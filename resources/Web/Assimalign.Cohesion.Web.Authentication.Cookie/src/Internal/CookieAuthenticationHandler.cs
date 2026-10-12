@@ -78,9 +78,9 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         {
             protectedBytes = Base64Url.DecodeFromChars(cookieValue);
         }
-        catch (FormatException)
+        catch (FormatException exception)
         {
-            return AuthenticateResult.Fail("The authentication cookie is not valid base64url.");
+            return Reject("NotBase64Url", "The authentication cookie is not valid base64url.", exception);
         }
 
         byte[] plaintext;
@@ -88,10 +88,10 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         {
             plaintext = _protector.Unprotect(protectedBytes);
         }
-        catch (DataProtectionException)
+        catch (DataProtectionException exception)
         {
             // Tampered, foreign-purpose, or aged-out-of-grace ticket.
-            return AuthenticateResult.Fail("The authentication cookie could not be unprotected.");
+            return Reject("UnprotectFailed", "The authentication cookie could not be unprotected.", exception);
         }
 
         AuthenticationTicket ticket;
@@ -99,16 +99,16 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         {
             ticket = CookieTicketSerializer.Deserialize(plaintext, _scheme.Name);
         }
-        catch (FormatException)
+        catch (FormatException exception)
         {
-            return AuthenticateResult.Fail("The authentication cookie payload is malformed.");
+            return Reject("PayloadMalformed", "The authentication cookie payload is malformed.", exception);
         }
 
         DateTimeOffset now = _options.TimeProvider.GetUtcNow();
         DateTimeOffset? expiresUtc = ticket.Properties.ExpiresUtc;
         if (expiresUtc.HasValue && expiresUtc.Value <= now)
         {
-            return AuthenticateResult.Fail("The authentication ticket has expired.");
+            return Reject("Expired", "The authentication ticket has expired.");
         }
 
         RenewIfNeeded(ticket, now);
@@ -315,6 +315,12 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     {
         char separator = basePath.Contains('?', StringComparison.Ordinal) ? '&' : '?';
         return $"{basePath}{separator}{parameterName}={Uri.EscapeDataString(returnUrl)}";
+    }
+
+    private AuthenticateResult Reject(string reason, string message, Exception? exception = null)
+    {
+        CookieAuthenticationEventSource.Log.TicketRejected(_context, _scheme.Name, reason, exception);
+        return AuthenticateResult.Fail(message);
     }
 
     private AuthenticateResult Cache(AuthenticateResult result)

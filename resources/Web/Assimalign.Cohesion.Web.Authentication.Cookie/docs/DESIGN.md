@@ -211,3 +211,30 @@ metadata resolution is an `is`-test scan.
   `AuthenticationBuilder.DataProtectionProvider` (the default key ring, or
   a provider the application passes to `AuthenticationBuilder.UseDataProtection`
   inside `builder.Services.AddAuthentication`).
+
+## Diagnostics
+
+The internal `CookieAuthenticationEventSource` provider is named
+`Assimalign.Cohesion.Web.Authentication.Cookie`. A contracts-only `Web.Server` reference
+supplies request correlation; the root authentication dispatcher emits nothing.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | TicketRejected | Verbose | scheme, reason, exceptionType, exceptionMessage, innerExceptionType, requestId |
+
+Reasons are NotBase64Url, UnprotectFailed, PayloadMalformed and Expired. Exception
+types identify parsing or unprotect failures; exception messages apply only to
+UnprotectFailed. The message is allowlisted to the six fixed
+built-in DataProtection failure strings; arbitrary custom-protector text is omitted.
+An inner exception type appears only for the fixed key-repository-read failure, never
+for a cryptographic verification failure. Inner exception messages are never written.
+
+The lazily published PollingCounter `rejected-tickets` counts every rejection, including
+with no listener, once per request and scheme. Handler/result caching prevents counting
+Authorization re-authentication or a subsequent challenge twice. Missing cookies and
+successful authentication do not count. The counter is maintained independently of delivery.
+
+Every allocating payload and request-id read is inside the Verbose enable check. Correlation
+uses `IWebRequestIdFeature`, never `Activity.Current`. No cookie value, plaintext, principal,
+claim, return URL or request path is written. This is additive diagnostics with no public
+API or response behavior change from 10.0.0-preview.1.
