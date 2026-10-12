@@ -77,6 +77,7 @@ internal sealed class Http1RequestBodyStream : Stream
     // 100 Continue: once the final response has started, an interim response can no longer
     // legally precede it (RFC 9110 §15.2), so the solicitation is suppressed.
     private TransportHttpContext? _owner;
+    private int _rejectionReported;
 
     private readonly byte[] _oneByte = new byte[1];
 
@@ -933,11 +934,30 @@ internal sealed class Http1RequestBodyStream : Stream
         return new Http1LimitExceededException(statusCode, message);
     }
 
+    // A body hook can let malformed framing escape before an exchange exists. The reader's
+    // failure cleanup reports that pending latch; limit exceptions are reported by the outer
+    // pre-dispatch error-response path instead.
+    internal void ReportPendingMalformedRejection(ConnectionId connectionId)
+    {
+        if (IsMalformed)
+        {
+            ReportRejection(connectionId, HttpStatusCode.BadRequest);
+        }
+    }
+
     private void ReportRejection(HttpStatusCode statusCode)
     {
         if (_owner is { } owner)
         {
-            HttpTransportEventSource.Log.RequestRejected(owner.DiagnosticConnectionId, "1.1", -1, (int)statusCode);
+            ReportRejection(owner.DiagnosticConnectionId, statusCode);
+        }
+    }
+
+    private void ReportRejection(ConnectionId connectionId, HttpStatusCode statusCode)
+    {
+        if (Interlocked.Exchange(ref _rejectionReported, 1) == 0)
+        {
+            HttpTransportEventSource.Log.RequestRejected(connectionId, "1.1", -1, (int)statusCode);
         }
     }
 

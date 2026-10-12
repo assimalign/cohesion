@@ -58,6 +58,50 @@ public class Http1PreDispatchDiagnosticsTests
         Encoding.ASCII.GetString(await driver.ReadOutputAsync().WaitAsync(timeout.Token)).ShouldStartWith("HTTP/1.1 400");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HTTP/1 malformed body escaping an interceptor reports once without an exchange")]
+    public async Task ReceiveAsync_OnMalformedBodyEscapingInterceptor_ShouldReportOnceWithoutExchange()
+    {
+        // Arrange — no context is constructed when the body hook lets the framing failure escape.
+        await HttpTransportEventSourceTests.WaitForThrottleAsync();
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        using EventSourceRecorder events = new(HttpTransportEventSource.Log, EventLevel.Verbose);
+        using TransportMeterRecorder meter = new();
+        await using TestConnection driver = new(
+            "POST /private-target HTTP/1.1\r\nHost: secret.invalid\r\nTransfer-Encoding: chunked\r\n\r\ninvalid-chunk\r\n"u8.ToArray());
+        Http1ConnectionContext connection = new(driver, false, new(), [new ReadingBodyInterceptor()], [], 0, null);
+        long before = meter.Count("cohesion.http.server.rejected_requests", "1.1", 400);
+        long counterBefore = HttpTransportEventSource.Log.RejectedRequests;
+        await using IAsyncEnumerator<IHttpContext> receive = connection.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
+
+        // Act
+        bool dispatched = await receive.MoveNextAsync();
+
+        // Assert — the wire failure still ends dispatch, but its pending fault is reported once.
+        dispatched.ShouldBeFalse();
+        meter.Count("cohesion.http.server.rejected_requests", "1.1", 400).ShouldBe(before + 1);
+        HttpTransportEventSource.Log.RejectedRequests.ShouldBe(counterBefore + 1);
+        EventWrittenEventArgs[] rejected = events.Events.Where(item => item.EventId == 1
+            && Equals(Payload(item, "connectionId"), driver.Id.ToString())).ToArray();
+        rejected.Length.ShouldBe(1);
+        Payload(rejected[0], "protocol").ShouldBe("1.1");
+        Payload(rejected[0], "statusCode").ShouldBe(400);
+        Payload(rejected[0], "streamId").ShouldBe(-1L);
+        events.Events.ShouldNotContain(item => item.EventId == 0);
+    }
+
+    private sealed class ReadingBodyInterceptor : HttpExchangeInterceptor
+    {
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
+        {
+            ValueTask<int> read = body.ReadAsync(new byte[1], CancellationToken.None);
+            read.IsCompleted.ShouldBeTrue();
+            read.GetAwaiter().GetResult();
+            return body;
+        }
+    }
+
     private static object? Payload(EventWrittenEventArgs item, string name)
         => item.Payload![item.PayloadNames!.IndexOf(name)];
 

@@ -1619,7 +1619,11 @@ The raising sites describe decisions, not successful wire delivery:
 
 - HTTP/1.1 reports a pre-dispatch answer before its best-effort error write, and reports a body's
   first 400/408/413/431 fault at the latch. A fault caught by an interceptor before the context
-  exists is reported when that context attaches. Final send and repeated reads do not recount it.
+  exists is reported when that context attaches. If malformed framing escapes a body hook instead,
+  pre-dispatch cleanup reports the pending 400 before disposing wrappers, without needing an
+  exchange. A body-local atomic claim prevents replay from recounting the fault. Explicit hook
+  rejections and limit exceptions remain owned by the pre-dispatch error-response path. Final send
+  and repeated reads do not recount it.
 - HTTP/2 reports a first rejection at its stream fault latch or transport response claim, whichever
   wins. Non-`NO_ERROR` GOAWAY and RST_STREAM decisions report their numeric RFC 9113 codes;
   only the first connection-error decision counts. Flood guards therefore expose

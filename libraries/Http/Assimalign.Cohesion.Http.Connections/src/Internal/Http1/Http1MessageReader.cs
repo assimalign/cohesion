@@ -381,15 +381,22 @@ internal static class Http1MessageReader
                 RequestInterception = interception,
             };
         }
-        catch when (features is not null)
+        catch (Exception exception) when (features is not null)
         {
             // The request failed after interceptors started participating (a head- or body-hook
-            // rejection; malformed framing is refused before any hook runs, above) and no Http1Context —
+            // rejection, including malformed body framing read by a hook) and no Http1Context —
             // the owner of the feature-disposal walk — will ever exist for this exchange. Honor the seam's
             // disposal contract here instead: tear down the partially-built wrapper chain (the outermost
             // wrapper owns its inner stream) and dispose every hook-attached feature, then let the failure
             // surface unchanged. The exception filter keeps the zero-interceptor fast path entirely outside
             // this handler.
+            // Only an escaping framing failure needs replay here. If a hook replaces it with
+            // an explicit rejection, the connection's error-response path reports that instead.
+            if (exception is InvalidDataException)
+            {
+                requestBody?.ReportPendingMalformedRejection(
+                    connectionInfo is HttpTransportConnectionInfo info ? info.ConnectionId : default);
+            }
             bodyStream?.Dispose();
             await DisposeFeaturesAsync(features).ConfigureAwait(false);
             throw;
