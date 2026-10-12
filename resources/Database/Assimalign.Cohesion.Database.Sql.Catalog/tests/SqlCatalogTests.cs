@@ -96,7 +96,7 @@ public class SqlCatalogTests
             [Column("id", DatabaseType.Int64), Column("legacy", DatabaseType.String)],
             null, DatabaseObjectOwner.Schema, "AppSchema", default);
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_customers_id", ["id"], false,
-            DatabaseObjectOwner.Schema, "AppSchema"), []);
+            DatabaseObjectOwner.Schema, "AppSchema"), [new(table.ObjectId, new IndexDefinition("ix_customers_id"), 7)]);
         await catalog.AddColumnAsync("dbo", "customers", Column("note", DatabaseType.String));
         await catalog.DropColumnAsync("dbo", "customers", "legacy");
         await catalog.CreateTableAsync("dbo", "scratch", [Column("id", DatabaseType.Int64)]);
@@ -336,14 +336,12 @@ public class SqlCatalogTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Indexes: registrations round-trip across reopen")]
-    public async Task SaveIndexRegistrations_ShouldRoundTripAcrossReopen()
+    public async Task CreateIndex_WithRegistrationSnapshots_ShouldRoundTripAcrossReopen()
     {
         // Arrange
         var (catalog, harness) = OpenFresh();
         var users = await catalog.CreateTableAsync("dbo", "users", [Column("id", DatabaseType.Int32)]);
         var orders = await catalog.CreateTableAsync("dbo", "orders", [Column("date", DatabaseType.Int64)]);
-        await catalog.CreateIndexAsync(new SqlCatalogIndex(users.ObjectId, "pk_users", ["id"], true), []);
-        await catalog.CreateIndexAsync(new SqlCatalogIndex(orders.ObjectId, "ix_orders_date", ["date"], false), []);
         var registrations = new List<BTreeIndexRegistration>
         {
             new(1, new IndexDefinition("pk_users", IndexKind.BTree, IsUnique: true), 7),
@@ -351,8 +349,8 @@ public class SqlCatalogTests
         };
 
         // Act
-        await catalog.SaveIndexRegistrationsAsync(registrations);
-        await catalog.SaveIndexRegistrationsAsync(registrations); // idempotent rewrite path
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(users.ObjectId, "pk_users", ["id"], true), registrations);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(orders.ObjectId, "ix_orders_date", ["date"], false), registrations);
 
         var reopened = Reopen(harness);
 

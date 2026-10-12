@@ -157,8 +157,8 @@ codec, the key encoding and every comparison read, so they do not consult the do
   component (`Database.Indexing`'s documented split): the catalog stores the
   exported `BTreeIndexRegistration` set and hands it back for re-attachment on
   open. A tree's root page stays fixed through splits (#1159), so registrations
-  change through index DDL; the engine still re-saves at its persistence points
-  (checkpoint/shutdown) as a backstop.
+  change only through index DDL. Checkpoint and shutdown persist the already
+  committed catalog; they never export or save another registration snapshot.
 - **Index descriptions are schema metadata, one record per index (kind 5)** —
   `SqlCatalogIndex`: name (unique per table, case-insensitive), owning table
   object id, ordered key columns, uniqueness. The description is deliberately
@@ -222,28 +222,40 @@ its descriptions, so an unrelated publication cannot erase a completed tree's du
 registration. PostgreSQL likewise inserts the affected `pg_index` tuple rather than
 replacing an independently captured directory (`src/backend/catalog/index.c:669`).
 
-Checkpoint snapshots can also arrive after a publication, drop, or same-name recreation.
-`SaveIndexRegistrationsAsync` only adds missing registrations that match current index
-descriptions; it keeps every existing registration and ignores absent descriptions.
-Roots remain fixed through splits, so a checkpoint has no legitimate root replacement
-to apply. This preserves newer publications and prevents resurrection or replacement
-with an older tree. Unchanged and stale checkpoint snapshots leave DDL generation alone.
-Catalog-only callers that populate registrations separately must create the descriptions
-first; raw orphan directories and whole-directory replacement are no longer supported.
+Every new index description requires exactly one physical registration in that same
+publication, matching the table identity, case-insensitive index name, and uniqueness,
+with B-tree kind and a positive root page id. Missing, duplicate or inconsistent
+registrations fail before any metadata or DDL generation changes. Both standalone
+index creation and table publication use this validation. Unrelated registrations
+in the snapshot are ignored, preserving the current directory.
 
-`SqlIndexPublicationTests` builds real trees, captures both disjoint snapshots before
-publication, commits them in the conflicting order, and opens durable crash images
-before shutdown can persist a repair. It also exercises delayed checkpoint snapshots
-across publication, drop and same-name recreation; recovered inserts and unique checks
-prove that the registered roots remain usable. These are ordered interleavings, with no
-scheduler-dependent race window.
+Description-first publication and the separate registration-save API are removed.
+There is no production caller needing separate publication. A delayed snapshot cannot
+identify an index incarnation from its table, name and uniqueness: after DROP W on
+OldValue and CREATE W on NewValue, those fields still match the abandoned tree.
+Accepting that tree into a missing registration slot would make the replacement seek
+old keys and stop enforcing its own unique values. Requiring atomic publication closes
+that gap without a new incarnation field or an on-disk format change. Roots stay fixed
+through splits, so checkpoint and shutdown need no registration-save backstop and
+cannot overwrite a newer tree or resurrect a dropped one.
+
+`SqlIndexPublicationTests` builds real trees, captures disjoint snapshots before
+publication, commits them in the conflicting order, and opens durable crash images.
+It also rejects description-first same-name recreation, checks that rejection survives
+reopen without advancing DDL generation, and proves the atomically published replacement
+seeks its new key and rejects duplicates after checkpoint and reopen. An unrelated
+publication carrying the dropped tree's stale registration cannot change that result.
+Catalog tests reject missing, ambiguous and invalid registrations through both APIs,
+including new and replacement tables, with unchanged live and reopened metadata.
+These are ordered interleavings, with no scheduler-dependent race window.
+
 ## DDL generation and crash convergence (B2)
 
 The kind-2 identity counter also persists `SqlCatalog.DdlGeneration`, a monotonically
 increasing `ulong`. Every committed metadata change writes the next generation in the
 same storage transaction: table identity reservation and publication, direct table
-creation and drop, column and constraint changes, index creation and drop, changed
-physical registrations, default-collation initialization and format-marker changes.
+creation and drop, column and constraint changes, index creation and drop,
+default-collation initialization and format-marker changes.
 Schema-owned and ad-hoc objects follow the same path. `CommitCatalogChange` stages the
 counter with the change and publishes the generation, identity and record locations
 only after commit succeeds. A failure before the commit record leaves the transaction
@@ -258,8 +270,8 @@ rule PostgreSQL applies in `RecordTransactionCommit`'s critical section
 (`src/backend/access/transam/xlog.c:9877-9937`). Exhaustion refuses the mutation rather
 than wrapping.
 
-Saving an unchanged registration directory or format marker is a no-op. In particular,
-checkpoint and shutdown persistence do not invalidate a fully applied schema. Recording
+Saving an unchanged format marker is a no-op. Checkpoint and shutdown never change
+index registrations or DDL generation, so neither invalidates a fully applied schema. Recording
 `SqlCatalogSchemaState` is bookkeeping, not DDL: its `{hash, generation}` describes the
 catalog after every provisioning step succeeded and does not advance the counter.
 `SaveSchemaStateAsync` requires that supplied generation to equal the live generation

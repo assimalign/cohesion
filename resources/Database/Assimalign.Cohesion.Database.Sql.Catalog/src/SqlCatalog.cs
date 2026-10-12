@@ -661,10 +661,10 @@ public sealed class SqlCatalog
     /// registration would promise uniqueness no tree enforces).
     /// </summary>
     /// <param name="index">The index description to persist.</param>
-    /// <param name="registrations">A physical registration snapshot. Only the created index's registration is merged into the current directory.</param>
+    /// <param name="registrations">A physical registration snapshot containing exactly one registration for the created index, matching its table, name (case-insensitively), and uniqueness, with B-tree kind and a positive root page id. Only that registration is merged into the current directory.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created index description.</returns>
-    /// <exception cref="SqlCatalogException">The table does not exist, a key column does not exist, or an index with the name already exists on the table.</exception>
+    /// <exception cref="SqlCatalogException">The table or a key column does not exist, the index name already exists on the table, or the required matching physical registration is missing, duplicated, or invalid.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="index"/> or <paramref name="registrations"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
@@ -753,57 +753,6 @@ public sealed class SqlCatalog
         }
     }
 
-    /// <summary>
-    /// Persists missing physical registrations for currently described indexes.
-    /// Existing registrations have fixed root identities and are retained, so a
-    /// delayed checkpoint cannot erase a publication, resurrect a dropped index,
-    /// or replace a newly recreated tree with its predecessor.
-    /// </summary>
-    /// <param name="registrations">The index manager's snapshot. Only missing registrations matching a current index description are added.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>A task that completes once the registrations are durable.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
-    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    public ValueTask SaveIndexRegistrationsAsync(IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(registrations);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        lock (_sync)
-        {
-            ThrowIfOffline();
-            var merged = _registrations.ToDictionary(registration =>
-                (registration.ObjectId, registration.Definition.Name), IndexNameComparer.Instance);
-            foreach (var registration in registrations)
-            {
-                var key = (registration.ObjectId, registration.Definition.Name);
-                if (!merged.ContainsKey(key) && _indexes.TryGetValue(key, out var slot) &&
-                    slot.Index.IsUnique == registration.Definition.IsUnique)
-                {
-                    merged.Add(key, registration);
-                }
-            }
-            if (merged.Count == _registrations.Count)
-            {
-                return default;
-            }
-
-            var mergedRegistrations = merged.Values.ToArray();
-            byte[] record = EncodeRegistrations(mergedRegistrations);
-
-            using (var transaction = _storage.BeginTransaction())
-            {
-                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, record);
-                CommitCatalogChange(transaction);
-                _registrationsLocation = registrationsLocation;
-            }
-
-            _registrations = mergedRegistrations;
-            return default;
-        }
-    }
-
     // Called only under _sync. Publishers can finish trees and capture snapshots
     // independently, so only their own new descriptions may change the directory.
     private BTreeIndexRegistration[] MergePublishedRegistrations(
@@ -811,13 +760,17 @@ public sealed class SqlCatalog
     {
         var merged = _registrations.ToDictionary(registration =>
             (registration.ObjectId, registration.Definition.Name), IndexNameComparer.Instance);
-        foreach (var registration in registrations)
+        foreach (var index in indexes)
         {
-            if (indexes.Any(index => index.TableObjectId == registration.ObjectId &&
-                string.Equals(index.Name, registration.Definition.Name, StringComparison.OrdinalIgnoreCase)))
+            var matches = registrations.Where(registration => registration.ObjectId == index.TableObjectId &&
+                string.Equals(registration.Definition.Name, index.Name, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (matches.Length != 1 || matches[0].Definition.IsUnique != index.IsUnique ||
+                matches[0].Definition.Kind != IndexKind.BTree || matches[0].RootPageId <= 0)
             {
-                merged[(registration.ObjectId, registration.Definition.Name)] = registration;
+                throw new SqlCatalogException(
+                    $"Index '{index.Name}' requires exactly one matching B-tree registration with a positive root page id in the same publication.");
             }
+            merged[(index.TableObjectId, index.Name)] = matches[0];
         }
         return merged.Values.ToArray();
     }
@@ -1677,7 +1630,7 @@ public sealed class SqlCatalog
     /// </summary>
     /// <param name="table">The reserved table, or a replacement definition with the existing table's identity.</param>
     /// <param name="indexes">New index descriptions whose physical trees have already been committed.</param>
-    /// <param name="registrations">A physical registration snapshot. Only the supplied new indexes' registrations are merged into the current directory.</param>
+    /// <param name="registrations">A physical registration snapshot containing exactly one registration per new index, matching its table, name (case-insensitively), and uniqueness, with B-tree kind and a positive root page id. Only those registrations are merged into the current directory.</param>
     /// <param name="replaceExisting">Whether the definition replaces an existing table with the same identity.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task representing durable publication of all supplied metadata.</returns>
@@ -1736,12 +1689,9 @@ public sealed class SqlCatalog
             foreach (SqlCatalogIndex index in indexes)
             {
                 if (index.TableObjectId != table.ObjectId || !names.Add(index.Name) ||
-                    index.ColumnNames.Any(column => table.FindColumn(column) is null) ||
-                    !registrations.Any(registration => registration.ObjectId == table.ObjectId &&
-                        string.Equals(registration.Definition.Name, index.Name, StringComparison.Ordinal) &&
-                        registration.Definition.IsUnique == index.IsUnique))
+                    index.ColumnNames.Any(column => table.FindColumn(column) is null))
                 {
-                    throw new SqlCatalogException($"Index '{index.Name}' does not describe a registered index on '{table.Schema}.{table.Name}'.");
+                    throw new SqlCatalogException($"Index '{index.Name}' does not describe a new index on '{table.Schema}.{table.Name}'.");
                 }
             }
             var mergedRegistrations = MergePublishedRegistrations(registrations, indexes);

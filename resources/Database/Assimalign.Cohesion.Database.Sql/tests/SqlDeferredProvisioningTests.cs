@@ -176,7 +176,6 @@ public sealed partial class SqlDeferredProvisioningTests
                 string values = string.Join(",", Enumerable.Range(1, 1000).Select(value => $"({value})"));
                 await other.ExecuteAsync($"INSERT INTO other (Id) VALUES {values}", cancellationToken: timeout.Token);
                 await other.ExecuteAsync("CREATE TABLE scratch (Id INT)", cancellationToken: timeout.Token);
-                database.SaveIndexRegistrationsIfChanged();
                 database.Coordinator.Checkpoint();
                 crash = storage.CaptureDurableImages();
             }

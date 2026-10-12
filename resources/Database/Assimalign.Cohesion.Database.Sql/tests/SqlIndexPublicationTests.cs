@@ -68,10 +68,10 @@ public sealed class SqlIndexPublicationTests
         recovered.Catalog.GetIndexRegistrations().Count.ShouldBe(2);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Index checkpoint: a stale snapshot retains later publication after a crash")]
-    public async Task SaveIndexRegistrations_SnapshotBeforePublication_ShouldRetainNewRegistrationAfterCrash()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Index checkpoint: completed publication survives a crash")]
+    public async Task Checkpoint_AfterPublication_ShouldRetainNewRegistrationAfterCrash()
     {
-        // Arrange: checkpoint captures a directory before the second index publishes.
+        // Arrange: both trees publish before checkpointing their file sets.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var storage = new CrashCaptureSqlStorageStrategy();
         await using var engine = await Builder(storage).BuildAsync(timeout.Token);
@@ -79,13 +79,13 @@ public sealed class SqlIndexPublicationTests
         await using var session = await database.CreateSessionAsync(timeout.Token);
         await session.ExecuteAsync("CREATE TABLE a (Value INT)", cancellationToken: timeout.Token);
         await session.ExecuteAsync("CREATE UNIQUE INDEX W ON a (Value)", cancellationToken: timeout.Token);
-        var checkpointSnapshot = database.IndexManager.ExportRegistrations();
         await session.ExecuteAsync("CREATE TABLE b (Value INT)", cancellationToken: timeout.Token);
         await session.ExecuteAsync("CREATE UNIQUE INDEX J ON b (Value)", cancellationToken: timeout.Token);
         ulong generation = database.Catalog.DdlGeneration;
 
-        // Act: delayed checkpoint persistence arrives after the newer catalog commit.
-        await database.Catalog.SaveIndexRegistrationsAsync(checkpointSnapshot, timeout.Token);
+        // Act: checkpointing cannot republish the in-memory index directory.
+        database.Coordinator.Checkpoint();
+        database.CatalogStorage.Checkpoint();
         var crash = storage.CaptureDurableImages();
 
         // Assert
@@ -97,10 +97,10 @@ public sealed class SqlIndexPublicationTests
         recovered.Catalog.DdlGeneration.ShouldBe(generation);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Index checkpoint: a stale snapshot cannot resurrect a dropped or replaced tree")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Index checkpoint: checkpointing cannot resurrect a dropped or replaced tree")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task SaveIndexRegistrations_SnapshotBeforeDrop_ShouldKeepCurrentDirectoryAfterCrash(bool recreate)
+    public async Task Checkpoint_AfterDrop_ShouldKeepCurrentDirectoryAfterCrash(bool recreate)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -110,7 +110,6 @@ public sealed class SqlIndexPublicationTests
         await using var session = await database.CreateSessionAsync(timeout.Token);
         await session.ExecuteAsync("CREATE TABLE a (Value INT)", cancellationToken: timeout.Token);
         await session.ExecuteAsync("CREATE UNIQUE INDEX W ON a (Value)", cancellationToken: timeout.Token);
-        var checkpointSnapshot = database.IndexManager.ExportRegistrations();
         await session.ExecuteAsync("DROP INDEX W ON a", cancellationToken: timeout.Token);
         if (recreate)
         {
@@ -121,7 +120,8 @@ public sealed class SqlIndexPublicationTests
         ulong generation = database.Catalog.DdlGeneration;
 
         // Act
-        await database.Catalog.SaveIndexRegistrationsAsync(checkpointSnapshot, timeout.Token);
+        database.Coordinator.Checkpoint();
+        database.CatalogStorage.Checkpoint();
         var crash = storage.CaptureDurableImages();
 
         // Assert
@@ -137,8 +137,10 @@ public sealed class SqlIndexPublicationTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Index publication: a replacement cannot attach its predecessor's tree")]
-    public async Task CreateIndex_ReplacementDescriptionFirst_ShouldKeepReplacementTreeAfterCrash()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Index publication: a replacement cannot attach its predecessor's tree")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateIndex_ReplacementDescriptionFirst_ShouldKeepReplacementTreeAfterCrash(bool publishTable)
     {
         // Arrange: the dropped and replacement indexes share table, name and uniqueness,
         // but index different values in different real trees.
@@ -173,10 +175,43 @@ public sealed class SqlIndexPublicationTests
         stale.Single().RootPageId.ShouldBeGreaterThan(0);
         current.Single().RootPageId.ShouldNotBe(stale.Single().RootPageId);
 
-        // Act: description-first publication admits a checkpoint captured before DROP.
-        await database.Catalog.CreateIndexAsync(replacement, [], timeout.Token);
-        await database.Catalog.SaveIndexRegistrationsAsync(stale, timeout.Token);
-        await database.Catalog.SaveIndexRegistrationsAsync(current, timeout.Token);
+        // Act: description-first publication must fail before it can expose the replacement.
+        ulong generation = database.Catalog.DdlGeneration;
+        await Should.ThrowAsync<SqlCatalogException>(async () =>
+        {
+            if (publishTable)
+            {
+                await database.Catalog.PublishTableAsync(table, [replacement], [], replaceExisting: true, timeout.Token);
+            }
+            else
+            {
+                await database.Catalog.CreateIndexAsync(replacement, [], timeout.Token);
+            }
+        });
+        database.Catalog.TryGetIndex(table.ObjectId, "W", out _).ShouldBeFalse();
+        database.Catalog.GetIndexRegistrations().ShouldBeEmpty();
+        database.Catalog.DdlGeneration.ShouldBe(generation);
+        var rejectedCrash = storage.CaptureDurableImages();
+        await using (var rejectedEngine = await Builder(rejectedCrash).BuildAsync(timeout.Token))
+        {
+            var rejected = await rejectedEngine.OpenDatabaseAsync("publication", timeout.Token);
+            rejected.Catalog.TryGetIndex(table.ObjectId, "W", out _).ShouldBeFalse();
+            rejected.Catalog.GetIndexRegistrations().ShouldBeEmpty();
+            rejected.Catalog.DdlGeneration.ShouldBe(generation);
+        }
+        if (publishTable)
+        {
+            await database.Catalog.PublishTableAsync(table, [replacement], current, replaceExisting: true, timeout.Token);
+        }
+        else
+        {
+            await database.Catalog.CreateIndexAsync(replacement, current, timeout.Token);
+        }
+        // An unrelated publication may still carry the stale root in its snapshot.
+        // It must retain W's current registration, not replace it by snapshot order.
+        await database.Catalog.PublishTableAsync(table, [], stale, replaceExisting: true, timeout.Token);
+        database.Coordinator.Checkpoint();
+        database.CatalogStorage.Checkpoint();
         var crash = storage.CaptureDurableImages();
 
         // Assert: recovery must seek and enforce the replacement's key, never the old key.

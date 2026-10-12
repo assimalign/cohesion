@@ -55,19 +55,15 @@ public sealed class SqlCatalogGenerationTests
         catalog.DdlGeneration.ShouldBe(10UL);
         await catalog.DropTableAsync("dbo", "adhoc", CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(11UL);
-        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_id", ["id"], false), [], CancellationToken.None);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_id", ["id"], false), [registration], CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(12UL);
-        await catalog.SaveIndexRegistrationsAsync([registration], CancellationToken.None);
-        catalog.DdlGeneration.ShouldBe(13UL);
-        await catalog.SaveIndexRegistrationsAsync([], CancellationToken.None);
-        catalog.DdlGeneration.ShouldBe(13UL);
         catalog.GetIndexRegistrations().ShouldBe([registration]);
         await catalog.DropTableAsync("dbo", "owned", CancellationToken.None);
-        catalog.DdlGeneration.ShouldBe(14UL);
+        catalog.DdlGeneration.ShouldBe(13UL);
 
         using var reopenedStorage = Reopen(data, journal);
         var reopened = SqlCatalog.Open(reopenedStorage);
-        reopened.DdlGeneration.ShouldBe(14UL);
+        reopened.DdlGeneration.ShouldBe(13UL);
         reopened.Tables.ShouldBeEmpty();
         reopened.GetIndexRegistrations().ShouldBeEmpty();
     }
@@ -227,14 +223,13 @@ public sealed class SqlCatalogGenerationTests
         var catalog = SqlCatalog.Open(storage);
         await catalog.SetRecordSpaceFormatVersionAsync(8, CancellationToken.None);
         var table = await catalog.CreateTableAsync("dbo", "t", [Column("id")], cancellationToken: CancellationToken.None);
-        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix", ["id"], false), [], CancellationToken.None);
-        var registration = new BTreeIndexRegistration(1, new IndexDefinition("ix"), 42);
-        await catalog.SaveIndexRegistrationsAsync([registration], CancellationToken.None);
+        var registration = new BTreeIndexRegistration(table.ObjectId, new IndexDefinition("ix"), 42);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix", ["id"], false), [registration], CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
 
         // Act
         await catalog.SetRecordSpaceFormatVersionAsync(8, CancellationToken.None);
-        await catalog.SaveIndexRegistrationsAsync([new BTreeIndexRegistration(1, new IndexDefinition("ix"), 42)], CancellationToken.None);
+        storage.Checkpoint();
         await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("hash", "{}", generation), CancellationToken.None);
         await Should.ThrowAsync<OperationCanceledException>(async () =>
             await catalog.CreateTableAsync("dbo", "cancelled", [Column("id")], cancellationToken: new CancellationToken(true)));

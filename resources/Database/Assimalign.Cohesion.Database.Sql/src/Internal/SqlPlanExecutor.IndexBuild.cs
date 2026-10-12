@@ -54,7 +54,7 @@ internal sealed partial class SqlPlanExecutor
         statement.ProvisioningProgress(processed, processed);
     }
 
-    // Unpublished trees are never exported by a checkpoint or by unrelated DDL.
+    // Unpublished trees are never published by unrelated DDL.
     // A crash discards their directory entries; the pending operation rebuilds them.
     // This snapshot may miss a concurrent publication. The catalog merges only
     // this statement's added descriptions under its publication lock.

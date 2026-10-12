@@ -1193,8 +1193,11 @@ by B2's complete-catalog reconciliation. A failed step takes only its database o
 `COHSQLP004` and keeps the intent for the next open, even without a fresh schema declaration.
 Catalog publication merges only affected registrations under its metadata lock. Independently
 finished trees therefore cannot erase one another through stale full-directory snapshots.
-Checkpoint snapshots can fill missing registrations for current descriptions, but preserve
-published fixed-root identities and cannot remove or resurrect indexes.
+Every new description requires its matching registration in the same catalog commit.
+There is no separate registration-save API: checkpoint and shutdown persist committed
+catalog state without exporting the index manager's directory. A stale snapshot therefore
+cannot attach a dropped tree to a same-name replacement published without a registration;
+such incomplete publication is refused before any catalog write.
 
 `DatabaseInstance.Provisioning` carries immutable model-neutral observations: kind, table,
 position/total, pending/running, counted rows and optional failure code. Hosting reports Degraded
@@ -2357,11 +2360,12 @@ description + exported registrations), the engine binds them.
   (`Database.Storage` DESIGN, "No reader sees a rollback's restore half done"). The
   executor's apply and rollback path is unchanged, and a reclaimed-row skip in the seek
   (`TryReadRecord` returning false for page 0) would only have hidden the torn read.
-- **Registrations re-export at persistence points**: index DDL itself, each
-  checkpoint pass, and instance disposal — each compares against the stored set
-  first, so an idle checkpoint writes nothing. Root splits no longer move a
-  tree's root page (#1159, `Database.Indexing` DESIGN), so outside DDL the
-  comparison is a backstop rather than the way a split reaches the catalog.
+- **Registrations publish only with index DDL.** The catalog requires exactly one
+  matching B-tree registration per new index description in the same publication.
+  Root splits never move a tree's root page (#1159, `Database.Indexing` DESIGN), so
+  checkpoint and instance disposal have no registration export or save backstop.
+  They persist the directory already committed by DDL. Removing separate publication
+  prevents a dropped index's stale registration from attaching to its replacement.
 - **Seeks over duplicated keys** (#1159): an index over a low-cardinality column,
   and every UNIQUE index whose rows are updated (each UPDATE retires one entry
   and adds another under the same key), holds runs of equal keys that span leaf

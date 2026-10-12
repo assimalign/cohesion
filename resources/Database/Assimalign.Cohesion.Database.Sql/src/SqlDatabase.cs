@@ -341,64 +341,6 @@ public sealed class SqlDatabase : DatabaseInstance
     internal SqlBoundTableCache Definitions => _definitions;
 
     /// <summary>
-    /// Persists the index manager's current registrations when they differ from
-    /// the stored set. A tree's root page stays fixed through splits (#1159), so
-    /// outside index DDL this normally finds nothing to write; it runs at the
-    /// engine's persistence points (checkpoint passes and disposal), in addition
-    /// to index DDL itself, as a backstop.
-    /// </summary>
-    internal void SaveIndexRegistrationsIfChanged()
-    {
-        // DDL alone publishes directory changes. An unfinished worker tree must
-        // never become durable just because the checkpointer ran between batches.
-        var current = _indexManager.ExportRegistrations()
-            .Where(registration => _catalog.TryGetIndex(registration.ObjectId, registration.Definition.Name, out _)).ToArray();
-        var stored = _catalog.GetIndexRegistrations();
-
-        if (RegistrationsEqual(current, stored))
-        {
-            return;
-        }
-
-        // Synchronous over the ValueTask by design: catalog writes complete
-        // synchronously (worker passes and disposal are synchronous paths).
-        _catalog.SaveIndexRegistrationsAsync(current).AsTask().GetAwaiter().GetResult();
-
-        static bool RegistrationsEqual(
-            IReadOnlyList<BTreeIndexRegistration> left,
-            IReadOnlyList<BTreeIndexRegistration> right)
-        {
-            if (left.Count != right.Count)
-            {
-                return false;
-            }
-
-            // Registration sets are tiny; order-insensitive comparison by value
-            // (BTreeIndexRegistration is a record).
-            foreach (var registration in left)
-            {
-                bool found = false;
-
-                foreach (var candidate in right)
-                {
-                    if (registration == candidate)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-    }
-
-    /// <summary>
     /// Gets the database's transaction coordinator (the MVCC composition sessions
     /// bind to), for the engine's background workers and tests.
     /// </summary>
@@ -643,26 +585,20 @@ public sealed class SqlDatabase : DatabaseInstance
     {
         _schemaProvisioner.StopDeferredAsync().AsTask().GetAwaiter().GetResult();
         // An offline database closes without writing anything (#1243): both file sets are
-        // taken offline, so the coordinator's aborts undo nothing, no registration is saved,
-        // and neither storage flushes at its close.
-        bool offline = OfflineError is not null;
+        // taken offline, so the coordinator's aborts undo nothing and neither storage
+        // flushes at its close.
 
         // The coordinator first: the manager aborts every still-active logical
         // transaction (rolling its paired bracket back) while the storage is
         // still open. Synchronous over the ValueTask by design — the in-process
-        // implementations complete synchronously. Registrations re-export after
-        // the aborts (a rollback never moves roots, but the order costs nothing)
-        // and before the storages close. The storages close even when the
+        // implementations complete synchronously. Index registrations were committed
+        // with their descriptions during DDL. The storages close even when the
         // coordinator reports a writer whose undo still failed: it kept that
         // writer in flight in the data storage, so the close does not truncate
         // the journal recovery classifies the writer from (#1226).
         try
         {
             _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            if (!offline && !IsOffline)
-            {
-                SaveIndexRegistrationsIfChanged();
-            }
         }
         finally
         {
@@ -682,14 +618,9 @@ public sealed class SqlDatabase : DatabaseInstance
     {
         await _schemaProvisioner.StopDeferredAsync().ConfigureAwait(false);
         // See DisposeCore: an offline database closes without writing anything (#1243).
-        bool offline = OfflineError is not null;
         try
         {
             await _coordinator.DisposeAsync().ConfigureAwait(false);
-            if (!offline && !IsOffline)
-            {
-                SaveIndexRegistrationsIfChanged();
-            }
         }
         finally
         {
