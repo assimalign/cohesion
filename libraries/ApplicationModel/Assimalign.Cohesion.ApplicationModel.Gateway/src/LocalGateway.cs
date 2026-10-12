@@ -201,7 +201,8 @@ public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRender
 
     private string ResolveRenderPath(string path)
     {
-        string baseDirectory = _options.BaseDirectory ?? AppContext.BaseDirectory;
+        path = LocalProcessPath.Unquote(path);
+        string baseDirectory = LocalProcessPath.Unquote(_options.BaseDirectory ?? AppContext.BaseDirectory);
         return Path.IsPathFullyQualified(path)
             ? Path.GetFullPath(path)
             : Path.GetFullPath(Path.Combine(baseDirectory, path));

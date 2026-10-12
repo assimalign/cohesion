@@ -135,8 +135,14 @@ the registration under the same lock.
   success with the original long name (possible when 8.3 names are disabled) is a refusal too.
   The native lookup accepts an extended-length path, but `ProcessStartInfo.FileName` receives an
   ordinary drive or UNC path, never the `\\?\` prefix. The child working directory comes from
-  that launch path. Exec probes apply the same rule to explicit executable paths and use the
-  resolved host's directory, while bare command names retain their PATH lookup.
+  that launch path. On Windows, paired surrounding quotes are removed before resolving a
+  resource executable, deriving a working directory, or looking up a long command's short name.
+  Exec probes retain short commands verbatim (quoted or unquoted, absolute, relative with a
+  directory, or bare names on PATH), preserving `Process.Start` file lookup and argument handling.
+  Their working directory is still the configured host's directory, relative to the gateway's
+  current directory when relative, or inherited when empty; only a long directory is shortened.
+  The command and working directory are resolved independently, so a probe does not require a
+  short name for a host executable it never starts. Render and gather share the Windows quote rule.
   `COHLOCAL001` refuses a launch without a usable short name before `Process.Start`, naming the
   original path, its character count, and the remedies: move to a shorter location, or enable
   8.3 names on the volume and recreate the affected directories/files. `LongPathsEnabled` alone

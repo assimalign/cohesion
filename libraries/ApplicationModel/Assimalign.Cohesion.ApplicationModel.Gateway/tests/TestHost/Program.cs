@@ -19,6 +19,15 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        if (Environment.GetEnvironmentVariable("TEST_LAUNCH_CAPTURE") is string launchCapture)
+        {
+            File.WriteAllLines(launchCapture, [Environment.ProcessPath!, Environment.CurrentDirectory, .. args]);
+            if (args.Length > 0 && args[0] == "capture-launch")
+            {
+                return 0;
+            }
+        }
+
         if ((args.Length > 0 && IsExecProbeArgument(args[0]))
             || string.Equals(Environment.GetEnvironmentVariable("TEST_MODE"), "exec-probe", StringComparison.OrdinalIgnoreCase))
         {

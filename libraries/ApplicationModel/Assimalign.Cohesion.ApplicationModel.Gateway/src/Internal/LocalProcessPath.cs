@@ -10,10 +10,51 @@ internal static partial class LocalProcessPath
 
     public static string ResolveExecutable(string path, Func<string, string?> shortPathResolver)
     {
-        string fullPath = Path.GetFullPath(path);
+        string fullPath = Path.GetFullPath(Unquote(path));
         return OperatingSystem.IsWindows()
             ? ResolveWindowsPath(fullPath, "executable", shortPathResolver)
             : fullPath;
+    }
+
+    public static string Unquote(string path) => OperatingSystem.IsWindows()
+        && path.Length >= 2 && path[0] == '"' && path[^1] == '"'
+            ? path[1..^1]
+            : path;
+
+    public static string ResolveCommand(string command, Func<string, string?> shortPathResolver)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return command;
+        }
+
+        string path = Unquote(command);
+        if (!Path.IsPathRooted(path)
+            && !path.Contains(Path.DirectorySeparatorChar)
+            && !path.Contains(Path.AltDirectorySeparatorChar))
+        {
+            return command;
+        }
+
+        string fullPath = Path.GetFullPath(path);
+        // Leave short commands to Process.Start, including its quoting and search rules.
+        return RemoveExtendedPrefix(fullPath).Length < maxPath
+            ? command
+            : ResolveWindowsPath(fullPath, "executable", shortPathResolver);
+    }
+
+    public static string ResolveWorkingDirectory(string path, Func<string, string?> shortPathResolver)
+    {
+        path = Unquote(path);
+        if (!OperatingSystem.IsWindows() || path.Length == 0)
+        {
+            return path;
+        }
+
+        string fullPath = Path.GetFullPath(path);
+        return RemoveExtendedPrefix(fullPath).Length < maxPath
+            ? path
+            : ResolveWindowsPath(fullPath, "working directory", shortPathResolver);
     }
 
     internal static string ResolveWindowsPath(

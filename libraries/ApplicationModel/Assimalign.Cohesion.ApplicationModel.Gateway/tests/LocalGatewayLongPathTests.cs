@@ -16,8 +16,10 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 [Collection(LocalGatewayConsoleCollection.Name)]
 public class LocalGatewayLongPathTests
 {
-    [WindowsLongPathFact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: launches long Windows paths with working content, mounts, and exec probes")]
-    public async Task StartAsync_LongExecutableAndWorkingDirectory_LaunchesWithContentAndMounts()
+    [WindowsProcessTheory(true, DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: launches long Windows paths with working content, mounts, and exec probes")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_LongExecutableAndWorkingDirectory_LaunchesWithContentAndMounts(bool quoted)
     {
         // Arrange
         using var directory = new LongPathTestDirectory();
@@ -31,7 +33,7 @@ public class LocalGatewayLongPathTests
         {
             ["TEST_ENV_CAPTURE_PATH"] = capture,
             ["TEST_CAPTURE_PATHS"] = "true",
-        }, new ResourceManifestProbe { Exec = [directory.ExecutablePath, "exec-probe", probeStatus] });
+        }, new ResourceManifestProbe { Exec = [quoted ? $"\"{directory.ExecutablePath}\"" : directory.ExecutablePath, "exec-probe", probeStatus] }, quoted);
         IApplicationGateway control = gateway;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
@@ -187,7 +189,8 @@ public class LocalGatewayLongPathTests
         LongPathTestDirectory directory,
         LocalGateway gateway,
         IReadOnlyDictionary<string, string>? environment = null,
-        ResourceManifestProbe? readiness = null)
+        ResourceManifestProbe? readiness = null,
+        bool quoted = false)
     {
         IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("long-path-tests"), []).UseGateway(gateway);
         builder.AddResource(new ResourceManifest
@@ -199,7 +202,7 @@ public class LocalGatewayLongPathTests
             Artifact = new ResourceManifestArtifact
             {
                 Assembly = "Assimalign.Cohesion.ApplicationModel.Gateway.TestHost.dll",
-                AppHost = directory.ExecutablePath,
+                AppHost = quoted ? $"\"{directory.ExecutablePath}\"" : directory.ExecutablePath,
             },
             Endpoints = [new ResourceManifestEndpoint
             {

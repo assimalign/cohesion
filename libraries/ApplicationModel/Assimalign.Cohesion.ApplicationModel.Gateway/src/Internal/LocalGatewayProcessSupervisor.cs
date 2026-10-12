@@ -1223,7 +1223,7 @@ internal sealed class LocalGatewayProcessSupervisor
 
     private static string CanonicalizePath(string path)
     {
-        string fullPath = Path.GetFullPath(path);
+        string fullPath = Path.GetFullPath(LocalProcessPath.Unquote(path));
         FileSystemInfo? target = File.ResolveLinkTarget(fullPath, returnFinalTarget: true);
         fullPath = target?.FullName ?? fullPath;
         // Process.MainModule may report either spelling after an 8.3 launch. Compare and
