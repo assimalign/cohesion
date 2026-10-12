@@ -57,7 +57,11 @@ public sealed class HttpConnectionListenerOptions
     /// </summary>
     /// <remarks>
     /// Disable when a trusted proxy supplies Date. The generated timestamp is available in response
-    /// headers before dispatch, so middleware can use the response's origination time.
+    /// headers before dispatch, so middleware can use the response's origination time. Disabling
+    /// this option suppresses only the automatic header. Web.StaticFiles retains Last-Modified and
+    /// date validators, using one <c>TimeProvider.System.GetUtcNow()</c> read when the response Date
+    /// is absent, invalid, or repeated. A valid response Date remains authoritative, and StaticFiles
+    /// does not add or replace that header.
     /// </remarks>
     public bool AddDateHeader { get; set; } = true;
 

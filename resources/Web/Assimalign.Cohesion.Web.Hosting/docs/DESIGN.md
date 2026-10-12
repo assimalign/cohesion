@@ -1521,9 +1521,13 @@ It defaults to `true`: HTTP/1.1, HTTP/2, and HTTP/3 add IMF-fixdate `Date` to ev
 including `5xx`, while interim responses carry none. An application-provided date is preserved.
 The cached default is visible before dispatch so static-file validators use the response's own
 origination time. A deployment whose proxy adds dates can set `Http:AddDateHeader` to `false`;
-that suppresses only the automatic value. Both binding paths parse it as a boolean and reject an
-invalid value. This changes 10.0.0-preview.1's response header set, which contained no automatic
-`Date`. See `Http.Connections` DESIGN for the process-wide, once-per-second formatting cache.
+that suppresses only the automatic value. StaticFiles keeps `Last-Modified` and date validators
+working (#1449). A valid response `Date` remains its reference; when absent, invalid, or repeated,
+one `TimeProvider.System.GetUtcNow()` read supplies its clamp and date validation, including the
+`If-Range` strength check, without adding or replacing `Date`. Both binding paths parse the option
+as a boolean and reject an invalid value. Automatic dates change 10.0.0-preview.1's response
+header set, which contained no automatic `Date`. See `Http.Connections` DESIGN for the
+process-wide, once-per-second formatting cache.
 
 ### Why explicit, hand-rolled binding
 

@@ -895,9 +895,11 @@ applies. The matching cached value takes the pre-encoded path.
 
 Set `AddDateHeader = false`, or `Http:AddDateHeader = false` in Web.Hosting
 configuration, behind a proxy that supplies its own Date. This disables automatic
-generation only; an application Date still goes out on a final response. With no
-valid Date visible, StaticFiles conservatively omits its derived Last-Modified
-and cannot use a date-form If-Range; entity-tag conditions remain available.
+generation only; an application Date still goes out on a final response. StaticFiles keeps
+Last-Modified and date validators enabled (#1449): when Date is absent, invalid, or repeated,
+it reads `TimeProvider.System.GetUtcNow()` once for the future-date clamp and all date
+validation, including the date-form If-Range strength check. A single valid response Date
+remains its reference. This fallback does not add or rewrite the Date header.
 
 **Breaking behavior against 10.0.0-preview.1 (decision 15).** Final responses now
 carry an additional Date field by default, and the application sees it before

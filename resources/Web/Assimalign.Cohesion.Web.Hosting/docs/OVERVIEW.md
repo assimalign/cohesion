@@ -60,7 +60,10 @@ The opt-out preserves the gateway's scheme in `Request.Scheme`.
 
 Every final response carries an automatic `Date` unless the application supplied one. To let a
 proxy add its own, set `options.AddDateHeader = false` in `Server.UseServer`, or configure
-`Http:AddDateHeader` through `UseConfiguration`. Interim responses carry no `Date`.
+`Http:AddDateHeader` through `UseConfiguration`. Disabling it suppresses only the automatic
+header; StaticFiles retains `Last-Modified` and date validators. It uses a valid response `Date`,
+or one clock read when that field is absent, invalid, or repeated, without adding or replacing
+`Date`. Interim responses carry no `Date`.
 
 TLS endpoints, including HTTP/3, default to a 10-second handshake timeout. Set
 `Http:Endpoints:<name>:HandshakeTimeout` through `UseConfiguration` to a `TimeSpan` string or

@@ -14,6 +14,9 @@ scheme. Connection security still reflects the backend connection.
 
 Final responses include a cached IMF-fixdate `Date` by default. The timestamp is
 available before dispatch and preserves an application override. Set
-`AddDateHeader = false` behind a proxy that adds Date; 1xx responses omit it.
+`AddDateHeader = false` behind a proxy that adds Date; 1xx responses omit it. The option
+suppresses only the automatic header. StaticFiles keeps Last-Modified and date validators:
+it uses a valid response Date, or one clock read when Date is absent, invalid, or repeated,
+without adding or replacing the header.
 
 See [DESIGN.md](DESIGN.md) for protocol behavior, limits and interception.

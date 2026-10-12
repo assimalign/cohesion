@@ -120,7 +120,7 @@ and also ride on a `304`. Pass an explicit content type for user-supplied files:
 
 | Concern | Behavior |
 |---|---|
-| Validators | Strong `ETag` derived from `Size` + `UpdatedOn`; `Last-Modified` (HTTP-date), clamped to the response's `Date` when `UpdatedOn` is later (RFC 9110 §8.8.2.1). Without a valid response `Date`, no derived `Last-Modified` is emitted and date conditions are ignored; date-form `If-Range` serves the full representation. |
+| Validators | Strong `ETag` derived from `Size` + `UpdatedOn`; a future `Last-Modified` is clamped to the response's valid `Date`, or one clock read when `Date` is absent, invalid, or repeated (RFC 9110 §8.8.2.1). The same instant governs date conditions and date-form `If-Range`. |
 | Conditional GET | `If-None-Match` / `If-Modified-Since` → `304`; `If-Match` / `If-Unmodified-Since` → `412` (RFC 9110 §13.2.2 via `HttpConditionalRequest`). |
 | Ranges | `Accept-Ranges: bytes`; single satisfiable byte range → `206` + `Content-Range`; multi-range set → full `200` fallback; unsatisfiable → `416` + `bytes */N` (via `HttpRangeSelector`); `If-Range` gates application: the current strong `ETag`, or a date equal to a `Last-Modified` at least one second old (RFC 9110 §13.1.5), else the full `200`. |
 | Content types | File-name lookup via `HttpContentTypes` with builder-time overlays; a name whose extension is unmapped, or that has none (`html`, the dotfile `.json`), passes through by default or serves the configured fallback type. |
@@ -131,9 +131,11 @@ and also ride on a `304`. Pass an explicit content type for user-supplied files:
 The response helpers produce the same columns for a handler's file or stream, minus precompression
 and default documents.
 
-The transports supply `Date` before dispatch. If automatic dates are disabled for a proxy that
-adds them (`AddDateHeader = false`), set a valid response `Date` before static-file selection to
-retain modification-date validators. Entity tags and their conditions remain available without it.
+The transports supply `Date` before dispatch. Disabling automatic dates for a proxy that adds
+its own (`AddDateHeader = false`) removes only that automatic header: `Last-Modified`,
+`If-Modified-Since`, `If-Unmodified-Since`, and date-form `If-Range` keep working. A single valid
+response `Date` remains the reference; otherwise StaticFiles reads `TimeProvider.System.GetUtcNow()`
+once for clamping and date validation. It does not add or replace the `Date` header.
 
 ## Dependencies
 

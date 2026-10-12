@@ -130,27 +130,26 @@ internal static class RepresentationWriter
     /// The representation the request is evaluated against. A <c>Last-Modified</c> later than the
     /// response's <c>Date</c> is first replaced with that date (RFC 9110 &#167; 8.8.2.1,
     /// <see cref="RepresentationMetadata.ClampLastModified"/>), so the caller passes the updated value
-    /// on to <see cref="WriteContentAsync"/>. Without a valid response date the modification time is
-    /// withheld: neither its emission nor date-based conditions can be validated safely.
+    /// on to <see cref="WriteContentAsync"/>. Without a valid response date, one clock read supplies
+    /// the instant for clamping and date-based conditions without adding a Date header.
     /// </param>
     /// <param name="slice">When this method returns <see langword="true"/>, the range to send, or <see langword="null"/> for the full representation.</param>
+    /// <param name="timeProvider">The fallback clock; defaults to <see cref="TimeProvider.System"/>.</param>
     /// <returns><see langword="true"/> when the caller should write the content; <see langword="false"/> when the response is complete.</returns>
-    public static bool TrySelectContent(IHttpContext context, ref RepresentationMetadata representation, out HttpRangeSlice? slice)
+    public static bool TrySelectContent(IHttpContext context, ref RepresentationMetadata representation, out HttpRangeSlice? slice, TimeProvider? timeProvider = null)
     {
         slice = null;
 
         // The transport makes its default Date visible before dispatch; an application-provided
         // Date wins. Use that exact origination time for both the clamp and the strength test.
-        // A proxy can own Date instead, or a custom response can have no valid date: without one,
-        // withhold Last-Modified and its conditions rather than inventing a second clock.
-        DateTimeOffset? responseDate = context.Response.Headers.TryGetValue(HttpHeaderKey.Date, out HttpHeaderValue dateValue)
+        // Without a valid Date, read the fallback clock once for both decisions. Disabling the
+        // transport's Date header must not disable modification-date validators.
+        DateTimeOffset responseDate = context.Response.Headers.TryGetValue(HttpHeaderKey.Date, out HttpHeaderValue dateValue)
             && dateValue.Count == 1
             && HttpDate.TryParse(dateValue[0], out DateTimeOffset parsedDate)
                 ? parsedDate
-                : null;
-        representation = responseDate is DateTimeOffset origination
-            ? representation.ClampLastModified(origination)
-            : representation with { LastModified = null };
+                : (timeProvider ?? TimeProvider.System).GetUtcNow();
+        representation = representation.ClampLastModified(responseDate);
 
         IHttpRequest request = context.Request;
         HttpMethod method = request.Method;
@@ -326,7 +325,7 @@ internal static class RepresentationWriter
         HttpEntityTag? etag,
         DateTimeOffset? lastModified,
         long length,
-        DateTimeOffset? responseDate,
+        DateTimeOffset responseDate,
         out HttpRangeSelection selection)
     {
         selection = default;
@@ -339,15 +338,14 @@ internal static class RepresentationWriter
         // RFC 9110 §13.2.2 step 5: a present If-Range gates whether the Range is honored at
         // all. An unparseable If-Range cannot be validated, so the range is ignored; so is one
         // whose validator the representation does not have, a date that is not exactly the
-        // Last-Modified, a date without a valid response Date, and any date while Last-Modified
-        // is still within the response's second
+        // Last-Modified, and any date while Last-Modified is still within the selected
+        // origination second (the response Date or the fallback clock)
         // (HttpIfRange treats it as weak: the file can change again without changing it). A future
         // Last-Modified, clamped to the current second above, is one of those.
         if (request.Headers.TryGetValue(HttpHeaderKey.IfRange, out HttpHeaderValue ifRangeValue))
         {
             if (!HttpIfRange.TryParse((string?)ifRangeValue, out HttpIfRange ifRange)
-                || (ifRange.Date is not null && responseDate is null)
-                || !ifRange.Matches(etag, lastModified, responseDate.GetValueOrDefault()))
+                || !ifRange.Matches(etag, lastModified, responseDate))
             {
                 return false;
             }

@@ -74,9 +74,10 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   bytes (RFC 9110 §14.2: ranges address the selected representation).
 - **A date `If-Range` applies only to a settled file (#1185).** `HttpIfRange.Matches` honors the
   range for a date only when the date equals `Last-Modified` and `Last-Modified` is at least one
-  second before the response's `Date`, which `RepresentationWriter` reads from its header section
-  (#1417). The transport makes its default date available before dispatch, and preserves a date
-  the application set. A file written in that
+  second before the response's origination time. `RepresentationWriter` uses a single valid
+  response `Date` (#1417), or one `TimeProvider.System.GetUtcNow()` read when that header is
+  absent, invalid, or repeated (#1449). The transport makes its default date available before
+  dispatch and preserves a date the application set. A file written in that
   second can change again without changing its `Last-Modified`, so it gets the full `200`, and so
   does any date earlier or later than `Last-Modified`. The one-second test is a conservative
   heuristic, not RFC 9110 §8.8.2.2's "reliably knows" condition: a file written twice inside one
@@ -87,26 +88,27 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   server with a clock to send a `Last-Modified` later than the response's origination, and makes it
   send that time instead. A file stamped in the future (a clock that ran ahead, an archive
   extracted with its original times) or a `WriteStreamAsync` caller's future `lastModified` would
-  otherwise go out unchanged. `TrySelectContent` parses the response's `Date` once, clamps
-  `RepresentationMetadata.LastModified` to that second (`ClampLastModified`), and evaluates the
-  preconditions, the `If-Range` test, and every header section that carries validators (`200`,
+  otherwise go out unchanged. `TrySelectContent` selects the response's valid `Date` or the
+  single clock fallback once, clamps `RepresentationMetadata.LastModified` to that second
+  (`ClampLastModified`), and evaluates the preconditions, the `If-Range` test, and every header
+  section that carries validators (`200`,
   `206`, `304`, `416`) against the clamped value, passing the same instant to `HttpIfRange.Matches`.
   A clamped `Last-Modified` falls in the current second, so it never applies a date `If-Range`.
   The `ETag` keeps the file's real timestamp, so it stays stable while the clamped date moves.
-- **No valid response `Date` means no derived modification-date validator (#1417).** A listener
-  can disable automatic dates (`AddDateHeader = false`) for a proxy that adds its own, a custom
-  response can have no date, or the application can supply an invalid or repeated date. This
-  package cannot know that response's origination time, so it withholds its derived
-  `Last-Modified` instead of consulting an unrelated clock or risking a future validator.
-  `If-Modified-Since` and `If-Unmodified-Since` then have no date to evaluate, and a date-form
-  `If-Range` serves the full representation. Entity-tag conditions, entity-tag `If-Range`, and
-  ranges without `If-Range` keep working. A deployment that needs modification-date validators
-  while suppressing the transport default can set a valid response `Date` before static-file
-  selection. This is a conservative implementation choice: RFC 9110 §8.8.2.1 recommends
-  `Last-Modified` when it can be determined consistently, and prohibits a future value. There is
-  no invented replacement date, and the application-owned `Date` is never rewritten here.
-  Compared with 10.0.0-preview.1, response dates now control date validation and clamping; that
-  release emitted source modification dates unchanged and no transport supplied `Date`.
+- **Disabling `Date` removes only the automatic header (#1449, owner decision 53).** A listener
+  can disable automatic dates (`AddDateHeader = false`) for a proxy that adds its own. A custom
+  response can also have no date, or the application can supply an invalid or repeated date.
+  Without one valid response `Date`, `RepresentationWriter` reads `TimeProvider.System.GetUtcNow()`
+  exactly once for that selection. That instant supplies the future-date clamp, the
+  `If-Modified-Since` / `If-Unmodified-Since` comparisons through the clamped modification date,
+  and the date-form `If-Range` strength check. `Last-Modified` and all date validators therefore
+  keep working. A valid response `Date` remains authoritative, with no fallback clock read.
+  StaticFiles never adds or rewrites `Date`; a missing header stays missing.
+  This restores the no-`Date` validation that #1417 inadvertently disabled after
+  10.0.0-preview.1. **Breaking behavior against 10.0.0-preview.1 (decision 15)** remains the
+  future-date clamp and the one-second date `If-Range` strength rule introduced by #1185:
+  preview.1 emitted source modification dates unchanged and used date matching without that
+  strength check. No transport supplied an automatic `Date` in that release.
 - **Single-range only; multi-range falls back to full `200`.** `multipart/byteranges`
   assembly is complexity with almost no modern client demand; the RFC permits serving the
   full representation instead. `HttpRangeSelector`'s DoS guard (16-range cap → full) rides
