@@ -136,3 +136,34 @@ implementation, Web-local HMAC verification uses BCL one-shot APIs, and base64ur
   `IJwtSignatureVerifier`s; fetching and caching a signer's JWKS endpoint is
   a later addition on the same seam.
 - **Token encryption (JWE).** Only signed (JWS) compact tokens are handled.
+
+## Diagnostics
+
+The internal `JwtBearerEventSource` provider is named
+`Assimalign.Cohesion.Web.Authentication.Bearer`. It references the contracts-only
+`Web.Server` package for request correlation; the authentication dispatcher owns no source.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | TokenRejected | Verbose | scheme, reason, algorithm (32 characters), keyId (128 characters), validationCode, requestId |
+
+Reasons are EmptyCredential, Malformed, NotCompactJws, UnsecuredAlgorithm,
+SignatureEncoding, NoMatchingKey, SignatureInvalid, ValidationFailed, IssuerRejected
+and AudienceRejected. NoMatchingKey means no configured verifier accepts the
+algorithm/key id; SignatureInvalid means an eligible verifier rejected the signature.
+The authentication result and challenge text retain their existing semantics.
+
+The lazily published PollingCounter `rejected-tokens` counts once per request and
+scheme, including when no listener is attached. The per-scheme handler/result cache
+prevents Authorization re-authentication and a subsequent challenge from counting again.
+Missing/non-Bearer credentials and successful authentication produce neither event nor count.
+
+All allocating payload work and request-id reads occur inside the Verbose enable check.
+The request id comes from `IWebRequestIdFeature`, never an ambient Activity. Tokens,
+Authorization headers, claim values and validation diagnostic messages never enter payloads.
+The scope table's issuer field is deliberately omitted: JWT issuer is a claim and conflicts
+with #1403's explicit no-claim-value acceptance criterion. Attacker-selected algorithm and
+key id are untrusted text, truncated only when the event is enabled.
+
+This adds diagnostics without changing public APIs or authentication decisions relative
+to 10.0.0-preview.1. The separate #1450 challenge behavior change is described above.

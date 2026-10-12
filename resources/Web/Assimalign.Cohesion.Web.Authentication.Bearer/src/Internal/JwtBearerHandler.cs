@@ -65,12 +65,12 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
 
         if (string.IsNullOrEmpty(token))
         {
-            return AuthenticateResult.Fail("The Bearer credential carries no token.");
+            return Reject("EmptyCredential", "The Bearer credential carries no token.");
         }
 
         if (!JsonWebToken.TryParse(token, out JsonWebToken? jwt) || jwt is null)
         {
-            return AuthenticateResult.Fail("The bearer token is malformed.");
+            return Reject("Malformed", "The bearer token is malformed.");
         }
 
         if (_options.RequireSignedTokens)
@@ -86,17 +86,17 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
         TokenValidationResult validation = jwt.Validate(BuildValidationOptions(now));
         if (!validation.Succeeded)
         {
-            return AuthenticateResult.Fail(DescribeFailure(validation));
+            return Reject("ValidationFailed", DescribeFailure(validation), jwt, validation);
         }
 
         if (!IssuerIsValid(jwt))
         {
-            return AuthenticateResult.Fail("The bearer token issuer is not accepted.");
+            return Reject("IssuerRejected", "The bearer token issuer is not accepted.", jwt);
         }
 
         if (!AudienceIsValid(jwt))
         {
-            return AuthenticateResult.Fail("The bearer token audience is not accepted.");
+            return Reject("AudienceRejected", "The bearer token audience is not accepted.", jwt);
         }
 
         var principal = JwtClaimsPrincipalMapper.Map(jwt, _scheme.Name, _options);
@@ -132,12 +132,12 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
 
         if (parts is null || jwt.SigningInput is null || algorithm is null)
         {
-            return AuthenticateResult.Fail("The bearer token cannot be verified: it is not in compact JWS form.");
+            return Reject("NotCompactJws", "The bearer token cannot be verified: it is not in compact JWS form.", jwt);
         }
 
         if (string.Equals(algorithm, JoseAlgorithms.None, StringComparison.Ordinal))
         {
-            return AuthenticateResult.Fail("The bearer token uses the unsecured 'none' algorithm.");
+            return Reject("UnsecuredAlgorithm", "The bearer token uses the unsecured 'none' algorithm.", jwt);
         }
 
         byte[] signature;
@@ -147,21 +147,35 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
         }
         catch (FormatException)
         {
-            return AuthenticateResult.Fail("The bearer token signature is not valid base64url.");
+            return Reject("SignatureEncoding", "The bearer token signature is not valid base64url.", jwt);
         }
 
         byte[] signingInput = Encoding.ASCII.GetBytes(jwt.SigningInput);
         string? keyId = jwt.Header.KeyId;
 
+        bool matchingKey = false;
         foreach (IJwtSignatureVerifier verifier in _options.SigningKeys)
         {
-            if (verifier.CanVerify(algorithm, keyId) && verifier.Verify(algorithm, signingInput, signature))
+            if (!verifier.CanVerify(algorithm, keyId))
+            {
+                continue;
+            }
+
+            matchingKey = true;
+            if (verifier.Verify(algorithm, signingInput, signature))
             {
                 return null;
             }
         }
 
-        return AuthenticateResult.Fail("The bearer token signature could not be verified.");
+        return Reject(matchingKey ? "SignatureInvalid" : "NoMatchingKey",
+            "The bearer token signature could not be verified.", jwt);
+    }
+
+    private AuthenticateResult Reject(string reason, string message, JsonWebToken? jwt = null, TokenValidationResult? validation = null)
+    {
+        JwtBearerEventSource.Log.TokenRejected(_context, _scheme.Name, reason, jwt, validation);
+        return AuthenticateResult.Fail(message);
     }
 
     private JsonWebTokenValidationOptions BuildValidationOptions(DateTimeOffset now)
