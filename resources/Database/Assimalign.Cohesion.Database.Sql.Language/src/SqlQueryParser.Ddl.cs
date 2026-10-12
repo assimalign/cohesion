@@ -23,6 +23,14 @@ public sealed partial class SqlQueryParser
             return ParseCreateIndex(ref lexer, pos);
         }
 
+        if (IsKeyword(ref lexer, "FUNCTION"))
+        {
+            return ParseCreateFunction(ref lexer, pos);
+        }
+        if (IsKeyword(ref lexer, "DOMAIN"))
+        {
+            return ParseCreateDomain(ref lexer, pos);
+        }
         return ParseCreateTable(ref lexer, pos);
     }
 
@@ -524,6 +532,14 @@ public sealed partial class SqlQueryParser
             return ParseDropIndex(ref lexer, pos);
         }
 
+        if (IsKeyword(ref lexer, "FUNCTION"))
+        {
+            return ParseDropFunction(ref lexer, pos);
+        }
+        if (IsKeyword(ref lexer, "DOMAIN"))
+        {
+            return ParseDropDomain(ref lexer, pos);
+        }
         return ParseDropTable(ref lexer, pos);
     }
 

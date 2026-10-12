@@ -1666,7 +1666,7 @@ for example `DefaultSql(row => row.Placed, "'2026-01-01'")`; the SQL typed prefi
 unchanged `cohesion/database-schema/v4` document, so equal text gives the same hash.
 
 `DEFAULT -7` and `DEFAULT -1.2500` accept a single numeric minus. Arithmetic, nested unary expressions,
-functions and other computed expressions remain unsupported. `DEFAULT NULL` has the same
+functions and other computed expressions remain unsupported in typed defaults and ADD COLUMN; see E4 below for CREATE TABLE function-call defaults. `DEFAULT NULL` has the same
 stored meaning as no default. A binary default is a quoted `\x` prefix followed by even-count
 hexadecimal digits, for example `DEFAULT '\x007FFF'`; no whitespace or octal escapes are accepted,
 and the column's length bounds still apply. The typed `byte[]` renderer emits uppercase digits.
@@ -1675,3 +1675,49 @@ Hex decoding is specific to DEFAULT and does not add a general string-to-binary 
 While a compiled-schema apply runs, ordinary session DDL is refused with
 `DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the
 apply, including any compensation, finishes; unrelated table reads and writes continue.
+
+## SQL definitions and declared scripts (E4)
+
+~~~sql
+CREATE FUNCTION increment(p INT) RETURNS INT IMMUTABLE STRICT RETURN p + 1;
+DROP FUNCTION increment(INT);
+CREATE DOMAIN positive AS INT DEFAULT 1 NOT NULL CONSTRAINT positive_value CHECK (VALUE > 0);
+DROP DOMAIN positive;
+~~~
+
+Functions have one expression body. Parameters are named; tables, subqueries, aggregates,
+external parameters and recursion are refused. Defaults are VOLATILE and CALLED ON NULL INPUT,
+as in PostgreSQL src/backend/commands/functioncmds.c:1095-1098. STRICT bypasses a body on NULL.
+A function may call only functions whose volatility is at least its own; CHECK, including a
+domain CHECK, admits Immutable functions only. Functions share the engine namespace and E2's
+storage-type overload identity. Iteration 1 has no CREATE OR REPLACE, procedural body, LANGUAGE,
+CASCADE, qualified function name or domain-over-domain, unlike PostgreSQL's broader facilities.
+
+Domains share E3's type namespace and coercion/check path. Columns inherit their domain's
+literal default unless they supply one; explicit DEFAULT NULL overrides inheritance. Domain
+bounds and NOT NULL apply on writes and CAST. SQL definitions persist as canonical expressions.
+DROP refuses dependencies in other function/domain bodies, CHECK, DEFAULT, casts and domain
+columns. Ordinary DDL cannot drop Schema-owned objects. Engine registrations cannot be dropped.
+
+CREATE TABLE defaults additionally admit column-free scalar function calls, bound once and
+executed for each omitted value. Domain defaults, ADD COLUMN, typed DefaultSql and SDK defaults
+remain literal-only. ADD COLUMN retains the existing missing-tail representation; a volatile
+expression there would change historical rows on each read. ALTER cannot change defaults.
+
+| Code | Meaning |
+| --- | --- |
+| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition. |
+| COHSQLD002 | A persisted definition or column depends on the object being dropped. |
+| COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
+| COHSQLS001 | A declared script name has a different recorded SHA-256. |
+| COHSQLS002 | Verify requires a complete receipt with the declared checksum. |
+| COHSQLS003 | Transaction control inside a declared script; the runner owns transactions. |
+| COHSQLS004 | A script statement failed or attempted to adopt an existing table. |
+
+SqlDatabaseBuilder.Script(name, sql) runs after the typed schema in declaration order. Names are
+case-sensitive, unique and at most 128 characters. Exact UTF-8 bodies are SHA-256 checked;
+whitespace changes the checksum. Parsing precedes file I/O and lexical semicolon splitting
+respects strings, quoted names and comments. Deleting a declaration undoes nothing. Each statement
+commits with a receipt; crash recovery resumes after its committed prefix, including DML.
+Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
+SDK v4 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
