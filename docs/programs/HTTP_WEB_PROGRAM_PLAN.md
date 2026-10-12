@@ -361,7 +361,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 ### Stage 13 — Web correctness
 
-**Status:** delivered 2026-10-11 on the Phase 2 branch and in owner review (§5). The owner approved Stage 12 and every recommendation from its review (decisions 43–49). From this stage on, sessions run in the Codex CLI on Astra 6 at ultra effort, by the owner's instruction of 2026-10-11. Each session works in its own worktree, and the main session integrates and audits the result as before. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
+**Status:** delivered 2026-10-11 on the Phase 2 branch and approved by the owner on 2026-10-12 with every recommendation (§5; decisions 50–54). The owner approved Stage 12 and every recommendation from its review (decisions 43–49). From this stage on, sessions run in the Codex CLI on Astra 6 at ultra effort, by the owner's instruction of 2026-10-11. Each session works in its own worktree, and the main session integrates and audits the result as before. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
 
 | Session | Issues (in order) | Wave |
 |---|---|---|
@@ -399,7 +399,42 @@ The issue list:
 
 ### Stage 14 — Performance, operations and DX
 
-**Status:** lined up. Gate: Stage 13 reviewed.
+**Status:** in progress (2026-10-12). The owner approved Stage 13 and every recommendation from its review (decisions 50–54).
+- Sessions run in the Codex CLI on Astra 6 at ultra effort, as in Stage 13. A pipeline script drives each session's implement, review, verify and fix runs in its own worktree.
+- Sessions in one row edit the same files, so each runs as one serial session; the rows of a wave run in parallel.
+- Wave 2 needs wave 1 integrated:
+  - #1300 builds on the transport changes;
+  - #1398 on #1389;
+  - #1401 on #1432;
+  - #1404 on #1435;
+  - every source on #1448's recorder.
+- Wave 3 needs #1300's source name and #1398 (#1399's own blockers).
+
+| Session | Issues (in order) | Wave |
+|---|---|---|
+| 1 | #1338 → #1427 → #1425 → #1311: HTTP/3 and the QUIC driver (no thread hop, a FIN facet, the stream-limit facet, the handshake timeout) | 1 |
+| 2 | #1439 → #1432 → #1389: connection loss on HTTP/1.1 and HTTP/2, the response-side fault latch, a single per-exchange interceptor | 1 |
+| 3 | #1337 → #1414: allocation-free feature lookup, unregistered status codes | 1 |
+| 4 | #1303 → #1305: the missing OVERVIEW files, then `Web.Authentication.Certificate` (decision 31) | 1 |
+| 5 | #1448 → #1449 → #1413 → #1435: the recorder's new home (decision 52), StaticFiles' clock fallback (decision 53), HttpsPolicy's redirect-loop docs, the form limit name | 1 |
+| 6 | #1092: the `cohesion-spa` fallback route, verified against a packed SDK | 1 |
+| 7 | #1300: transport rejections and protocol errors through a Meter and an EventSource (decisions 31 and 49) | 2 |
+| 8 | #1398: `WebServerEventSource` replaces #147's `ILogger` diagnostics | 2 |
+| 9 | #1412 → #1400 → #1434: verifier reuse, `ResourceControlPlaneEventSource`, command outcomes | 2 |
+| 10 | #1401: `ErrorHandlingEventSource` on #1432's latch | 2 |
+| 11 | #1402: the edge group (Cors, SecurityHeaders, HostFiltering, ForwardedHeaders) | 2 |
+| 12 | #1403: the authentication group (Bearer, Cookie, Authorization, Antiforgery), plus Certificate's place in the catalog | 2 |
+| 13 | #1404: the traffic group (RateLimiting, RequestTimeouts, Compression, Forms) | 2 |
+| 14 | #1405: the content group (Caching, StaticFiles, Sessions, WebSockets) | 2 |
+| 15 | #1406 → #1407: Health, then Diagnostics | 2 |
+| 16 | #1399 → #1408: default forwarding and NativeAOT delivery, then conformance and the docs roll-up | 3 |
+
+Not scheduled in this stage:
+- #1436 waits on an owner decision: `IsModified` is a new member on the public `IHttpStoredSession` interface.
+- #1433 belongs to the Security program.
+- #1202 and #1217 wait on the OpenApi program.
+
+The issue list:
 - #1338 → #1300: no HTTP/3 thread hop; transport rejections reported through a Meter and an EventSource (decision 31).
 - #1337: allocation-free feature lookup.
 - #1311: the QUIC handshake timeout option.
@@ -408,7 +443,7 @@ The issue list:
 - #1389: resolve a single per-exchange response interceptor without intermediate lists.
 - #1412: reuse the control plane's bootstrap-token verifier instead of building one per request.
 - #1439: a connection lost mid-body is a cancellation on HTTP/1.1 and HTTP/2 too (decision 45; #1430 did HTTP/3).
-- #1432 with #1300 in lane G: latch a response-side client fault where the exception boundary can read it.
+- #1432: latch a response-side client fault where the exception boundary can read it (session 2, ahead of #1401).
 - #1413: document how an operator recognizes HttpsPolicy's proxy redirect loop.
 - #1414: `HttpStatusCode` accepts unregistered codes from 100 to 599.
 - #1425: an HTTP/3 `PRIORITY_UPDATE` beyond the stream limits is `H3_ID_ERROR`, once the QUIC driver publishes its limit.
@@ -416,7 +451,7 @@ The issue list:
 - #1202 and #1217's Web.OpenApi follow-up, once the OpenApi program fixes its model.
 - **Lane G — Web event sources** (epic #1396, tasks #1397–#1408; scope in [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md)). 21 internal sources under `event-source.md`; #147's `ILogger` diagnostics move into `WebServerEventSource`.
   - #1397 (T0) records three owner decisions, taken at the Stage 12 review (decision 49): (a) a default forwarder replaces #147's default visibility; (d) payload hygiene and an `event-source.md` amendment; (f) Sdk.Web turns on `EventSourceSupport` for NativeAOT. Its rule amendment, the not-instrumented list and the shared recorder landed in Stage 13 (`fc624f6d`), so this lane opens with no gate.
-  - Wave 1: #1398 (Web.Hosting) serial after #1389, with #1400–#1407 in parallel. Wave 2: #1399 (forwarding and AOT) with #1398, then #1408 (conformance and docs).
+  - Scheduled in the session table above: #1398 and #1400–#1407 in wave 2 (#1398 after wave 1's #1389), then #1399 and #1408 in wave 3.
   - Stage 13 rewrites code these sources instrument (#1079 → #1078, #1156, #1388, #1297 → #1325), which is why the lane waits for Stage 14.
 
 **Other programs**, not scheduled here:
@@ -936,7 +971,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - **`AddJsonSerialization`** keeps one hidden static factory, `SerializationComponents`. Recommended: accept it. The alternative drops the shorthand in favor of `AddContentSerialization(s => s.AddJson(resolver))`, which breaks every JSON application.
   - **HTTP/2 control frames when the listener sets no rate.** A `null` `MinResponseDataRate` leaves the HTTP/2 output unbounded. The session rejected a flat 2 s fallback because it would abort healthy slow readers. Recommended: accept.
   - **Web event sources (#1397):** decisions (a), (d) and (f) from [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md).
-- **Stage 13 delivered (2026-10-11), in owner review.** Stage 13 fixed the Web correctness defects, the protocol follow-ups Stage 12 found, and the two security holes its decisions opened: #1424's HTTP/3 stream retention and #1431's open standalone control planes.
+- **Stage 13 delivered (2026-10-11), approved by the owner on 2026-10-12 with every recommendation (decisions 50–54).** Stage 13 fixed the Web correctness defects, the protocol follow-ups Stage 12 found, and the two security holes its decisions opened: #1424's HTTP/3 stream retention and #1431's open standalone control planes.
   - **How it ran:** by the owner's instruction of 2026-10-11, every session ran in the Codex CLI on Astra 6 at ultra effort.
     - Each session had a Codex implementer, a Codex reviewer, two Codex skeptics on every serious finding, and a Codex fixer.
     - Every brief forbade boundary widening and required an Escalations section. After each implement and fix run, a launcher grepped the diff for `InternalsVisibleTo` and interface changes.
@@ -1309,6 +1344,14 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
     - **(d)** One `event-source.md` amendment covers throttling, attacker-chosen identifiers, the `requestId` correlation payload, type-only exception carve-outs, prefix overlap, and a wider `paths:`. The owner accepts that a default `UseErrorHandling()` under forwarding writes application exception messages to the configured sinks.
     - **(f)** Sdk.Web defaults `EventSourceSupport=true` when unset, after the binary-size delta is measured, with an evaluation test.
     - #1397 makes the rule amendment in Stage 13. The sources stay in Stage 14's lane G.
+50. **Stage 13 is approved (owner, 2026-10-12).** Its breaks are accepted on decision 15's terms, and Stage 14 opens.
+51. **Stage 13's three new public seams are accepted (owner, 2026-10-12).** Each lives in the package decision 20 assigns it to:
+    - `IValidationJsonPropertyResolver`, with the generator that emits it onto the application's `JsonSerializerContext` partials (#1209);
+    - `IWebRequestActivityFeature` in Web.Server (#1297);
+    - `IWebResponseStartingFeature` in Web.Server, with its optional `preservedHeaders` list (#1156).
+52. **The shared `EventSourceRecorder` moves to a neutral test-support location (owner, 2026-10-12; #1448).** A DI package does not own a test helper. It moves before lane G links it.
+53. **StaticFiles falls back to the clock when `Date` is off (owner, 2026-10-12; #1449).** `AddDateHeader = false` removes only the header; `Last-Modified` and the date validators keep working.
+54. **Database's namespaced health routes stay unauthenticated in gateway-managed mode (owner, 2026-10-12).** They publish no exception text since #1409.
 
 ### 7.5 Lineup
 
