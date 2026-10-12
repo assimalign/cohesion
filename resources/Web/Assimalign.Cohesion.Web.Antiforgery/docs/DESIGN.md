@@ -322,6 +322,44 @@ composition, so `AddAntiforgery` inherits the earlier failure. This Web package 
 10.0.0-preview.1. Defaults and other valid token names are unchanged; configurations with an invalid
 name must be corrected before the application can register antiforgery.
 
+## Diagnostics
+
+The internal `AntiforgeryEventSource` uses the provider name
+`Assimalign.Cohesion.Web.Antiforgery`. Its events explain rejection and recovery decisions without
+reporting successful requests or duplicating server spans. Enable Verbose to investigate rejected
+tokens; Warning reports that an already committed response forced the middleware to abort.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `RequestRejected` | Verbose | `reason` (`TokenInvalid`, `FormMalformed`, `FormTooLarge`), `statusCode:int`, `tokenLocation` (`Header`, `Form`, `None`), `routeTemplate`, `requestId` |
+| 2 | `RejectionAborted` | Warning | `reason`, `routeTemplate`, `suppressedCount:int`, `requestId` |
+| 3 | `TokenUnprotectFailed` | Verbose | `exceptionType`, `exceptionMessage`, `innerExceptionType` |
+
+`rejected-requests` is a lazily published `PollingCounter` backed by an exact total maintained without
+listeners. An internal exchange feature marks a request after its first rejection, so re-entering the
+middleware counts it once. The counter includes every rejected exchange, including those whose abort
+warning is suppressed. `RejectionAborted` is limited to one event per second across the process; the
+next event reports the number suppressed. There is no unprotect-attempt counter because one request
+can require two unprotect operations.
+
+The two middleware events read `IWebRequestIdFeature` and `IWebEndpointFeature.RouteTemplate` only
+inside `IsEnabled`. They never use ambient activities. The protector seam has no request context:
+`TokenUnprotectFailed` is the context-free attempt event specified by the scope, and has no fabricated
+request id. In contrast, `RejectionAborted` includes the available request id in addition to the scope's
+listed payload so an abort can be joined to the request's rejection.
+
+`FormMalformed` includes no exception text: multipart-parser errors can quote the client's header
+line. No event reports a header value, form field, cookie, token, body, claim, user, or request path.
+Data-protection text is restricted to an allowlist of its six fixed verification and key-lifecycle
+messages; custom protector messages become empty. `innerExceptionType` is set only for the fixed
+key-repository-read failure, and never includes its message. This keeps custom-provider exceptions
+from disclosing tokens or repository paths while retaining the built-in diagnosis.
+
+These diagnostics add no public API or request-processing behavior change. This package did not
+exist in `10.0.0-preview.1`. `AntiforgeryEventSourceTests` validates the strict manifest, all event
+payloads, counter publication and exact deltas, malformed-form hygiene, custom-provider hygiene,
+disabled-listener feature reads, and abort throttling.
+
 ## AOT posture
 
 No reflection, no runtime code generation, no configuration binding, no service location. The middleware

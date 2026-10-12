@@ -75,6 +75,7 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 | `Assimalign.Cohesion.Web.Authentication.Bearer` | TokenRejected (Verbose): bounded rejection reason, algorithm/key id and request correlation; no token or claims | `rejected-tokens` | [Bearer DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Authentication.Cookie` | TicketRejected (Verbose): bounded reason and sanitized unprotect exception metadata with request correlation | `rejected-tickets` | [Cookie DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Authorization` | RequestDenied (Verbose): challenge/forbid outcome, route template, policy source, failed requirement type, schemes and request correlation | `challenged-requests`, `forbidden-requests` | [Authorization DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authorization/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Antiforgery` | RequestRejected and sanitized TokenUnprotectFailed (Verbose); RejectionAborted (Warning, at most once a second with suppressedCount); FormMalformed has no exception text | `rejected-requests` | [Antiforgery DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Antiforgery/docs/DESIGN.md#diagnostics) |
 
 Deliberately not instrumented: `Connections.InMemory` (a test driver), `Connections.Security` (TLS
 handshakes are already reported by the runtime's `System.Net.Security` source, and a handshake that

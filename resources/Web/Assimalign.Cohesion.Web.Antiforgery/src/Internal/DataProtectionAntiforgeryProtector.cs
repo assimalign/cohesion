@@ -49,10 +49,11 @@ internal sealed class DataProtectionAntiforgeryProtector : IHttpAntiforgeryProte
             plaintext = _protector.Unprotect(protectedData);
             return true;
         }
-        catch (DataProtectionException)
+        catch (DataProtectionException exception)
         {
             // A forged, truncated, foreign-purpose, or aged-out payload is a validation failure, not an
             // exceptional condition for the caller.
+            AntiforgeryEventSource.Log.TokenUnprotectFailed(exception);
             plaintext = null;
             return false;
         }

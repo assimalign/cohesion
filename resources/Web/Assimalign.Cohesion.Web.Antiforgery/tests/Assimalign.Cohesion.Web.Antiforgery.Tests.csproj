@@ -7,6 +7,7 @@
 		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
 		<!-- Drive the real runtime through the in-memory test factory; test projects are exempt from
 		     the hosting-isolation rule (COHRES001). -->

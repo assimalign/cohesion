@@ -58,7 +58,8 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
                 && await ValidateAsync(context).ConfigureAwait(false) is { } rejection)
             {
                 // Answer the request here; the endpoint does not run.
-                await RejectAsync(context, rejection).ConfigureAwait(false);
+                AntiforgeryEventSource.Log.RequestRejected(context, rejection.Reason, rejection.Status, rejection.TokenLocation);
+                await RejectAsync(context, rejection.Status, rejection.Reason).ConfigureAwait(false);
                 return;
             }
 
@@ -72,12 +73,16 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
     }
 
     // Validates the request's token pair: null when the request may proceed, otherwise the status it is
-    // rejected with.
-    private async Task<HttpStatusCode?> ValidateAsync(IHttpContext context)
+    // rejected with and its diagnostic classification.
+    private async Task<(HttpStatusCode Status, string Reason, string TokenLocation)?> ValidateAsync(IHttpContext context)
     {
         IHttpRequest request = context.Request;
 
-        if (!HasHeaderToken(request) && HasFormContentType(request))
+        bool hasHeaderToken = HasHeaderToken(request);
+        bool readForm = !hasHeaderToken && HasFormContentType(request);
+        string tokenLocation = hasHeaderToken ? "Header" : readForm ? "Form" : "None";
+
+        if (readForm)
         {
             try
             {
@@ -90,17 +95,19 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
                 // A form over a configured Http.Forms limit is answered as the endpoint's own form binding
                 // answers it, 413 Content Too Large (RFC 9110 §15.5.14): the client must send less, whatever
                 // its token.
-                return HttpStatusCode.RequestEntityTooLarge;
+                return (HttpStatusCode.RequestEntityTooLarge, "FormTooLarge", tokenLocation);
             }
             catch (InvalidDataException)
             {
                 // A malformed body carries no token the server can verify.
-                return HttpStatusCode.BadRequest;
+                return (HttpStatusCode.BadRequest, "FormMalformed", tokenLocation);
             }
         }
 
         IHttpAntiforgery antiforgery = context.Antiforgery ?? _registration.Antiforgery;
-        return await antiforgery.IsRequestValidAsync(context).ConfigureAwait(false) ? null : HttpStatusCode.BadRequest;
+        return await antiforgery.IsRequestValidAsync(context).ConfigureAwait(false)
+            ? null
+            : (HttpStatusCode.BadRequest, "TokenInvalid", tokenLocation);
     }
 
     private bool HasHeaderToken(IHttpRequest request)
@@ -127,13 +134,14 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
             || method == HttpMethod.Trace;
     }
 
-    private static async Task RejectAsync(IHttpContext context, HttpStatusCode status)
+    private static async Task RejectAsync(IHttpContext context, HttpStatusCode status, string reason)
     {
         // The check runs before next, so the head is normally still writable. A middleware ahead of this
         // one may already have committed it, though, and then the status can no longer be set: abort the
         // exchange at the protocol layer instead, so the endpoint still does not run.
         if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
         {
+            AntiforgeryEventSource.Log.RejectionAborted(context, reason);
             await context.CancelAsync().ConfigureAwait(false);
             return;
         }

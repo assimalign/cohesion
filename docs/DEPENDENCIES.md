@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 254 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 725 |
+| Declared project references | 726 |
 | Declared shared-source links | 14 |
 
 ## Ambiguous project names
@@ -1037,7 +1037,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Web` | `Assimalign.Cohesion.Http` | — | — | — |
-| `Assimalign.Cohesion.Web.Antiforgery` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Antiforgery`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing` | — | — | — |
+| `Assimalign.Cohesion.Web.Antiforgery` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Antiforgery`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.Api` | `Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing` | — | — | — |
 | `Assimalign.Cohesion.Web.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
 | `Assimalign.Cohesion.Web.Authentication` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web` | — | — | — |
