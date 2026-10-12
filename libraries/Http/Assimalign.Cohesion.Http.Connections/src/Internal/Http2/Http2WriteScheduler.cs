@@ -127,6 +127,9 @@ internal sealed class Http2WriteScheduler : IDisposable
     {
         lock (_sync)
         {
+            // Grant removes the waiter before completing it. A callback already in
+            // flight must leave that grant intact; its writer owns the gate and
+            // releases it in finally even when the subsequent write is cancelled.
             if (_waiters.Remove(waiter))
             {
                 waiter.Cancel();
@@ -277,13 +280,16 @@ internal sealed class Http2WriteScheduler : IDisposable
 
         public void Grant()
         {
-            _registration.Dispose();
+            // Called under _sync: Dispose could wait for CancelWaiter, which needs
+            // that same lock. Unregister never waits for an in-flight callback.
+            _registration.Unregister();
             _completion.TrySetResult();
         }
 
         public void Cancel()
         {
-            _registration.Dispose();
+            // Scheduler disposal also cancels queued waiters under _sync.
+            _registration.Unregister();
             _completion.TrySetCanceled();
         }
     }

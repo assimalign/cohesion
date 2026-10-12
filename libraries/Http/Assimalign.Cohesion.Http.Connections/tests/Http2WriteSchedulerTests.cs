@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -155,5 +156,109 @@ public class Http2WriteSchedulerTests
         // The gate is still held by the control writer; releasing it must not
         // fault even though the queued waiter was withdrawn.
         scheduler.Release();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 scheduler: Completing a waiter never waits for its running cancellation callback")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompleteWaiter_ConcurrentCancellation_ShouldNotWaitForCallback(bool dispose)
+    {
+        // Arrange
+        TimeSpan timeout = TimeSpan.FromSeconds(10);
+        Http2WriteScheduler scheduler = new();
+        CancellationTokenSource cancellation = new();
+        ManualResetEventSlim resumeCallback = new();
+        TaskCompletionSource callbackStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Register captures this execution context. Entering it on the cancellation thread
+        // holds the scheduler's own callback open before CancelWaiter takes _sync. This
+        // forces the race without sleeps, reflection, or a hook in the production lock.
+        AsyncLocal<bool> cancellationContext = new(change =>
+        {
+            if (change.ThreadContextChanged && change.CurrentValue)
+            {
+                callbackStarted.TrySetResult();
+                resumeCallback.Wait();
+            }
+        });
+
+        await scheduler.AcquireAsync(0, Http2WriteScheduler.ControlUrgency, false, CancellationToken.None);
+        Task queued;
+        cancellationContext.Value = true;
+        try
+        {
+            queued = scheduler.AcquireAsync(1, urgency: 3, incremental: false, cancellation.Token);
+        }
+        finally
+        {
+            cancellationContext.Value = false;
+        }
+
+        queued.IsCompleted.ShouldBeFalse();
+        Task cancel = Task.Run(cancellation.Cancel);
+        Task complete = Task.CompletedTask;
+        try
+        {
+            await callbackStarted.Task.WaitAsync(timeout);
+
+            // Act: Grant (Release) and Cancel (Dispose) both complete waiters under _sync.
+            complete = Task.Run(() =>
+            {
+                if (dispose)
+                {
+                    scheduler.Dispose();
+                }
+                else
+                {
+                    scheduler.Release();
+                }
+            });
+
+            // Assert: registration.Dispose would wait for the held-open callback here.
+            await complete.WaitAsync(timeout);
+            queued.IsCompleted.ShouldBeTrue();
+            cancel.IsCompleted.ShouldBeFalse();
+        }
+        finally
+        {
+            // Do not dispose the scheduler on timeout: the unfixed implementation holds
+            // its lock while waiting for this callback, which now needs that same lock.
+            // The bounded failure lets the test host exit and end those background tasks.
+            resumeCallback.Set();
+        }
+
+        await Task.WhenAll(cancel, complete).WaitAsync(timeout);
+
+        if (dispose)
+        {
+            await Should.ThrowAsync<TaskCanceledException>(() => queued);
+        }
+        else
+        {
+            // A cancellation callback that lost to Grant must not revoke the grant or
+            // release somebody else's gate. The granted writer observes cancellation and
+            // releases in finally, just as the transport's frame-writing paths do.
+            queued.IsCompletedSuccessfully.ShouldBeTrue();
+            Task following = scheduler.AcquireAsync(3, urgency: 3, incremental: false, CancellationToken.None);
+            following.IsCompleted.ShouldBeFalse();
+            await Should.ThrowAsync<OperationCanceledException>(async () =>
+            {
+                await queued;
+                try
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                }
+                finally
+                {
+                    scheduler.Release();
+                }
+            });
+            await following.WaitAsync(timeout);
+            scheduler.Release();
+        }
+
+        scheduler.Dispose();
+        cancellation.Dispose();
+        resumeCallback.Dispose();
     }
 }

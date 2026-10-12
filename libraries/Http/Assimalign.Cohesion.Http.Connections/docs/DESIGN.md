@@ -5726,6 +5726,34 @@ paths go through it:
   frame, and a newly-arrived lower-urgency (more urgent) response preempts
   between frames of a less urgent one.
 
+**Lock and cancellation rule (#1455).** `_sync` protects the queue and gate ownership.
+Code holding it must never dispose or wait for a cancellation registration or run
+user code. Both `Waiter.Grant` and `Waiter.Cancel` use the nonblocking
+`CancellationTokenRegistration.Unregister()`. A callback already running may still
+enter `CancelWaiter` afterward; registration cleanup must not wait for that callback
+because it takes the same lock. Waiter completions use
+`RunContinuationsAsynchronously`, so completing them under the lock cannot invoke
+the writer's continuation inline. The registration callback itself only withdraws
+a queued waiter and completes its task; synchronous registration on an already
+cancelled token can safely reenter the monitor without invoking application code.
+
+Removing the waiter under `_sync` decides the race. If cancellation removes it
+first, the acquisition observes cancellation and never owns the gate. If granting
+removes it first, its task succeeds and a late cancellation callback leaves the
+grant intact. The granted writer owns the gate and must release it exactly once
+in `finally`, including when its write then observes cancellation. Scheduler
+disposal cancels queued acquisitions under the same nonblocking rule.
+
+**Breaking behavior against 10.0.0-preview.1 (#1455).** A concurrent cancellation
+and grant or scheduler disposal now finish instead of deadlocking the frame pump,
+the canceller and later writes such as GOAWAY. This is the preview behavior change
+recorded on decision 15's terms; public contracts and priority ordering are unchanged.
+The released scheduler contains both blocking disposals. An unauthenticated peer
+can reach cancellation through a reset of a stream whose writer uses its request
+cancellation token; exploitation also requires concurrent write contention and
+the grant/cancellation race (CWE-833, proposed medium severity for race-dependent
+denial of service).
+
 ### HTTP/3 posture
 
 HTTP/3 multiplexes streams at the QUIC layer, so there is no shared connection
