@@ -58,7 +58,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// <see cref="Open(SqlStorage, Collation)"/>, are the only ways to create it.
 /// </para>
 /// </remarks>
-public sealed class SqlCatalog
+public sealed partial class SqlCatalog
 {
     private const int tableRecordKind = 1;
     private const int counterRecordKind = 2;
@@ -165,7 +165,7 @@ public sealed class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation);
+            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value));
         }
     }
 
@@ -1050,6 +1050,37 @@ public sealed class SqlCatalog
                     _defaultCollationLocation = (unit.PageId, unit.SlotIndex);
                     break;
 
+                case 12:
+                {
+                    var receipt = System.Text.Json.JsonSerializer.Deserialize(reader.ReadString(out _), SqlCatalogJsonContext.Default.SqlCatalogScript)
+                        ?? throw new SqlCatalogException("Malformed declared script receipt.");
+                    if (!reader.IsAtEnd || !_scripts.TryAdd(receipt.Name, new DefinitionSlot<SqlCatalogScript>(receipt, (unit.PageId, unit.SlotIndex))))
+                    {
+                        throw new SqlCatalogException("Malformed or duplicate declared script receipt.");
+                    }
+                    break;
+                }
+                case 13:
+                    if (_scriptState is not null)
+                    {
+                        throw new SqlCatalogException("Duplicate declared script-set marker.");
+                    }
+                    _scriptState = new SqlCatalogScriptState(reader.ReadString(out _), (ulong)reader.ReadInt64());
+                    if (!reader.IsAtEnd)
+                    {
+                        throw new SqlCatalogException("Malformed declared script-set marker.");
+                    }
+                    _scriptStateLocation = (unit.PageId, unit.SlotIndex);
+                    break;
+                case functionRecordKind:
+                case domainRecordKind:
+                    LoadDefinition(kind, reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                    if (!reader.IsAtEnd)
+                    {
+                        throw new SqlCatalogException("Malformed SQL definition record.");
+                    }
+                    break;
+
                 default:
                     throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
             }
@@ -1160,7 +1191,18 @@ public sealed class SqlCatalog
         ulong generation = _ddlGeneration + 1;
         ulong identity = nextObjectId ?? _nextObjectId;
         var location = PersistCounter(transaction, identity, generation);
+        DefinitionSlot<SqlCatalogScript>? script = null;
+        if (_scriptStatement.Value is { } receipt)
+        {
+            int completed = nextObjectId.HasValue ? receipt.CompletedStatements - 1 : receipt.CompletedStatements;
+            script = StageScript(transaction, new SqlCatalogScript(receipt.Name, receipt.ContentHash, receipt.StatementCount,
+                completed, receipt.BaseGeneration, generation, receipt.SchemaHash, receipt.Objects));
+        }
         transaction.Commit();
+        if (script is not null)
+        {
+            _scripts[script.Value.Name] = script;
+        }
         _counterLocation = location;
         _nextObjectId = identity;
         _ddlGeneration = generation;

@@ -4200,3 +4200,49 @@ its TCP connection while its session idles and while the server writes (a transp
 connection whose disposal throws (`SessionClosed` once, the gauge
 restored). `SessionCleanupFailed` is covered only by the allocation check: no test double makes
 the session's own close fail yet.
+
+## SQL-defined functions, domains and declared scripts (E4)
+
+SqlDefinitionBinder admits CREATE FUNCTION expression bodies and CREATE DOMAIN definitions.
+An internal sealed SqlExpressionFunction derives from E2's SqlScalarFunction, binds through the
+E1 expression tree against a positional parameter frame, and checks the declared return bounds.
+There is no reflection, runtime compilation or evaluation-time parsing. Reference analogues:
+PostgreSQL src/backend/utils/fmgr/fmgr.c:253 (fmgr_sql), commands/functioncmds.c:1095-1098
+(default attributes) and commands/typecmds.c:700 (DefineDomain).
+
+One immutable per-database environment merges native and SQL definitions, rebuilt topologically
+on open and definition DDL. Namespace collisions, recursive dependencies and declarations weaker
+than their called functions are refused before publication. SQL defaults are volatile and called
+on NULL, while native shorthand keeps its strict default. SQL domain columns use E3's existing
+bounds and check path. Missing native calls produce unresolved bindings: open succeeds but use
+fails, and a declared database fails Build's generation-cached validation. CHECK is Immutable-only.
+CREATE TABLE function-call defaults bind once and run for each omitted value; ADD COLUMN stays
+literal-only because its metadata operation does not materialize missing row tails.
+
+Format 10 extends 9 with record kinds 10-13. Bodies, checks and defaults follow the canonical
+persisted-expression rule. Function/domain metadata retains dependency identities and Adhoc/Schema
+ownership. DROP walks those identities and table expressions/domain names. Definition DDL excludes
+other catalog mutations while checking dependencies. It refuses native DROP (COHSQLD003), dependent
+DROP (COHSQLD002) and invalid declarations (COHSQLD001). No interface, new project reference,
+shipped-to-shipped internal grant or assembly scanning was added.
+
+Scripts use statement-granular recovery. The catalog's scoped receipt enlists in each final DDL
+publication. Object-id reservations advance the generation without completing a statement. Data
+statements add an MVCC receipt in the same logical transaction, in a reserved internal chain
+(owner long.MaxValue), never exposed as a SQL table. If data commits before catalog progress,
+recovery finds that receipt and advances without replay. The ordinary row recovery protocol
+handles these versions. Forward-only receipts are retained; removing code deletes no history.
+
+The ordered script-set digest is computed before I/O. A matching digest plus DDL generation
+skips reconciliation in O(1), without parsing, hashing, receipt scans or catalog walks. Verify
+requires complete checksum-matching receipts and executes nothing. Script-created table/index
+identities keep typed reconciliation from dropping raw-owned objects. A continuous receipt
+generation chain repairs the typed marker after a crash between typed apply and script completion.
+
+Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
+data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v4 typed
+artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
+Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
+SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views
+show the merged type environment with the same provenance. INFORMATION_SCHEMA.ROUTINES remains
+absent. The format gate refuses older files without a legacy reader or upgrade path.

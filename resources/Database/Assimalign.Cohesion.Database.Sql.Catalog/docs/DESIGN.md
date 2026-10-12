@@ -461,5 +461,24 @@ missing tables/columns, primary-key drops, malformed persisted records).
 
 ## AOT posture
 
-Value/data classes plus the shared codec — no reflection, no serialization
-libraries.
+Value/data classes, the shared codec and source-generated System.Text.Json metadata; no reflection-based serialization.
+
+## E4 definitions and script receipts
+
+The engine stamps format 10, previously 9. Kinds 10/11 store immutable SqlCatalogFunction and
+SqlCatalogDomain records: signatures/types, canonical SQL, volatility/null behavior, dependency
+identities and Adhoc/Schema ownership. Publication/removal advances DDL generation. Snapshots
+include both kinds. The engine owns semantic binding and dependency/ownership admission.
+
+Kind 12 stores SqlCatalogScript: case-sensitive name, exact-body SHA-256, statement count and
+committed prefix, initial/latest DDL generations, typed schema hash and created table/index
+identities. Kind 13 stores the ordered set's digest and reconciled generation. Tuple payloads use
+source-generated System.Text.Json metadata with unknown-member refusal; no reflection serializer.
+Definitions and receipts must fit the existing one-page record bound. The declaration's body stays
+in application code, not the receipt.
+
+BeginScriptStatement scopes a receipt to the asynchronous execution context. Final catalog
+publication commits it atomically; object-id reservations persist generation without advancing
+the completed prefix. SaveScriptAsync records progress after data/read statements, whose atomic
+DML receipts the engine owns. SaveScriptStateAsync checks generation before saving the O(1)
+marker. No multi-statement catalog transaction was introduced. History is forward-only.
