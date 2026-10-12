@@ -126,8 +126,9 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature, IWebRequestAc
         // Deviates from the repo "catch specific exceptions" rule per design decision: listener callbacks
         // are application code that runs inline. Their failure costs this exchange its telemetry and
         // nothing else (docs/DESIGN.md, "Server telemetry").
-        catch (Exception)
+        catch (Exception exception)
         {
+            WebServerEventSource.Log.TelemetryListenerFaulted(exception);
         }
 
         return telemetry;
@@ -209,8 +210,9 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature, IWebRequestAc
             RecordMetrics(statusCode, error, route, elapsed);
         }
         // Deviates from the repo "catch specific exceptions" rule per design decision: see Start.
-        catch (Exception)
+        catch (Exception exception)
         {
+            WebServerEventSource.Log.TelemetryListenerFaulted(exception);
         }
         finally
         {
@@ -405,8 +407,9 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature, IWebRequestAc
             activity.Stop();
         }
         // Deviates from the repo "catch specific exceptions" rule per design decision: see Start.
-        catch (Exception)
+        catch (Exception exception)
         {
+            WebServerEventSource.Log.TelemetryListenerFaulted(exception);
         }
     }
 

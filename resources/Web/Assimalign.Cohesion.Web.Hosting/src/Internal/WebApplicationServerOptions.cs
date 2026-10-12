@@ -3,7 +3,6 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 using System.Collections.Frozen;
 
 using Assimalign.Cohesion.Http.Connections;
-using Assimalign.Cohesion.Logging;
 
 /// <summary>
 /// The construction options for the default <see cref="WebApplicationServer"/>.
@@ -26,13 +25,6 @@ internal sealed class WebApplicationServerOptions
     /// connections are not opened until an active connection completes.
     /// </summary>
     public int? MaxConcurrentConnections { get; set; }
-
-    /// <summary>
-    /// Gets or sets the logger the server writes its own diagnostics to, under
-    /// <see cref="WebApplicationServerLog.Category"/>. <see langword="null"/> (the default) writes
-    /// nothing.
-    /// </summary>
-    public ILogger? Logger { get; set; }
 
     /// <summary>
     /// Gets or sets the query parameters whose values the server's request spans show in

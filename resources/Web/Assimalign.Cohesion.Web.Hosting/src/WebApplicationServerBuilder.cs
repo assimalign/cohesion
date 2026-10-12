@@ -12,7 +12,6 @@ using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
-using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 
 /// <summary>
@@ -115,8 +114,6 @@ public sealed class WebApplicationServerBuilder
                 Pipeline = pipeline,
                 Listener = listener,
                 MaxConcurrentConnections = _maxConcurrentConnections ?? _configuredMaxConcurrentConnections,
-                // The application's logging (builder.Logging), created once with the server.
-                Logger = serviceProvider.GetRequiredService<ILoggerFactory>().Create(WebApplicationServerLog.Category),
                 TelemetryQueryValues = _telemetryQueryValues?.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             });
         });

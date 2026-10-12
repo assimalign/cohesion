@@ -297,6 +297,10 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             }
             int? port = (_controlPlane.ObservedEndpoints.TryGetValue("http", out Uri? endpoint) ||
                 _controlPlane.ObservedEndpoints.TryGetValue("https", out endpoint)) ? endpoint.Port : null;
+            if (port is null)
+            {
+                WebServerEventSource.Log.ControlPlaneDisabled(_resourceContext!.ResourceName, _controlPlane);
+            }
             return new EnabledResourcePipeline(_controlPlane, _resourceContext!, _context, port, pipeline);
         });
 

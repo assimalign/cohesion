@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Generic;
+using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -12,11 +12,12 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
-using Assimalign.Cohesion.Logging;
+using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Testing;
@@ -28,10 +29,10 @@ using HttpMethod = System.Net.Http.HttpMethod;
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 /// <summary>
-/// The default server's own diagnostics (#147): a bind failure, an accept-loop fault, a connection
-/// fault, and a drain the stop's budget cut short are each logged once, at a deliberate level, under
-/// the server's category, and never with request or response content.
+/// The default server reports its failures through its event source with server and connection
+/// identities, deliberate levels, and no request or response content.
 /// </summary>
+[Collection(nameof(TelemetryCollection))]
 public class WebApplicationServerDiagnosticsTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
@@ -40,21 +41,25 @@ public class WebApplicationServerDiagnosticsTests
     public async Task ServeExchange_WhenCompletionCallbacksThrow_ShouldReportEveryFailure()
     {
         // Arrange
-        RecordingLoggerProvider recorded = new();
-        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
         InvalidOperationException first = new("first callback");
         AggregateException second = new("second callback", new InvalidOperationException("nested"));
         bool lastRan = false;
-        FakeHttpConnection connection = new(new FakeHttpConnectionContext(new[] { new FakeHttpContext() }));
+        string? requestId = null;
+        FakeHttpConnection connection = new(new FakeHttpConnectionContext(new[]
+        {
+            new FakeHttpContext(request: new FakeHttpRequest("/", string.Empty)),
+        }));
         FakePipeline pipeline = new((context, _) =>
         {
+            requestId = context.Features.Get<IWebRequestIdFeature>()!.RequestId.ToHexString();
             IWebResponseCompletionFeature completion = context.Features.Get<IWebResponseCompletionFeature>()!;
             completion.Register(() => throw first);
             completion.Register(() => ValueTask.FromException(second));
             completion.Register(() => { lastRan = true; return ValueTask.CompletedTask; });
             return Task.CompletedTask;
         });
-        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection), loggerFactory);
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
 
         // Act
         try
@@ -64,10 +69,14 @@ public class WebApplicationServerDiagnosticsTests
 
             // Assert
             lastRan.ShouldBeTrue();
-            recorded.Entries.Select(entry => entry.Exception).ShouldBe(new Exception[] { first, second });
-            recorded.Entries.ShouldAllBe(entry => entry.Level == LogLevel.Error &&
-                entry.Category == WebApplicationServerLog.Category);
+            EventWrittenEventArgs[] events = ServerEvents(recorded, server.ServerId, 11);
+            events.Length.ShouldBe(2);
+            events.ShouldAllBe(entry => entry.EventName == "CompletionCallbackFailed" && entry.Level == EventLevel.Error);
+            events[0].PayloadNames.ShouldBe(["serverId", "requestId", "routeTemplate", "exceptionType", "exceptionMessage"]);
+            events[0].Payload.ShouldBe(new object?[] { server.ServerId, requestId, string.Empty, first.GetType().FullName, first.Message });
+            events[1].Payload.ShouldBe(new object?[] { server.ServerId, requestId, string.Empty, second.GetType().FullName, second.Message });
             connection.AbortCount.ShouldBe(0);
+            recorded.Events.ShouldNotContain(entry => entry.EventId == 0);
         }
         finally
         {
@@ -75,87 +84,106 @@ public class WebApplicationServerDiagnosticsTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A bind failure is logged as Critical with its cause before startup fails")]
-    public async Task StartAsync_WhenBindFails_ShouldLogCriticalWithTheCause()
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A bind failure is Critical with its cause before startup fails")]
+    public async Task StartAsync_WhenBindFails_ShouldReportCriticalWithTheCause()
     {
         // Arrange
-        RecordingLoggerProvider recorded = new();
-        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
         InvalidOperationException failure = new("endpoint unavailable");
         FakeHttpConnectionListener listener = new()
         {
             BindHandler = _ => ValueTask.FromException(failure),
         };
-        WebApplicationServer server = CreateServer(new FakePipeline(), listener, loggerFactory);
+        WebApplicationServer server = CreateServer(new FakePipeline(), listener);
 
         // Act
-        await Should.ThrowAsync<HostStartupException>(() => server.StartAsync());
+        try
+        {
+            await Should.ThrowAsync<HostStartupException>(() => server.StartAsync(CancellationToken.None));
 
-        // Assert
-        ILoggerEntry entry = recorded.Entries.ShouldHaveSingleItem();
-        entry.Level.ShouldBe(LogLevel.Critical);
-        entry.Category.ShouldBe(WebApplicationServerLog.Category);
-        entry.Exception.ShouldBeSameAs(failure);
-        entry.Attributes[WebApplicationServerLog.ListenerProtocolsAttribute].ShouldBe("HTTP/1.1");
-
-        await server.StopAsync();
+            // Assert
+            EventWrittenEventArgs entry = ServerEvents(recorded, server.ServerId, 2).ShouldHaveSingleItem();
+            entry.EventName.ShouldBe("BindFailed");
+            entry.Level.ShouldBe(EventLevel.Critical);
+            entry.PayloadNames.ShouldBe(["serverId", "protocols", "exceptionType", "exceptionMessage"]);
+            entry.Payload.ShouldBe(new object?[] { server.ServerId, "HTTP/1.1", failure.GetType().FullName, failure.Message });
+            ServerEvents(recorded, server.ServerId, 1).ShouldBeEmpty();
+            recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: An accept-loop fault is logged as Critical")]
-    public async Task AcceptLoop_WhenTheListenerFaults_ShouldLogCritical()
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: An accept-loop fault is Error")]
+    public async Task AcceptLoop_WhenTheListenerFaults_ShouldReportError()
     {
         // Arrange
-        RecordingLoggerProvider recorded = new();
-        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
         InvalidOperationException failure = new("listener faulted");
         FakeHttpConnectionListener listener = new()
         {
             AcceptHandler = _ => Task.FromException<IHttpConnection>(failure),
         };
-        WebApplicationServer server = CreateServer(new FakePipeline(), listener, loggerFactory);
+        WebApplicationServer server = CreateServer(new FakePipeline(), listener);
 
         // Act
-        await server.StartAsync();
-        ILoggerEntry entry = await WaitForEntryAsync(recorded, LogLevel.Critical);
+        try
+        {
+            await server.StartAsync(CancellationToken.None);
+            EventWrittenEventArgs entry = await WaitForEventAsync(recorded, server.ServerId, 3);
 
-        // Assert
-        entry.Category.ShouldBe(WebApplicationServerLog.Category);
-        entry.Exception.ShouldBeSameAs(failure);
-
-        await server.StopAsync();
+            // Assert
+            entry.EventName.ShouldBe("AcceptLoopFaulted");
+            entry.Level.ShouldBe(EventLevel.Error);
+            entry.PayloadNames.ShouldBe(["serverId", "exceptionType", "exceptionMessage"]);
+            entry.Payload.ShouldBe(new object?[] { server.ServerId, failure.GetType().FullName, failure.Message });
+            ServerEvents(recorded, server.ServerId, 3).ShouldHaveSingleItem();
+            recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A cancellation the server did not request is logged as an accept-loop fault")]
-    public async Task AcceptLoop_WhenTheListenerFaultsWithACancellation_ShouldLogCritical()
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A cancellation the server did not request is an accept-loop fault")]
+    public async Task AcceptLoop_WhenTheListenerFaultsWithACancellation_ShouldReportError()
     {
-        // Arrange — the listener reports a transport fault whose exception is a cancellation the server never
-        // requested (#1310). Before the fix the accept loop read it as the drain and ended without a log.
-        RecordingLoggerProvider recorded = new();
-        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        // Arrange — the listener's own cancellation is a transport fault, not a requested drain (#1310).
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
         OperationCanceledException failure = new("The transport canceled its own accept.");
         FakeHttpConnectionListener listener = new()
         {
             AcceptHandler = _ => Task.FromException<IHttpConnection>(failure),
         };
-        WebApplicationServer server = CreateServer(new FakePipeline(), listener, loggerFactory);
+        WebApplicationServer server = CreateServer(new FakePipeline(), listener);
 
         // Act
-        await server.StartAsync();
-        ILoggerEntry entry = await WaitForEntryAsync(recorded, LogLevel.Critical);
+        try
+        {
+            await server.StartAsync(CancellationToken.None);
+            EventWrittenEventArgs entry = await WaitForEventAsync(recorded, server.ServerId, 3);
 
-        // Assert
-        entry.Category.ShouldBe(WebApplicationServerLog.Category);
-        entry.Exception.ShouldBeSameAs(failure);
-
-        await server.StopAsync();
+            // Assert
+            entry.Level.ShouldBe(EventLevel.Error);
+            entry.Payload.ShouldBe(new object?[] { server.ServerId, failure.GetType().FullName, failure.Message });
+            ServerEvents(recorded, server.ServerId, 3).ShouldHaveSingleItem();
+            recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A connection fault is logged as Error with the connection's id, endpoints and protocol only")]
-    public async Task ServeConnection_WhenTheResponseCannotBeSent_ShouldLogErrorWithTheConnectionIdentity()
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A connection fault is Error with its identity, endpoints and protocol")]
+    public async Task ServeConnection_WhenTheResponseCannotBeSent_ShouldReportErrorWithTheConnectionIdentity()
     {
-        // Arrange — the HTTP/1.1 response cannot be written, an unexpected failure.
-        RecordingLoggerProvider recorded = new();
-        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        // Arrange — the HTTP/1.1 response cannot be written because of an application defect.
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
+        long faults = WebServerEventSource.Log.ConnectionFaults;
         InvalidOperationException failure = new("response framing failed");
         FakeHttpConnectionContext connectionContext = new(new[] { new FakeHttpContext() })
         {
@@ -164,69 +192,111 @@ public class WebApplicationServerDiagnosticsTests
             SendHandler = (_, _) => ValueTask.FromException(failure),
         };
         FakeHttpConnection connection = new(connectionContext);
-        WebApplicationServer server = CreateServer(new FakePipeline(), new FakeHttpConnectionListener(connection), loggerFactory);
+        WebApplicationServer server = CreateServer(new FakePipeline(), new FakeHttpConnectionListener(connection));
 
         // Act
-        await server.StartAsync();
-        await connection.Disposed.Task.WaitAsync(_timeout);
-
-        // Assert — one Error entry, identifying the connection by nothing but id, endpoints, and protocol.
-        ILoggerEntry entry = recorded.Entries.ShouldHaveSingleItem();
-        entry.Level.ShouldBe(LogLevel.Error);
-        entry.Category.ShouldBe(WebApplicationServerLog.Category);
-        entry.Exception.ShouldBeSameAs(failure);
-        entry.Attributes.Keys.OrderBy(key => key, StringComparer.Ordinal).ShouldBe(new[]
+        try
         {
-            WebApplicationServerLog.ConnectionIdAttribute,
-            WebApplicationServerLog.LocalAddressAttribute,
-            WebApplicationServerLog.LocalPortAttribute,
-            WebApplicationServerLog.PeerAddressAttribute,
-            WebApplicationServerLog.PeerPortAttribute,
-            WebApplicationServerLog.ProtocolVersionAttribute,
-        }.OrderBy(key => key, StringComparer.Ordinal));
-        entry.Attributes[WebApplicationServerLog.ConnectionIdAttribute].ShouldBe(connection.Id.ToString());
-        entry.Attributes[WebApplicationServerLog.LocalAddressAttribute].ShouldBe("127.0.0.1");
-        entry.Attributes[WebApplicationServerLog.LocalPortAttribute].ShouldBe(8080);
-        entry.Attributes[WebApplicationServerLog.PeerAddressAttribute].ShouldBe("10.0.0.7");
-        entry.Attributes[WebApplicationServerLog.PeerPortAttribute].ShouldBe(51000);
-        entry.Attributes[WebApplicationServerLog.ProtocolVersionAttribute].ShouldBe("1.1");
-        connection.AbortCount.ShouldBe(1);
+            await server.StartAsync(CancellationToken.None);
+            await connection.Disposed.Task.WaitAsync(_timeout);
 
-        await server.StopAsync();
+            // Assert
+            EventWrittenEventArgs entry = ServerEvents(recorded, server.ServerId, 4).ShouldHaveSingleItem();
+            entry.EventName.ShouldBe("ConnectionFaulted");
+            entry.Level.ShouldBe(EventLevel.Error);
+            entry.PayloadNames.ShouldBe(["serverId", "connectionId", "localEndPoint", "remoteEndPoint", "protocolVersion", "exceptionType", "exceptionMessage"]);
+            entry.Payload.ShouldBe(new object?[]
+            {
+                server.ServerId, connection.Id.ToString(), "127.0.0.1:8080", "10.0.0.7:51000", "1.1",
+                failure.GetType().FullName, failure.Message,
+            });
+            (WebServerEventSource.Log.ConnectionFaults - faults).ShouldBe(1);
+            connection.AbortCount.ShouldBe(1);
+            recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A connection the peer or the network ended is logged at Debug only")]
-    public async Task ServeConnection_WhenThePeerIsGone_ShouldLogAtDebug()
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: Send and disposal faults count one connection")]
+    public async Task ServeConnection_WhenSendAndDisposalFault_ShouldCountTheConnectionOnce()
+    {
+        // Arrange
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
+        long faults = WebServerEventSource.Log.ConnectionFaults;
+        InvalidOperationException sendFailure = new("response framing failed");
+        InvalidOperationException disposeFailure = new("connection disposal failed");
+        FakeHttpConnection connection = new(new FakeHttpConnectionContext(new[] { new FakeHttpContext() })
+        {
+            SendHandler = (_, _) => ValueTask.FromException(sendFailure),
+        });
+        DisposeFailureConnection failing = new(connection, disposeFailure);
+        WebApplicationServer server = CreateServer(new FakePipeline(), new FakeHttpConnectionListener(failing));
+
+        // Act
+        try
+        {
+            await server.StartAsync(CancellationToken.None);
+            await connection.Disposed.Task.WaitAsync(_timeout);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+
+        // Assert — both sites report their cause, but the total measures connections rather than exceptions.
+        EventWrittenEventArgs[] events = ServerEvents(recorded, server.ServerId, 4);
+        events.Length.ShouldBe(2);
+        events.ShouldAllBe(entry => Equals(Payload(entry, "connectionId"), connection.Id.ToString()));
+        events.Select(entry => Payload(entry, "exceptionMessage")).ShouldBe(new[] { sendFailure.Message, disposeFailure.Message });
+        (WebServerEventSource.Log.ConnectionFaults - faults).ShouldBe(1);
+        recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A peer-ended connection is Verbose and does not count as a connection fault")]
+    public async Task ServeConnection_WhenThePeerIsGone_ShouldReportVerboseWithoutCountingAFault()
     {
         // Arrange — the response write fails because the peer went away.
-        RecordingLoggerProvider recorded = new();
-        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
+        long faults = WebServerEventSource.Log.ConnectionFaults;
+        IOException failure = new("connection reset by peer");
         FakeHttpConnectionContext connectionContext = new(new[] { new FakeHttpContext() })
         {
-            SendHandler = (_, _) => ValueTask.FromException(new IOException("connection reset by peer")),
+            SendHandler = (_, _) => ValueTask.FromException(failure),
         };
         FakeHttpConnection connection = new(connectionContext);
-        WebApplicationServer server = CreateServer(new FakePipeline(), new FakeHttpConnectionListener(connection), loggerFactory);
+        WebApplicationServer server = CreateServer(new FakePipeline(), new FakeHttpConnectionListener(connection));
 
         // Act
-        await server.StartAsync();
-        await connection.Disposed.Task.WaitAsync(_timeout);
+        try
+        {
+            await server.StartAsync(CancellationToken.None);
+            await connection.Disposed.Task.WaitAsync(_timeout);
 
-        // Assert
-        ILoggerEntry entry = recorded.Entries.ShouldHaveSingleItem();
-        entry.Level.ShouldBe(LogLevel.Debug);
-        entry.Exception.ShouldBeOfType<IOException>();
-
-        await server.StopAsync();
+            // Assert
+            EventWrittenEventArgs entry = ServerEvents(recorded, server.ServerId, 5).ShouldHaveSingleItem();
+            entry.EventName.ShouldBe("ConnectionEndedByPeer");
+            entry.Level.ShouldBe(EventLevel.Verbose);
+            Payload(entry, "connectionId").ShouldBe(connection.Id.ToString());
+            Payload(entry, "exceptionType").ShouldBe(typeof(IOException).FullName);
+            Payload(entry, "exceptionMessage").ShouldBe(failure.Message);
+            ServerEvents(recorded, server.ServerId, 4).ShouldBeEmpty();
+            (WebServerEventSource.Log.ConnectionFaults - faults).ShouldBe(0);
+            recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A drain the budget cut short is logged as Warning with the connections and exchanges still in flight")]
-    public async Task StopAsync_WhenBudgetRunsOut_ShouldLogWarningWithWhatWasInFlight()
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A drain the budget cut short is Warning with the work still in flight")]
+    public async Task StopAsync_WhenBudgetRunsOut_ShouldReportWarningWithWhatWasInFlight()
     {
-        // Arrange — one HTTP/1.1 exchange and two HTTP/2 streams on a second connection, all running
-        // until they are cancelled.
-        RecordingLoggerProvider recorded = new();
-        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        // Arrange — one HTTP/1.1 exchange and two HTTP/2 streams run until they are cancelled.
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
         int entered = 0;
         TaskCompletionSource allEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         FakeHttpConnection sequential = new(new FakeHttpConnectionContext(new[] { new FakeHttpContext() }, parkAfterExchanges: true));
@@ -242,38 +312,52 @@ public class WebApplicationServerDiagnosticsTests
 
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         });
-        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(sequential, multiplexed), loggerFactory);
-
-        await server.StartAsync();
-        await allEntered.Task.WaitAsync(_timeout);
-
+        FakeHttpConnectionListener listener = new(sequential, multiplexed);
+        WebApplicationServer server = CreateServer(pipeline, listener);
         using CancellationTokenSource budget = new();
-        Task stop = server.StopAsync(budget.Token);
+        using CancellationTokenSource timeout = new(_timeout);
 
         // Act
-        budget.Cancel();
-        await stop.WaitAsync(_timeout);
+        try
+        {
+            await server.StartAsync(CancellationToken.None);
+            await allEntered.Task.WaitAsync(_timeout);
+            // Dispatch enters the pipeline before the accept loop records the task. Its next accept
+            // proves both connections have been registered before the stop snapshots them.
+            while (listener.AcceptCount != 3)
+            {
+                await Task.Delay(10, timeout.Token);
+            }
 
-        // Assert
-        ILoggerEntry entry = recorded.Entries.Where(entry => entry.Level == LogLevel.Warning).ShouldHaveSingleItem();
-        entry.Category.ShouldBe(WebApplicationServerLog.Category);
-        entry.Attributes[WebApplicationServerLog.DrainConnectionsAttribute].ShouldBe(2);
-        entry.Attributes[WebApplicationServerLog.DrainExchangesAttribute].ShouldBe(3);
-        entry.Attributes[WebApplicationServerLog.DrainDurationAttribute].ShouldBeOfType<TimeSpan>();
-        recorded.Entries.ShouldNotContain(entry => entry.Level >= LogLevel.Error);
+            Task stop = server.StopAsync(budget.Token);
+            budget.Cancel();
+            await stop.WaitAsync(_timeout);
+
+            // Assert
+            EventWrittenEventArgs entry = ServerEvents(recorded, server.ServerId, 7).ShouldHaveSingleItem();
+            entry.EventName.ShouldBe("DrainTimedOut");
+            entry.Level.ShouldBe(EventLevel.Warning);
+            entry.PayloadNames.ShouldBe(["serverId", "connections", "exchanges", "elapsedMilliseconds"]);
+            Payload(entry, "connections").ShouldBe(2);
+            Payload(entry, "exchanges").ShouldBe(3);
+            Payload(entry, "elapsedMilliseconds").ShouldBeOfType<double>().ShouldBeGreaterThanOrEqualTo(0);
+            ServerEvents(recorded, server.ServerId).ShouldNotContain(candidate => (candidate.Level == EventLevel.Error || candidate.Level == EventLevel.Critical));
+            recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
+        }
+        finally
+        {
+            budget.Cancel();
+            await server.StopAsync(budget.Token);
+        }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server/Diagnostics: A connection fault on a real exchange is logged without its header values or bodies")]
-    public async Task ServeConnection_WhenARealResponseFails_ShouldNotLogHeaderValuesOrBodies()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server/Diagnostics: A real response fault reports no header values, bodies or target")]
+    public async Task ServeConnection_WhenARealResponseFails_ShouldNotReportHeaderValuesOrBodies()
     {
-        // Arrange — the handler hands the server a response body that fails when it is read, so the
-        // HTTP/1.1 response cannot be framed and the connection faults.
+        // Arrange — a real response body fails while the HTTP/1.1 transport frames it.
         using CancellationTokenSource cancellation = new(_timeout);
-        CancellationToken cancellationToken = cancellation.Token;
-        RecordingLoggerProvider recorded = new();
-
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.Logging.AddProvider(recorded);
         factory.Application.Use((context, next) =>
         {
             context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -282,6 +366,7 @@ public class WebApplicationServerDiagnosticsTests
         });
 
         using HttpClient client = factory.CreateClient();
+        long serverId = factory.Application.Context.Servers.Single().ShouldBeOfType<WebApplicationServer>().ServerId;
         using HttpRequestMessage request = new(HttpMethod.Post, "/secret")
         {
             Content = new StringContent("request-body-secret", Encoding.UTF8),
@@ -289,71 +374,83 @@ public class WebApplicationServerDiagnosticsTests
         request.Headers.Add("X-Api-Key", "header-value-secret");
 
         // Act
-        await Should.ThrowAsync<Exception>(() => client.SendAsync(request, cancellationToken));
-        ILoggerEntry entry = await WaitForEntryAsync(recorded, LogLevel.Error);
+        await Should.ThrowAsync<Exception>(() => client.SendAsync(request, cancellation.Token));
+        EventWrittenEventArgs entry = await WaitForEventAsync(recorded, serverId, 4);
 
         // Assert
-        entry.Category.ShouldBe(WebApplicationServerLog.Category);
-        entry.Attributes[WebApplicationServerLog.ProtocolVersionAttribute].ShouldBe("1.1");
-        string logged = entry.Message + " " + string.Join(" ", entry.Attributes.Select(attribute => $"{attribute.Key}={attribute.Value}"));
-        logged.ShouldNotContain("header-value-secret");
-        logged.ShouldNotContain("request-body-secret");
-        logged.ShouldNotContain("/secret");
+        entry.Level.ShouldBe(EventLevel.Error);
+        Payload(entry, "connectionId").ShouldBeOfType<string>().ShouldNotBeNullOrEmpty();
+        Payload(entry, "protocolVersion").ShouldBe("1.1");
+        string reported = string.Join(" ", entry.PayloadNames!.Zip(entry.Payload!, (name, value) => $"{name}={value}"));
+        reported.ShouldNotContain("header-value-secret", Case.Sensitive);
+        reported.ShouldNotContain("request-body-secret", Case.Sensitive);
+        reported.ShouldNotContain("/secret", Case.Sensitive);
+        recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server/Diagnostics: The default server logs through the application's logger factory")]
-    public async Task Build_DefaultServer_ShouldLogBindFailuresThroughTheApplicationLoggerFactory()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server/Diagnostics: The default server reports a real bind collision through its event source")]
+    public async Task Build_WhenASecondServerCannotBind_ShouldReportItsDistinctServerIdentity()
     {
-        // Arrange — a first application holds a loopback port; a second one is configured to bind it.
+        // Arrange — a first application holds a loopback port; a second tries to bind it.
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Verbose);
         TcpConnectionListener holder = new(new TcpConnectionListenerOptions { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) });
         WebApplicationBuilder holderBuilder = WebApplication.CreateBuilder();
         holderBuilder.Server.UseServer(options => options.UseHttp1(holder));
         await using WebApplication holderApplication = holderBuilder.Build();
-        await ((IWebApplication)holderApplication).StartAsync();
+        await ((IWebApplication)holderApplication).StartAsync(CancellationToken.None);
+        long holderServerId = holderApplication.Context.Servers.Single().ShouldBeOfType<WebApplicationServer>().ServerId;
 
-        RecordingLoggerProvider recorded = new();
         TcpConnectionListener competitor = new(new TcpConnectionListenerOptions { EndPoint = (IPEndPoint)holder.EndPoint });
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        builder.Logging.AddProvider(recorded);
         builder.Server.UseServer(options => options.UseHttp1(competitor));
         await using WebApplication application = builder.Build();
+        long competitorServerId = application.Context.Servers.Single().ShouldBeOfType<WebApplicationServer>().ServerId;
 
         // Act
-        await Should.ThrowAsync<HostStartupException>(() => ((IWebApplication)application).StartAsync());
+        try
+        {
+            await Should.ThrowAsync<HostStartupException>(() => ((IWebApplication)application).StartAsync(CancellationToken.None));
 
-        // Assert
-        ILoggerEntry entry = recorded.Entries.Where(entry => entry.Category == WebApplicationServerLog.Category).ShouldHaveSingleItem();
-        entry.Level.ShouldBe(LogLevel.Critical);
-        entry.Exception.ShouldNotBeNull();
-
-        await ((IWebApplication)holderApplication).StopAsync();
+            // Assert
+            EventWrittenEventArgs entry = ServerEvents(recorded, competitorServerId, 2).ShouldHaveSingleItem();
+            competitorServerId.ShouldNotBe(holderServerId);
+            ServerEvents(recorded, holderServerId, 1).ShouldHaveSingleItem();
+            ServerEvents(recorded, holderServerId, 2).ShouldBeEmpty();
+            entry.Level.ShouldBe(EventLevel.Critical);
+            Payload(entry, "exceptionType").ShouldBeOfType<string>().ShouldNotBeNullOrEmpty();
+            recorded.Events.ShouldNotContain(candidate => candidate.EventId == 0);
+        }
+        finally
+        {
+            await ((IWebApplication)holderApplication).StopAsync(CancellationToken.None);
+        }
     }
 
-    private static ILoggerFactory CreateLoggerFactory(RecordingLoggerProvider recorded)
-    {
-        return new LoggerFactoryBuilder()
-            .AddProvider(recorded)
-            .SetMinimumLevel(LogLevel.Trace)
-            .Build();
-    }
-
-    private static WebApplicationServer CreateServer(IWebApplicationPipeline pipeline, FakeHttpConnectionListener listener, ILoggerFactory loggerFactory)
+    private static WebApplicationServer CreateServer(IWebApplicationPipeline pipeline, FakeHttpConnectionListener listener)
     {
         return new WebApplicationServer(new WebApplicationServerOptions
         {
             Pipeline = pipeline,
             Listener = listener,
-            Logger = loggerFactory.Create(WebApplicationServerLog.Category),
         });
     }
 
-    private static async Task<ILoggerEntry> WaitForEntryAsync(RecordingLoggerProvider recorded, LogLevel level)
+    private static EventWrittenEventArgs[] ServerEvents(EventSourceRecorder recorded, long serverId, int? eventId = null)
+        => recorded.Events.Where(entry =>
+            (!eventId.HasValue || entry.EventId == eventId.Value) &&
+            entry.PayloadNames is { Count: > 0 } && entry.PayloadNames[0] == "serverId" &&
+            entry.Payload is { Count: > 0 } && Equals(entry.Payload[0], serverId)).ToArray();
+
+    private static object? Payload(EventWrittenEventArgs entry, string name)
+        => entry.Payload![entry.PayloadNames!.IndexOf(name)];
+
+    private static async Task<EventWrittenEventArgs> WaitForEventAsync(EventSourceRecorder recorded, long serverId, int eventId)
     {
         using CancellationTokenSource timeout = new(_timeout);
 
         while (true)
         {
-            ILoggerEntry? entry = recorded.Entries.FirstOrDefault(entry => entry.Level == level && entry.Category == WebApplicationServerLog.Category);
+            EventWrittenEventArgs? entry = ServerEvents(recorded, serverId, eventId).FirstOrDefault();
 
             if (entry is not null)
             {
@@ -361,6 +458,37 @@ public class WebApplicationServerDiagnosticsTests
             }
 
             await Task.Delay(10, timeout.Token);
+        }
+    }
+
+    private sealed class DisposeFailureConnection : IHttpConnection
+    {
+        private readonly FakeHttpConnection _connection;
+        private readonly Exception _failure;
+
+        public DisposeFailureConnection(FakeHttpConnection connection, Exception failure)
+        {
+            _connection = connection;
+            _failure = failure;
+        }
+
+        public ConnectionId Id => _connection.Id;
+
+        public ConnectionState State => _connection.State;
+
+        public CancellationToken ConnectionClosed => _connection.ConnectionClosed;
+
+        public void Abort(Exception? reason = null) => _connection.Abort(reason);
+
+        public IHttpConnectionContext Open() => _connection.Open();
+
+        public ValueTask<IHttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
+            => _connection.OpenAsync(cancellationToken);
+
+        public async ValueTask DisposeAsync()
+        {
+            await _connection.DisposeAsync();
+            throw _failure;
         }
     }
 }

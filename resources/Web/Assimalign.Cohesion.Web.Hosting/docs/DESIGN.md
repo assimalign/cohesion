@@ -339,7 +339,7 @@ once, in one of three ways, chosen by how its pipeline ended:
   run only after the application's own response was sent — never after a replacement
   `500` or a reset. Each callback runs in registration order even if a previous one throws
   (#1410). Completion collects all failures in an `AggregateException`; the server reports each
-  callback's exception separately through its existing logger, without changing the sent response.
+  callback's exception separately through its event source, without changing the sent response.
   This is a behavioral break from 10.0.0-preview.1, which skipped the remaining callbacks; in
   particular, an earlier failure can no longer suppress the control plane's deferred stop.
 - **The connection-level catch remains** for what is left: a receive-side failure the
@@ -893,64 +893,71 @@ checks a routed request's span and duration. In-process listeners need no
 `EventSourceSupport` in a NativeAOT application; tools that read meters out of process through
 EventPipe (`dotnet-counters`) do, as they do for event sources.
 
-## Diagnostics (#147)
+## Diagnostics (#147, #1398)
 
-The default server writes its own diagnostics through the application's logging. The
-default server factory creates its logger, once, from the `ILoggerFactory` that
-`WebApplicationBuilder.Build` registers from `builder.Logging`, under the category
-`Assimalign.Cohesion.Web.Hosting.WebApplicationServer`, and hands it to the server through
-`WebApplicationServerOptions.Logger`. Composition stays builder-time; nothing resolves per
-request. The events, their levels, and their attribute names live in
-`Internal/WebApplicationServerLog`, and a logger that throws never changes what the server
-does. There is no `Microsoft.Extensions.*` dependency and no `EventSource`: these are discrete
-events an operator acts on, while counters and traces are the telemetry work (#1064).
+The internal sealed `WebServerEventSource`, named `Assimalign.Cohesion.Web.Hosting`,
+reports server lifecycle and failures. It replaces `WebApplicationServerLog` and the internal
+`WebApplicationServerOptions.Logger`; the server has no second logging path. The same-named
+ActivitySource owns request spans and the Meter owns `http.server.request.duration` and
+`http.server.active_requests`. EventSource owns operator events and attribution counters,
+with no request counts, per-request Start/Stop, pipeline exception, or transport rejection events.
 
-| Event | Level | When | Content |
+Each server receives a process-unique monotonic `serverId`. Connection events also carry the
+transport connection id. Request-related failures read `IWebRequestIdFeature`, never ambient
+`Activity.Current`, and use a route template rather than the raw path. All formatting and
+feature reads for payloads happen only while the corresponding event level is enabled.
+
+| Id | Event | Level | Payload |
 | --- | --- | --- | --- |
-| Bind failure | `Critical` | `StartAsync` cannot bind the listener; logged before `HostStartupException` propagates | the transport's exception; `http.server.listener.protocols` |
-| Accept-loop fault | `Critical` | accepting faults; the server keeps running but accepts nothing more. Only the drain's own cancellation ends the loop quietly; a cancellation the server did not request is the listener's fault and is logged here (#1310) | the exception |
-| Connection fault, a defect | `Error` | the connection-level isolation boundary caught a failure not attributable to the peer: an unexpected receive-side failure, an HTTP/1.1 response that could not be framed, a teardown failure | the exception; `connection.id`, `network.local.address`/`.port`, `network.peer.address`/`.port`, `network.protocol.version` |
-| Connection fault, the peer or the network | `Debug` | the same boundary, for an `IOException`, `SocketException`, or `ConnectionException`, or any fault after the server aborted its drain | as above |
-| Completion callback failure | `Error` | after every callback has been attempted; one entry per failing callback (#1410) | the callback's exception |
-| Drain cut short | `Warning` | a stop's budget ran out with work in flight; logged before the abort | `http.server.drain.connections`, `.exchanges`, `.duration` |
+| 1 | ServerBound | Informational | serverId:long, protocols, endPoints, maxConcurrentConnections:int |
+| 2 | BindFailed | Critical | serverId:long, protocols, exceptionType, exceptionMessage |
+| 3 | AcceptLoopFaulted | Error | serverId:long, exceptionType, exceptionMessage |
+| 4 | ConnectionFaulted | Error | serverId:long, connectionId, localEndPoint, remoteEndPoint, protocolVersion, exceptionType, exceptionMessage |
+| 5 | ConnectionEndedByPeer | Verbose | serverId:long, connectionId, localEndPoint, remoteEndPoint, protocolVersion, exceptionType, exceptionMessage |
+| 6 | ServerDraining | Informational | serverId:long, connections:int, exchanges:int |
+| 7 | DrainTimedOut | Warning | serverId:long, connections:int, exchanges:int, elapsedMilliseconds:double |
+| 8 | AbortGraceExpired | Warning | serverId:long, exchanges:int, gracePeriodMilliseconds:double |
+| 9 | ServerStopped | Informational | serverId:long, elapsedMilliseconds:double, aborted:bool |
+| 10 | ResponseHeadRefused | Error | serverId:long, requestId, protocolVersion, routeTemplate, exceptionMessage, suppressedCount:int |
+| 11 | CompletionCallbackFailed | Error | serverId:long, requestId, routeTemplate, exceptionType, exceptionMessage |
+| 12 | ExchangeIsolationEscaped | Error | exceptionType, exceptionMessage |
+| 13 | ConnectionCapReached | Verbose | serverId:long, maxConcurrentConnections:int |
+| 14 | ControlPlaneDisabled | Warning | resourceName, observedEndpoints |
+| 15 | TelemetryListenerFaulted | Warning | exceptionType, exceptionMessage, suppressedCount:int |
 
-Why these levels:
+`endPoints` is currently empty: neither `IHttpConnectionListener` nor its concrete implementation
+exposes bound endpoints. A read seam needs owner review; this change adds no public transport
+member, reflection, or cross-library internal grant to obtain it. Protocols and server ids remain
+available to distinguish servers. Connection-fault endpoints come from the opened context.
 
-- **`Critical` for a bind or accept-loop failure.** After either, the server cannot serve: the
-  host fails to start (exit 70, or 64/69 for a classified cause), or the server runs on without
-  accepting anything. Kestrel logs its own startup failure at the same level.
-- **`Error` for a connection fault the server cannot blame on the peer.** It is a defect — in
-  the transport, an interceptor, or the application's response — that cost a connection. The
-  server isolated it and keeps serving, so it is not `Critical`.
-- **`Debug` for a connection the peer or the network ended.** That is routine on any reachable
-  endpoint and not actionable, and it is frequent enough to flood a log at a higher level. The
-  classification is by exception type, so an application stream that throws an `IOException`
-  is reported at `Debug` too. A fault after the drain was aborted is the server's own doing, and
-  the drain warning already reports it.
-- **`Warning` for a drain cut short.** The requests in flight got no response, which an operator
-  should see, but it is the outcome of a budget, not a defect; the host reports the same stop as
-  `DrainAborted` (exit 130/143 for an orchestrated resource).
+The three lazily created PollingCounters are `connection-faults`, `connection-cap-waits`, and
+`refused-response-heads`. Their backing values stay exact with no listener. A local per-connection
+flag counts faults once even if serving and teardown both fail. An IOException, SocketException,
+ConnectionException, or failure after an aborted drain is `ConnectionEndedByPeer` at Verbose,
+and never increments `connection-faults`; response-side client-fault cancellations likewise stay
+out of it. The connection cap counts every failed immediate semaphore probe, before waiting.
 
-What is never logged is request or response content. A connection is identified by its id, its
-endpoints, and the version of the exchanges it carried (absent when it faulted before its first
-exchange); no header value, body, path, or query reaches an entry. An exception's message is the
-faulting component's own.
+`ResponseHeadRefused` and `TelemetryListenerFaulted` each use an independent process-wide
+one-second throttle. Their next delivered event carries `suppressedCount`; refused heads are
+counted even when suppressed or disabled. Telemetry reporting is never latched once per process.
+Other server events are unthrottled: lifecycle events fire once per lifecycle transition, and
+application callback/fault events preserve each failure. Accept-loop failures are Error because
+existing connections still drain; bind failures remain Critical.
 
-The peer's address is logged even though server telemetry leaves it out of spans and metrics ("Server
-telemetry (#1064)", "Deliberately not emitted"). The two go to different sinks under different
-policies. A connection-fault entry is an operator's lead when investigating a failing or abusive peer,
-and logs stay under the application's own retention and access control. Span and metric attributes
-flow to telemetry backends, where a client address is personal data, a cardinality risk on metrics,
-and ambiguous until forwarded headers are trusted. The logged address is the transport's peer, which
-behind a proxy is the proxy.
+Payloads contain no request path, query, headers, body, cookie, token or user identity. Application
+exception type and Message remain visible, including completion callbacks. No stack trace is
+written. ResponseHeadRefused uses a fixed refusal description in exceptionMessage because the
+transport exception can echo an unbounded response header name; header identifiers do not belong
+at Error. A connection's transport peer address is personal data in the diagnostic sink; behind
+a proxy it is the proxy. Pipeline failures belong to
+[ErrorHandling](../../Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics), while
+pre-dispatch rejections and protocol/client-fault classifications belong to Http.Connections.
 
-Not logged here: an exception the application's pipeline throws. The server isolates it to its
-exchange (a `500`, or a reset), and reporting it belongs to the application's error handling
-(`Web.ErrorHandling`'s `Assimalign.Cohesion.Web.ErrorHandling` event source and optional
-`OnException` hook) and to request telemetry, so the server does not add a second report of the
-same failure. The source excludes client-caused and cancelled exchanges: a peer-abandoned response
-raises Verbose only. A boundary abort after the response starts counts the originating application
-fault and independently increments `aborted-responses`. See [ErrorHandling diagnostics](../../Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics).
+**Compatibility:** preview.1 had no server EventSource. Compared with the interim #147 logger,
+the category changes from `Assimalign.Cohesion.Web.Hosting.WebApplicationServer` to
+`Assimalign.Cohesion.Web.Hosting`, dotted attributes become the camelCase payload names above,
+and exception stacks and per-host logger attribution are lost. Decision 49 accepts this preview
+behavior change together with #1399's entry-point default forwarding in the same integration.
 
 ## AOT posture
 
@@ -1299,14 +1306,10 @@ reports `request_canceled` without a response status, and neither an Error log n
 runs. `WebApplicationServerClientFaultTests` also covers incomplete HTTP/1.1 EOF for fixed-length
 and chunked bodies: both cancel without a response or client-fault status.
 
-The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
-entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an
-accept-loop fault (`Critical`), a connection fault the server cannot blame on the peer (`Error`,
-whose attributes are exactly the connection id, both endpoints, and the protocol version), one
-the peer caused (`Debug`), and a drain cut short (`Warning`, two connections and three exchanges
-in flight across HTTP/1.1 and HTTP/2). End to end, a real exchange carrying a secret header and
-body whose response cannot be framed is logged without either, and an application built through
-`WebApplicationBuilder` reports a real port conflict through its own `builder.Logging`.
+The diagnostics are pinned by `WebApplicationServerDiagnosticsTests` under the shared
+EventSource recorder, including real TCP bind and response failures. `WebServerEventSourceTests`
+checks the name, strict manifest, server lifecycle and counter publication. Serial collections,
+server/connection identifiers and counter deltas isolate process-wide observation.
 
 ## Non-goals
 

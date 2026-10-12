@@ -63,9 +63,8 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     // as a WebSocket can end itself cleanly within the budget. One shared instance.
     private readonly WebServerDrainFeature _drainFeature;
 
-    // The server's own diagnostics: a bind or accept-loop failure, a connection fault, a drain the
-    // budget cut short.
-    private readonly WebApplicationServerLog _log;
+    // Event listeners observe the whole process, so every server needs its own identity.
+    private static long _nextServerId;
 
     // The query parameters whose values a request span's url.query shows; null redacts every value.
     private readonly FrozenSet<string>? _telemetryQueryValues;
@@ -97,7 +96,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             ?? throw new ArgumentException("A pipeline must be configured on the server options.", nameof(options));
         _listener = options.Listener
             ?? throw new ArgumentException("A listener must be configured on the server options.", nameof(options));
-        _log = new WebApplicationServerLog(options.Logger);
+        ServerId = Interlocked.Increment(ref _nextServerId);
         _telemetryQueryValues = options.TelemetryQueryValues;
         _drainFeature = new WebServerDrainFeature(_drain.Draining);
 
@@ -125,6 +124,8 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     /// unlimited.
     /// </summary>
     internal int? MaxConcurrentConnections { get; }
+
+    internal long ServerId { get; }
 
     /// <summary>
     /// Binds the configured listener and then starts the accept loop.
@@ -176,12 +177,12 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         }
         catch (HostStartupException exception)
         {
-            _log.BindFailed(_listener.Protocols, exception);
+            WebServerEventSource.Log.BindFailed(ServerId, _listener.Protocols, exception);
             throw;
         }
         catch (Exception exception)
         {
-            _log.BindFailed(_listener.Protocols, exception);
+            WebServerEventSource.Log.BindFailed(ServerId, _listener.Protocols, exception);
             throw new HostStartupException(
                 "The web application server failed to bind its configured listener.",
                 exception);
@@ -196,6 +197,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 return;
             }
 
+            WebServerEventSource.Log.ServerBound(ServerId, _listener.Protocols, MaxConcurrentConnections ?? 0);
             CancellationToken drainingToken = _drain.Draining;
             _acceptLoop = Task.Run(() => AcceptLoopAsync(drainingToken));
         }
@@ -253,6 +255,8 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 shutdownSignalFailure = exception;
             }
 
+            WebServerEventSource.Log.Draining(ServerId, _connections.Count, Volatile.Read(ref _exchangesInFlight));
+
             try
             {
                 await DrainAsync(cancellationToken).ConfigureAwait(false);
@@ -263,7 +267,8 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 // the listener is released: its job is done, only the graceful part was cut short, and
                 // the caller knows that from its own token. Throwing would replay the cancellation to
                 // every later StopAsync caller, which shares this task.
-                _log.DrainTimedOut(
+                WebServerEventSource.Log.DrainTimedOut(
+                    ServerId,
                     _connections.Count,
                     Volatile.Read(ref _exchangesInFlight),
                     Stopwatch.GetElapsedTime(drainStarted));
@@ -282,6 +287,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             try
             {
                 await _listener.DisposeAsync().ConfigureAwait(false);
+                WebServerEventSource.Log.ServerStopped(ServerId, Stopwatch.GetElapsedTime(drainStarted), _drain.Aborted.IsCancellationRequested);
             }
             finally
             {
@@ -361,6 +367,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         }
         catch (TimeoutException)
         {
+            WebServerEventSource.Log.AbortGraceExpired(ServerId, Volatile.Read(ref _exchangesInFlight), _abortGracePeriod);
         }
     }
 
@@ -373,8 +380,9 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 // Gate around accept: reserve a slot before accepting so the listener's backlog
                 // channel applies backpressure when the cap is reached. The slot is handed to the
                 // connection task, which releases it when the connection finishes.
-                if (_connectionSlots is not null)
+                if (_connectionSlots is not null && !_connectionSlots.Wait(0))
                 {
+                    WebServerEventSource.Log.ConnectionCapWait(ServerId, MaxConcurrentConnections!.Value);
                     await _connectionSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
                 }
 
@@ -422,13 +430,14 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             // loop; already-accepted connections still drain through StopAsync. Swallowed so the
             // stored task completes rather than escalating as an unobserved exception — and logged,
             // because the server keeps running but accepts nothing more.
-            _log.AcceptLoopFaulted(exception);
+            WebServerEventSource.Log.AcceptLoopFaulted(ServerId, exception);
         }
     }
 
     private async Task ServeConnectionAsync(IHttpConnection connection, long key, CancellationToken cancellationToken)
     {
         WebApplicationServerDrain.Registration drainRegistration = default;
+        bool faultCounted = false;
         try
         {
             await using (connection.ConfigureAwait(false))
@@ -489,7 +498,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                     // Aborting signals the peer; the enclosing await using still disposes it. Catching
                     // Exception is the deliberate process-crash guard, mirroring the accept-loop
                     // isolation boundary in HttpConnectionListener.
-                    _log.ConnectionFaulted(connection, context, version, exception, _drain.Aborted.IsCancellationRequested);
+                    WebServerEventSource.Log.ConnectionEnded(ServerId, connection, context, version, exception, _drain.Aborted.IsCancellationRequested, ref faultCounted);
                     connection.Abort(exception);
                 }
                 finally
@@ -517,7 +526,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         {
             // Teardown faults (OpenAsync or connection disposal) must not escape as an unobserved
             // task exception; the connection is being discarded regardless.
-            _log.ConnectionFaulted(connection, context: null, HttpVersion.Unknown, exception, _drain.Aborted.IsCancellationRequested);
+            WebServerEventSource.Log.ConnectionEnded(ServerId, connection, context: null, HttpVersion.Unknown, exception, _drain.Aborted.IsCancellationRequested, ref faultCounted);
         }
         finally
         {
@@ -577,6 +586,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                     // it (#1183): a name that is not a token, or a value with CR, LF, NUL, or another
                     // control character. That is an application fault like any other, so the exchange is
                     // finalized as one: a 500 in place of the refused response.
+                    WebServerEventSource.Log.ResponseHeadRefused(ServerId, exchange, exception);
                     outcome = ExchangeOutcome.Faulted;
                     (responded, outcome) = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
                 }
@@ -615,7 +625,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             // for the application's own response — never after a replacement 500 or a reset.
             if (outcome == ExchangeOutcome.Completed)
             {
-                await RunCompletionCallbacksAsync(responseCompletion).ConfigureAwait(false);
+                await RunCompletionCallbacksAsync(exchange, responseCompletion).ConfigureAwait(false);
             }
 
             return responded;
@@ -806,7 +816,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         }
     }
 
-    private async Task RunCompletionCallbacksAsync(ResponseCompletionFeature responseCompletion)
+    private async Task RunCompletionCallbacksAsync(IHttpContext exchange, ResponseCompletionFeature responseCompletion)
     {
         try
         {
@@ -818,7 +828,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             // when that callback itself threw an aggregate, without changing the sent response.
             foreach (Exception failure in failures.InnerExceptions)
             {
-                _log.CompletionCallbackFailed(failure);
+                WebServerEventSource.Log.CompletionCallbackFailed(ServerId, exchange, failure);
             }
         }
     }

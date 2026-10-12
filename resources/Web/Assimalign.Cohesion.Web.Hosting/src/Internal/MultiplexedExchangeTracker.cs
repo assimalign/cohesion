@@ -77,8 +77,9 @@ internal sealed class MultiplexedExchangeTracker
         // Deviates from the repo "catch specific exceptions" rule per design decision: this is the
         // last guard of a fault-isolation boundary. Exchange bodies isolate their own faults, so
         // this only keeps a defect from surfacing as an unobserved task exception or a stuck drain.
-        catch (Exception)
+        catch (Exception exception)
         {
+            WebServerEventSource.Log.ExchangeIsolationEscaped(exception);
         }
         finally
         {

@@ -21,9 +21,9 @@ every server drains. The default server drains lame-duck style: it accepts nothi
 every peer the connection is closing (`Connection: close` or `GOAWAY`), lets the requests in
 flight finish within the host's shutdown budget, and cancels only what outlives it. Each exchange
 sees the drain begin through `IWebServerDrainFeature` (a `Web.Server` contract), so a long-lived one, such as a WebSocket,
-can end itself inside the budget. It logs
-its own failures — a listener that cannot bind, a connection fault, a drain the budget cut
-short — through `builder.Logging`, never with request content. Disposing the application
+can end itself inside the budget. The internal `Assimalign.Cohesion.Web.Hosting` EventSource
+reports lifecycle and failures, with `serverId` identifying each server in the process and no
+request content in its payloads. See [Diagnostics](DESIGN.md#diagnostics-147-1398). Disposing the application
 disposes the service provider and every factory-created service.
 
 Pipeline composition can use `IWebApplicationLifetime` on the application context to register
