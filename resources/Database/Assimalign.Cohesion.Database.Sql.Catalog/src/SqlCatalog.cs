@@ -33,8 +33,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// DDL operations are self-committing: each runs in its own storage transaction and
 /// is durable when the call returns. Interleaving DDL with an open DML transaction
 /// is deliberately not supported in the MVP (the catalog cache updates on commit,
-/// and half-visible schema changes are a correctness trap) — the engine serializes
-/// DDL per database.
+/// and half-visible schema changes are a correctness trap). The engine locks the
+/// affected tables; this catalog serializes metadata publication under its lock.
 /// </para>
 /// <para>
 /// A commit whose record was appended but whose durability was not confirmed takes
@@ -661,7 +661,7 @@ public sealed class SqlCatalog
     /// registration would promise uniqueness no tree enforces).
     /// </summary>
     /// <param name="index">The index description to persist.</param>
-    /// <param name="registrations">The full registration set to persist alongside (replaces the stored set).</param>
+    /// <param name="registrations">A physical registration snapshot. Only the created index's registration is merged into the current directory.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created index description.</returns>
     /// <exception cref="SqlCatalogException">The table does not exist, a key column does not exist, or an index with the name already exists on the table.</exception>
@@ -694,28 +694,29 @@ public sealed class SqlCatalog
                 }
             }
 
+            var mergedRegistrations = MergePublishedRegistrations(registrations, [index]);
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeIndex(index));
-                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
+                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
                 CommitCatalogChange(transaction);
                 _registrationsLocation = registrationsLocation;
                 _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, location);
             }
 
-            _registrations = registrations.ToList();
+            _registrations = mergedRegistrations;
             return new ValueTask<SqlCatalogIndex>(index);
         }
     }
 
     /// <summary>
-    /// Drops an index description and persists the given physical registrations in
+    /// Drops an index description and removes its current physical registration in
     /// the same self-committing catalog transaction (see
     /// <see cref="CreateIndexAsync"/> for why the two writes are atomic).
     /// </summary>
     /// <param name="tableObjectId">The table's object identity.</param>
     /// <param name="name">The index name.</param>
-    /// <param name="registrations">The full registration set to persist alongside (replaces the stored set).</param>
+    /// <param name="registrations">The caller's remaining registration snapshot. Unrelated registrations are retained from the current directory instead of this possibly stale snapshot.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the drop is durable.</returns>
     /// <exception cref="SqlCatalogException">The index does not exist.</exception>
@@ -735,25 +736,30 @@ public sealed class SqlCatalog
                 throw new SqlCatalogException($"No index named '{name}' exists on object {tableObjectId}.");
             }
 
+            var remainingRegistrations = _registrations.Where(registration =>
+                registration.ObjectId != tableObjectId ||
+                !string.Equals(registration.Definition.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
             using (var transaction = _storage.BeginTransaction())
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
-                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
+                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
                 CommitCatalogChange(transaction);
                 _registrationsLocation = registrationsLocation;
             }
 
             _indexes.Remove((tableObjectId, name));
-            _registrations = registrations.ToList();
+            _registrations = remainingRegistrations;
             return default;
         }
     }
 
     /// <summary>
-    /// Persists the physical index registrations exported by the index manager, so
-    /// indexes re-attach when the database reopens.
+    /// Persists missing physical registrations for currently described indexes.
+    /// Existing registrations have fixed root identities and are retained, so a
+    /// delayed checkpoint cannot erase a publication, resurrect a dropped index,
+    /// or replace a newly recreated tree with its predecessor.
     /// </summary>
-    /// <param name="registrations">The registrations to persist (replaces the stored set).</param>
+    /// <param name="registrations">The index manager's snapshot. Only missing registrations matching a current index description are added.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the registrations are durable.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
@@ -767,12 +773,24 @@ public sealed class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            if (_registrations.SequenceEqual(registrations))
+            var merged = _registrations.ToDictionary(registration =>
+                (registration.ObjectId, registration.Definition.Name), IndexNameComparer.Instance);
+            foreach (var registration in registrations)
+            {
+                var key = (registration.ObjectId, registration.Definition.Name);
+                if (!merged.ContainsKey(key) && _indexes.TryGetValue(key, out var slot) &&
+                    slot.Index.IsUnique == registration.Definition.IsUnique)
+                {
+                    merged.Add(key, registration);
+                }
+            }
+            if (merged.Count == _registrations.Count)
             {
                 return default;
             }
 
-            byte[] record = EncodeRegistrations(registrations);
+            var mergedRegistrations = merged.Values.ToArray();
+            byte[] record = EncodeRegistrations(mergedRegistrations);
 
             using (var transaction = _storage.BeginTransaction())
             {
@@ -781,9 +799,27 @@ public sealed class SqlCatalog
                 _registrationsLocation = registrationsLocation;
             }
 
-            _registrations = registrations.ToList();
+            _registrations = mergedRegistrations;
             return default;
         }
+    }
+
+    // Called only under _sync. Publishers can finish trees and capture snapshots
+    // independently, so only their own new descriptions may change the directory.
+    private BTreeIndexRegistration[] MergePublishedRegistrations(
+        IReadOnlyList<BTreeIndexRegistration> registrations, IReadOnlyList<SqlCatalogIndex> indexes)
+    {
+        var merged = _registrations.ToDictionary(registration =>
+            (registration.ObjectId, registration.Definition.Name), IndexNameComparer.Instance);
+        foreach (var registration in registrations)
+        {
+            if (indexes.Any(index => index.TableObjectId == registration.ObjectId &&
+                string.Equals(index.Name, registration.Definition.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                merged[(registration.ObjectId, registration.Definition.Name)] = registration;
+            }
+        }
+        return merged.Values.ToArray();
     }
 
     /// <summary>
@@ -1641,7 +1677,7 @@ public sealed class SqlCatalog
     /// </summary>
     /// <param name="table">The reserved table, or a replacement definition with the existing table's identity.</param>
     /// <param name="indexes">New index descriptions whose physical trees have already been committed.</param>
-    /// <param name="registrations">The complete durable index registration set, replacing the stored set.</param>
+    /// <param name="registrations">A physical registration snapshot. Only the supplied new indexes' registrations are merged into the current directory.</param>
     /// <param name="replaceExisting">Whether the definition replaces an existing table with the same identity.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task representing durable publication of all supplied metadata.</returns>
@@ -1708,10 +1744,11 @@ public sealed class SqlCatalog
                     throw new SqlCatalogException($"Index '{index.Name}' does not describe a registered index on '{table.Schema}.{table.Name}'.");
                 }
             }
+            var mergedRegistrations = MergePublishedRegistrations(registrations, indexes);
             using var transaction = _storage.BeginTransaction();
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
-            var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
+            var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
             CommitCatalogChange(transaction);
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
@@ -1719,7 +1756,7 @@ public sealed class SqlCatalog
                 _indexes[(table.ObjectId, slot.Index.Name)] = slot;
             }
             _registrationsLocation = registrationsLocation;
-            _registrations = registrations.ToArray();
+            _registrations = mergedRegistrations;
             return default;
         }
     }

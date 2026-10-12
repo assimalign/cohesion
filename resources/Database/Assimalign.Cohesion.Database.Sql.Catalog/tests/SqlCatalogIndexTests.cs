@@ -158,4 +158,25 @@ public class SqlCatalogIndexTests
         reopened.GetIndexes(other.ObjectId).Count.ShouldBe(1);
         reopened.GetIndexRegistrations().Single().ObjectId.ShouldBe(other.ObjectId);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Indexes: a stale drop snapshot retains a later unrelated publication")]
+    public async Task DropIndex_SnapshotBeforeUnrelatedPublication_ShouldRetainPublishedRegistration()
+    {
+        // Arrange: DROP captured the directory before the age index published.
+        var (catalog, harness, table) = await OpenWithTableAsync();
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_email", ["email"], false),
+            [Registration(table.ObjectId, "ix_email", false, 7)]);
+        var remaining = Array.Empty<BTreeIndexRegistration>();
+        var age = Registration(table.ObjectId, "ix_age", false, 9);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_age", ["age"], false), [age]);
+
+        // Act
+        await catalog.DropIndexAsync(table.ObjectId, "ix_email", remaining);
+
+        // Assert
+        catalog.GetIndexRegistrations().ShouldBe([age]);
+        var reopened = harness.Reopen();
+        reopened.GetIndexRegistrations().ShouldBe([age]);
+        reopened.GetIndexes(table.ObjectId).Single().Name.ShouldBe("ix_age");
+    }
 }

@@ -340,6 +340,10 @@ public class SqlCatalogTests
     {
         // Arrange
         var (catalog, harness) = OpenFresh();
+        var users = await catalog.CreateTableAsync("dbo", "users", [Column("id", DatabaseType.Int32)]);
+        var orders = await catalog.CreateTableAsync("dbo", "orders", [Column("date", DatabaseType.Int64)]);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(users.ObjectId, "pk_users", ["id"], true), []);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(orders.ObjectId, "ix_orders_date", ["date"], false), []);
         var registrations = new List<BTreeIndexRegistration>
         {
             new(1, new IndexDefinition("pk_users", IndexKind.BTree, IsUnique: true), 7),

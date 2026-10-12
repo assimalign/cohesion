@@ -55,10 +55,13 @@ public sealed class SqlCatalogGenerationTests
         catalog.DdlGeneration.ShouldBe(10UL);
         await catalog.DropTableAsync("dbo", "adhoc", CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(11UL);
-        await catalog.SaveIndexRegistrationsAsync([registration], CancellationToken.None);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_id", ["id"], false), [], CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(12UL);
+        await catalog.SaveIndexRegistrationsAsync([registration], CancellationToken.None);
+        catalog.DdlGeneration.ShouldBe(13UL);
         await catalog.SaveIndexRegistrationsAsync([], CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(13UL);
+        catalog.GetIndexRegistrations().ShouldBe([registration]);
         await catalog.DropTableAsync("dbo", "owned", CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(14UL);
 
@@ -223,6 +226,8 @@ public sealed class SqlCatalogGenerationTests
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "generation-noop");
         var catalog = SqlCatalog.Open(storage);
         await catalog.SetRecordSpaceFormatVersionAsync(8, CancellationToken.None);
+        var table = await catalog.CreateTableAsync("dbo", "t", [Column("id")], cancellationToken: CancellationToken.None);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix", ["id"], false), [], CancellationToken.None);
         var registration = new BTreeIndexRegistration(1, new IndexDefinition("ix"), 42);
         await catalog.SaveIndexRegistrationsAsync([registration], CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
@@ -238,7 +243,8 @@ public sealed class SqlCatalogGenerationTests
         catalog.DdlGeneration.ShouldBe(generation);
         catalog.SchemaState.ShouldNotBeNull();
         catalog.SchemaState.Generation.ShouldBe(generation);
-        catalog.Tables.ShouldBeEmpty();
+        catalog.Tables.Count.ShouldBe(1);
+        catalog.TryGetTable("dbo", "cancelled", out _).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - DDL generation: database collation initialization is a committed change")]

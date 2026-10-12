@@ -133,8 +133,8 @@ codec, the key encoding and every comparison read, so they do not consult the do
   transaction and is durable (WAL commit record) when the call returns. DDL inside
   a user DML transaction is deliberately unsupported in the MVP: the in-memory
   cache updates on commit, and half-visible schema changes are a correctness trap
-  (historically mishandled by real engines). The engine serializes DDL per
-  database.
+  (historically mishandled by real engines). The engine locks affected tables and
+  the catalog serializes their metadata publications.
 - **The shared tuple codec as the record format.** Catalog records are encoded
   with `DatabaseKeyWriter`/`DatabaseKeyReader` (#854): self-describing, exact
   round-trips, one codec maintained in one place. Ordering (the codec's other
@@ -172,6 +172,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   removes the table's descriptions and registrations the same way. Guards:
   dropping an indexed column is rejected (entries key on its values); index
   columns must exist at creation.
+
 - **The record-space format version lives here** (kind-4 record, kind 8 from
   version 4 as below; `RecordSpaceFormatVersion`): data rows are not self-describing across layout
   changes — a stamped (MVCC, version ≥ 2) record and an unstamped (version 1)
@@ -209,6 +210,33 @@ codec, the key encoding and every comparison read, so they do not consult the do
   generation let the SQL provisioner skip in constant time. Any later DDL invalidates
   that proof and the provisioner reconciles from live schema-owned metadata.
 
+## Concurrent index publication (49a review)
+
+Tree builds on different tables can finish before either publishes. Their exported
+registration snapshots are therefore not authoritative replacements for the directory.
+Under the catalog metadata lock, `CreateIndexAsync` and `PublishTableAsync` merge only
+the registrations for the new descriptions they publish into the current directory.
+`DropIndexAsync` removes only the named index from that current directory. Table drops
+already remove only that table's registrations. Each merged directory is committed with
+its descriptions, so an unrelated publication cannot erase a completed tree's durable
+registration. PostgreSQL likewise inserts the affected `pg_index` tuple rather than
+replacing an independently captured directory (`src/backend/catalog/index.c:669`).
+
+Checkpoint snapshots can also arrive after a publication, drop, or same-name recreation.
+`SaveIndexRegistrationsAsync` only adds missing registrations that match current index
+descriptions; it keeps every existing registration and ignores absent descriptions.
+Roots remain fixed through splits, so a checkpoint has no legitimate root replacement
+to apply. This preserves newer publications and prevents resurrection or replacement
+with an older tree. Unchanged and stale checkpoint snapshots leave DDL generation alone.
+Catalog-only callers that populate registrations separately must create the descriptions
+first; raw orphan directories and whole-directory replacement are no longer supported.
+
+`SqlIndexPublicationTests` builds real trees, captures both disjoint snapshots before
+publication, commits them in the conflicting order, and opens durable crash images
+before shutdown can persist a repair. It also exercises delayed checkpoint snapshots
+across publication, drop and same-name recreation; recovered inserts and unique checks
+prove that the registered roots remain usable. These are ordered interleavings, with no
+scheduler-dependent race window.
 ## DDL generation and crash convergence (B2)
 
 The kind-2 identity counter also persists `SqlCatalog.DdlGeneration`, a monotonically
@@ -260,10 +288,10 @@ nullability, canonical defaults, primary keys, unique and foreign-key constraint
 checks and indexes so that reconciliation can represent each provisionable kind.
 Engine-registered domains remain code and are represented by their column references.
 
-Owner decision 49a was accepted on 2026-10-11 and lands next. Its pending-step record will
-attach between planning and step execution in the SQL provisioner; successful deferred
-DDL would use the same catalog commit path, and the applied state would be recorded only
-after all steps completed. No worker, pending state or progress surface exists here.
+Owner decision 49a's pending-step record attaches between planning and step execution
+in the SQL provisioner. Successful deferred DDL uses the same catalog commit path, and
+the applied state is recorded only after all steps complete. The pending envelope lives
+here; worker execution and progress remain SQL engine responsibilities.
 
 ## Object ownership
 
