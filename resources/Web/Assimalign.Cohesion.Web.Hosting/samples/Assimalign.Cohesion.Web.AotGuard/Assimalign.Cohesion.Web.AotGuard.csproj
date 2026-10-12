@@ -20,6 +20,12 @@
         exact publish and run commands. On LongPathsEnabled=0 machines publish from a short path:
         ILC intermediate paths are long.
 
+        EventSource delivery (#1399): the smoke run observes ServerBound and ServerStopped through
+        an in-process EventListener, checking their named payloads and rejecting event 0. This guard
+        uses Microsoft.NET.Sdk, so it enables EventSource explicitly; the SDK evaluation tests prove
+        Sdk.Web's conditional default independently. CI also publishes with support disabled to
+        measure the native binary-size delta, without running that measurement-only binary.
+
         WebSockets (#765, #1336): one MapWebSocket endpoint serves a permessage-deflate echo over the
         default HTTP/1.1 upgrade and over an HTTP/2 extended CONNECT (a second, prior-knowledge HTTP/2
         endpoint in smoke mode) and answers a plain GET with 400, behind the UseWebSockets origin
@@ -28,8 +34,9 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <PublishAot>true</PublishAot>
+    <EventSourceSupport>true</EventSourceSupport>
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
-    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051;IL2104;IL3053</WarningsAsErrors>
+    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL2111;IL3050;IL3051;IL2104;IL3053</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Web" />

@@ -6,6 +6,7 @@ on:
       # listed separately because it belongs to the Gateway's tests, not to this area
       # (.claude/rules/resource-areas.md) — the Web runtime it composes is still this area's.
       - 'resources/Web/**'
+      - 'sdks/Assimalign.Cohesion.Sdk.Web/**'
       - 'build/TestSupport/**'
       - '!resources/Web/**/*.slnx'
       - '!resources/Web/**/*.md'
@@ -113,7 +114,24 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet build build/Tasks -c Release
+      - name: Publish without EventSource support for the binary-size baseline
+        run: dotnet publish resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj -c Release -r linux-x64 -p:EventSourceSupport=false -o "${{ runner.temp }}/web-aot-guard-no-events"
       - name: Publish the guard with NativeAOT (trim/AOT warnings are errors)
-        run: dotnet publish resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj -c Release -r linux-x64 -o "${{ runner.temp }}/web-aot-guard"
+        run: dotnet publish resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj -c Release -r linux-x64 -p:EventSourceSupport=true -o "${{ runner.temp }}/web-aot-guard"
+      - name: Record the linux-x64 EventSource binary-size delta
+        shell: bash
+        run: |
+          without_events=$(stat -c %s "${{ runner.temp }}/web-aot-guard-no-events/Assimalign.Cohesion.Web.AotGuard")
+          with_events=$(stat -c %s "${{ runner.temp }}/web-aot-guard/Assimalign.Cohesion.Web.AotGuard")
+          delta=$((with_events - without_events))
+          {
+            echo '### Web NativeAOT EventSourceSupport size (linux-x64)'
+            echo '| EventSourceSupport | Native executable bytes |'
+            echo '| --- | ---: |'
+            echo "| false | $without_events |"
+            echo "| true | $with_events |"
+            echo "| delta | $delta |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "EventSourceSupport delta: $delta bytes ($without_events without, $with_events with)."
       - name: Run the smoke checks against the native binary
         run: '"${{ runner.temp }}/web-aot-guard/Assimalign.Cohesion.Web.AotGuard" --smoke'

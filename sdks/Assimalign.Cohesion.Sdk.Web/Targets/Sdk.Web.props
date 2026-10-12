@@ -6,6 +6,7 @@
 		The resource's domain composition remains in its Program.cs.
 	-->
 	<PropertyGroup>
+		<EventSourceSupport Condition="'$(EventSourceSupport)' == ''">true</EventSourceSupport>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Web.ApplicationModel</CohesionResourceApplicationModel>
 		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.WebResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Web</CohesionResourceKind>

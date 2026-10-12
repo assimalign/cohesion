@@ -43,7 +43,7 @@
         App is derived, not curated assembly-by-assembly. The
         @(CohesionAppKernelRoot) list below is its only policy input: the host
         and siblings, Connections, host-composed configuration providers,
-        console logging, telemetry, dependency injection, and the physical file system. The
+        console logging, EventSource forwarding, telemetry, dependency injection, and the physical file system. The
         Runtime project references only those roots; App.targets computes their
         transitive Assimalign.Cohesion project-reference closure for the Ref and
         Runtime manifests, then adds the App umbrella assembly. Framework tests
@@ -135,6 +135,7 @@
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Configuration.FileSystem" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Configuration.Json" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Logging.Console" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Logging.EventSource" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.OpenTelemetry" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.DependencyInjection" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.FileSystem.Physical" />

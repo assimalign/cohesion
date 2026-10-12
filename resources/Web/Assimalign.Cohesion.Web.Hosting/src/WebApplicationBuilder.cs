@@ -172,6 +172,17 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     public LoggerFactoryBuilder Logging { get; }
 
     /// <summary>
+    /// Gets or sets whether an entry-point application forwards Web and HTTP transport events
+    /// to its configured logging providers. Defaults to true.
+    /// </summary>
+    /// <remarks>
+    /// Applies only to CreateBuilder(args). An application-registered forwarder takes precedence.
+    /// Forwarding adds no provider or filter rule. EventSource listeners observe the whole process;
+    /// concurrent entry-point applications can therefore forward the same event more than once.
+    /// </remarks>
+    public bool EnableEventSourceForwarding { get; set; } = true;
+
+    /// <summary>
     /// Gets the generated resource control plane, or null when this is a plain application.
     /// </summary>
     internal IResourceControlPlane? ControlPlane => _controlPlane;
@@ -282,40 +293,51 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
         Services.AddSingleton<IHostEnvironment>(Environment);
         Services.AddSingleton<IConfiguration>(Configuration);
-        Services.AddSingleton<ILoggerFactory>(Logging.Build());
-        Services.AddSingleton<IWebApplicationContext>(_context);
-        Services.AddSingleton<IWebApplicationPipelineBuilder>(app);
-        Services.AddSingleton<IWebApplicationPipeline>(serviceProvider =>
+        if (_isEntryPoint && EnableEventSourceForwarding && !Logging.HasForwarders)
         {
-            IWebApplicationPipeline pipeline = _pipeline is null
-                ? serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build()
-                : new BorrowedWebApplicationPipeline(_pipeline);
-
-            if (_controlPlane is null)
-            {
-                return pipeline;
-            }
-            int? port = (_controlPlane.ObservedEndpoints.TryGetValue("http", out Uri? endpoint) ||
-                _controlPlane.ObservedEndpoints.TryGetValue("https", out endpoint)) ? endpoint.Port : null;
-            if (port is null)
-            {
-                WebServerEventSource.Log.ControlPlaneDisabled(_resourceContext!.ResourceName, _controlPlane);
-            }
-            return new EnabledResourcePipeline(_controlPlane, _resourceContext!, _context, port, pipeline);
-        });
-
-        _isBuilt = true;
-
-        // Registration closes here. The provider copies the registrations, so one added after
-        // Build would silently never reach it; the read-only container turns that into an error.
-        if (Services.Container is ServiceContainer container)
-        {
-            container.MakeReadOnly();
+            var forwarding = new EventSourceForwardingOptions();
+            forwarding.Sources.Clear();
+            forwarding.Sources.Add("Assimalign.Cohesion.Web.");
+            forwarding.Sources.Add("Assimalign.Cohesion.Http.Connections");
+            Logging.AddEventSourceForwarding(forwarding);
         }
 
-        _context.SetServiceProvider(((IServiceProviderBuilder)Services).Build());
+        ILoggerFactory loggerFactory = Logging.Build();
+        _context.RegisterForDisposal(loggerFactory);
         try
         {
+            Services.AddSingleton<ILoggerFactory>(loggerFactory);
+            Services.AddSingleton<IWebApplicationContext>(_context);
+            Services.AddSingleton<IWebApplicationPipelineBuilder>(app);
+            Services.AddSingleton<IWebApplicationPipeline>(serviceProvider =>
+            {
+                IWebApplicationPipeline pipeline = _pipeline is null
+                    ? serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build()
+                    : new BorrowedWebApplicationPipeline(_pipeline);
+
+                if (_controlPlane is null)
+                {
+                    return pipeline;
+                }
+                int? port = (_controlPlane.ObservedEndpoints.TryGetValue("http", out Uri? endpoint) ||
+                    _controlPlane.ObservedEndpoints.TryGetValue("https", out endpoint)) ? endpoint.Port : null;
+                if (port is null)
+                {
+                    WebServerEventSource.Log.ControlPlaneDisabled(_resourceContext!.ResourceName, _controlPlane);
+                }
+                return new EnabledResourcePipeline(_controlPlane, _resourceContext!, _context, port, pipeline);
+            });
+
+            _isBuilt = true;
+
+            // Registration closes here. The provider copies the registrations, so one added after
+            // Build would silently never reach it; the read-only container turns that into an error.
+            if (Services.Container is ServiceContainer container)
+            {
+                container.MakeReadOnly();
+            }
+
+            _context.SetServiceProvider(((IServiceProviderBuilder)Services).Build());
             // Materializes the lifecycle services once, in registration order, against the final
             // context. Servers resolve later, at host start, after the pipeline is composed.
             _context.ResolveApplicationServices();

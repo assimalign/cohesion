@@ -142,3 +142,25 @@ buffered replacement without callbacks running again. Pass optional `preservedHe
 retain policy fields accepted unchanged; their final values or absence are captured after callbacks.
 The default interceptor supplies this feature;
 clearing the interceptors removes it. SecurityHeaders and CORS require it, including on custom servers.
+
+## Default EventSource forwarding
+
+`WebApplication.CreateBuilder(args)` forwards `Assimalign.Cohesion.Web.` sources and
+`Assimalign.Cohesion.Http.Connections` into the application's configured log providers. It adds no
+provider or filter rule. Set `builder.EnableEventSourceForwarding = false` to opt out, or register
+`builder.Logging.AddEventSourceForwarding(options)` before Build to choose your own sources. Any
+application forwarder registration takes precedence. Explicit/options-based builders used for nested
+Web hosts register no automatic forwarder.
+
+Listeners observe the entire process. Concurrent entry-point applications can forward the same event;
+use `serverId` payloads for server identity and opt out in secondary hosts that share sinks. Forwarding
+ends when the application disposes its logger factory, after shutdown diagnostics. HTTP access logs
+remain Information-level ILogger entries from Web.Diagnostics, independent of this forwarding.
+
+Sdk.Web enables EventSource support for NativeAOT when unset. An explicit
+`<EventSourceSupport>false</EventSourceSupport>` disables delivery. See the
+[SDK design](../../../../sdks/Assimalign.Cohesion.Sdk.Web/Tasks/docs/DESIGN.md) for size measurements.
+
+Compared with 10.0.0-preview.1, entry-point applications now forward these framework events into
+their existing sinks. The built application owns its logger factory and disposes its providers and
+forwarders at final teardown; a factory obtained from its service provider cannot outlive the app.

@@ -61,6 +61,7 @@ public sealed class FrameworkManifestTests
             "Assimalign.Cohesion.Hosting.Telemetry",
             "Assimalign.Cohesion.Logging",
             "Assimalign.Cohesion.Logging.Console",
+            "Assimalign.Cohesion.Logging.EventSource",
             "Assimalign.Cohesion.OpenTelemetry"
         ];
 
@@ -72,7 +73,7 @@ public sealed class FrameworkManifestTests
             .ToArray();
 
         // Assert
-        roots.Length.ShouldBe(16);
+        roots.Length.ShouldBe(17);
         declaredAssemblies.ShouldBe([AppFramework]);
         actualClosure.ShouldBe(expectedClosure);
     }

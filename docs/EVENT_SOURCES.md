@@ -41,8 +41,12 @@ using ILoggerFactory loggerFactory = new LoggerFactoryBuilder()
 ```
 
 The factory owns the forwarder: forwarding starts when the factory is built and stops when it is
-disposed. In a host, call `builder.Logging.AddEventSourceForwarding()`; the factory is built before the
-host starts, so the events raised while listeners bind are forwarded too. To forward into a factory you
+disposed. Web entry-point builders (`CreateBuilder(args)`) forward the `Assimalign.Cohesion.Web.`
+prefix and `Assimalign.Cohesion.Http.Connections` by default, unless opted out with
+`EnableEventSourceForwarding = false` or an application forwarder is already registered. Nested/options
+builders do not. No provider or filter rule is added. To select other sources, register
+`builder.Logging.AddEventSourceForwarding(options)` before Build. Listeners observe the whole process,
+so concurrent entry points can duplicate events; use payload server IDs for attribution. To forward into a factory you
 did not build, `loggerFactory.ForwardEventSources()` returns a forwarder that you dispose yourself.
 
 By default every source named `Assimalign.Cohesion.*` is forwarded; a runtime source is added by
@@ -52,7 +56,8 @@ mapping, the entry shape, and the failure model.
 
 ### NativeAOT
 
-A NativeAOT application compiles EventSource out unless it opts back in:
+Sdk.Web enables EventSource support for NativeAOT when unset; an explicit false wins. Applications
+using other SDKs must opt in:
 
 ```xml
 <PropertyGroup>

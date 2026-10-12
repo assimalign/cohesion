@@ -35,6 +35,7 @@ using Assimalign.Cohesion.Web.WebSockets;
 // --smoke it serves on a free loopback port, exercises every feature over real HTTP, and exits
 // non-zero on the first failed check.
 bool smoke = Array.IndexOf(args, "--smoke") >= 0;
+using GuardEventSourceListener? events = smoke ? new GuardEventSourceListener() : null;
 byte[] signingKey = RandomNumberGenerator.GetBytes(32);
 int port = smoke ? GuardSmoke.GetFreeTcpPort() : 0;
 int http2Port = smoke ? GuardSmoke.GetFreeTcpPort() : 0;
@@ -247,15 +248,18 @@ if (!smoke)
 
 IWebApplication web = application;
 using CancellationTokenSource cancellation = new(TimeSpan.FromMinutes(2));
+int smokeResult;
 await web.StartAsync(cancellation.Token);
 try
 {
-    return await GuardSmoke.RunAsync(port, http2Port, signingKey, cancellation.Token);
+    smokeResult = await GuardSmoke.RunAsync(port, http2Port, signingKey, cancellation.Token);
 }
 finally
 {
     await web.StopAsync(CancellationToken.None);
 }
+bool eventsDelivered = events!.Verify();
+return smokeResult == 0 && eventsDelivered ? 0 : 1;
 
 static async Task EchoWebSocketAsync(IHttpContext context, WebSocket socket)
 {

@@ -28,6 +28,8 @@
 		<!-- Test-only: form and antiforgery parsing must leave transport-classified rejections to HTTP (#1300). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Forms" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
+		<!-- Default EventSource forwarding must preserve the separately composed HTTP access log. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Diagnostics" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
 		<!-- Test-only: a raw in-memory connection pipelines HTTP/1.1 requests, which a real client never does. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
