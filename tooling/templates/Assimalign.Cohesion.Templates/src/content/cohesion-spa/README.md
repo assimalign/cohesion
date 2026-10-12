@@ -3,6 +3,10 @@
 Created with `dotnet new cohesion-spa`. `Program.cs` owns the application entry point.
 The SDK supplies .NET 10 executable, language, nullable and AOT defaults.
 
+Static files are served from `wwwroot`. GET and HEAD requests for client-side routes such as
+`/settings` fall back to `wwwroot/index.html`. A missing asset whose last path segment names a
+file, such as `/assets/missing.js`, still returns 404.
+
 ```bash
 dotnet build
 dotnet run

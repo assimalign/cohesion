@@ -82,11 +82,12 @@ internal sealed class TemplateWorkspace : IDisposable
 
     /// <summary>
     /// Starts a built Web application's apphost on a free loopback port and returns the body of a
-    /// GET to <paramref name="path"/>. The endpoint arrives through configuration (the command
-    /// line), which a plain entry-point application binds without any UseServer call.
+    /// GET to <paramref name="path"/>, optionally checking additional responses on the same server.
+    /// The endpoint arrives through configuration (the command line), which a plain entry-point
+    /// application binds without any UseServer call.
     /// </summary>
     internal async Task<string> GetFromBuiltWebApplicationAsync(string output, string name, string path,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Func<HttpClient, CancellationToken, Task>? verifyAsync = null)
     {
         string executableName = OperatingSystem.IsWindows() ? name + ".exe" : name;
         string executable = Directory.GetFiles(Path.Combine(output, "bin"), executableName, SearchOption.AllDirectories)
@@ -120,8 +121,13 @@ internal sealed class TemplateWorkspace : IDisposable
         process.BeginErrorReadLine();
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var client = new HttpClient
+            {
+                BaseAddress = new Uri($"http://127.0.0.1:{port}"),
+                Timeout = TimeSpan.FromSeconds(5)
+            };
             DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+            string body;
             while (true)
             {
                 if (process.HasExited)
@@ -131,13 +137,21 @@ internal sealed class TemplateWorkspace : IDisposable
 
                 try
                 {
-                    return await client.GetStringAsync($"http://127.0.0.1:{port}{path}", cancellationToken).ConfigureAwait(false);
+                    body = await client.GetStringAsync(path, cancellationToken).ConfigureAwait(false);
+                    break;
                 }
                 catch (HttpRequestException) when (DateTime.UtcNow < deadline)
                 {
                     await Task.Delay(250, cancellationToken).ConfigureAwait(false);
                 }
             }
+
+            if (verifyAsync is not null)
+            {
+                await verifyAsync(client, cancellationToken).ConfigureAwait(false);
+            }
+
+            return body;
         }
         finally
         {
