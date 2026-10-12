@@ -113,6 +113,12 @@ with a sanitized `error_description`. `ForbidAsync` emits `403` with
 and CR/LF so they cannot break the quoted-string grammar. The bearer scheme
 never redirects, so it needs no endpoint-metadata check.
 
+Both paths append their challenge, preserving challenges already added by other schemes
+(RFC 9110 §11.6.1, #1450). This is a behavior change from 10.0.0-preview.1, which
+replaced earlier challenges: multi-scheme policies now advertise every alternative on
+401 and preserve other challenges on 403. Authentication decisions and public APIs
+are unchanged; this corrects challenge discovery, not an authentication bypass.
+
 ## AOT posture
 
 `<IsAotCompatible>true</IsAotCompatible>` is inherited. No reflection: JSON

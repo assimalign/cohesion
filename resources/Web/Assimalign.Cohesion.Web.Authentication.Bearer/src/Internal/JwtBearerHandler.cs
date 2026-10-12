@@ -106,7 +106,7 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
     /// <inheritdoc />
     public Task ChallengeAsync(AuthenticationProperties? properties, CancellationToken cancellationToken = default)
     {
-        _context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = BuildChallenge();
+        _context.Response.Headers.AppendValue(HttpHeaderKey.WWWAuthenticate, BuildChallenge());
         _context.Response.StatusCode = HttpStatusCode.Unauthorized;
         return Task.CompletedTask;
     }
@@ -120,7 +120,7 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
             ? $"Bearer realm=\"{Sanitize(realm)}\", error=\"insufficient_scope\""
             : "Bearer error=\"insufficient_scope\"";
 
-        _context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = challenge;
+        _context.Response.Headers.AppendValue(HttpHeaderKey.WWWAuthenticate, challenge);
         _context.Response.StatusCode = HttpStatusCode.Forbidden;
         return Task.CompletedTask;
     }

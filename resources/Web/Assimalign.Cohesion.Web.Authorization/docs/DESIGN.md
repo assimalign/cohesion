@@ -289,8 +289,9 @@ with the default challenge or forbid scheme when the policy names none. The hand
 response: JWT Bearer answers `401` with a `WWW-Authenticate` challenge and `403` with
 `insufficient_scope` (RFC 6750 §3.1); Cookie redirects a browser endpoint to its login or access-denied
 page and answers an endpoint marked `IApiEndpointMetadata` with a bare `401` or `403`. When several
-schemes answer, each writes in turn; a handler that sets a header outright (Bearer's
-`WWW-Authenticate`) leaves the last value.
+schemes answer, each writes in turn. Bearer and Certificate append `WWW-Authenticate`,
+preserving every earlier challenge. Bearer's append behavior corrects 10.0.0-preview.1,
+which replaced earlier schemes' challenges (#1450); custom handlers must also append.
 
 A failure is a response, not an exception, so no exception boundary can turn it into a `500`. A missing
 authentication registration is the exception: with no `AddAuthentication`, or no default challenge

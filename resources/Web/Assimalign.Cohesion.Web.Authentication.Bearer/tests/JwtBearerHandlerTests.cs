@@ -308,6 +308,46 @@ public class JwtBearerHandlerTests
         context.Response.Headers.GetValue(HttpHeaderKey.WWWAuthenticate)!.ShouldContain("insufficient_scope");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Challenges preserve all schemes in either order on 401 and 403")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Challenge_WithOtherSchemesInEitherOrder_PreservesEveryChallenge(bool forbid, bool bearerFirst)
+    {
+        // Arrange — a prior scheme has challenged; another runs before or after Bearer.
+        TestHttpContext context = TestHttpContext.Create();
+        context.Response.Headers.AppendValue(HttpHeaderKey.WWWAuthenticate, "Negotiate");
+        IAuthenticationHandler handler = await InitializeAsync(HmacOptions(), context);
+        string bearer = forbid ? "Bearer error=\"insufficient_scope\"" : "Bearer";
+
+        // Act
+        if (!bearerFirst)
+        {
+            context.Response.Headers.AppendValue(HttpHeaderKey.WWWAuthenticate, "Custom");
+        }
+
+        if (forbid)
+        {
+            await handler.ForbidAsync(null);
+        }
+        else
+        {
+            await handler.ChallengeAsync(null);
+        }
+
+        if (bearerFirst)
+        {
+            context.Response.Headers.AppendValue(HttpHeaderKey.WWWAuthenticate, "Custom");
+        }
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(forbid ? 403 : 401);
+        context.Response.Headers.GetValue(HttpHeaderKey.WWWAuthenticate).ShouldBe(bearerFirst
+            ? "Negotiate," + bearer + ",Custom"
+            : "Negotiate,Custom," + bearer);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - CreateHandler requires a signing key when signatures are required")]
     public void CreateHandler_NoSigningKey_Throws()
     {
