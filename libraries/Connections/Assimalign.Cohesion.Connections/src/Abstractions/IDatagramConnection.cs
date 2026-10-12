@@ -27,6 +27,15 @@ public interface IDatagramConnection : IAsyncDisposable
     ConnectionCapabilities Capabilities { get; }
 
     /// <summary>
+    /// Gets the optional capabilities and facts registered for this connection.
+    /// </summary>
+    /// <remarks>
+    /// A layer exposes its wrapped connection's features unless it replaces or removes their names.
+    /// A multiplexed stream has its own features and does not inherit its parent connection's features.
+    /// </remarks>
+    IConnectionFeatureCollection Features { get; }
+
+    /// <summary>
     /// Receives the next datagram into the supplied buffer.
     /// </summary>
     /// <param name="buffer">The buffer to copy the received datagram into.</param>

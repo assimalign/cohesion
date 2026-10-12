@@ -37,6 +37,65 @@ diagnostics-only.
 
 ---
 
+## Connection features
+
+`IConnection`, `IMultiplexedConnection`, and `IDatagramConnection` expose an
+`IConnectionFeatureCollection` through `Features`. A feature implements `IConnectionFeature` and
+has one stable, non-empty `Name`. `Set<TFeature>` installs it in that named slot, replacing any
+feature with the same ordinal, case-sensitive name; null features and null or empty names throw.
+An object fills one slot, so a driver offering two named capabilities registers two feature objects.
+
+The public `ConnectionFeatureCollection(inner)` exposes the wrapped connection's effective set.
+A lookup checks the layer's own names first, then its inner collection. `Remove(name)` leaves a
+local tombstone: it hides both today's inner value and future registrations of that name, and
+returns whether a visible feature was removed. `Set` can replace that tombstone. Enumeration yields
+own features first and then inner features whose names are neither replaced nor hidden. Typed
+`Get<TFeature>()` follows the same order; replacing a name with a different type still hides the
+inner feature of the requested type. Exact built-in collections are scanned without allocating;
+custom collections and subclasses retain their own enumeration semantics.
+
+Collections serialize mutations and publish immutable arrays. Named and typed reads require no
+lock, and an enumerator retains the local snapshot it started with. Concurrent changes never
+invalidate a reader; a traversal across independently changing layers is not one atomic snapshot.
+Features themselves own the thread safety of their values.
+
+`Connection`, `MultiplexedConnection`, and `DatagramConnection` create no collection until the
+first `Features` access. They resolve protected `InnerFeatures`, construct the collection, and call
+protected `ConfigureFeatures` exactly once before publishing it with `Interlocked.CompareExchange`.
+Concurrent first readers wait for the configured collection; a failed configuration is remembered
+and rethrown rather than retried or partially published. The bases do not implement the collection.
+A driver's configuration uses its supplied collection; it must not recursively access `Features`.
+A layer overrides `InnerFeatures` to return its wrapped connection's `Features`. A multiplexed
+stream retains its own collection and does not inherit features from its parent connection.
+
+Optional contracts belong to their feature packages, all with the family namespace
+`Assimalign.Cohesion.Connections`. The driver registers a feature and consumers reference only the
+package that describes it. The package dependency direction is:
+
+```mermaid
+flowchart LR
+    Tls["Connections.Tls"] --> Root["Connections"]
+    Abort["Connections.StreamAbort"] --> Root
+    Limits["Connections.StreamLimits"] --> Root
+```
+
+| Package | Contract and pinned name | Access |
+|---|---|---|
+| `Assimalign.Cohesion.Connections.Tls` | `ITlsConnectionInfo`, `"Tls"` | `Tls` on a stream or multiplexed connection |
+| `Assimalign.Cohesion.Connections.StreamAbort` | `IMultiplexedStreamAbort`, `"StreamAbort"` | `DirectionalAbort` on a stream connection |
+| `Assimalign.Cohesion.Connections.StreamLimits` | `IMultiplexedConnectionStreamLimits`, `"StreamLimits"` | `StreamLimits` on a multiplexed connection |
+
+A byte-rewriting layer removes any inherited capability whose behavior it invalidates. TLS facts
+remain valid through accounting or compression above TLS. Hot-path consumers resolve a feature
+once per connection or stream and cache it. `ConnectionCapabilities` remains the pre-connection
+description of a transport class and does not move into this collection.
+
+**Breaking change against 10.0.0-preview.1 (owner decisions 15 and 56, #1452):** adding `Features`
+to the three root interfaces breaks direct implementers. Deriving from the guided bases supplies
+the implementation. The three optional contracts were added after preview.1, so moving them into
+feature packages breaks no released API. `IConnectionInputCompletion` and
+`IMultiplexedConnectionAbort` retain their existing contracts during this migration.
+
 ## Design Rationale
 
 This section consolidates the reasoning that produced this design, recorded so future changes are
@@ -190,14 +249,16 @@ and logging only.
 because capabilities describe a transport class and the handshake is per connection. An
 application protocol needs that agreement: HTTP chooses between HTTP/2 and HTTP/1.1 from the
 application protocol ALPN selected (RFC 7301), and shows its handlers the client certificate,
-TLS version, and cipher suite. `ITlsConnectionInfo` is the typed facet that carries it. A connection that terminates TLS implements it beside its connection contract, and a
-consumer finds it with a type test on the connection it holds:
+TLS version, and cipher suite. `ITlsConnectionInfo`, owned by
+[Connections.Tls](../../Assimalign.Cohesion.Connections.Tls/docs/DESIGN.md), is the typed feature
+that carries it. A connection that terminates TLS registers it under `ITlsConnectionInfo.FeatureName`,
+and a consumer reads the `Tls` extension property on the connection it holds:
 
 - the secured `IConnection` the TLS layer returns (`Assimalign.Cohesion.Connections.Security`),
   which captures the values once its handshake completes;
 - a multiplexed connection whose transport is TLS itself (QUIC, RFC 9001).
 
-The facet reports four values, all fixed once the handshake completes:
+The feature reports four values, all fixed once the handshake completes:
 
 | Member | Meaning |
 |---|---|
@@ -213,22 +274,15 @@ release it; a consumer that keeps the certificate past the connection copies it.
 
 Why this shape:
 
-- **It lives in the contracts library** so the TLS layer and the QUIC driver can each implement it
-  without a new reference, and a consumer reads it while depending on the contracts alone. HTTP
-  never references the TLS layer. The HTTP server transport carries the facet one hop further: it
-  republishes the values on each exchange's connection info, where `Assimalign.Cohesion.Http.Tls`
-  reads them, so neither HTTP package references the other.
-- **Not an `Items` bag** (see Non-Goals): the facts are few, typed, and fixed at handshake time,
-  which is exactly what a typed contract is for.
-- **Not a member of `IConnection` or `IMultiplexedConnection`**: every driver and test double
-  would have to answer a question only TLS-terminating connections can, and a QUIC stream would
-  answer for its whole connection.
-- **A facet, not a base type**: `IConnection` and `IMultiplexedConnection` are different shapes,
-  and both have TLS-terminating implementations, so the facet extends neither.
-
-The cost is the usual one for decorators. A layer composed above TLS that returns a new
-connection hides the facet unless it implements the facet too and forwards it. A pass-through
-layer, which returns the connection it was given, keeps it visible.
+- **The feature package owns the contract.** The TLS layer, QUIC driver, and consumers reference
+  `Connections.Tls`; HTTP never references the TLS layer. HTTP republishes the handshake values on
+  its own connection-info object, which `Assimalign.Cohesion.Http.Tls` keeps reading.
+- **The facts stay typed and fixed at handshake time.** Public feature registration does not change
+  the certificate ownership or handshake semantics.
+- **The capability stays optional.** Cleartext connections and individual QUIC streams do not
+  claim connection-level handshake facts.
+- **Layers preserve visibility.** An outer layer supplies `InnerFeatures`, so it need not implement
+  TLS's contract or forward its individual members.
 
 ### Observed input completion: `IConnectionInputCompletion` (#1427)
 
@@ -244,7 +298,8 @@ with 10.0.0-preview.1.
 
 ### Cumulative stream allowance: `IMultiplexedConnectionStreamLimits` (#1425)
 
-The optional `InboundBidirectionalStreamLimit` facet reports a conservative upper bound on how
+The optional `InboundBidirectionalStreamLimit` feature in `Connections.StreamLimits` reports a
+conservative upper bound on how
 many peer-initiated bidirectional streams the transport may have allowed over the connection's
 lifetime. It is cumulative, not the number that may be open concurrently, and never decreases.
 Protocols can reject a referenced stream ordinal at or beyond that bound; they still own the
@@ -253,8 +308,9 @@ Connections contracts.
 
 A conservative bound may include credit whose release has started but is not advertised yet.
 Consumers must retain their own state limits; this facet is not a replacement for flow control.
-Drivers without the facet remain valid, and a decorator must explicitly forward it. The interface
-is an additive, optional API relative to 10.0.0-preview.1; `IMultiplexedConnection` is unchanged.
+Drivers without the feature remain valid. Consumers use `connection.StreamLimits`, and decorators
+preserve it through `InnerFeatures`. Its feature contract postdates 10.0.0-preview.1; the root
+`Features` addition is the breaking change recorded above.
 
 ### Application error codes: `IMultiplexedStreamAbort` and `IMultiplexedConnectionAbort` (#1080)
 
@@ -270,7 +326,10 @@ configured defaults in all three, so an HTTP/3 server could not send what RFC 91
   can tell a request it may retry from one it must not.
 - A connection error closes with its own code, such as `H3_FRAME_UNEXPECTED`, not `H3_NO_ERROR`.
 
-Two facets carry the code. A consumer finds each with a type test and falls back to `Abort` without it:
+Stream-direction codes are offered by the `Connections.StreamAbort` feature, read through
+`connection.DirectionalAbort`. `IMultiplexedConnectionAbort` remains an optional connection facet
+found by a type test until the next contract migration. Consumers fall back to `Abort` without
+the corresponding capability:
 
 | Facet | Member | QUIC frame | Implemented by |
 |---|---|---|---|
@@ -300,10 +359,9 @@ The rules:
 
 Why this shape:
 
-- **Facets, not members of `IConnection` or `IMultiplexedConnection`.** A new member breaks every
-  implementation outside this repository (the contracts shipped in 10.0.0-preview.1), and only a
-  transport with codes can honor it: a TCP connection has none to send. `ITlsConnectionInfo` is a facet for
-  the same reason.
+- **Direction-specific abort is optional.** Only transports that can end one direction independently
+  offer `DirectionalAbort`. The feature collection lets layers preserve it without implementing
+  the contract themselves. Connection-level coded abort retains its existing facet for Part 2.
 - **Not a code carried on the reason exception.** The reason types belong to the protocol (HTTP/3's are
   internal to it), so a driver would have to recognize them, or the protocol would have to throw this
   area's exceptions at its own application. The code is wire data, so it is an argument.
@@ -486,8 +544,9 @@ compatible.
 
 - No request/application middleware pipeline, and no per-byte layer interfaces — layers compose
   per connection at establishment only.
-- No general-purpose `Items` property bag on the connection; cross-cutting state belongs to the
-  layers or protocols that own it.
+- **Owner decision 56 reverses the former no-`Items`-bag non-goal.** Consumers may attach named,
+  typed connection features through public `Set<TFeature>`. Feature packages own their contracts;
+  layers preserve, replace, or hide them through the collection described above.
 - No `ILayer<TLower, TUpper>`-style nominal OSI hierarchy, and no datagram/multiplexed layer
   interfaces until a second real implementation exists (DTLS would justify
   `IDatagramConnection → IDatagramConnection`).

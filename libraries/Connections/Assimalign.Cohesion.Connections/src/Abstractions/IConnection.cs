@@ -57,6 +57,15 @@ public interface IConnection : IDuplexPipe, IAsyncDisposable
     ConnectionCapabilities Capabilities { get; }
 
     /// <summary>
+    /// Gets the optional capabilities and facts registered for this connection.
+    /// </summary>
+    /// <remarks>
+    /// A layer exposes its wrapped connection's features unless it replaces or removes their names.
+    /// A multiplexed stream has its own features and does not inherit its parent connection's features.
+    /// </remarks>
+    IConnectionFeatureCollection Features { get; }
+
+    /// <summary>
     /// Gets the current lifecycle state of the connection.
     /// </summary>
     ConnectionState State { get; }
