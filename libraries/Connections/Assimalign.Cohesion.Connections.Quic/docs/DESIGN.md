@@ -187,7 +187,8 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
      host's connection slot, would wait for as long as the peer chose.
      When the bound runs out the close in step 2 ends every stream still
      delivering, which completes its disposal, and the tail is lost. An
-     abort after disposal started keeps disposal's chosen default code and delivery wait.
+     abort after disposal started ends the delivery wait immediately with disposal's chosen
+     default close code, so a shorter host shutdown budget can still force teardown.
      (Before #1330 the wait happened on the exchange's own thread, inside
      the blocking disposal of the `QuicStream`; the bound was added with
      the half-close, which moved it into this phase.)
@@ -216,9 +217,9 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
   contract of abort. `Abort(Exception?)` closes with
   `DefaultCloseErrorCode`; `Abort(long errorCode, Exception?)`
   on the multiplexed root closes with the caller's code. The first abort or disposal decides
-  the close under the state lock, before any delivery wait: a later abort cannot replace
-  disposal's default code, and disposal retains a preceding abort's code even if it overtakes
-  that abort before its asynchronous close starts. `QuicConnection` sends one
+  the close code under the state lock, before any delivery wait: a later abort interrupts
+  disposal's delivery wait while retaining its default code, and disposal retains a preceding
+  abort's code even if it overtakes that abort before its asynchronous close starts. `QuicConnection` sends one
   `CONNECTION_CLOSE`, and a later close request has no effect on the wire.
 
 A stream's `ConnectionClosed` fires on its own `Abort` and `DisposeAsync`,
@@ -461,8 +462,10 @@ break is accepted during the previews and recorded here.
    base. The new stream root requires whole-stream reset and `IsInputCompleted`.
    Retired optional contracts postdate preview.1, so their removal breaks nothing released.
 7. **The first disposal selects the connection close (#1453).** A coded abort made while
-   disposal waits for stream delivery cannot replace its default close code or interrupt
-   that delivery wait. Earlier code allowed the later abort to choose the wire close.
+   disposal waits for stream delivery cannot replace its default close code. The abort
+   still interrupts the delivery wait and changes the state to `Aborted`, preserving bounded
+   host shutdown. Earlier code allowed the later abort to choose the wire close. The coded
+   overload postdates preview.1, so this code-selection rule changes only unreleased behavior.
 
 Completing a half also no longer blocks the completing thread until the
 peer acknowledges the FIN; that is not expected to break a consumer.

@@ -96,5 +96,7 @@ stream.Abort(0x10c); // H3_REQUEST_CANCELLED; already ended directions retain th
 ```
 
 QUIC codes range from 0 to 2^62 - 1. The first connection abort or disposal chooses its close
-code, including when disposal is still waiting for stream delivery. The new stream return types
+code, including when disposal is still waiting for stream delivery. A later abort interrupts
+that wait with the already chosen code, allowing a shorter shutdown budget to force teardown.
+The new stream return types
 are binary breaks against 10.0.0-preview.1; see DESIGN.md for the migration and accepted breaks.

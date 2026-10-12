@@ -398,20 +398,27 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
     // Retain its code so disposal cannot overtake an abort between choosing the code and sending it.
     private void AbortCore(long errorCode)
     {
+        long closeErrorCode;
         lock (_stateLock)
         {
-            if (_isDisposed || _state is ConnectionState.Aborted or ConnectionState.Closed)
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
             {
                 return;
             }
 
-            _closeErrorCode = errorCode;
+            if (!_isDisposed)
+            {
+                _closeErrorCode = errorCode;
+            }
+
+            closeErrorCode = _closeErrorCode;
             _state = ConnectionState.Aborted;
         }
 
         // Abort is synchronous while closing a QUIC connection is asynchronous; fire and forget
-        // the close, which observes its own faults so nothing surfaces as unobserved.
-        _ = CloseConnectionAsync(errorCode);
+        // the close, which observes its own faults so nothing surfaces as unobserved. An abort during
+        // disposal ends its delivery wait immediately while retaining the code disposal selected.
+        _ = CloseConnectionAsync(closeErrorCode);
 
         CancelConnectionClosedToken();
         ReportClosed();

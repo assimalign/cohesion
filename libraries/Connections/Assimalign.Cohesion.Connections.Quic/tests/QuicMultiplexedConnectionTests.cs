@@ -1236,31 +1236,41 @@ public class QuicMultiplexedConnectionTests
         }
     }
 
-    [QuicTheory(DisplayName = "Cohesion Test [Connections.Quic] - Connection Abort: Disposal should retain its close code while delivery is pending")]
-    [InlineData(0x42L)]
-    public async Task Abort_AfterDisposalStarts_ShouldKeepTheDisposalCloseCode(long errorCode)
+    [QuicTheory(DisplayName = "Cohesion Test [Connections.Quic] - Connection Abort: Abort should end pending delivery with disposal's chosen close code")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Abort_AfterDisposalStarts_ShouldEndDeliveryWithTheFirstCloseCode(bool codedAbort)
     {
         // Arrange — the peer withholds stream credit so disposal pauses before sending CONNECTION_CLOSE.
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
         await using WithheldCreditPair pair = await WithheldCreditPair.CreateAsync(
             certificate,
-            options => options.CloseDeliveryTimeout = TimeSpan.FromMilliseconds(100),
+            options => options.CloseDeliveryTimeout = Timeout.InfiniteTimeSpan,
             cancellation.Token);
         Task disposal = pair.Server.DisposeAsync().AsTask();
         disposal.IsCompleted.ShouldBeFalse();
         pair.Server.State.ShouldBe(ConnectionState.Closing);
 
-        // Act — a later coded abort must not choose the close while disposal waits for the peer.
-        pair.Server.Abort(errorCode);
-        await disposal.WaitAsync(cancellation.Token);
+        // Act — a host's shorter stop budget must interrupt the delivery wait without replacing
+        // the close code disposal already selected. Both root overloads honor that first choice.
+        if (codedAbort)
+        {
+            pair.Server.Abort(0x42);
+        }
+        else
+        {
+            pair.Server.Abort();
+        }
+
+        await disposal.WaitAsync(TimeSpan.FromSeconds(2), cancellation.Token);
 
         // Assert
         QuicException closed = await Should.ThrowAsync<QuicException>(
             async () => await pair.ReadToEndAsync(cancellation.Token));
         closed.QuicError.ShouldBe(QuicError.ConnectionAborted);
         closed.ApplicationErrorCode.ShouldBe(sentinelCloseErrorCode);
-        pair.Server.State.ShouldBe(ConnectionState.Closed);
+        pair.Server.State.ShouldBe(ConnectionState.Aborted);
     }
 
     private static void WithSentinelCodes(QuicConnectionListenerOptions options)
