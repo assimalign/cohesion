@@ -17,6 +17,31 @@ namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
 public partial class CompileDatabaseSchemaTaskTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Runtime scripts cannot silently disappear from a typed schema artifact")]
+    public void Execute_RuntimeScript_ShouldRefuseIncompleteArtifact()
+    {
+        // Arrange
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Schema.cs");
+        File.WriteAllText(sourcePath, """
+            using Assimalign.Cohesion.Database.Sql;
+            var builder = SqlDatabaseEngine.CreateBuilder("app");
+            builder.AddDatabase("app", database => {
+                database.Schema(schema => schema.Table<Row>("rows", table => table.Key(row => row.Id)));
+                database.Script("001", "CREATE FUNCTION answer() RETURNS INT RETURN 42");
+            });
+            public sealed class Row { public int Id { get; set; } }
+            """);
+        var engine = new RecordingBuildEngine();
+        var task = CreateTask(directory, sourcePath, "Sql", engine);
+        // Act
+        bool success = task.Execute();
+        // Assert
+        success.ShouldBeFalse();
+        engine.Errors.ShouldContain(error => error.Code == "COHDBSDK110");
+        task.Schemas.ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: C# SQL declaration writes canonical document and hash")]
     public void Execute_WithSqlCSharpSchema_ShouldWriteCanonicalDocumentAndHash()
     {
