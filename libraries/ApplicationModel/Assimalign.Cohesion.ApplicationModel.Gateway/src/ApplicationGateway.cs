@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Net.Http;
@@ -1125,10 +1126,12 @@ public abstract partial class ApplicationGateway :
             }
 
             ResourceStateDetailTracker observations = GetApplicationObservations(model);
-            ResourceStateObservation observation = await observations
-                .WaitForObservationAsync(
+            ResourceStateObservation observation = await WaitForReadinessAsync(
+                    state,
+                    observations,
                     descriptor.Resource.Id,
                     terminals,
+                    plan.Workload.Gate.Satisfying,
                     budget,
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -1171,6 +1174,43 @@ public abstract partial class ApplicationGateway :
         }
     }
 
+    private static async Task<ResourceStateObservation> WaitForReadinessAsync(
+        IApplicationResourceStateManager state,
+        ResourceStateDetailTracker details,
+        ResourceId id,
+        IReadOnlySet<ResourceLifecycle> terminals,
+        IReadOnlyList<ResourceLifecycle> satisfying,
+        TimeSpan budget,
+        CancellationToken cancellationToken)
+    {
+        Task<ResourceStateObservation>? atomicWait = state switch
+        {
+            InMemoryResourceStateManager memory => memory.WaitForObservationAsync(id, terminals, budget, cancellationToken),
+            ApplicationScopedResourceStateManager scoped => scoped.WaitForObservationAsync(id, terminals, budget, cancellationToken),
+            _ => null,
+        };
+        if (atomicWait is not null)
+        {
+            return await atomicWait.ConfigureAwait(false);
+        }
+
+        long started = Stopwatch.GetTimestamp();
+        ResourceLifecycle reached = await state.WaitForStateAsync(id, terminals, budget, cancellationToken).ConfigureAwait(false);
+        if (Contains(satisfying, reached) || !terminals.Contains(reached))
+        {
+            return new ResourceStateObservation(reached, null);
+        }
+
+        // Only failure diagnostics can wait for late events, within the original budget.
+        // 250 ms allows dispatch/scheduler handoff without spending a full readiness budget
+        // on an event a foreign manager may never deliver.
+        TimeSpan remaining = budget - Stopwatch.GetElapsedTime(started);
+        TimeSpan grace = TimeSpan.FromMilliseconds(250);
+        string? detail = await details.WaitForDetailAsync(id, reached,
+            remaining < grace ? remaining : grace, cancellationToken).ConfigureAwait(false);
+        return new ResourceStateObservation(reached, detail);
+    }
+
     private ResourceStateDetailTracker GetApplicationObservations(IApplicationModel model)
     {
         foreach (ApplicationStateView view in _applicationStates)
@@ -1194,13 +1234,13 @@ public abstract partial class ApplicationGateway :
             {
                 bool gated = view.Model.Name == gatedResource.Model.Name
                     && resource.Id == gatedResource.Descriptor.Resource.Id;
-                ResourceStateObservation observation = gated ? terminal : view.Details.GetObservation(resource.Id);
-                if (!gated && observation.State != ResourceLifecycle.Failed)
+                if (!gated && view.State.GetState(resource.Id) != ResourceLifecycle.Failed)
                 {
                     continue;
                 }
 
-                string? detail = observation.Detail;
+                ResourceStateObservation observation = gated ? terminal : view.Details.GetObservation(resource.Id);
+                string? detail = gated || observation.State == ResourceLifecycle.Failed ? observation.Detail : null;
                 details.Append($" Resource '{view.Model.Name}/{resource.Name}' last state detail: ");
                 details.Append(string.IsNullOrWhiteSpace(detail) ? "(none reported)." : detail);
             }

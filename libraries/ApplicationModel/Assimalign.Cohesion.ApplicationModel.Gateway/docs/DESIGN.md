@@ -79,7 +79,7 @@ Kubernetes — is the *same* algorithm with different hooks, so it is written on
    compile the immutable plan plus artifact, inputs, and observed dependencies, and call
    `ReconcileAsync`. A controller may set `Skipped`; its dependents become `Skipped` while
    independent resources continue.
-6. **Gate once from the plan**: wait for a lifecycle-and-detail observation with
+6. **Gate once from the plan**: wait on the gateway's state manager with
    `plan.Workload.Gate.Terminals` and a per-resource budget, then admit the resource exactly when
    `Gate.Satisfying` contains the reached state. Long-running kinds satisfy on `Running`; a Job
    satisfies on `Stopped`. `Degraded` is observational and never re-gates an admitted dependent.
@@ -97,21 +97,32 @@ state comparison. Deployment, StatefulSet, and DaemonSet plans terminate on
 by the `cohesion-platforms` rule 2 amendment; that sibling repository is not edited here.
 
 A rejected readiness gate throws an `InvalidOperationException` naming the observed state and
-detail of the observation that ended its wait, plus the latest observation of every other Failed
-resource, qualified by application and resource name. This includes startup exceptions and
-readiness-budget expiry, so a caller does not need access to the in-memory state to learn why
-reconciliation failed. A later Starting or Failed update cannot replace the gated observation's
-detail, and a null failure detail never inherits an earlier state's text.
+detail associated with that state, plus every other resource currently Failed according to its
+manager's `GetState`, qualified by application and resource name. This includes startup exceptions
+and readiness-budget expiry, so a caller does not need access to the in-memory state to learn why
+reconciliation failed. A null failure detail never inherits an earlier state's text.
 
-Each application subscribes to the existing `StateChanged` contract before realization and keeps
-lifecycle and detail together in an internal observation store. The readiness waiter receives
-that immutable pair directly; diagnostics never join a lifecycle-only wait result to a separate
-detail read. This same event path applies to built-in, scoped, and foreign state managers,
-including forwarding wrappers whose readiness waiters complete before their events arrive.
-Event delivery is part of the readiness budget and caller cancellation abandons the observation
-wait. The tracker detaches when the session ends. The reference store supplies the internal paired
-snapshot/wait machinery while its public `WaitForStateAsync` still returns only the lifecycle.
-No public state or gateway contract is widened for diagnostics.
+Readiness always comes from the gateway's manager. For `InMemoryResourceStateManager`, the gate
+uses its internal `WaitForObservationAsync`, which captures lifecycle and detail together under the
+same lock as state writes and waiter registration. An application-scoped view over that manager
+forwards internally with the scoped resource id. Later state updates cannot replace the pair that
+completed this waiter. Other Failed resources use the manager's internal atomic snapshot, also
+forwarded by the scoped view; if the snapshot is no longer Failed its detail is omitted.
+
+For any other manager, its own `WaitForStateAsync` alone decides the gate's lifecycle. Successful
+readiness returns immediately, independent of events. For a rejected terminal state, the gateway
+accepts detail only when the tracker's latest `StateChanged` observation has that same lifecycle.
+It allows up to **250 ms**, capped by the readiness budget remaining after the manager wait, for
+that pairing: enough for an event-dispatch/scheduler handoff (including a briefly held subscriber),
+while bounding failure-report latency when events are absent. Expiry reports `(none reported)`;
+it never turns a manager terminal result into a readiness timeout. Caller cancellation abandons
+the detail wait. A budget-expired nonterminal result retains the gateway's own timeout detail.
+For other Failed resources a foreign manager's tracked detail is used only if its latest event
+is also Failed, without another grace period. The public contract cannot distinguish separate
+transitions to the same lifecycle, so foreign detail pairing promises a matching latest lifecycle,
+not an exact transition identity. The tracker subscribes before realization and detaches when the
+session ends. Event delivery may race or reverse state-write order; it never decides readiness or
+which resources are Failed. No public state or gateway contract is widened for diagnostics.
 
 `LocalPlanController` keeps compilation pure:
 `Compile(plan, artifact, inputs, observedDependencies, options)` only produces the local desired
@@ -701,7 +712,9 @@ and unquoted short absolute, relative, and PATH commands, including empty argume
 quotes, spaces, and trailing backslashes. Quoted short and long resource launches also retain
 their working directories. Reconcile tests cover multiple failures, latest details, equal resource
 names in separate applications, a forwarding manager with an earlier subscriber holding its
-Failed event, and later updates that must not change an already completed failure observation.
+Failed event, late or absent foreign terminal events, deterministically reversed built-in events,
+manager-owned selection of other failures, and later updates that must not change an already
+completed built-in failure observation.
 Item #968 tests additionally cover literal/parameter/store resolution, typed certificate
 unavailability, fresh audience-bound ES256 credentials, per-application persisted trust keys,
 bounded developer tokens, digest enforcement for `AddContainer`, and parameter CLI precedence.

@@ -40,6 +40,18 @@ internal sealed class ApplicationScopedResourceStateManager :
 
     public ResourceLifecycle GetState(ResourceId id) => _inner.GetState(GetScopedId(id));
 
+    internal ResourceStateObservation? GetObservation(ResourceId id) =>
+        _inner is InMemoryResourceStateManager memory ? memory.GetObservation(GetScopedId(id)) : null;
+
+    internal Task<ResourceStateObservation>? WaitForObservationAsync(
+        ResourceId id,
+        IReadOnlySet<ResourceLifecycle> terminals,
+        TimeSpan budget,
+        CancellationToken cancellationToken = default) =>
+        _inner is InMemoryResourceStateManager memory
+            ? memory.WaitForObservationAsync(GetScopedId(id), terminals, budget, cancellationToken)
+            : null;
+
     public IReadOnlyList<ResourceCommandObservation> GetCommandObservations(ResourceId id) =>
         _inner.GetCommandObservations(GetScopedId(id));
 
