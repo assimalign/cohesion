@@ -399,7 +399,7 @@ The issue list:
 
 ### Stage 14 — Performance, operations and DX
 
-**Status:** in progress (2026-10-12). The owner approved Stage 13 and every recommendation from its review (decisions 50–54).
+**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation.
 - Sessions run in the Codex CLI on Astra 6 at ultra effort, as in Stage 13. A pipeline script drives each session's implement, review, verify and fix runs in its own worktree.
 - Sessions in one row edit the same files, so each runs as one serial session; the rows of a wave run in parallel.
 - Wave 2 needs wave 1 integrated:
@@ -1054,6 +1054,131 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - **Where the shared `EventSourceRecorder` lives.** #1397 put it in `libraries/DependencyInjection/.../shared/`. Recommended: move it to a neutral test-support location, because a DI package is an odd owner for a test helper.
   - **StaticFiles without `Date`.** Turning `Date` off also turns off StaticFiles' `Last-Modified`. Recommended: fall back to the clock instead, so the option only removes the header.
   - **Database's namespaced health routes.** `/cohesion/v1/healthz` and its siblings on the `admin` listener stay unauthenticated in gateway-managed mode, as before #1431. They publish no exception text since #1409. Recommended: accept.
+- **Stage 14 delivered (2026-10-12), in owner review.** Stage 14 closed the transport's client-fault gaps and finished Web event sources: every Web package, the transport and the server now report through EventSources, and Web forwards them by default. It also reshaped the Connections contracts on the owner's direction (decision 56) and fixed an HTTP/2 deadlock found during validation.
+  - **How it ran:** as in Stage 13, every session ran in the Codex CLI on Astra 6 at ultra effort.
+    - Each session had an implementer, a reviewer, two skeptics on every serious finding, and a fixer.
+    - A Codex integrator cherry-picked each wave, and a Codex auditor three-way-checked it.
+    - Sessions 17, 18, 7, 16 and 19 ran on bases that included the Connections changes they built on. Each was integrated from its own base.
+    - The rule against boundary widening said "a member on an existing public interface", and two sessions added new public types under that wording without reporting them. The rule now counts any unsanctioned public type or member, and later sessions reported theirs.
+  - **Wave 1** (16 issues):
+    - #1439 `c4ad6c1d`, `6eefbfe8`: a connection lost while the application reads an upload is a cancellation on HTTP/1.1 and HTTP/2 too (decision 45). A lazy `100 Continue` write is cancelled with its exchange.
+    - #1432 `eeb3a105`, `2c51c9af`, `a8bc4b1a`: the transport latches a response-side client fault (slow reader, peer reset, `STOP_SENDING`) on every protocol. It does so through the default-implemented `IHttpExchangeControl.ResponseAbortedByClient` and the new `IWebResponseClientFaultFeature` (Web.Server). Web.ErrorHandling treats such an exchange as cancelled.
+    - #1389 `0cdeaa01`, `4bd5169f`: a single added response interceptor resolves without lists: 32 B per exchange instead of 200 B.
+    - #1338 `a12774db`: HTTP/3 request interceptors run inline, without a thread-pool hop.
+    - #1427 `5a2ce987`, `f1c7de08`, `f13498e6`, `7f24e919`: the QUIC driver reports a FIN it already holds, so a bodiless HTTP/3 request skips the body phase. That saves 200 B per request; the 240 B quoted earlier no longer reproduces.
+    - #1425 `3c0e5c6e`: a `PRIORITY_UPDATE` beyond the QUIC stream allowance is `H3_ID_ERROR`.
+    - #1311 `89d58f43`: the QUIC listener's handshake timeout is configurable.
+    - #1337 `b615d4ab`, `c551e70f`: feature lookups allocate nothing on the concrete collection.
+    - #1414 `c684dd85`, `abe3751c`: `HttpStatusCode` accepts unregistered codes from 100 to 599, with titles.
+    - #1303 `5aa2aa72`: Http.Connections and Web.Routing get their OVERVIEW files.
+    - #1305 `e478666f`, `82342334`: the new `Web.Authentication.Certificate` authenticates clients by their TLS certificate, and keeps other schemes' challenges.
+    - #1092 `6739d355`: the `cohesion-spa` template serves client routes through its fallback.
+    - #1448 `1e379c1c`, `fa0e4792`, `2a310824`: the shared `EventSourceRecorder` moves to `build/TestSupport` (decision 52). Its consumers' workflows trigger on it.
+    - #1449 `722a2b48`, `f360705f`: StaticFiles falls back to the clock when `Date` is off (decision 53).
+    - #1413 `2b1d17cf`: HttpsPolicy documents how an operator recognizes a proxy redirect loop.
+    - #1435 `2b1f9d90`: `HttpFormLimitExceededException` names the exceeded limit, and multipart forms count sections against `ValueCountLimit`, which closes a preview.1 hole.
+  - **Wave 2** (12 issues):
+    - #1450 `d4061726`: the Bearer handler appends its challenge instead of replacing other schemes'.
+    - #1403 `33276e1c` … `c2551302`: event sources for Bearer, Cookie, Authorization, Antiforgery and Certificate.
+    - #1412 `a6b915cd`, `66f930c6`: the control plane reuses its bootstrap-token verifier. It disposes the key at teardown through the new `IWebApplicationLifetime` (Web root).
+    - #1400 `5cd9d1fc`, `dbd30129`, `3d136178`: `ResourceControlPlaneEventSource`.
+    - #1434 `41d7e1d8`: Hosting.Resources reports command outcomes.
+    - #1436 `011e17b3`: session store load and commit failures are reported. `IHttpStoredSession.IsModified` is a default interface member (decision 55).
+    - #1405 `f4ee809d`, `bf884a39`: Caching, StaticFiles, Sessions and WebSockets sources. Caching's hit and miss counters were measured over budget and dropped.
+    - #1404 `68d590b2` … `6d821ab1`: RateLimiting, RequestTimeouts, Compression and Forms sources.
+    - #1402 `67a42557` … `d35fd763`: Cors, SecurityHeaders, HostFiltering and ForwardedHeaders sources.
+    - #1406 `fbce91e2`: `HealthCheckEventSource`, with status transitions.
+    - #1407 `8f4bf287`, `e3762abf`: HTTP logging reports sink failures. It also fixes HTTP logging's handling of wave 1's connection-loss cancellation.
+    - #1401 `b75ae2ba` … `11fcbb75`: `ErrorHandlingEventSource`, on #1432's latch.
+  - **The Connections contracts (decision 56)** (3 issues):
+    - #1452 `81caa792` … `c710247d`: every connection carries an `IConnectionFeatureCollection` (`Features`). The `Assimalign.Cohesion.Connections.Tls`, `.StreamAbort` and `.StreamLimits` packages hold the optional capabilities.
+    - #1453 `d5b992f7`, `6b6b50d4`, `74a097cb`, `c27bee54`: the multiplexed roots:
+      - `IMultiplexedStream` and its guided base;
+      - a coded connection close and stream reset;
+      - `IsInputCompleted`.
+      
+      `IMultiplexedConnectionAbort` and `IConnectionInputCompletion` are gone.
+    - #1451 `497d12a4`: an in-memory multiplexed close reaches its peer, with its code.
+  - **The transport and the server** (5 issues):
+    - #1300 `d9bc7a06`, `f1097a68`, `b6d5b5ee`, `1134bdbd`: Http.Connections' EventSource and Meter report transport rejections and protocol errors (decisions 31 and 49).
+    - #1455 `281ba7bc`: the HTTP/2 write scheduler no longer deadlocks when a queued writer is cancelled during a grant. Session 16 found it from a hang dump.
+    - #1398 `d96d8ee1`, `98904c1d`, `df3d78e6`: `WebServerEventSource` replaces #147's `ILogger` diagnostics.
+    - #1399 `371777fd`, `29adf5bc`: an entry-point Web builder forwards Web and transport events by default. Sdk.Web turns `EventSourceSupport` on, which costs +1.68 MB (+11%) on a linux-x64 NativeAOT guard.
+    - #1408 `f46bee61`, `b2842f3a`: a conformance test over every App.Web assembly, and the catalog roll-up.
+  - **Review and integration fixes:** each was confirmed by both skeptics or found by an audit, and each has a regression test.
+    - **Wave 1:**
+      - lazy `100 Continue` writes during a disconnect;
+      - the latch on HTTP/2 and HTTP/3 peer connection loss;
+      - HTTP/3 extended CONNECT writes;
+      - Certificate keeping other schemes' challenges.
+    - **Wave 2:** eight fixes across the control plane, sessions, the edge sources and error handling.
+    - **The Connections changes:**
+      - TLS passed up the per-direction stream-abort feature from beneath it, and now hides it;
+      - stream teardown stopped early when a cancellation callback threw;
+      - a failed local input was reported as a clean completion.
+    - **#1300:**
+      - malformed HTTP/1.1 bodies before dispatch were not reported;
+      - an HTTP/3 reset could be counted twice;
+      - after integration, Web.Forms and Web.Antiforgery reported transport-classified faults a second time (`1134bdbd`).
+    - **Wave 3:**
+      - `ServerBound` names its endpoints;
+      - the linux-x64 NativeAOT cost was measured in a throwaway container.
+  - **Advisories** (decision 24): four new private drafts, each fact-checked against the tag.
+    - GHSA-27jw-43wr-34wv (#1083 and #1425, high): HTTP/3 `PRIORITY_UPDATE` state grew without bound. Stage 12 fixed it, and its triage missed it.
+    - GHSA-v8v7-8p62-v2mx (#1435, medium): multipart forms had no section limit, and IdentityHub's `/oauth2/token` parsed them unauthenticated.
+    - GHSA-r7fx-2r9q-4hfv (#1048, medium): HTTP/2 never enforced `MaxRequestBodySize`. Stage 5 fixed it before the advisory practice began, as with #1066.
+    - GHSA-m5cv-28j8-36pf (#1455, medium): the HTTP/2 write-scheduler deadlock.
+    
+    The other preview.1 defects were triaged and need none: diagnostics gaps, functional defects, or not in the tag.
+  - **Verification at `29adf5bc`:** 93 suites and 9,418 tests, 0 failures. The one skip, Core's `CheckInvalidNamespaces`, predates this stage.
+    - Http.Connections 1,631, Http 1,630, Web.Hosting 509, Web.Routing 387, and Connections.Quic 65 over real QUIC.
+    - The guard passes 37/37 under JIT. The release inventory (225) and the dependency graph checks pass.
+    - The guard, published NativeAOT for win-arm64 from a clean worktree at `29adf5bc`, has no trim or AOT warnings. The native binary passes 37/37 smoke checks, including server EventSource delivery.
+    - Each wave was verified when integrated. During wave 3's integration, one allocation assertion (`Http3InputCompletionAllocationTests`) failed once under load and passed every rerun.
+  - **Docs site** ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)), synced by Codex runs and checked for parity against the source. The check's 6 findings were fixed. The site builds with no warnings and passes its catalog tests (4/4).
+    - `1c8d2a6` syncs the library and SDK pages, with new folders for the three Connections feature packages.
+    - `c14de1e` syncs the Web and area pages, with a new Web.Authentication.Certificate folder.
+    - `af6e246` syncs the guides. `eec581e` links the Routing overview from the site (#1303).
+  - **Follow-ups filed:**
+    - In this stage: #1450 (Bearer challenges), #1451 (in-memory peer close) and #1455 (the HTTP/2 deadlock).
+    - For a later stage: #1454 (certificate rejection reasons that TLS decides before HTTP).
+
+  Behavior changes for the review (decision 15's terms):
+  - **Client faults:**
+    - A connection lost mid-upload or mid-response is a cancellation on every protocol: no `OnException` and no Error log.
+    - A slow reader or a peer reset mid-response is latched, not reported as an application fault.
+  - **Forms:** multipart sections count against `ValueCountLimit` (1,024 by default).
+  - **Status codes:** unregistered codes from 100 to 599 are accepted.
+  - **HTTP/3:**
+    - A `PRIORITY_UPDATE` beyond the stream allowance closes the connection with `H3_ID_ERROR`.
+    - A bodiless request skips the body phase.
+  - **Authentication:** Bearer appends its challenge.
+  - **Connections:**
+    - `Features` is on every connection interface.
+    - `AcceptStreamAsync` and `OpenStreamAsync` return `IMultiplexedStream`.
+    - `Abort(code, reason)` is on the multiplexed roots.
+    - The four capability interfaces moved or were deleted; all of them postdate preview.1.
+  - **Diagnostics:**
+    - `WebApplicationServerLog` and `WebApplicationServerOptions.Logger` are deleted.
+    - The server's category is now `Assimalign.Cohesion.Web.Hosting`, with camelCase payload names.
+    - Entry-point Web builders forward Web and transport events by default. `EnableEventSourceForwarding` opts out.
+    - Sdk.Web turns `EventSourceSupport` on.
+  - **Sessions:** the built-in stores skip the commit for an unchanged session.
+
+  Questions for the review:
+  - **New public seams that no decision approved beforehand.**
+    - The ones the issues sanctioned, and the sessions reported:
+      - `IHttpExchangeControl.ResponseAbortedByClient` (#1432);
+      - `HttpFormLimit` and `HttpFormLimitExceededException.Limit` (#1435);
+      - `ILoggerFactoryBuilder.HasForwarders` and `WebApplicationBuilder.EnableEventSourceForwarding` (#1399, decision 49 (a)).
+    - The two that sessions did not report:
+      - `IWebResponseClientFaultFeature` (Web.Server, #1432);
+      - `IWebApplicationLifetime` (Web root, #1412). The control plane needs it to dispose its key, because `Web.Hosting.Resources` may not reference `Web.Hosting`.
+    - `QuicMultiplexedConnection` no longer implements the TLS and stream-limit contracts itself; it registers them as features (decision 56).
+  - **Advisory packages.** Should every draft also list the `App.<Area>` runtime packs, so Dependabot flags applications that get these libraries only through the shared frameworks? It would apply to all 24 drafts.
+  - **#1454.** Untrusted-chain, expired and not-yet-valid certificate rejections need a validation contract from TLS to the handler. A connection feature is the obvious carrier.
+  - **`ServerBound` endpoints.** It lists the endpoints it can see. Raw `HttpConnectionListenerOptions` registrations stay omitted until a listener exposes its endpoints. Add that seam?
+  - **The Http epic.** #314 hit GitHub's 100-sub-issue cap, so new Http work is filed as tasks under features. Keep that, or split the epic?
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
