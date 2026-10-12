@@ -3010,6 +3010,17 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
   introduced after that release. Compared with intervening builds, hooks now observe `false`
   when the driver already knows there are no bytes after the head.
 
+  Part 2 validation (#1453, #1451) keeps the input-completion allocation test and its
+  assertion unchanged and measures 3,200 B saved across 16 requests (200 B/request).
+  An isolated rerun at base `03207dd6d` measures the same 200 B/request, confirming that
+  the root migration preserves this saving. The historical #1427 report recorded 240 B/request. The independently developed
+  #1389 interceptor optimization is already present in base commit `03207dd6d`:
+  commit `0cdeaa019` records a 40 B/request reduction on the mixed
+  response-interceptor path (see "One added response interceptor"). The default
+  response-starting interceptor keeps Web.Hosting on that path. Singleton-array storage
+  for the client-fault registration and its smaller enumerator account for the reduction;
+  the multiplexed-root migration changes neither that storage nor the allocation assertion.
+
   The completion-race regression uses a delegating pipe reader that publishes DATA and FIN
   immediately after an empty probe. Its explicit constructor stores the inner reader in a
   readonly field and the one-shot completion callback in a separate mutable field, following
@@ -4734,9 +4745,8 @@ Preview.1 retained each wrapper until the connection closed, even after both pip
 completed. Repeated unauthenticated requests on a long-lived opt-in HTTP/3 connection
 could therefore grow retained managed memory (CWE-401). The driver's current-streams
 gauge now falls as requests are released; this diagnostic behavior change against
-preview.1 follows decision 15. The in-memory driver already keeps no collection of
-accepted streams; tests pin HTTP/3's half completion there and verify real QUIC
-request-stream release and the gauge separately.
+preview.1 follows decision 15. Tests pin HTTP/3's half completion over the in-memory
+driver and verify real QUIC request-stream release and the gauge separately.
 
 ### A client's cancellation fires `RequestCancelled` (#1329)
 
@@ -4770,7 +4780,11 @@ half with an error. `Http3Context` passes the request stream's `ConnectionClosed
   local operation, so neither fires the token. The linked source is disposed with the
   exchange, so a stream closed after that reaches no one.
 - **Connection loss.** On the QUIC driver a stream's halves also fault when the connection
-  is lost, so an exchange in flight is cancelled with its connection.
+  is lost, so an exchange in flight is cancelled with its connection. Since #1451 the
+  in-memory multiplexed driver propagates parent abort and disposal to its peer too:
+  the peer's `ConnectionClosed` fires, its accept loop ends, and open streams fail with
+  `ConnectionResetException.ApplicationErrorCode` carrying the close code. HTTP/3
+  peer-loss tests rely on this driver notification instead of aborting both ends by hand.
 
 ### Connection teardown — critical streams and close ordering
 

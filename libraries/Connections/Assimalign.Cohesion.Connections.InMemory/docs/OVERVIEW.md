@@ -24,6 +24,10 @@ maintained.
   `ConnectionResetException`. Both stream ends register that feature; byte-stream pairs have no directional-abort feature.
 - `InMemoryEndPoint` — a name-addressed `EndPoint` for the socketless transport.
 
+Closing or aborting either multiplexed parent notifies both ends and completes both accept loops.
+Active streams fail with `ConnectionResetException.ApplicationErrorCode`: the selected close code,
+or 0 for disposal and no-code abort. The first pair close wins.
+
 Protocol semantics belong to the layers above; this driver only moves bytes.
 
 ## Dependencies

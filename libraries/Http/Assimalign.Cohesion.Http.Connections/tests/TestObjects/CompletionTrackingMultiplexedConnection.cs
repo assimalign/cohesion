@@ -11,8 +11,8 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 /// <summary>
-/// Observes completed request-stream pipes over the in-memory driver, which does not retain accepted
-/// streams in a registry or publish a stream gauge. Its Closing state records output completion.
+/// Observes completed request-stream pipes over the in-memory driver, which does not publish a stream
+/// gauge. Its Closing state records output completion.
 /// </summary>
 internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConnection
 {

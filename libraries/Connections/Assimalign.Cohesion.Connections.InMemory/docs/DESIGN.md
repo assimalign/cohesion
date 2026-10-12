@@ -89,10 +89,34 @@ Stream direction is honored: an outbound unidirectional (`WriteOnly`) stream mir
 `ReadOnly` stream on the peer — the write-only end's `Input` is pre-completed (it reads nothing)
 and the read-only end's `Output` throws on write, per the `IMultiplexedConnection` contract.
 Opening a `ReadOnly` stream throws `ArgumentException`, since a peer cannot open a stream only the
-remote side may write to. Disposing or aborting a multiplexed connection completes its inbound
-channel (so pending and future `AcceptStreamAsync` calls observe `OperationCanceledException`) and
-tears down any queued-but-unaccepted streams; opening a stream toward a closed peer throws
-`ConnectionAbortedException`.
+remote side may write to.
+
+**A parent close reaches both ends (#1451).** The pair shares one close gate. Opening a stream
+registers both ends before handing either out; each parent tracks queued, accepted and locally
+opened streams until their terminal teardown. A stream leaving an accept queue stays tracked.
+Stream disposal, whole-stream abort and completion of both usable halves remove the end; a
+directional peer notification alone does not, since the opposite half can still be live.
+
+The first abort or disposal on either parent chooses the pair close. Coded abort uses its caller
+code; no-code abort and disposal use 0. Both parents signal `ConnectionClosed`, both accept queues
+end, and pending and future accepts throw `OperationCanceledException`. The initiating parent is
+`Aborted` for abort or `Closed` for disposal; its peer becomes `Aborted`. Repeated closes and later
+disposal preserve that first decision. Opening another stream fails with the selected loss.
+
+Every active stream first records a `ConnectionResetException` whose `ApplicationErrorCode` is the
+connection close code. Only then are queues completed and parent tokens signaled; callbacks and
+pipe completion run outside the pair gate. A callback can dispose its stream without deadlocking
+or replacing the recorded code with a clean end. A throwing cancellation callback does not strand
+other notifications. Pipe wrappers check recorded loss before and after pending operations, so
+pending and subsequent reads/writes fail as connection loss even after cleanup. Parent disposal
+is not a clean stream FIN. The optional reason exception stays local; the code is the peer-facing
+close reason, matching the existing reset-code mapping.
+
+**Compatibility and triage.** This corrects behavior shipped in 10.0.0-preview.1: parent closure
+previously left the peer token and accepts live, and failed to terminate accepted streams. Code
+relying on those pending operations surviving closure now observes immediate cancellation/loss,
+an accepted preview behavior break under decisions 15 and 56. The socketless driver has no remote
+network entry point; this is an in-process lifecycle defect, not an unauthenticated remote attack.
 
 **An end that abandons a stream signals the other end (#1329).** The two ends of a stream pair hold
 each other. An end that aborts, or whose holder completes `Output` with an error (the in-memory
@@ -127,8 +151,8 @@ tested over this driver puts its codes where the QUIC driver puts them:
 available directions before ending the lifecycle. A direction already ended retains its first code.
 `IsInputCompleted` is true when the peer completed output cleanly and this end has not aborted
 reading; buffered bytes may still remain. The parent root accepts coded aborts in the same 62-bit
-range as streams; the first abort or disposal decides its close. Peer notification is the follow-up
-in #1451.
+range as streams; the first abort or disposal decides the pair close and notifies both ends as
+described above.
 
 The stream return types change from `ValueTask<IConnection>` to `ValueTask<IMultiplexedStream>`
 (and from `ValueTask<Connection>` to `ValueTask<MultiplexedStream>` on guided bases). Together

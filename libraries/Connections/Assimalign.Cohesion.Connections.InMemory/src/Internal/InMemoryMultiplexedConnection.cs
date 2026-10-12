@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using System.Threading.Channels;
@@ -9,7 +10,7 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// <summary>
 /// One end of a cross-wired, in-memory <see cref="MultiplexedConnection"/>. Streams opened on one end
 /// are delivered to the other end's accept queue; each stream is itself an in-memory
-/// <see cref="Connection"/>, so h2/h3-shaped tests can open and accept multiple concurrent streams.
+/// <see cref="MultiplexedStream"/>, so h2/h3-shaped tests can open and accept multiple concurrent streams.
 /// </summary>
 /// <remarks>
 /// Opening a stream creates a cross-wired stream pair (see <see cref="InMemoryConnection"/>): the local
@@ -28,21 +29,27 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
     private readonly EndPoint? _remoteEndPoint;
     private readonly ConnectionId _id = ConnectionId.New();
     private readonly CancellationTokenSource _connectionClosedSource = new();
-    private readonly Lock _gate = new();
+    // Both ends share this gate: opening a pair and choosing its first close are atomic together.
+    private readonly Lock _gate;
+    private readonly HashSet<InMemoryConnection.StreamEnd> _streams = new();
+    private readonly Action<InMemoryConnection.StreamEnd> _onStreamClosed;
 
     private InMemoryMultiplexedConnection _peer = null!;
     private ConnectionState _state = ConnectionState.Open;
-    private bool _isDisposed;
+    private ConnectionResetException? _closeReason;
 
     private InMemoryMultiplexedConnection(
         ConnectionCapabilities capabilities,
         EndPoint? localEndPoint,
-        EndPoint? remoteEndPoint)
+        EndPoint? remoteEndPoint,
+        Lock gate)
     {
         _capabilities = capabilities;
         _streamCapabilities = capabilities with { IsMultiplexed = false };
         _localEndPoint = localEndPoint;
         _remoteEndPoint = remoteEndPoint;
+        _gate = gate;
+        _onStreamClosed = OnStreamClosed;
     }
 
     /// <inheritdoc />
@@ -77,7 +84,15 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
     {
         try
         {
-            return await _inboundStreams.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            MultiplexedStream stream = await _inboundStreams.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            lock (_gate)
+            {
+                if (_closeReason is not null)
+                {
+                    throw new OperationCanceledException("The in-memory multiplexed connection has been closed.", cancellationToken);
+                }
+            }
+            return stream;
         }
         catch (ChannelClosedException)
         {
@@ -100,29 +115,25 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
 
         lock (_gate)
         {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            if (_closeReason is not null)
             {
-                throw new ConnectionAbortedException("Cannot open a stream on a closed multiplexed connection.");
+                throw _closeReason;
             }
+
+            // Track each end until it terminates, including after it leaves the accept queue.
+            (InMemoryConnection.StreamEnd local, InMemoryConnection.StreamEnd remote) = InMemoryConnection.CreateStreamPair(
+                _streamCapabilities,
+                endPointA: _localEndPoint,
+                endPointB: _remoteEndPoint,
+                directionA: direction,
+                onClosedA: _onStreamClosed,
+                onClosedB: _peer._onStreamClosed);
+            _streams.Add(local);
+            _peer._streams.Add(remote);
+            // Closing either writer also holds the pair gate, so this open cannot cross a close.
+            _peer._inboundStreams.Writer.TryWrite(remote);
+            return ValueTask.FromResult<MultiplexedStream>(local);
         }
-
-        // The local end takes the requested direction; the peer end takes the mirror direction. The
-        // ends signal each other's ConnectionClosed when one abandons the stream, as QUIC streams do.
-        (MultiplexedStream local, MultiplexedStream remote) = InMemoryConnection.CreateStreamPair(
-            _streamCapabilities,
-            endPointA: _localEndPoint,
-            endPointB: _remoteEndPoint,
-            directionA: direction);
-
-        if (!_peer._inboundStreams.Writer.TryWrite(remote))
-        {
-            _ = local.DisposeAsync();
-            _ = remote.DisposeAsync();
-
-            throw new ConnectionAbortedException("The peer multiplexed connection has been closed.");
-        }
-
-        return ValueTask.FromResult<MultiplexedStream>(local);
     }
 
     /// <inheritdoc />
@@ -134,44 +145,13 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
         ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, (1L << 62) - 1);
 
-        lock (_gate)
-        {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
-            {
-                return;
-            }
-
-            _state = ConnectionState.Aborted;
-        }
-
-        TearDownStreams();
-        CancelConnectionClosed();
+        Close(errorCode, disposing: false);
     }
 
     /// <inheritdoc />
     public override ValueTask DisposeAsync()
     {
-        bool wasAborted;
-
-        lock (_gate)
-        {
-            if (_isDisposed)
-            {
-                return ValueTask.CompletedTask;
-            }
-
-            _isDisposed = true;
-            wasAborted = _state == ConnectionState.Aborted;
-            if (!wasAborted)
-            {
-                _state = ConnectionState.Closed;
-            }
-        }
-
-        TearDownStreams();
-
-        CancelConnectionClosed();
-
+        Close(0, disposing: true);
         return ValueTask.CompletedTask;
     }
 
@@ -187,8 +167,9 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
         EndPoint? endPointA,
         EndPoint? endPointB)
     {
-        InMemoryMultiplexedConnection a = new(capabilities, endPointA, endPointB);
-        InMemoryMultiplexedConnection b = new(capabilities, endPointB, endPointA);
+        Lock gate = new();
+        InMemoryMultiplexedConnection a = new(capabilities, endPointA, endPointB, gate);
+        InMemoryMultiplexedConnection b = new(capabilities, endPointB, endPointA, gate);
 
         a._peer = b;
         b._peer = a;
@@ -196,13 +177,62 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
         return (a, b);
     }
 
-    private void TearDownStreams()
+    private void Close(long errorCode, bool disposing)
+    {
+        InMemoryConnection.StreamEnd[] streams;
+        lock (_gate)
+        {
+            if (_closeReason is not null)
+            {
+                return;
+            }
+
+            ConnectionResetException loss = new(
+                $"The multiplexed connection closed with application error code 0x{errorCode:x}.", errorCode);
+            _closeReason = loss;
+            _peer._closeReason = loss;
+            _state = disposing ? ConnectionState.Closed : ConnectionState.Aborted;
+            _peer._state = ConnectionState.Aborted;
+
+            streams = new InMemoryConnection.StreamEnd[_streams.Count + _peer._streams.Count];
+            _streams.CopyTo(streams);
+            _peer._streams.CopyTo(streams, _streams.Count);
+            _streams.Clear();
+            _peer._streams.Clear();
+            // Mark every end before a completed accept can wake protocol teardown. This stores state
+            // only; stream removal callbacks never run while holding a stream's mechanics gate.
+            foreach (InMemoryConnection.StreamEnd stream in streams)
+            {
+                stream.SetConnectionLoss(loss);
+            }
+            CompleteAcceptQueue();
+            _peer.CompleteAcceptQueue();
+        }
+
+        // A callback may read or dispose a stream. Pipe operations and callbacks run outside the pair
+        // gate, after loss is published, to allow reentrant teardown without losing the close code.
+        CancelConnectionClosed();
+        _peer.CancelConnectionClosed();
+        foreach (InMemoryConnection.StreamEnd stream in streams)
+        {
+            stream.FinishConnectionLoss();
+        }
+    }
+
+    private void OnStreamClosed(InMemoryConnection.StreamEnd stream)
+    {
+        lock (_gate)
+        {
+            _streams.Remove(stream);
+        }
+    }
+
+    private void CompleteAcceptQueue()
     {
         _inboundStreams.Writer.TryComplete();
-
-        while (_inboundStreams.Reader.TryRead(out MultiplexedStream? stream))
+        while (_inboundStreams.Reader.TryRead(out _))
         {
-            _ = stream.DisposeAsync();
+            // All live ends, queued or accepted, are in the close snapshot.
         }
     }
 
@@ -215,6 +245,10 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
         catch (ObjectDisposedException)
         {
             // The token source was disposed concurrently with tear-down.
+        }
+        catch (AggregateException)
+        {
+            // A consumer callback must not prevent the other end and its streams from learning of loss.
         }
     }
 }
