@@ -2575,6 +2575,14 @@ failed response operation latches before surfacing the failure to the handler.
 HTTP/2 preserves its existing response-write behavior on peer reset: a writer awaiting flow-control
 credit may return after discarding the unwritten remainder, while `RequestCancelled` and the latch
 report why the response ended. A thrown failure is not needed to retain the transport's fact.
+
+HTTP/3 extended CONNECT acceptance HEADERS and tunnel DATA use the same peer-abort classifier and
+exchange cancellation as ordinary responses. They retain their direct pipe writer and minimum-rate
+exemption. A tokenless tunnel flush ends on peer reset or `STOP_SENDING`, and the response latch is
+visible before the failure escapes. Classification sees the original driver exception before tunnel
+compatibility wrapping: DATA retains its `IOException` contract, while a peer failure accepting the
+HEADERS carries the exchange's cancellation token.
+
 Application cancellation, application header or callback failures, and server resets caused by
 request-body rejection do not alone set the response latch. HTTP/3 excludes its local request reset
 and explicitly initiated local connection closure from the peer classifier. Ending stream acceptance
@@ -2599,6 +2607,9 @@ reset or connection loss during response writing, or a configured HTTP/1.1 slow 
 application fault observer. HTTP/2 and HTTP/3 minimum-rate reclamation arrived later in #1384. The
 latch changes no rate default or wire reset code and keeps existing control implementations source
 compatible through its default `false`.
+
+The HTTP/3 extended CONNECT transport path did not exist in 10.0.0-preview.1. Its HEADERS and DATA
+classification now follows the same behavior as ordinary responses without changing tunnel rate policy.
 
 The implementation remains AOT compatible: interface dispatch, static delegates and value tuples,
 with no reflection. HTTP/1.1 and HTTP/3 final writes reuse the exchange token when the caller passes

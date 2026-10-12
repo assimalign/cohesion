@@ -59,13 +59,13 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
     /// <param name="headerBlock">The QPACK-encoded <c>200</c> field section.</param>
     /// <param name="cancellationToken">A token that cancels the write.</param>
     /// <returns>A task that completes once the head is flushed.</returns>
-    /// <exception cref="IOException">The request stream was reset, its peer stopped reading, or the connection closed.</exception>
+    /// <exception cref="IOException">The request stream was reset locally or its connection closed locally.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled the write, or the peer abandoned the response.</exception>
     public async ValueTask WriteHeadAsync(byte[] headerBlock, CancellationToken cancellationToken)
     {
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ThrowIfUnwritable();
             await WriteFrameAsync(Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -91,7 +91,6 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
                     "The server's side of the extended CONNECT tunnel has already ended.");
             }
 
-            ThrowIfUnwritable();
             await WriteFrameAsync(Http3FrameType.Data, data, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -139,26 +138,34 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
 
     private async ValueTask WriteFrameAsync(Http3FrameType frameType, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        PipeWriter output = _context.StreamConnection.Output;
-        FlushResult result;
-
+        // Tunnel HEADERS and DATA share ordinary responses' cancellation and peer-abort classification.
+        // Keep the tunnel's raw writer here: tunnel octets are exempt from the response data rate.
         try
         {
-            // RFC 9114 §7.1 — a frame is its type and length (variable-length integers) and its payload.
-            Span<byte> header = output.GetSpan(2 * QuicVariableLengthInteger.MaxLength);
-            int length = QuicVariableLengthInteger.Write(header, (long)frameType);
-            length += QuicVariableLengthInteger.Write(header[length..], payload.Length);
-            output.Advance(length);
-
-            result = await output.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+            await _connection.RunResponseWriteAsync(_context, (Tunnel: this, frameType, payload),
+                static (_, _, state, token) => state.Tunnel.WriteFrameCoreAsync(state.frameType, state.payload, token),
+                cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is ConnectionException or InvalidOperationException)
         {
-            // The in-memory driver surfaces a peer's abort as its reason; a pipe completed or disposed
-            // underneath (a reset, the connection's teardown) throws InvalidOperationException. The QUIC
-            // driver's QuicException is already an IOException.
+            // Classify the original driver failure first: a coded peer reset may reach this writer
+            // before its closure callback. Unclassified local pipe failures keep the tunnel contract.
             throw new IOException("The HTTP/3 request stream carrying the extended CONNECT tunnel failed.", exception);
         }
+    }
+
+    private async ValueTask WriteFrameCoreAsync(Http3FrameType frameType, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        ThrowIfUnwritable();
+        PipeWriter output = _context.StreamConnection.Output;
+
+        // RFC 9114 §7.1 — a frame is its type and length (variable-length integers) and its payload.
+        Span<byte> header = output.GetSpan(2 * QuicVariableLengthInteger.MaxLength);
+        int length = QuicVariableLengthInteger.Write(header, (long)frameType);
+        length += QuicVariableLengthInteger.Write(header[length..], payload.Length);
+        output.Advance(length);
+
+        FlushResult result = await output.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
 
         if (result.IsCompleted)
         {
