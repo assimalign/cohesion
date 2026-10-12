@@ -1331,13 +1331,20 @@ script checksum refusal; the catalog format tests.
 E1's bound tree and E2's scalar ABI; SQL domains use E3's shared resolution, bounds and CHECK path.
 Engine-registered domains remain code; SQL domains are persisted catalog objects reconstructed
 on reopen. The persisted-expression inventory includes CREATE TABLE function-call DEFAULTs.
-Function parameter/result domain names persist and their constraints run inside the SQL scalar leaf.
-Defaults are volatile/called-on-NULL for SQL functions, and CHECK remains Immutable-only. Native
+Function parameter/result domain names persist. Domain argument coercion runs before STRICT's
+NULL short-circuit, for native and SQL calls, and result validation follows body execution.
+Invocation collation reaches SQL body parameters, comparisons and LIKE; string results retain
+it for ordering/grouping. Bound bodies are cached per collation, prepared during binding for
+fixed-collation calls, and reused across rows and statements. Defaults are volatile/called-on-NULL for SQL functions, and CHECK
+rechecks Immutable-only admission on every bind. Native
 collisions, native DROP, recursion, volatility violations and dependent DROP are refused. Native
 DROP matches the requested normalized signature (COHSQLD003); an unknown overload of a native
 name is COHSQLD001. Format
-**10** persists canonical definitions, dependency identities and Adhoc/Schema ownership; the format
-gate refuses 9 and older without a reader or upgrade path. Missing native calls remain unresolved
+**10** persists canonical definitions with ordered resolved-call identities and Adhoc/Schema
+ownership. Table/domain CHECKs, column/domain DEFAULTs and SQL bodies reload each call by its
+original normalized signature; native or SQL overload additions cannot rebind them. DROP reads
+the same call records. Literal-only defaults carry empty lists. Format 10 remains unchanged;
+the gate refuses 9 and older without a reader or upgrade path. Missing recorded calls remain unresolved
 on open and fail use/declared Build. CREATE TABLE accepts function-call defaults, evaluated once
 per omitted INSERT value; ADD COLUMN remains literal-only because missing historical row tails
 are not materialized. The FUNCTIONS view adds IS_SQL_DEFINED; TYPES and DOMAINS expose the merged
@@ -1373,7 +1380,7 @@ before any database files are opened, preserving the exact pre-Build state on re
 document remains an accurate record of typed objects after script publication; no post-script
 snapshot is substituted for declaration intent.
 
-Validation: Debug and Release each pass SQL 2,014; Language 1,020; Catalog 68; Schema 104;
+Original E4 validation, before the review fixes: Debug and Release each pass SQL 2,014; Language 1,020; Catalog 68; Schema 104;
 Client 350; Hosting 115; root Database 186; SDK Database 100; Database.Testing 5 (zero failures
 and skips in every final run). Database.Testing follows the final-source Release local installer
 with -SkipLibraries. The installer succeeds with single-node builds after an MSB4166 child-node
@@ -1395,8 +1402,8 @@ recovery in two fresh reader processes: no repeated earlier INSERT, callable SQL
 enforced SQL domain. The committed crash-image test also covers every durable write boundary.
 
 Re-derived entry points: Sql/src/SqlDatabaseBuilder.cs:172; Sql.Language/src/SqlQueryParser.Definitions.cs;
-Sql/src/Internal/SqlDefinitionBinder.cs:30; Sql/src/Internal/Functions/SqlExpressionFunction.cs;
-Sql/src/Internal/SqlPlanExecutor.Definitions.cs; Sql/src/Internal/SqlDeclaredDatabase.Scripts.cs:19;
+Sql/src/Internal/SqlDefinitionBinder.cs:53; Sql/src/Internal/Functions/SqlExpressionFunction.cs;
+Sql/src/Internal/SqlPlanExecutor.Definitions.cs; Sql/src/Internal/SqlDeclaredDatabase.Scripts.cs:19,93;
 Sql.Catalog/src/SqlCatalog.Definitions.cs; Sql.Catalog/src/SqlCatalog.Scripts.cs. PostgreSQL references
 were checked against the local clone: functioncmds.c:1095/1098, typecmds.c:700, fmgr.c:238/253.
 

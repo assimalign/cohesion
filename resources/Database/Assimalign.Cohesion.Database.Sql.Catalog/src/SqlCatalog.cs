@@ -1200,6 +1200,11 @@ public sealed partial class SqlCatalog
             throw new SqlCatalogException("The catalog DDL generation is exhausted.");
         }
 
+        if (scriptReceipt is { } suppliedReceipt && suppliedReceipt.BaseGeneration > _ddlGeneration)
+        {
+            throw new SqlCatalogException($"COHSQLS001: Script receipt '{suppliedReceipt.Name}' has an original generation later than the current catalog generation.");
+        }
+
         ulong generation = _ddlGeneration + 1;
         ulong identity = nextObjectId ?? _nextObjectId;
         var location = PersistCounter(transaction, identity, generation);
@@ -1337,10 +1342,9 @@ public sealed partial class SqlCatalog
         }
 
         AppendOwnership(ref writer, table.Owner, table.OwningSchema);
-        // Versioned trailing extension; old records end after keys or ownership. Version 1
-        // carries the constraints, 2 adds the column collations, 3 (data-storage format 6,
-        // #1241) the dropped columns' physical ordinals and 4 (data-storage format 7, phase E3)
-        // each column's domain name, NULL for a column of a built-in type.
+        // Format 10 retains the existing constraint/layout/domain extension and appends
+        // mandatory function-call identity vectors. No earlier table-record shape is accepted
+        // as a current-format record; the engine's format gate refuses older databases.
         writer.AppendInt32(tableExtensionVersion).AppendInt32(table.Constraints.Count);
         foreach (SqlCatalogConstraint constraint in table.Constraints)
         {
@@ -1374,7 +1378,24 @@ public sealed partial class SqlCatalog
         {
             AppendOptionalString(ref writer, column.DomainName);
         }
+        foreach (var column in table.Columns)
+        {
+            AppendFunctionCalls(ref writer, column.DefaultFunctionCalls);
+        }
+        foreach (var constraint in table.Constraints)
+        {
+            AppendFunctionCalls(ref writer, constraint.CheckFunctionCalls);
+        }
         return writer.ToArray();
+    }
+
+    private static void AppendFunctionCalls(ref DatabaseKeyWriter writer, IReadOnlyList<string> calls)
+    {
+        writer.AppendInt32(calls.Count);
+        foreach (string call in calls)
+        {
+            writer.AppendString(call, Collation.Binary);
+        }
     }
 
     private static SqlCatalogTable DecodeTable(ref DatabaseKeyReader reader)
@@ -1427,10 +1448,8 @@ public sealed partial class SqlCatalog
         var dropped = new List<int>();
         if (!reader.IsAtEnd)
         {
-            // Versions 1 to 3 still load, so that the data-storage format gate, which
-            // reads the loaded catalog, refuses an older database with its own message
-            // (format 5 and earlier wrote version 2, with no dropped columns; format 6 wrote
-            // version 3, with no domains).
+            // The historical extension labels describe the fields below. Format 10 also
+            // requires the call vectors after them; an older record cannot load successfully.
             int version = reader.ReadInt32();
             if (version is < 1 or > tableExtensionVersion)
             {
@@ -1505,6 +1524,27 @@ public sealed partial class SqlCatalog
                         column.DefaultLiteral, column.Collation, domain);
                 }
             }
+        }
+        for (int index = 0; index < columns.Count; index++)
+        {
+            if (reader.IsAtEnd)
+            {
+                throw new SqlCatalogException($"The persisted table '{schema}.{name}' is missing format 10 function-call identities.");
+            }
+            var column = columns[index];
+            columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
+                column.DefaultLiteral, column.Collation, column.DomainName, ReadColumnNames(ref reader));
+        }
+        for (int index = 0; index < constraints.Count; index++)
+        {
+            if (reader.IsAtEnd)
+            {
+                throw new SqlCatalogException($"The persisted table '{schema}.{name}' is missing format 10 function-call identities.");
+            }
+            var constraint = constraints[index];
+            constraints[index] = new SqlCatalogConstraint(constraint.Name, constraint.Kind, constraint.Columns,
+                constraint.ReferencedSchema, constraint.ReferencedTable, constraint.ReferencedColumns,
+                constraint.CheckExpression, constraint.OnDelete, ReadColumnNames(ref reader));
         }
         if (!reader.IsAtEnd)
         {

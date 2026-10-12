@@ -890,19 +890,22 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="table">The table version the predicate constrains.</param>
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
+    /// <returns>The resolved identities of its function calls, in expression preorder.</returns>
     /// <exception cref="DatabaseException">The predicate does not bind or is not a valid CHECK.</exception>
-    internal static void ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
+    internal static IReadOnlyList<string> ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
         SqlFunctionEnvironment functions)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions);
         SqlPlanner.ValidateExpression(expression, scope);
         new SqlCheckSyntax(table, scope, declaring: true).Validate(expression, requireBoolean: true);
+        return SqlDefinitionBinder.FunctionCalls(expression, scope);
     }
 
     /// <summary>
     /// Binds a CHECK predicate the catalog persisted to a table version: every column and
     /// collation must resolve, and the predicate must be a Boolean row expression the evaluator
-    /// can run. The declaration rules <see cref="ValidateCheck"/> adds are not applied again: the
+    /// can run, and every recorded call must still be Immutable. Other declaration rules
+    /// <see cref="ValidateCheck"/> adds are not applied again: the
     /// engine that stored the predicate accepted it, and a later engine tightening what DDL
     /// accepts must not make an existing database refuse to open.
     /// </summary>
@@ -910,6 +913,7 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="table">The table version the predicate constrains.</param>
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
+    /// <param name="functionCalls">The persisted calls' exact normalized identities in preorder.</param>
     /// <returns>
     /// The predicate compiled to the bound tree every write to the table version evaluates: its
     /// columns as ordinals of the version's rows, its calls bound to their functions and each
@@ -917,9 +921,10 @@ internal sealed partial class SqlPlanExecutor
     /// </returns>
     /// <exception cref="DatabaseException">The predicate cannot be evaluated against the table's rows.</exception>
     internal static SqlBoundExpression BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions)
+        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions);
+        SqlDefinitionBinder.PinCalls(expression, scope, functionCalls);
         SqlPersistedExpression.Bind(expression, scope);
         new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
         return scope.Bind(expression);
@@ -960,7 +965,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 var expression = definition.CheckExpression
                     ?? throw new DatabaseException("CHECK requires a valid scalar predicate.");
-                ValidateCheck(expression, table, _catalog.DefaultCollation, _definitions.Functions);
+                var calls = ValidateCheck(expression, table, _catalog.DefaultCollation, _definitions.Functions);
 
                 // The catalog stores the canonical text of the parsed predicate, not the text as
                 // written: no spelling, and no leniency an older parser had for it, reaches
@@ -968,7 +973,7 @@ internal sealed partial class SqlPlanExecutor
                 string canonical = SqlPersistedExpression.Canonicalize(expression,
                     $"CHECK constraint '{name}' on table '{table.Schema}.{table.Name}'");
                 result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Check, definition.Columns,
-                    checkExpression: canonical));
+                    checkExpression: canonical, checkFunctionCalls: calls));
                 continue;
             }
             var referenced = definition.ReferencedTable!;
@@ -1261,7 +1266,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 throw new DatabaseException($"Function '{call.FunctionName}' is not supported in CHECK.");
             }
-            if (_declaring && function.Volatility != SqlFunctionVolatility.Immutable)
+            if (function.Volatility != SqlFunctionVolatility.Immutable)
             {
                 throw new DatabaseException(
                     $"Function '{call.FunctionName}' is {(function.Volatility == SqlFunctionVolatility.Stable ? "STABLE" : "VOLATILE")}, and a CHECK admits only IMMUTABLE functions. " +

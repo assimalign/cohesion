@@ -342,8 +342,8 @@ whose catalog holds a CHECK or DEFAULT fails the open with a format error that
 says so.
 
 **Binding is not re-validation.** Opening a database binds each stored CHECK —
-its columns and collations resolve, each function call passes arguments its
-signature accepts, and it is a Boolean row predicate the engine can evaluate — but
+its columns and collations resolve, each function call binds to its recorded signature
+and remains Immutable, and it is a Boolean row predicate the engine can evaluate — but
 does not apply again the rules `CREATE TABLE` and `ALTER TABLE` use to accept one,
 such as the sign operand check or the ban on `CAST`. Those rules may tighten in a
 later release; a predicate an earlier release accepted keeps opening and is
@@ -1169,7 +1169,7 @@ the original alias spelling. For example, `INT`/`INTEGER` report `INTEGER`,
 `JSONB`. Type parameters appear separately where catalog metadata retains them.
 Unknown or inapplicable values are null; `CHARACTER_OCTET_LENGTH` is null because
 the catalog stores no character-set byte bound. `COLUMN_DEFAULT` is the persisted
-canonical literal as declared, including escaped quotes for string defaults (`DEFAULT
+canonical expression as declared, including escaped quotes for string defaults (`DEFAULT
 'it''s'` reports `'it''s'`, `DEFAULT +5` reports `5`), or null when absent.
 
 Projection, aliases, parameters, `WHERE`, `ORDER BY`, `DISTINCT`, aggregation,
@@ -1545,10 +1545,11 @@ declares (a type that widens to the declared one is converted); the statement wr
 nothing and an explicit transaction stays usable, as for every coded failure. A sign over a
 constant is itself a constant, so `ABS(-5)` is computed once too.
 
-**A stored CHECK whose function is gone.** A CHECK stores its SQL text, not the identity of
-the functions it calls, so a later engine build may no longer register one, register it
-with parameter types that no longer accept the stored call, or with a result type that no
-longer fits where the CHECK uses it (a BOOLEAN predicate, a comparison). The database still opens and
+**A stored CHECK whose function is gone.** A CHECK stores canonical SQL and each call's
+resolved function identity. A later engine build may omit that exact signature, change
+its volatility from Immutable, or register a result type that no longer fits where the
+CHECK uses it (a BOOLEAN predicate, a comparison). Another overload never replaces it.
+The database still opens and
 its reads proceed; every write that would evaluate the CHECK (an `INSERT`, an `UPDATE`, or a
 DDL backfill over existing rows) fails with `COHSQLE009`, naming the constraint, the table and
 the call as the CHECK makes it, on a session or connection that stays usable. A `DELETE`, an
@@ -1560,10 +1561,8 @@ builder's `AddDatabase`) fails its build with the same code instead, before it a
 COHSQLE009: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', which this engine does not register, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.
 ```
 
-A call a built-in takes always resolves to it. A stored call of a built-in's name that no
-built-in takes (`upper(email, 2)`) can only have called an application's overload of the
-name, so it is a function the engine no longer registers, as above; only `COALESCE`'s wrong
-arity is the #1189 case under
+Native, built-in and SQL calls all reload by recorded identity. Special forms such as
+`COALESCE` have no function identity; its wrong arity is the #1189 case under
 [Persisted definitions are canonical](#persisted-definitions-are-canonical), which still
 fails the open.
 
@@ -1600,7 +1599,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, a cancellation or an exhausted stack or memory, which is the inner exception; or a `CAST`'s registered cast threw anything but those and a value's fault (`FormatException`, `OverflowException`, `InvalidCastException`), a cancellation the statement did not ask for included (`Cast TEXT AS cents failed: ...`, E3); or a function returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
 | `COHSQLE008` | Error | A function call that more than one overload accepts equally well, such as an overloaded function over a NULL literal. Raised while planning; a `CAST` on an argument chooses (ISO SQLSTATE 42725, ambiguous function; E2) |
 | `COHSQLE009` | Error | A write would evaluate a stored CHECK that calls a function the engine does not register, registers as an aggregate, registers with no overload, or more than one, that accepts the stored call, or registers with a result that no longer fits where the CHECK uses it. The database opens and its reads proceed; the message names the constraint, the table and the call. An engine build that declares the database fails with it (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises at use for a missing implementation; E2, owner decision 65) |
-| `COHSQLE010` | Error | A type name that is neither a built-in type nor a domain the engine registers: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the engine that opened the database does not register, or registers over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`COHSQLE006`, `COHSQLE009`); whether to split it is an open owner question |
+| `COHSQLE010` | Error | A type name that is neither a built-in type nor a domain in the merged engine/SQL type environment: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the opening engine cannot resolve, or resolves over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`COHSQLE006`, `COHSQLE009`); whether to split it is an open owner question |
 | `COHSQLE011` | Error | A `CAST` whose operand's type no registered cast converts to the target, nor is of its storage type: raised while planning when the plan knows the operand's type, the same over an empty table as over a populated one, and while evaluating for a parameter, whose type only its value reveals (ISO SQLSTATE 42846, cannot coerce, PostgreSQL's "cannot cast type ... to ..."; E3) |
 | `COHSQLE012` | Error | Character value exceeds its destination's declared length and the excess is not entirely ASCII spaces: INSERT, INSERT ... SELECT, UPDATE, DEFAULT or ADD COLUMN backfill, for plain columns and domain base types. Explicit CAST truncates instead (ISO SQLSTATE 22001, string data right truncation; #1418) |
 
@@ -1687,12 +1686,25 @@ DROP DOMAIN positive;
 
 Functions have one expression body. Parameters are named; tables, subqueries, aggregates,
 external parameters and recursion are refused. Defaults are VOLATILE and CALLED ON NULL INPUT,
-as in PostgreSQL src/backend/commands/functioncmds.c:1095-1098. STRICT bypasses a body on NULL.
+as in PostgreSQL src/backend/commands/functioncmds.c:1095-1098. Domain arguments are coerced
+and checked before STRICT bypasses a body on NULL. Thus a bad domain value still fails
+when another argument is NULL; a NOT NULL domain rejects NULL before strict dispatch.
 A function may call only functions whose volatility is at least its own; CHECK, including a
 domain CHECK, admits Immutable functions only. Functions share the engine namespace and E2's
 storage-type overload identity. Domain names in SQL function signatures persist, and their
-bounds and checks apply to arguments and results when the body runs. Iteration 1 has no CREATE OR REPLACE, procedural body, LANGUAGE,
+bounds and checks apply to arguments before dispatch and results after body execution.
+The invocation collation becomes the parameter collation inside the body: a case-insensitive
+column or explicit COLLATE affects comparisons and LIKE, and string results use it for ordering
+and grouping. A call without an input collation uses the database default. Body variants are
+bound once per collation and reused. Iteration 1 has no CREATE OR REPLACE, procedural body, LANGUAGE,
 CASCADE, qualified function name or domain-over-domain, unlike PostgreSQL's broader facilities.
+
+Every persisted function call in table/domain CHECKs, column/domain DEFAULTs and SQL bodies
+records its normalized name and resolved parameter signature beside canonical SQL. A later
+overload never rebinds these calls, including after reopen with different engine registrations.
+DROP dependencies use the same identities. A missing recorded identity follows COHSQLE009;
+CHECK also rechecks Immutable-only admission on every bind. Domain defaults remain literal-only
+and carry an empty call list. Format 10 is unchanged and has no compatibility reader.
 
 Domains share E3's type namespace and coercion/check path. Columns inherit their domain's
 literal default unless they supply one; explicit DEFAULT NULL overrides inheritance. Domain
@@ -1713,10 +1725,10 @@ expression there would change historical rows on each read. ALTER cannot change 
 | COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition. |
 | COHSQLD002 | A persisted definition or column depends on the object being dropped. |
 | COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
-| COHSQLS001 | A declared script name has a different recorded SHA-256. |
+| COHSQLS001 | A script receipt changes its recorded SHA-256, statement count or origin, or supplies an inconsistent, skipped or reused statement prefix. |
 | COHSQLS002 | Verify requires a complete receipt with the declared checksum. |
 | COHSQLS003 | Transaction control inside a declared script; the runner owns transactions. |
-| COHSQLS004 | A script statement failed or attempted to adopt an existing table. |
+| COHSQLS004 | A script statement failed or attempted to adopt an existing table or index. |
 | COHSQLS005 | A script attempts ALTER TABLE, DROP TABLE or DROP INDEX against an object declared by the typed schema; declare the change in the typed schema. |
 
 SqlDatabaseBuilder.Script(name, sql) runs after the typed schema in declaration order. Names are

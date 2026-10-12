@@ -821,7 +821,7 @@ internal sealed partial class SqlPlanner
             // PRIMARY KEY columns are implicitly NOT NULL.
             bool nullable = definition.IsNullable && !definition.IsPrimaryKey;
             columns.Add(new SqlCatalogColumn(definition.ColumnName, typeInfo, nullable, defaultLiteral,
-                ResolveColumnCollation(definition, typeInfo), type.IsDomain ? type.Name : null));
+                ResolveColumnCollation(definition, typeInfo), type.IsDomain ? type.Name : null, DefaultCalls(defaultLiteral)));
 
             if (definition.IsPrimaryKey)
             {
@@ -844,7 +844,7 @@ internal sealed partial class SqlPlanner
             var column = columns[i];
             if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
             {
-                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName);
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls);
             }
         }
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
@@ -880,6 +880,14 @@ internal sealed partial class SqlPlanner
             ValidateExpression(expression, scope);
         }
         return SqlPersistedExpression.Canonicalize(expression, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'");
+    }
+
+    private IReadOnlyList<string> DefaultCalls(string? text)
+    {
+        if (text is null) { return []; }
+        var expression = SqlPersistedExpression.Load(text, "DEFAULT");
+        var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+        return SqlDefinitionBinder.FunctionCalls(expression, scope);
     }
 
     /// <summary>Validates the column override without changing inherited database defaults.</summary>
@@ -966,7 +974,8 @@ internal sealed partial class SqlPlanner
         var type = ResolveTypeName(change.Column.DataType, change.Column.ColumnName);
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}"),
-            ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null));
+            ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null,
+            table.Columns[FindColumnOrdinal(table, change.Column.ColumnName)].DefaultFunctionCalls));
     }
 
     private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)

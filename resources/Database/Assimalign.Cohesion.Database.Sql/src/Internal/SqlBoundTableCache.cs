@@ -212,6 +212,7 @@ internal sealed class SqlBoundTableCache
                     if (column.DefaultLiteral is not { } text) { continue; }
                     var expression = SqlPersistedExpression.Load(text, "DEFAULT");
                     var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: Functions);
+                    SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
                     if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
                     {
                         definition ??= new SqlUnresolvedDefinition("DEFAULT of '" + table.Name + "." + column.Name + "'", text, "which this engine does not register");
@@ -360,7 +361,7 @@ internal sealed class SqlBoundTableCache
             // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind. The bound
             // tree is what every write to this version evaluates, so a write resolves no column,
             // function or collation of the predicate again.
-            var bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation, Functions);
+            var bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation, Functions, constraint.CheckFunctionCalls);
             return new SqlBoundCheck(constraint, predicate, ColumnOrdinals(table, predicate), bound);
         }
         catch (DatabaseException exception)
@@ -372,7 +373,7 @@ internal sealed class SqlBoundTableCache
         // predicate binds as unresolved, the table opens and its reads proceed, and each write that
         // would evaluate the predicate fails with COHSQLE009. Looked for only once binding failed, so
         // a predicate that binds costs nothing more.
-        var unresolved = FindUnresolvedCall(table, predicate, subject);
+        var unresolved = FindUnresolvedCall(table, predicate, subject, constraint.CheckFunctionCalls);
         if (unresolved is null && failure is SqlFunctionResultMismatchException mismatch)
         {
             // An application function the engine registers, with a result that no longer fits where
@@ -415,9 +416,10 @@ internal sealed class SqlBoundTableCache
     /// </summary>
     /// <returns>The unresolved call, or null when every call resolves.</returns>
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the predicate.</exception>
-    private SqlUnresolvedDefinition? FindUnresolvedCall(SqlCatalogTable table, SqlExpression predicate, string subject)
+    private SqlUnresolvedDefinition? FindUnresolvedCall(SqlCatalogTable table, SqlExpression predicate, string subject, IReadOnlyList<string> identities)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: Functions);
+        SqlDefinitionBinder.PinCalls(predicate, scope, identities);
         return Find(predicate);
 
         SqlUnresolvedDefinition? Find(SqlExpression expression)
@@ -446,10 +448,6 @@ internal sealed class SqlBoundTableCache
             {
                 return "which this engine does not register";
             }
-            if (SqlStandardLibrary.AcceptsShape(call.FunctionName, call.Arguments))
-            {
-                return null;
-            }
             if (overloads[0].Kind != SqlFunctionKind.Scalar)
             {
                 return "which this engine registers as an aggregate";
@@ -457,8 +455,17 @@ internal sealed class SqlBoundTableCache
 
             try
             {
-                scope.ResolveFunction(call);
-                return null;
+                var resolved = scope.ResolveFunction(call);
+                if (resolved is null)
+                {
+                    // Resolve only to explain the missing identity; never use the replacement.
+                    var diagnostic = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: Functions);
+                    _ = diagnostic.ResolveFunction(call);
+                    return $"whose recorded identity '{SqlDefinitionBinder.DescribeIdentity(scope.RecordedIdentity(call)!)}' this engine does not register";
+                }
+                return resolved.Volatility != SqlFunctionVolatility.Immutable
+                    ? "which this engine no longer registers as IMMUTABLE"
+                    : resolved is SqlExpressionFunction { Unresolved: { } reason } ? reason : null;
             }
             catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.AmbiguousFunctionCallCode)
             {

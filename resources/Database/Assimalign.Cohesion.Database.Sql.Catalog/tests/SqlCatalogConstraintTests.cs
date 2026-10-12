@@ -49,11 +49,12 @@ public sealed class SqlCatalogConstraintTests
         SqlCatalog.Open(recoveredStorage).Tables.ShouldHaveSingleItem().Constraints.ShouldHaveSingleItem().Name.ShouldBe("fk_parent");
     }
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Legacy constraint records without format 10 identities are refused")]
     [InlineData(false)]
     [InlineData(true)]
-    public void OlderTableRecords_ShouldLoadWithoutConstraints(bool ownershipSuffix)
+    public void Open_OlderTableRecords_ShouldRefuseMissingFunctionIdentities(bool ownershipSuffix)
     {
+        // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "legacy");
         var writer = LegacyTable();
         if (ownershipSuffix)
@@ -65,9 +66,8 @@ public sealed class SqlCatalogConstraintTests
             storage.InsertRow(transaction, writer.ToArray());
             transaction.Commit();
         }
-        SqlCatalogTable table = SqlCatalog.Open(storage).Tables.ShouldHaveSingleItem();
-        table.Constraints.ShouldBeEmpty();
-        table.Owner.ShouldBe(ownershipSuffix ? DatabaseObjectOwner.Schema : DatabaseObjectOwner.Adhoc);
+        // Act / Assert
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("missing format 10 function-call identities");
     }
 
     [Fact]

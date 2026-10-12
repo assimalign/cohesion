@@ -35,9 +35,9 @@ Making this creation-time state rather than a mutator is deliberate: a setter
 would tell every caller the value is changeable and then guard that promise at
 runtime.
 
-Table metadata extension version 2 appends one collation identifier per column
-after the existing constraints. Version-1 and pre-extension records still read
-with null column overrides and the Binary database fallback. Column additions,
+Table metadata extension version 2 introduced one collation identifier per column
+after the existing constraints. Current format 10 requires the complete table record,
+including the resolved-call vectors described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
 uses those same transforms for uniqueness enforcement.
@@ -91,10 +91,9 @@ dropped list.
   catalog checks it rather than trusting each caller.
 - **Persistence: table extension version 3.** The table record's trailing extension
   (constraints in version 1, column collations from version 2) appends the dropped
-  ordinals' count and values from version 3. Versions 1 and 2 still load, with no
-  dropped column, so that the SQL engine's data-storage format gate (format 6 for
-  this layout) refuses a database written before it with its own message rather than
-  a decode error. A persisted layout that cannot describe the table (a negative
+  ordinals' count and values from version 3. Earlier table records without the current
+  format's required fields are refused; the engine preserves the recorded-version
+  error through its format gate. A persisted layout that cannot describe the table (a negative
   count, an ordinal outside the physical columns, a repeated ordinal) fails the load
   with `SqlCatalogException`.
 
@@ -117,8 +116,8 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Versions 1 to 3 still load, with no domain, so that the
-  format gate refuses a database written before it with its own message. A persisted blank
+  which this catalog always writes. Current format 10 also requires the call vectors;
+  the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
 
@@ -320,9 +319,8 @@ atomically with the first table record. Index creation already accepts a complet
 description and persists the same metadata. Column add/drop replacements retain
 the table's ownership unchanged.
 
-The ownership fields are an appended tuple suffix. Older records without the
-suffix load as `Adhoc`, preserving their existing mutability rather than guessing
-an owner from a database-wide schema marker. Invalid owner/name combinations are
+The ownership fields are an appended tuple suffix. Ad-hoc creation writes `Adhoc`
+explicitly; ownership is never inferred from a database-wide schema marker. Invalid owner/name combinations are
 rejected. The tuple encoding is positional and never persisted CLR property
 identifiers; renaming the ownership property to `OwningSchema` therefore does not
 change the on-disk format and needed no compatibility alias. B2's format gate now
@@ -343,8 +341,8 @@ Table records now append a versioned constraint extension after ownership: versi
 `1`, constraint count, and each immutable foreign-key/check definition. A reference
 stores its ordered local and target columns, target SQL namespace/table, and
 `RESTRICT` or `CASCADE` delete action. A check stores its predicate as canonical
-SQL text (below). Records ending after the original primary keys or ownership
-suffix still load with no constraints. Unknown extension versions and malformed
+SQL text and resolved function calls (below). Records ending after the original primary keys
+or ownership suffix lack format 10's required fields and are refused. Unknown extension versions and malformed
 definitions fail closed.
 Column changes retain constraints, and add/drop constraint rewrites use the same
 WAL-backed, self-committing record replacement as existing catalog metadata.
@@ -384,19 +382,26 @@ source text is not an option, because a stored definition must mean the same thi
 under every later parser. Future general expression defaults and view queries use this
 same path; CREATE TABLE function-call defaults are already supported in format 10.
 
+Each expression also stores an ordered preorder vector of resolved function identities:
+normalized name and parameter-type signature, including pseudo-types and variadic shape.
+Repeated calls retain repeated entries; special forms have none. The column and constraint
+vectors are required trailing table fields in format 10; SQL function/domain records carry
+their body/check/default vectors. Literal-only defaults have empty vectors. These are format-10
+record changes, with no second format bump or compatibility fallback.
+
 The catalog itself stays SQL-agnostic: it has no reference to the language package,
-stores the text as an opaque string in the same tuple fields as before, and validates
+stores the text and identities as opaque strings, and validates
 only shape (a check needs non-blank text; a reference needs its columns). The SQL
 engine owns the rule end to end. It renders and verifies the canonical text before
 publishing a definition, and when it opens a database it parses and binds every
 stored table check and default once per table version, and reconstructs SQL functions
-and domain definitions on open. A stored
-definition that does not load fails that open, naming the table and the constraint or
-column, instead of failing a later write; DDL inside the engine never stores text
-that would not reload. Opening binds a stored definition (its columns resolve, and it
-is something the engine can evaluate) without re-applying the rules DDL uses to accept
-one, so a later release that narrows those rules never makes a stored definition fail
-the open. Canonical storage is part of data-storage format 4, so it needed no further
+and domain definitions on open. Calls bind only to the recorded identities, so added overloads
+cannot replace existing CHECKs, DEFAULTs or bodies. DROP reads those same vectors. Missing
+identities use the engine's unresolved-definition path: open and reads succeed, but use and
+declared Build fail with `COHSQLE009`. CHECK rechecks Immutable admission at every bind;
+other tightened declaration-only rules are not reapplied. A structurally malformed definition
+fails open, naming the table and constraint or column. Canonical storage began in data-storage
+format 4, so it needed no further
 format bump; text stored by earlier formats is not migrated, and the engine refuses an
 earlier-format database whose catalog holds a check or default with a format error. The
 engine's [persisted-definition design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#persisted-definitions-canonical-text-parsed-once)
@@ -470,11 +475,14 @@ Value/data classes, the shared codec and source-generated System.Text.Json metad
 ## E4 definitions and script receipts
 
 The engine stamps format 10, previously 9. Kinds 10/11 store immutable SqlCatalogFunction and
-SqlCatalogDomain records: signatures/types, canonical SQL, volatility/null behavior, dependency
-identities and Adhoc/Schema ownership. Publication/removal advances DDL generation. Snapshots
+SqlCatalogDomain records: signatures/types, canonical SQL with resolved-call vectors,
+volatility/null behavior, domain dependencies and Adhoc/Schema ownership. Publication/removal advances DDL generation. Snapshots
 include both kinds. The engine owns semantic binding and dependency/ownership admission.
 Native function ownership is resolved by the requested normalized signature; an unrelated
 engine overload does not turn a missing SQL definition into an engine-owned one.
+The engine evaluates domain argument coercion before STRICT dispatch and caches SQL body
+variants by invocation collation; the catalog persists the declarations and identities, not
+bound runtime trees. The format gate refuses older files without an upgrade path.
 
 Kind 12 stores SqlCatalogScript: case-sensitive name, exact-body SHA-256, statement count and
 committed prefix, initial/latest DDL generations, typed schema hash and created table/index

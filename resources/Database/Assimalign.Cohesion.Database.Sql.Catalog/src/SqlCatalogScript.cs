@@ -4,16 +4,16 @@ using System.Linq;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
-/// <summary>A durable, forward-only declared-script receipt. Statement positions are one-based completed prefixes.</summary>
+/// <summary>A forward-only declared-script receipt supplied to a publication or read from durable catalog state.</summary>
 public sealed record SqlCatalogScript
 {
     /// <summary>Creates a validated script receipt.</summary>
     /// <param name="name">The stable script name.</param>
     /// <param name="contentHash">The SHA-256 of the exact UTF-8 script body.</param>
     /// <param name="statementCount">The parsed statement count.</param>
-    /// <param name="completedStatements">The durably committed prefix.</param>
+    /// <param name="completedStatements">The prefix to record when the supplied operation commits; a receipt read from the catalog describes the durable prefix.</param>
     /// <param name="baseGeneration">The catalog generation before this script began.</param>
-    /// <param name="generation">The last catalog generation this script committed.</param>
+    /// <param name="generation">The last known catalog generation; publication replaces it with that commit's generation.</param>
     /// <param name="schemaHash">The typed schema hash at execution, or null.</param>
     /// <param name="objects">Table and index identities introduced by this script.</param>
     /// <exception cref="ArgumentException">An identity, digest or prefix is invalid.</exception>
@@ -44,7 +44,7 @@ public sealed record SqlCatalogScript
     public string ContentHash { get; }
     /// <summary>Gets the statement count.</summary>
     public int StatementCount { get; }
-    /// <summary>Gets the committed statement prefix.</summary>
+    /// <summary>Gets the statement prefix proposed for publication, or durably committed when read from the catalog.</summary>
     public int CompletedStatements { get; }
     /// <summary>Gets the generation before the script began.</summary>
     public ulong BaseGeneration { get; }

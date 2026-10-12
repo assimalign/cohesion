@@ -39,7 +39,7 @@ internal sealed partial class SqlPlanExecutor
                 if (definition is null)
                 {
                     if (environment.Catalog.GetOverloads(drop.Name).Any(function => function is not SqlExpressionFunction &&
-                        SqlDefinitionBinder.Signature(function.Name, function.Parameters).Equals(signature, StringComparison.OrdinalIgnoreCase)))
+                        SqlDefinitionBinder.Key(function).Equals("F:" + signature, StringComparison.OrdinalIgnoreCase)))
                     {
                         throw new DatabaseException($"{SqlDefinitionBinder.NativeCode}: Function '{signature}' is engine-registered and cannot be dropped through SQL.");
                     }
@@ -85,12 +85,12 @@ internal sealed partial class SqlPlanExecutor
 
     private void EnsureAcyclic(string key, IReadOnlyList<string> dependencies)
     {
-        var graph = _catalog.Functions.ToDictionary(function => "F:" + function.Signature, function => function.Dependencies, StringComparer.OrdinalIgnoreCase);
+        var graph = _catalog.Functions.ToDictionary(function => "F:" + function.Signature, function => SqlDefinitionBinder.DefinitionDependencies(function).ToArray(), StringComparer.OrdinalIgnoreCase);
         foreach (var domain in _catalog.Domains)
         {
-            graph.Add(SqlDefinitionBinder.DomainKey(domain.Name), domain.Dependencies);
+            graph.Add(SqlDefinitionBinder.DomainKey(domain.Name), SqlDefinitionBinder.DefinitionDependencies(domain).ToArray());
         }
-        graph[key] = dependencies;
+        graph[key] = dependencies.ToArray();
         var pending = new Stack<string>(dependencies);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (pending.TryPop(out string? next))
@@ -113,21 +113,20 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var function in _catalog.Functions)
         {
-            if (function.Dependencies.Contains(key, StringComparer.OrdinalIgnoreCase))
+            if (SqlDefinitionBinder.DefinitionDependencies(function).Contains(key, StringComparer.OrdinalIgnoreCase))
             {
                 Dependent($"function '{function.Name}'");
             }
         }
         foreach (var domain in _catalog.Domains)
         {
-            if (domain.Dependencies.Contains(key, StringComparer.OrdinalIgnoreCase))
+            if (SqlDefinitionBinder.DefinitionDependencies(domain).Contains(key, StringComparer.OrdinalIgnoreCase))
             {
                 Dependent($"domain '{domain.Name}'");
             }
         }
         foreach (var table in _catalog.Tables)
         {
-            var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: _definitions.Functions);
             foreach (var column in table.Columns)
             {
                 if (column.DomainName is { } name && key.Equals(SqlDefinitionBinder.DomainKey(name), StringComparison.OrdinalIgnoreCase))
@@ -136,30 +135,24 @@ internal sealed partial class SqlPlanExecutor
                 }
                 if (column.DefaultLiteral is { } text)
                 {
-                    Check(text, $"DEFAULT of '{table.Schema}.{table.Name}.{column.Name}'", scope);
+                    Check(text, column.DefaultFunctionCalls, $"DEFAULT of '{table.Schema}.{table.Name}.{column.Name}'");
                 }
             }
             foreach (var check in table.Constraints.Where(constraint => constraint.CheckExpression is not null))
             {
-                Check(check.CheckExpression!, $"CHECK '{check.Name}' on '{table.Schema}.{table.Name}'", scope);
+                Check(check.CheckExpression!, check.CheckFunctionCalls, $"CHECK '{check.Name}' on '{table.Schema}.{table.Name}'");
             }
         }
 
-        void Check(string text, string subject, SqlExpressionEvaluator scope)
+        void Check(string text, IReadOnlyList<string> calls, string subject)
         {
+            if (calls.Contains(key, StringComparer.OrdinalIgnoreCase)) { Dependent(subject); }
+            if (!key.StartsWith("D:", StringComparison.Ordinal)) { return; }
             var expression = SqlPersistedExpression.Load(text, subject);
             Visit(expression);
             void Visit(SqlExpression node)
             {
                 System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-                if (node is SqlFunctionCallExpression call && !call.FunctionName.Equals("COALESCE", StringComparison.OrdinalIgnoreCase))
-                {
-                    SqlFunction? resolved = null;
-                    try { resolved = scope.ResolveFunction(call); }
-                    catch (DatabaseException) { /* Missing native overload: retain a conservative name dependency. */ }
-                    if (resolved is not null ? SqlDefinitionBinder.Key(resolved).Equals(key, StringComparison.OrdinalIgnoreCase)
-                        : key.StartsWith("F:" + call.FunctionName.ToUpperInvariant() + "(", StringComparison.Ordinal)) { Dependent(subject); }
-                }
                 if (node is SqlCastExpression cast && key.Equals(SqlDefinitionBinder.DomainKey(cast.TargetType), StringComparison.OrdinalIgnoreCase)) { Dependent(subject); }
                 foreach (var child in SqlPlanner.Children(node)) { Visit(child); }
             }

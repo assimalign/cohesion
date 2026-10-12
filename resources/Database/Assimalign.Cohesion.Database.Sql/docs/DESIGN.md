@@ -478,19 +478,14 @@ flowchart LR
   parsing it (it references no SQL parser and never sees the engine's functions), so a
   CHECK that names a registered function compiles into the artifact and is validated here.
 - **A stored definition that names an unregistered function** (part 2, decision 65,
-  design §4.10). A CHECK stores SQL, not a function's identity, so an application release
-  that drops or renames a registered function leaves a definition its engine cannot
-  evaluate. When binding a stored CHECK fails, `SqlBoundTableCache` looks for the call that
-  explains it: a name the catalog does not register, a name it registers as an aggregate, a
-  registered name none of whose overloads, or more than one, accepts the call, or an
-  application function whose registered result no longer fits where the predicate uses it
-  (a changed return type: `which this engine registers returning TEXT, where the CHECK
-  needs BOOLEAN`). A call a built-in takes by its shape (`UPPER(x)`) always resolves to the
-  built-in; a call of a standard-library name no built-in takes (`upper(x, 2)`) can only
-  have called an application's overload of the name, since DDL checks every call's
-  arguments (#1189) and no earlier catalog format opens, so it is unresolved like any
-  application function's; only `COALESCE`'s wrong arity stays #1189's open failure. No
-  failure that involves an application function reaches the damaged-catalog message.
+  design §4.10, extended by E4). A CHECK stores canonical SQL and the resolved identity
+  of each function call. Binding pins each call to that identity, so another overload
+  added by SQL or a later engine build cannot replace it. A missing recorded signature,
+  a changed result that no longer fits the predicate, or a function that is no longer
+  Immutable leaves the definition unresolved. `SqlBoundTableCache` reports the recorded
+  call; it never falls back to resolving the text against the current overload set.
+  Only special forms such as `COALESCE` have no function identity; their invalid shape
+  remains the damaged-definition case described in #1189.
   Found, the CHECK binds as *unresolved* (`SqlUnresolvedDefinition`): the
   database opens and its reads proceed; its bound tree is a failure that raises
   `COHSQLE009` (SQLSTATE 42883) on every write that evaluates it, whatever the row,
@@ -3358,7 +3353,7 @@ children the transaction inserted itself included, at all three levels.
 **The rule (owner decision, 2026-10-01: production-ready regardless of the
 pre-release).** Every SQL expression the catalog persists is stored as canonical
 SQL rendered from its parsed tree, never as the user's text: table/domain CHECKs,
-column DEFAULTs and SQL function bodies. General expression DEFAULTs (#1121) and
+column/domain DEFAULTs and SQL function bodies. General expression DEFAULTs (#1121) and
 view queries (#1124) must take the same path when they land; a new persisted expression may
 not store source text, parse it on a per-row or per-statement path, or grow a
 second renderer or parser entry. The motivation is #1068: tightening the parser
@@ -3383,6 +3378,16 @@ and add it again" as the only remedy.
   every column before it reserves the table, as ADD COLUMN already did, so a
   DEFAULT the column cannot store fails its DDL rather than every later INSERT
   that omits the column.
+- **Persist resolved calls.** Alongside canonical text, format 10 stores the ordered
+  preorder identity of every function call in table/domain CHECKs, column/domain DEFAULTs
+  and SQL bodies. Repeated calls retain repeated entries; special forms are excluded.
+  Each identity contains the normalized name and parameter signature, distinguishing
+  pseudo-types and a variadic tail while normalizing aliases, bounds and domains to the
+  registration signature. Literal-only defaults have empty vectors. On reload,
+  `SqlDefinitionBinder.PinCalls` binds exactly those identities, never a newly preferred
+  overload. DROP reads the same vectors. PostgreSQL stores `FuncExpr.funcid` and records
+  its dependency (`src/backend/catalog/dependency.c:2008-2013`); parsed SQL body persistence
+  and dependency collection are in `src/backend/catalog/pg_proc.c:374-375,664-667`.
 - **Parse once per table version (`SqlBoundTableCache`).** The database owns one
   cache keyed by the `SqlCatalogTable` instance in a `ConditionalWeakTable`. A
   catalog table description is immutable and every change publishes a new
@@ -3407,17 +3412,19 @@ and add it again" as the only remedy.
   `SqlPlanExecutor.ValidateCheck`: binding, plus the declaration rules (no casts,
   no sign over an operand the plan types as non-numeric). Loading binds it through
   `BindPersistedCheck`: columns and collations resolve (`SqlPersistedExpression.Bind`),
-  every call resolves to an overload in the catalog of the engine that opens the
-  database, the predicate is a
+  every call binds to its recorded identity and is still Immutable, the predicate is a
   row expression (no parameter, subquery, `*` or aggregate) and a
   Boolean predicate over the functions the evaluator implements — what evaluating
-  it needs, and nothing more. The engine that stored a predicate accepted it, so a
+  it needs. Immutable-only admission is checked on every bind, because an engine
+  registration may have changed its volatility since declaration. Other declaration
+  restrictions remain declaration-only. The engine that stored a predicate accepted it, so a
   later release that tightens a declaration rule must not turn the predicate into
   an open failure, as #1068's parser tightening would have done to stored text.
   `CHECK (-label IS NULL)` on a TEXT column, which DDL now rejects with
   `COHSQLE003`, still opens and is enforced as stored; a row it cannot evaluate
   fails its own statement with the evaluator's coded error. The rule for future
-  changes: **a rule that narrows what DDL accepts goes in `ValidateCheck` only; a
+  changes, apart from function identity and Immutable admission: **a rule that narrows
+  what DDL accepts goes in `ValidateCheck` only; a
   change that removes the engine's ability to evaluate a construct a stored
   definition may hold (an evaluator function, an operator) is a catalog-format
   change** and needs a format version and a migration, never a silent open failure.
@@ -3427,16 +3434,13 @@ and add it again" as the only remedy.
   the engine's ability to evaluate a stored construct is *not* a catalog-format change
   when the construct is a function an application registered: the application, not the
   engine build, decides which functions exist, and the failure is coded and scoped to the
-  table. A stored CHECK whose call no longer resolves (a name the engine does not register,
-  one it registers as an aggregate, a registered name none of whose overloads, or more than
-  one, accepts the call, or an application function whose registered result no longer fits
-  where the predicate uses it) binds as unresolved: the database opens, reads proceed, and
+  table. A stored CHECK whose recorded call is unavailable, no longer Immutable, or has
+  a registered result that no longer fits where the predicate uses it binds as unresolved:
+  the database opens, reads proceed, and
   each write that evaluates the CHECK fails with `COHSQLE009` naming the function, the table
   and the constraint; an engine that declares the database fails its build with the same
-  code. A call a built-in takes by its shape is outside the amendment: it always resolves to
-  the built-in. A call of a standard-library name that no built-in takes (`upper(x, 2)`) is
-  inside it: DDL checks every call's arguments and no earlier format opens, so only an
-  application's overload of the name, which E2 allows for another arity, can have stored it.
+  code. Native, built-in and SQL calls use the same identity lookup. A replacement
+  overload is never a substitute for a missing recorded signature.
   Details in [Functions (E2)](#functions-e2).
 - **Argument counts are binding, not a declaration rule (#1189).** A call whose
   argument count no signature of its function accepts has no value on any row: the
@@ -4222,15 +4226,30 @@ One immutable per-database environment merges native and SQL definitions, rebuil
 on open and definition DDL. Namespace collisions, recursive dependencies and declarations weaker
 than their called functions are refused before publication. SQL defaults are volatile and called
 on NULL, while native shorthand keeps its strict default. SQL domain columns use E3's existing
-bounds and check path. Function metadata preserves domain names for parameters and results; the
-SQL scalar leaf applies their base bounds and domain checks whenever its body is invoked. Missing native calls produce unresolved bindings: open succeeds but use
-fails, and a declared database fails Build's generation-cached validation. CHECK is Immutable-only.
+bounds and check path. Function metadata preserves domain names for parameters and results.
+Bound domain-argument nodes coerce base bounds and validate each argument before STRICT tests
+for NULL; an invalid domain argument still fails when another argument is NULL. A domain's
+NOT NULL rejects a NULL argument before dispatch. STRICT still skips the body, and the scalar
+leaf validates its result after execution. The same argument path covers native functions.
+This follows PostgreSQL's domain coercion node (`src/backend/parser/parse_coerce.c:699-723`)
+and argument evaluation before strict dispatch (`src/backend/executor/execExpr.c:2752-2791`).
+Missing recorded calls produce unresolved bindings: open succeeds but use fails, and a declared
+database fails Build's generation-cached validation. CHECK is Immutable-only on every bind.
 CREATE TABLE function-call defaults bind once and run for each omitted value; ADD COLUMN stays
 literal-only because its metadata operation does not materialize missing row tails.
 
+The call's input collation becomes the SQL body's parameter collation, including an explicit
+COLLATE at the call site; a call without an input collation uses the database default. Body
+comparisons, LIKE and nested calls use it, and string results retain it for ordering and grouping.
+Each SQL function caches a bound body per effective collation; a fixed-collation call prepares
+its variant, including domain argument/result checks, during binding. Deferred collations use
+the same cache, compiling each variant once and reusing it across rows and statements. PostgreSQL
+sets parameter collation from the invocation in `src/backend/executor/functions.c:496-505`.
+
 Format 10 extends 9 with record kinds 10-13. Bodies, checks and defaults follow the canonical
-persisted-expression rule. Function/domain metadata retains dependency identities and Adhoc/Schema
-ownership. DROP walks those identities and table expressions/domain names. Definition DDL excludes
+persisted-expression rule and carry their resolved call vectors. Function/domain metadata retains
+domain dependencies and Adhoc/Schema ownership. DROP reads those recorded call identities and
+domain dependencies, including column domain names. Definition DDL excludes
 other catalog mutations while checking dependencies. It refuses native DROP (COHSQLD003), dependent
 DROP (COHSQLD002) and invalid declarations (COHSQLD001). Native DROP classification matches the
 requested normalized name and parameter signature, not every overload sharing that name;

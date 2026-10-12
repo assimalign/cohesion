@@ -19,8 +19,31 @@ internal static class SqlDefinitionBinder
 
     internal static DatabaseException Refuse(string message) => new($"{DefinitionCode}: {message}");
     internal static string Signature(string name, IEnumerable<SqlType> types)
-        => name.ToUpperInvariant() + "(" + string.Join(",", types.Select(type => ((int)type.Storage.Type).ToString(CultureInfo.InvariantCulture))) + ")";
-    internal static string Key(SqlFunction function) => "F:" + Signature(function.Name, function.Parameters);
+        => name.ToUpperInvariant() + "(" + string.Join(",", types.Select(type => type.IsPseudo ? type.Name : ((int)type.Storage.Type).ToString(CultureInfo.InvariantCulture))) + ")";
+    internal static string Key(SqlFunction function)
+    {
+        string signature = Signature(function.Name, function.Parameters);
+        return "F:" + (function.VariadicParameter is { } variadic
+            ? signature[..^1] + (function.Parameters.Count == 0 ? string.Empty : ",") + "VARIADIC:" +
+                (variadic.IsPseudo ? variadic.Name : ((int)variadic.Storage.Type).ToString(CultureInfo.InvariantCulture)) + ")"
+            : signature);
+    }
+
+    internal static string DescribeIdentity(string identity)
+    {
+        int start = identity.IndexOf('(');
+        var types = identity[(start + 1)..^1].Split(',');
+        for (int index = 0; index < types.Length; index++)
+        {
+            string token = types[index];
+            bool variadic = token.StartsWith("VARIADIC:", StringComparison.Ordinal);
+            if (int.TryParse(variadic ? token[9..] : token, NumberStyles.None, CultureInfo.InvariantCulture, out int code))
+            {
+                types[index] = (variadic ? "VARIADIC " : string.Empty) + SqlType.NameOf((DatabaseType)code);
+            }
+        }
+        return identity[2..(start + 1)] + string.Join(", ", types) + ")";
+    }
     internal static string DomainKey(string name) => "D:" + name.ToUpperInvariant();
 
     internal static SqlType ResolveType(string name, SqlFunctionEnvironment environment)
@@ -63,7 +86,7 @@ internal static class SqlDefinitionBinder
         return new SqlCatalogFunction(create.Name, signature, create.Parameters.Select(parameter => parameter.Name).ToArray(),
             types.Select(type => type.Name).ToArray(), result.Name,
             create.Volatility, create.IsStrict, body, dependencies.Order(StringComparer.Ordinal).ToArray(),
-            schema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema, schema);
+            schema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema, schema, FunctionCalls(create.Body, scope));
     }
 
     internal static SqlCatalogDomain Declare(SqlCreateDomainExpression create, SqlFunctionEnvironment environment, Collation collation, string? schema)
@@ -100,6 +123,7 @@ internal static class SqlDefinitionBinder
             }
         }
         string? check = null;
+        IReadOnlyList<string> calls = [];
         var dependencies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (create.Check is { } predicate)
         {
@@ -108,10 +132,11 @@ internal static class SqlDefinitionBinder
             SqlPlanExecutor.ValidateCheck(predicate, table, collation, environment);
             var scope = new SqlExpressionEvaluator([column], null, defaultCollation: collation, functions: environment);
             dependencies = Dependencies(predicate, scope, SqlFunctionVolatility.Immutable);
+            calls = FunctionCalls(predicate, scope);
             check = SqlPersistedExpression.Canonicalize(predicate, $"CHECK of domain '{create.Name}'");
         }
         return new SqlCatalogDomain(create.Name, type.Name, literal, create.IsNotNull, create.ConstraintName, check,
-            dependencies.Order(StringComparer.Ordinal).ToArray(), schema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema, schema);
+            dependencies.Order(StringComparer.Ordinal).ToArray(), schema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema, schema, calls, []);
     }
 
     internal static SqlFunctionEnvironment Load(SqlCatalog catalog, SqlFunctionEnvironment native)
@@ -139,7 +164,7 @@ internal static class SqlDefinitionBinder
                 throw Refuse($"Recursive SQL definition dependency at '{key}'.");
             }
             functions.TryGetValue(key, out var function);
-            foreach (string dependency in function is not null ? function.Dependencies : domains[key].Dependencies)
+            foreach (string dependency in function is not null ? DefinitionDependencies(function) : DefinitionDependencies(domains[key]))
             {
                 Visit(dependency);
             }
@@ -164,7 +189,8 @@ internal static class SqlDefinitionBinder
         }
     }
 
-    internal static SqlExpressionFunction Bind(SqlCatalogFunction function, SqlFunctionEnvironment environment, Collation collation)
+    internal static SqlExpressionFunction Bind(SqlCatalogFunction function, SqlFunctionEnvironment environment, Collation collation,
+        bool notNullCheck = false)
     {
         var types = function.ParameterTypes.Select(type => ResolveType(type, environment)).ToArray();
         var result = ResolveType(function.ReturnType, environment);
@@ -172,25 +198,34 @@ internal static class SqlDefinitionBinder
         {
             throw Refuse($"Malformed persisted signature of '{function.Name}'.");
         }
-        var columns = function.ParameterNames.Select((name, index) => new SqlCatalogColumn(name, types[index].Storage)).ToArray();
         var expression = SqlPersistedExpression.Load(function.Body, $"Function '{function.Name}'");
-        var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment);
-        SqlBoundExpression body;
         string? unresolved = null;
-        try
+        SqlBoundExpression body = BindBody(collation);
+        return new SqlExpressionFunction(function.Name, types, result, Volatility(function.Volatility), function.IsStrict,
+            body, unresolved, notNullCheck, bodyCollation: collation, bindBody: BindBody);
+
+        SqlBoundExpression BindBody(Collation inputCollation)
         {
-            SqlPersistedExpression.Bind(expression, scope);
-            SqlPlanner.ValidateExpression(expression, scope);
-            _ = Dependencies(expression, scope, Volatility(function.Volatility));
-            body = scope.Bind(expression);
+            // A parameter inherits the invocation's collation; literals retain the database default.
+            // PostgreSQL: src/backend/executor/functions.c:496-505.
+            var columns = function.ParameterNames.Select((name, index) => new SqlCatalogColumn(name, types[index].Storage,
+                collation: types[index].Storage.Type == DatabaseType.String ? inputCollation : null)).ToArray();
+            var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment);
+            PinCalls(expression, scope, function.BodyFunctionCalls);
+            try
+            {
+                SqlPersistedExpression.Bind(expression, scope);
+                SqlPlanner.ValidateExpression(expression, scope);
+                _ = Dependencies(expression, scope, Volatility(function.Volatility));
+                return scope.Bind(expression);
+            }
+            catch (DatabaseException failure) when (failure is SqlFunctionResultMismatchException || HasUnavailableCall(expression, scope))
+            {
+                unresolved = $"Function '{function.Name}': {failure.Message}";
+                string reason = unresolved;
+                return new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
+            }
         }
-        catch (DatabaseException failure) when (failure is SqlFunctionResultMismatchException || HasUnavailableCall(expression, scope))
-        {
-            unresolved = $"Function '{function.Name}': {failure.Message}";
-            string reason = unresolved;
-            body = new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
-        }
-        return new SqlExpressionFunction(function.Name, types, result, Volatility(function.Volatility), function.IsStrict, body, unresolved);
     }
 
     internal static SqlType Bind(SqlCatalogDomain domain, SqlFunctionEnvironment environment, Collation collation)
@@ -200,15 +235,61 @@ internal static class SqlDefinitionBinder
         if (domain.CheckExpression is not null || domain.IsNotNull)
         {
             var function = new SqlCatalogFunction(domain.Name + "_check", Signature(domain.Name + "_check", [type]), ["VALUE"], [type.Name],
-                "BOOLEAN", "IMMUTABLE", false, domain.CheckExpression ?? "TRUE", domain.Dependencies, domain.Owner, domain.OwningSchema);
-            var expression = Bind(function, environment, collation);
-            // Keep NOT NULL in the shared domain check path, including CAST(NULL AS domain).
-            check = new SqlExpressionFunction(function.Name, [type], SqlType.Boolean, SqlFunctionVolatility.Immutable, false,
-                new SqlBoundCall(expression, [new SqlBoundColumn(0)], null, new SqlBoundCollation(collation), environment.Database),
-                expression.Unresolved, domain.IsNotNull);
+                "BOOLEAN", "IMMUTABLE", false, domain.CheckExpression ?? "TRUE", domain.Dependencies, domain.Owner, domain.OwningSchema,
+                domain.CheckFunctionCalls);
+            check = Bind(function, environment, collation, domain.IsNotNull);
         }
         return SqlType.CreateSqlDomain(domain.Name, type, check, domain.DefaultLiteral, domain.IsNotNull);
     }
+
+    // The stored preorder vector identifies every call, including repeated and nested calls.
+    // PostgreSQL stores FuncExpr.funcid and derives dependencies from it
+    // (src/backend/catalog/dependency.c:2008-2013). Here normalized signatures are the identities.
+    internal static IReadOnlyList<string> FunctionCalls(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        var calls = new List<string>();
+        Visit(expression);
+        return calls;
+
+        void Visit(SqlExpression node)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+            {
+                calls.Add(Key(scope.ResolveFunction(call) ?? throw Refuse($"Unknown function '{call.FunctionName}'.")));
+            }
+            foreach (var child in SqlPlanner.Children(node)) { Visit(child); }
+        }
+    }
+
+    internal static void PinCalls(SqlExpression expression, SqlExpressionEvaluator scope, IReadOnlyList<string> identities)
+    {
+        int position = 0;
+        Visit(expression);
+        if (position != identities.Count) { throw Refuse("Persisted function-call identities do not match the expression."); }
+
+        void Visit(SqlExpression node)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+            {
+                if (position == identities.Count || !identities[position].StartsWith("F:" + call.FunctionName.ToUpperInvariant() + "(", StringComparison.Ordinal))
+                {
+                    throw Refuse($"Persisted function-call identity is missing or mismatched for '{call.FunctionName}'.");
+                }
+                scope.PinFunction(call, identities[position++]);
+            }
+            foreach (var child in SqlPlanner.Children(node)) { Visit(child); }
+        }
+    }
+
+    internal static IEnumerable<string> DefinitionDependencies(SqlCatalogFunction function)
+        => function.BodyFunctionCalls.Concat(function.Dependencies.Where(IsDomainDependency));
+
+    internal static IEnumerable<string> DefinitionDependencies(SqlCatalogDomain domain)
+        => domain.CheckFunctionCalls.Concat(domain.DefaultFunctionCalls).Concat(domain.Dependencies.Where(IsDomainDependency));
+
+    private static bool IsDomainDependency(string key) => key.StartsWith("D:", StringComparison.Ordinal);
 
     internal static HashSet<string> Dependencies(SqlExpression expression, SqlExpressionEvaluator scope, SqlFunctionVolatility volatility)
     {

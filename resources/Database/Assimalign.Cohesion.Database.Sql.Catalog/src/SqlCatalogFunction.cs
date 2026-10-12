@@ -21,9 +21,10 @@ public sealed class SqlCatalogFunction
     /// <param name="dependencies">The function signature and domain dependency identities.</param>
     /// <param name="owner">The durable owner.</param>
     /// <param name="owningSchema">The owning schema, or null for an ad-hoc definition.</param>
+    /// <param name="bodyFunctionCalls">Resolved normalized function signatures in expression preorder, retaining repeated calls.</param>
     /// <exception cref="ArgumentException">A required name or ownership value is invalid.</exception>
     /// <exception cref="ArgumentNullException">A required collection is null.</exception>
-    public SqlCatalogFunction(string name, string signature, IReadOnlyList<string> parameterNames, IReadOnlyList<string> parameterTypes, string returnType, string volatility, bool isStrict, string body, IReadOnlyList<string> dependencies, DatabaseObjectOwner owner, string? owningSchema)
+    public SqlCatalogFunction(string name, string signature, IReadOnlyList<string> parameterNames, IReadOnlyList<string> parameterTypes, string returnType, string volatility, bool isStrict, string body, IReadOnlyList<string> dependencies, DatabaseObjectOwner owner, string? owningSchema, IReadOnlyList<string>? bodyFunctionCalls = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(signature);
@@ -51,6 +52,11 @@ public sealed class SqlCatalogFunction
         Body = body;
         ArgumentNullException.ThrowIfNull(dependencies);
         Dependencies = Array.AsReadOnly(dependencies.ToArray());
+        BodyFunctionCalls = Array.AsReadOnly((bodyFunctionCalls ?? []).ToArray());
+        if (BodyFunctionCalls.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("A function identity cannot be blank.", nameof(bodyFunctionCalls));
+        }
         Owner = owner;
         OwningSchema = owningSchema;
     }
@@ -81,6 +87,9 @@ public sealed class SqlCatalogFunction
 
     /// <summary>Gets the function signature and domain dependency identities.</summary>
     public IReadOnlyList<string> Dependencies { get; }
+
+    /// <summary>Gets the expression's resolved normalized function signatures in preorder.</summary>
+    public IReadOnlyList<string> BodyFunctionCalls { get; }
 
     /// <summary>Gets the durable owner.</summary>
     public DatabaseObjectOwner Owner { get; }

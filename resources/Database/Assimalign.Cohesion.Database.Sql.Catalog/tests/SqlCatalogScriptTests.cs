@@ -16,6 +16,7 @@ public sealed class SqlCatalogScriptTests
     [InlineData("checksum")]
     [InlineData("count")]
     [InlineData("origin")]
+    [InlineData("futureorigin")]
     public async Task CreateTableAsync_InconsistentReceipt_ShouldRefusePublication(string changed)
     {
         // Arrange
@@ -24,8 +25,10 @@ public sealed class SqlCatalogScriptTests
         ulong generation = catalog.DdlGeneration;
         var original = new SqlCatalogScript("001", new string('A', 64), 1, 0, generation, generation, null);
         await catalog.SaveScriptAsync(original, CancellationToken.None);
+        ulong suppliedGeneration = changed == "futureorigin" ? generation + 2 : generation + 1;
+        ulong suppliedOrigin = changed is "origin" or "futureorigin" ? suppliedGeneration : generation;
         var invalid = new SqlCatalogScript("001", new string(changed == "checksum" ? 'B' : 'A', 64), changed == "count" ? 2 : 1,
-            1, changed == "origin" ? generation + 1 : generation, generation + 1, null);
+            1, suppliedOrigin, suppliedGeneration, null);
 
         // Act
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateTableAsync("dbo", "t",

@@ -191,7 +191,7 @@ internal sealed partial class SqlPlanExecutor
         constraints = BindConstraints(plan.Table, [plan.Constraint]);
         var primary = plan.Constraint.Kind == SqlConstraintKind.PrimaryKey ? plan.Constraint.Columns : plan.Table.PrimaryKeyColumns;
         var columns = plan.Table.Columns.Select(column => primary.Contains(column.Name, StringComparer.OrdinalIgnoreCase)
-            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName) : column).ToArray();
+            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls) : column).ToArray();
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
             plan.Table.DroppedColumnOrdinals);
@@ -407,8 +407,8 @@ internal sealed partial class SqlPlanExecutor
 
             try
             {
-                SqlPersistedExpression.Bind(check.Predicate,
-                    new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation, functions: _definitions.Functions));
+                _ = BindPersistedCheck(check.Predicate, new SqlCatalogTable(0, table.Schema, table.Name, columns),
+                    _catalog.DefaultCollation, _definitions.Functions, check.Constraint.CheckFunctionCalls);
             }
             catch (DatabaseException exception)
             {

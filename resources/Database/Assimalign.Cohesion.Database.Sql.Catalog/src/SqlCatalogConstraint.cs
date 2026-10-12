@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
@@ -35,6 +36,7 @@ public sealed class SqlCatalogConstraint
     /// The SQL Boolean expression for a check constraint, as the canonical text the SQL engine
     /// renders from the parsed predicate. The catalog stores it as an opaque string.
     /// </param>
+    /// <param name="checkFunctionCalls">Resolved normalized function signatures in expression preorder, retaining repeated calls.</param>
     /// <param name="onDelete">The action when a referenced parent row is deleted.</param>
     /// <exception cref="ArgumentException">The definition is incomplete or inconsistent.</exception>
     public SqlCatalogConstraint(
@@ -45,7 +47,8 @@ public sealed class SqlCatalogConstraint
         string? referencedTable = null,
         IReadOnlyList<string>? referencedColumns = null,
         string? checkExpression = null,
-        SqlCatalogReferentialAction onDelete = SqlCatalogReferentialAction.Restrict)
+        SqlCatalogReferentialAction onDelete = SqlCatalogReferentialAction.Restrict,
+        IReadOnlyList<string>? checkFunctionCalls = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(columns);
@@ -78,6 +81,11 @@ public sealed class SqlCatalogConstraint
         ReferencedColumns = Snapshot(referencedColumns ?? Array.Empty<string>());
         CheckExpression = checkExpression;
         OnDelete = onDelete;
+        CheckFunctionCalls = Array.AsReadOnly((checkFunctionCalls ?? []).ToArray());
+        if (CheckFunctionCalls.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("A check function identity cannot be blank.", nameof(checkFunctionCalls));
+        }
     }
 
     /// <summary>Gets the constraint name.</summary>
@@ -98,6 +106,8 @@ public sealed class SqlCatalogConstraint
     /// the user wrote it.
     /// </summary>
     public string? CheckExpression { get; }
+    /// <summary>Gets each CHECK call's resolved normalized signature in expression preorder.</summary>
+    public IReadOnlyList<string> CheckFunctionCalls { get; }
     /// <summary>Gets the action when a referenced parent row is deleted.</summary>
     public SqlCatalogReferentialAction OnDelete { get; }
 

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 
@@ -35,13 +36,13 @@ internal sealed class SqlStatementAllocationBaseline
         var previousMetrics = _session.LastStatementMetrics;
         _ = ProvisioningSchema(_session);
         _ = IsSelfCommitting(null, request);
-        await using var result = (QueryResultSet)await ExecuteStatementAsync(_session, request, cancellationToken).ConfigureAwait(false);
+        await using var result = (QueryResultSet)await ExecuteStatementAsync(_session, request, cancellationToken, null).ConfigureAwait(false);
         return SelfCommitted(_session, request, previousMetrics);
     }
 
     // Mirrors SqlDatabaseSession.ExecuteRequestAsync without its tracing: the same checks and the
-    // same async locals (previousMetrics, ddl), so Debug's hoisted state machine is the same size.
-    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
+    // same receipt parameter and async locals, so Debug's hoisted state machine is the same size.
+    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt = null)
     {
         _session.Database.ThrowIfOffline();
         var previousMetrics = _session.LastStatementMetrics;
@@ -54,7 +55,7 @@ internal sealed class SqlStatementAllocationBaseline
             }
             using var ddl = ProvisioningSchema(_session) is null && IsSelfCommitting(null, request)
                 ? _session.Database.DdlInterlock.EnterStatement(_session.Database.Name.ToString()) : null;
-            return await ExecuteStatementAsync(_session, request, cancellationToken).ConfigureAwait(false);
+            return await ExecuteStatementAsync(_session, request, cancellationToken, scriptReceipt).ConfigureAwait(false);
         }
         catch (Exception exception) when (_session.Database.TranslateOffline(exception,
             selfCommitted: SelfCommitted(_session, request, previousMetrics)) is var translated
@@ -77,7 +78,7 @@ internal sealed class SqlStatementAllocationBaseline
     private static extern ref SqlQueryParserOptions ParserOptions(SqlDatabaseSession session);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ExecuteStatementAsync")]
-    private static extern ValueTask<QueryResult> ExecuteStatementAsync(SqlDatabaseSession session, QueryRequest request, CancellationToken cancellationToken);
+    private static extern ValueTask<QueryResult> ExecuteStatementAsync(SqlDatabaseSession session, QueryRequest request, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "SelfCommitted")]
     private static extern bool SelfCommitted(SqlDatabaseSession session, QueryRequest request, SqlStatementMetrics? previousMetrics);

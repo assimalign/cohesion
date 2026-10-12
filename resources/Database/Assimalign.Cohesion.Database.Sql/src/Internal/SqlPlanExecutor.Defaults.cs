@@ -172,9 +172,14 @@ internal sealed partial class SqlPlanExecutor
             return BindDefault(column, value);
         }
         var scope = new SqlExpressionEvaluator([], null, defaultCollation: collation, functions: functions);
+        SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
         try
         {
             SqlPersistedExpression.Bind(expression, scope);
+            if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
+            {
+                throw new DatabaseException($"The recorded function signatures {string.Join(", ", column.DefaultFunctionCalls)} do not resolve.");
+            }
             if (declaring)
             {
                 SqlPlanner.ValidateExpression(expression, scope);

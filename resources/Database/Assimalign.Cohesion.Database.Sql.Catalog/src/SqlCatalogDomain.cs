@@ -19,9 +19,11 @@ public sealed class SqlCatalogDomain
     /// <param name="dependencies">The function signature dependency identities.</param>
     /// <param name="owner">The durable owner.</param>
     /// <param name="owningSchema">The owning schema, or null for an ad-hoc definition.</param>
+    /// <param name="checkFunctionCalls">Resolved normalized function signatures in expression preorder, retaining repeated calls.</param>
+    /// <param name="defaultFunctionCalls">Resolved normalized function signatures in expression preorder, retaining repeated calls.</param>
     /// <exception cref="ArgumentException">A required name or ownership value is invalid.</exception>
     /// <exception cref="ArgumentNullException">A required collection is null.</exception>
-    public SqlCatalogDomain(string name, string baseType, string? defaultLiteral, bool isNotNull, string? constraintName, string? checkExpression, IReadOnlyList<string> dependencies, DatabaseObjectOwner owner, string? owningSchema)
+    public SqlCatalogDomain(string name, string baseType, string? defaultLiteral, bool isNotNull, string? constraintName, string? checkExpression, IReadOnlyList<string> dependencies, DatabaseObjectOwner owner, string? owningSchema, IReadOnlyList<string>? checkFunctionCalls = null, IReadOnlyList<string>? defaultFunctionCalls = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(baseType);
@@ -39,6 +41,16 @@ public sealed class SqlCatalogDomain
         CheckExpression = checkExpression;
         ArgumentNullException.ThrowIfNull(dependencies);
         Dependencies = Array.AsReadOnly(dependencies.ToArray());
+        CheckFunctionCalls = Array.AsReadOnly((checkFunctionCalls ?? []).ToArray());
+        if (CheckFunctionCalls.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("A function identity cannot be blank.", nameof(checkFunctionCalls));
+        }
+        DefaultFunctionCalls = Array.AsReadOnly((defaultFunctionCalls ?? []).ToArray());
+        if (DefaultFunctionCalls.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("A function identity cannot be blank.", nameof(defaultFunctionCalls));
+        }
         Owner = owner;
         OwningSchema = owningSchema;
     }
@@ -63,6 +75,12 @@ public sealed class SqlCatalogDomain
 
     /// <summary>Gets the function signature dependency identities.</summary>
     public IReadOnlyList<string> Dependencies { get; }
+
+    /// <summary>Gets the expression's resolved normalized function signatures in preorder.</summary>
+    public IReadOnlyList<string> CheckFunctionCalls { get; }
+
+    /// <summary>Gets the expression's resolved normalized function signatures in preorder.</summary>
+    public IReadOnlyList<string> DefaultFunctionCalls { get; }
 
     /// <summary>Gets the durable owner.</summary>
     public DatabaseObjectOwner Owner { get; }
