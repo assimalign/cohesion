@@ -381,6 +381,36 @@ The adapter does not live in this package: Web.Authorization takes no IdentityMo
 the two claim models meet only in the Bearer handler's mapper, which projects a validated token onto a
 `ClaimsPrincipal`; an adapter that needs canonical provenance may need the mapper to carry it.
 
+## Diagnostics
+
+The internal `AuthorizationEventSource` is named `Assimalign.Cohesion.Web.Authorization`.
+It records the middleware's denial decision before the selected handlers write their challenge or
+forbid, so a cookie login redirect can be distinguished from an ordinary application redirect.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `RequestDenied` | Verbose | `outcome` (`Challenge` or `Forbid`), `routeTemplate`, `policySource` (`Endpoint` or `Fallback`), `failedRequirement`, `schemes`, `requestId` |
+
+The `challenged-requests` and `forbidden-requests` polling counters are lifetime totals. Each denial
+increments exactly one counter at the middleware decision, regardless of how many authentication
+schemes the policy evaluates or challenges, and even when no listener is enabled. Counters are created
+only when the source is enabled. Successful authorization emits no event and changes neither counter.
+
+An internal policy evaluation returns the first failing requirement's index, preserving evaluation
+order and the synchronous fast path. Public `EvaluateAsync` keeps its `ValueTask<bool>` contract and
+behavior. The requirement's type name, joined policy scheme names, endpoint template, and request id
+are read only inside the Verbose `IsEnabled` guard. An empty `schemes` field means that the policy
+uses the authentication defaults. The request id comes from `IWebRequestIdFeature` in the contracts-only
+Web.Server dependency; an absent feature produces an empty string. No ambient activity is consulted.
+The source never writes users, claims, role names, route values, request paths or queries.
+
+`AuthorizationEventSourceTests` validates the source name, strict manifest, both denial outcomes and
+their exact payloads, counter publication and listener-independent totals, fallback attribution,
+synchronous and asynchronous failure indices, and request-id correlation. Its real-host tests exercise
+Bearer and Cookie authentication again through Authorization and verify one rejection per request and
+scheme, alongside one authorization denial. Tests link the shared test-only `EventSourceRecorder`
+and run without parallelization. The own-test-only internals grant adds no shipped public API.
+
 ## AOT posture
 
 No reflection, no attribute discovery, no type activation, no runtime code generation. Requirements

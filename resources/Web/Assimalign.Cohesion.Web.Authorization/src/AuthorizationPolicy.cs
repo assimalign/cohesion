@@ -101,6 +101,15 @@ public sealed class AuthorizationPolicy
     /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
     public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken cancellationToken = default)
     {
+        ValueTask<int> pending = EvaluateFirstFailureAsync(context, cancellationToken);
+        return pending.IsCompletedSuccessfully
+            ? new ValueTask<bool>(pending.Result < 0)
+            : IsAuthorizedAsync(pending);
+    }
+
+    // The index is diagnostic state kept inside the assembly; the public evaluation remains boolean.
+    internal ValueTask<int> EvaluateFirstFailureAsync(AuthorizationContext context, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(context);
 
         for (int i = 0; i < _requirements.Length; i++)
@@ -114,17 +123,19 @@ public sealed class AuthorizationPolicy
 
             if (!pending.Result)
             {
-                return new ValueTask<bool>(false);
+                return new ValueTask<int>(i);
             }
         }
 
-        return new ValueTask<bool>(true);
+        return new ValueTask<int>(-1);
     }
 
-    // The slow path, entered at the first requirement that does not complete synchronously. The
-    // built-in requirements other than an asynchronous assertion always complete synchronously, so a
-    // typical policy never allocates a state machine.
-    private async ValueTask<bool> EvaluateRemainingAsync(
+    private static async ValueTask<bool> IsAuthorizedAsync(ValueTask<int> pending)
+        => await pending.ConfigureAwait(false) < 0;
+
+    // The slow path starts at the first asynchronous requirement; synchronous policies still avoid
+    // a state machine, and both paths report the first failure without evaluating a requirement twice.
+    private async ValueTask<int> EvaluateRemainingAsync(
         ValueTask<bool> pending,
         int index,
         AuthorizationContext context,
@@ -132,18 +143,18 @@ public sealed class AuthorizationPolicy
     {
         if (!await pending.ConfigureAwait(false))
         {
-            return false;
+            return index;
         }
 
         for (int i = index + 1; i < _requirements.Length; i++)
         {
             if (!await _requirements[i].EvaluateAsync(context, cancellationToken).ConfigureAwait(false))
             {
-                return false;
+                return i;
             }
         }
 
-        return true;
+        return -1;
     }
 
     private static ReadOnlyCollection<string> CopySchemes(IEnumerable<string>? authenticationSchemes)

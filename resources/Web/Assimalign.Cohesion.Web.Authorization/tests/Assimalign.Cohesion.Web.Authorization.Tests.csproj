@@ -4,6 +4,9 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />

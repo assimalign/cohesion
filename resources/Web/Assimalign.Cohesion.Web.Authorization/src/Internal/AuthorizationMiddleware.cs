@@ -103,12 +103,18 @@ internal sealed class AuthorizationMiddleware : IWebApplicationMiddleware
             ? context.User
             : await AuthenticateSchemesAsync(context, schemes, cancellationToken).ConfigureAwait(false);
 
-        if (!await policy.EvaluateAsync(new AuthorizationContext(context, user), cancellationToken).ConfigureAwait(false))
+        int failedRequirement = await policy.EvaluateFirstFailureAsync(
+            new AuthorizationContext(context, user), cancellationToken).ConfigureAwait(false);
+
+        if (failedRequirement >= 0)
         {
             // RFC 9110 §15.5.2 / §15.5.4: a request without an authenticated principal is asked to
             // authenticate (401, or the scheme's interactive equivalent); an authenticated one the policy
             // rejects is refused (403). The schemes' handlers write the response; the endpoint never runs.
-            if (DenyAnonymousRequirement.IsAuthenticated(user))
+            bool forbid = DenyAnonymousRequirement.IsAuthenticated(user);
+            AuthorizationEventSource.Log.RequestDenied(context, endpoint, policy, failedRequirement, forbid);
+
+            if (forbid)
             {
                 await ForbidSchemesAsync(context, schemes, cancellationToken).ConfigureAwait(false);
             }
