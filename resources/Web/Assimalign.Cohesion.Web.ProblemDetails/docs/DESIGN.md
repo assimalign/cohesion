@@ -41,7 +41,11 @@ owns only the former:
 - **`type` is always emitted**, defaulting to the reserved `about:blank` (RFC 9457 §4.2); the
   other standard members are omitted when null. `ProblemDetails.FromStatus` fills the
   status-phrase title for the default type: `HttpStatusCode.ReasonPhrase`, the RFC 9110 phrase
-  (`Content Too Large`, `Unprocessable Content`) since #1204.
+  (`Content Too Large`, `Unprocessable Content`) since #1204. Since #1414, core accepts every
+  code from 100 through 599 and gives an unregistered code an empty reason phrase. This library
+  retains its generic title fallback: `Internal Server Error` for 500–599, and `Error` for
+  other codes without a phrase. `IsValid` tests the numeric range, so title resolution separately
+  checks whether a phrase exists. Explicit application titles are serialized unchanged.
 - **No result carriers, no factories, no middleware.** Earlier iterations wrapped this payload in
   a `ProblemHttpResult` (IResult) or an exception-boundary middleware. Both were deliberately
   removed: how an application responds to a fault is the application's decision, made through the
@@ -60,6 +64,20 @@ The library throws only argument-validation exceptions. `WriteProblemDetailsAsyn
 response status from `ProblemDetails.Status` when present and otherwise leaves the status
 untouched — payload and status stay the caller's decision to reconcile; the writer never invents
 one.
+
+### Unregistered status codes (#1414)
+
+`ProblemDetails.FromStatus(new HttpStatusCode(499))` produces `status: 499` with title `Error`;
+599 produces `status: 599` with title `Internal Server Error`. `WriteProblemDetailsAsync` writes
+the same numeric response status and JSON status. It still rejects a supplied response status
+outside 100–599 through `HttpStatusCode` validation. The serializer alone remains a plain model
+writer; it does not validate or replace the caller's `Status` or `Title`.
+
+**Breaking behavior from 10.0.0-preview.1 (decision 15):** constructing an unregistered
+`HttpStatusCode`, or writing a problem with that integer status onto a response, used to throw.
+Those operations now succeed within 100–599. Registered titles and explicit application titles
+retain their behavior; the generic fallback prevents the newly accepted codes from acquiring an
+empty default title.
 
 ## AOT posture
 

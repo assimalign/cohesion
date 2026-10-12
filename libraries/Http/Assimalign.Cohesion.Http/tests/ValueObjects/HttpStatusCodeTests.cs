@@ -1,3 +1,6 @@
+using System;
+using System.Globalization;
+
 using Shouldly;
 
 using Xunit;
@@ -129,26 +132,87 @@ public class HttpStatusCodeTests
         statusCode.ToString().ShouldBe("226 IM Used");
     }
 
-    // 226 is registered (RFC 3229). 299 and the reserved 418 are three-digit codes RFC 9110 §15 lets a
-    // sender use, but only assigned codes are known here: the documented limit of IsValid. The reserved
-    // 306 is known only because the obsolete HttpStatusCode.Unused shipped in 10.0.0-preview.1, and
-    // dropping it would make that accessor throw.
-    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode.IsValid: accepts registered codes only")]
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode.IsValid: accepts exactly the HTTP status range")]
     [InlineData(200, true)]
     [InlineData(226, true)]
     [InlineData(300, true)]
     [InlineData(306, true)]
     [InlineData(425, true)]
-    [InlineData(299, false)]
-    [InlineData(418, false)]
+    [InlineData(100, true)]
+    [InlineData(104, true)]
+    [InlineData(299, true)]
+    [InlineData(418, true)]
+    [InlineData(599, true)]
+    [InlineData(99, false)]
+    [InlineData(600, false)]
     [InlineData(999, false)]
-    public void IsValid_KnownAndUnknownCodes_ShouldReturnExpectedResult(int value, bool expected)
+    public void IsValid_InsideAndOutsideRange_ShouldReturnExpectedResult(int value, bool expected)
     {
         // Act
         bool actual = HttpStatusCode.IsValid(value);
 
         // Assert
         actual.ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpStatusCode: All 500 status values round-trip through construction and conversion")]
+    public void Constructor_EntireValidRange_ShouldRoundTripEveryCode()
+    {
+        // Arrange
+        for (int value = 100; value <= 599; value++)
+        {
+            // Act
+            HttpStatusCode constructed = new(value);
+            HttpStatusCode converted = value;
+
+            // Assert
+            HttpStatusCode.IsValid(value).ShouldBeTrue();
+            constructed.Value.ShouldBe(value);
+            converted.ShouldBe(constructed);
+            ((int)converted).ShouldBe(value);
+            converted.GetHashCode().ShouldBe(constructed.GetHashCode());
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode: Out-of-range construction and conversion still fail")]
+    [InlineData(int.MinValue)]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(99)]
+    [InlineData(600)]
+    [InlineData(int.MaxValue)]
+    public void Constructor_OutsideValidRange_ShouldThrow(int value)
+    {
+        // Act
+        Action construct = () => _ = new HttpStatusCode(value);
+        Action convert = () => { HttpStatusCode status = value; };
+
+        // Assert
+        HttpStatusCode.IsValid(value).ShouldBeFalse();
+        construct.ShouldThrow<ArgumentException>();
+        convert.ShouldThrow<ArgumentException>();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode: Codes without a registered phrase retain their digits and status-line space")]
+    [InlineData(104)]
+    [InlineData(199)]
+    [InlineData(299)]
+    [InlineData(399)]
+    [InlineData(418)]
+    [InlineData(499)]
+    [InlineData(599)]
+    public void ToString_UnregisteredCode_ShouldRenderDigitsAndEmptyPhrase(int value)
+    {
+        // Arrange
+        HttpStatusCode status = new(value);
+
+        // Act
+        string phrase = status.ReasonPhrase;
+        string rendered = status.ToString();
+
+        // Assert
+        phrase.ShouldBeEmpty();
+        rendered.ShouldBe(value.ToString(CultureInfo.InvariantCulture) + " ");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - HttpStatusCode: implicit conversions round-trip the numeric value")]

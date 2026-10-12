@@ -89,6 +89,28 @@ public class ProblemDetailsWriterTests
         problem.Title.ShouldBe(expectedTitle);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.ProblemDetails] - ProblemDetails: unregistered codes keep a nonempty default title")]
+    [InlineData(199, "Error")]
+    [InlineData(299, "Error")]
+    [InlineData(399, "Error")]
+    [InlineData(499, "Error")]
+    [InlineData(599, "Internal Server Error")]
+    public void FromStatus_UnregisteredCode_ShouldUseGenericTitle(int status, string expectedTitle)
+    {
+        // Arrange
+        HttpStatusCode statusCode = status;
+
+        // Act
+        ProblemDetails problem = ProblemDetails.FromStatus(statusCode);
+        using JsonDocument document = JsonDocument.Parse(_writer.WriteToString(problem));
+
+        // Assert
+        problem.Title.ShouldBe(expectedTitle);
+        document.RootElement.GetProperty("type").GetString().ShouldBe("about:blank");
+        document.RootElement.GetProperty("status").GetInt32().ShouldBe(status);
+        document.RootElement.GetProperty("title").GetString().ShouldBe(expectedTitle);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.ProblemDetails] - ProblemDetailsWriter: renders scalar, array and nested-object extensions")]
     public void Write_WithExtensions_RendersConstrainedValueShapes()
     {

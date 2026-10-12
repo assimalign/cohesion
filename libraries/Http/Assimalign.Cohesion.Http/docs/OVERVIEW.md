@@ -5,6 +5,16 @@ Cohesion clients, transports, and Web features. The package depends on Core;
 feature-specific contracts live in the corresponding Http feature packages.
 See [DESIGN](DESIGN.md) for protocol semantics and compatibility decisions.
 
+## Status codes
+
+Construct `new HttpStatusCode(299)` or assign `HttpStatusCode status = 299` for
+any integer from 100 through 599. `IsValid` checks that numeric range, not registry
+membership. A code absent from the reason-phrase table has an empty
+`ReasonPhrase`; `ToString()` renders `"299 "` for an HTTP/1.1 status line.
+HTTP/2 and HTTP/3 send only the digits. Out-of-range values still throw.
+This broadens preview.1's registered-only acceptance; see DESIGN for the
+reserved-code and interim-response rules.
+
 ## Query values
 
 Parse with `new HttpQuery("?tag=first&tag=&tag=last").Parse()`.

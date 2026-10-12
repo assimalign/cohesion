@@ -72,7 +72,8 @@ public sealed class ProblemDetails
 
     /// <summary>
     /// Creates a <see cref="ProblemDetails"/> for an HTTP status code with the default
-    /// <c>"about:blank"</c> type and the status phrase as the title.
+    /// <c>"about:blank"</c> type and the status phrase as the title. When an unregistered code has
+    /// no phrase, the title is <c>"Internal Server Error"</c> for 500–599 and <c>"Error"</c> otherwise.
     /// </summary>
     /// <param name="statusCode">The HTTP status code the problem represents.</param>
     /// <param name="detail">An optional occurrence-specific explanation.</param>

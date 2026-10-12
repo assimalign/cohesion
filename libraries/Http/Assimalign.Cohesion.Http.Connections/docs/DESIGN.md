@@ -819,6 +819,38 @@ TLS-terminating gateways forwarding that scheme must enable the option or send
   is no renegotiation or post-handshake client authentication, which
   HTTP/2 forbids anyway (RFC 9113 §9.2.1, §9.2.3).
 
+## Extensible status codes (#1414)
+
+Core `HttpStatusCode` accepts every integer from 100 through 599 (RFC 9110
+§15), including values absent from its reason-phrase table. These values carry
+an empty phrase; the transport preserves their numeric identity rather than
+substituting their class's `x00` code. Interpreting an unknown status as its
+class default is the recipient's responsibility.
+
+- **HTTP/1.1** writes `HTTP/1.1 299 ` followed by CRLF for an unregistered
+  `299`: the SP after the status code remains present even though the phrase is
+  empty, as RFC 9112 §4 requires. Buffered, streamed, interim and transport-built
+  heads share this status-line writer.
+- **HTTP/2 and HTTP/3** encode only the three decimal digits in `:status`,
+  such as `299`. Neither HPACK nor QPACK carries a reason phrase.
+- **Informational codes** remain 100–199. Unregistered values such as `104`
+  and `199` can be emitted through the interim-response seam; every protocol
+  continues to reject them as final responses. `101` remains exclusive to the
+  HTTP/1.1 protocol-upgrade path. Accepting a numeric value does not recommend
+  emitting a reserved status: `306` retains its legacy `(Unused)` phrase and
+  obsolete accessor; `418` has an empty phrase.
+
+`HttpUnregisteredStatusCodeTests` exercises real buffered exchanges carrying
+`299`, `418` and `599` on all three protocols, each protocol's streamed `299`
+head, all interim writers with `104` and `199`, and the existing numeric final
+response guard. Invalid values below 100 or above 599 are rejected by the core
+value type before reaching a writer.
+
+**Breaking behavior against 10.0.0-preview.1 (decision 15).** Application code
+can now assign and send an unregistered in-range response status where the
+`HttpStatusCode` constructor and implicit conversion previously threw. No
+transport interface or framing rule changes; registered phrases stay intact.
+
 ## Automatic Date on final responses (#1417)
 
 The listener defaults `HttpConnectionListenerOptions.AddDateHeader` to true.

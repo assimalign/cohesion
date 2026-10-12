@@ -1,7 +1,8 @@
-﻿using System;
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -22,17 +23,16 @@ using Assimalign.Cohesion.Internal;
 /// and HTTP/2 and HTTP/3 carry no phrase at all.
 /// </para>
 /// <para>
-/// Reserved codes are not included: the reserved <c>418</c> (RFC 9110 &#167; 15.5.19) and the
-/// registry's temporary registrations are unknown. The reserved <c>306</c> (RFC 9110 &#167; 15.4.7)
-/// is the one exception: it stays known, with the registry's <c>(Unused)</c>, only because
-/// <see cref="Unused"/> shipped in 10.0.0-preview.1, and dropping the code would make that accessor
-/// throw. <see cref="Unused"/> is obsolete instead.
+/// The phrase table omits reserved <c>418</c> (RFC 9110 &#167; 15.5.19) and temporary registrations.
+/// Reserved <c>306</c> (RFC 9110 &#167; 15.4.7) retains <c>(Unused)</c> for compatibility with the
+/// obsolete <see cref="Unused"/> accessor shipped in 10.0.0-preview.1. Numeric validity does not
+/// imply registry assignment or recommend using a reserved code.
 /// </para>
 /// <para>
-/// Only a known code can be constructed: <see cref="IsValid(int)"/> rejects every other value. RFC 9110
-/// &#167; 15 allows any three-digit code from <c>100</c> to <c>599</c>, and a recipient treats an
-/// unknown one as the <c>x00</c> code of its class, so an application cannot send an unregistered or
-/// private code through this type.
+/// Every integer from <c>100</c> through <c>599</c> can be constructed (RFC 9110 &#167; 15).
+/// A code absent from the phrase table has an empty <see cref="ReasonPhrase"/>, preserving the
+/// supplied number without inventing a registered meaning. A recipient interprets an unknown code
+/// as the <c>x00</c> code of its class. Values outside that range are invalid.
 /// </para>
 /// </remarks>
 [DebuggerDisplay("{ToString()}")]
@@ -111,9 +111,10 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     };
 
     /// <summary>
-    /// The default constructor.
+    /// Initializes an HTTP status code in the inclusive range <c>100</c> through <c>599</c>.
     /// </summary>
     /// <param name="statusCode">The numeric HTTP status code.</param>
+    /// <exception cref="ArgumentException"><paramref name="statusCode"/> is outside the valid range.</exception>
     public HttpStatusCode(int statusCode)
     {
         ArgumentException.ThrowIf(!IsValid(statusCode), $"The provided status code is invalid: '{statusCode}'");
@@ -128,7 +129,8 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
 
     /// <summary>
     /// Gets the code's registered reason phrase, such as <c>OK</c> or <c>Content Too Large</c>
-    /// (RFC 9110 &#167; 15), or an empty string for a default-constructed instance.
+    /// (RFC 9110 &#167; 15), or an empty string for a code absent from the phrase table or a
+    /// default-constructed instance.
     /// </summary>
     public string ReasonPhrase
     {
@@ -156,14 +158,12 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
 
     /// <summary>
     /// Renders the code and its reason phrase as an HTTP/1.1 status line carries them, for example
-    /// <c>200 OK</c>.
+    /// <c>200 OK</c>. A code without a phrase retains the separating space, for example <c>299 </c>.
     /// </summary>
     /// <returns>The code and reason phrase, or an empty string for a default-constructed instance.</returns>
     public override string ToString()
     {
-        string reasonPhrase = ReasonPhrase;
-
-        return reasonPhrase.Length == 0 ? string.Empty : Value + " " + reasonPhrase;
+        return Value == 0 ? string.Empty : Value.ToString(CultureInfo.InvariantCulture) + " " + ReasonPhrase;
     }
 
     /// <inheritdoc />
@@ -279,23 +279,14 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     /// Checks whether the numeric <paramref name="statusCode"/> is valid.
     /// </summary>
     /// <remarks>
-    /// Only an assigned code in the IANA registry is known, so an unregistered code inside the RFC 9110
-    /// &#167; 15 range of <c>100</c>&#8211;<c>599</c>, such as <c>299</c> or the reserved <c>418</c>,
-    /// returns <see langword="false"/>. The reserved <c>306</c> returns <see langword="true"/>, only
-    /// because the obsolete <see cref="Unused"/> shipped in 10.0.0-preview.1 (see the type remarks).
+    /// Validity is the RFC 9110 &#167; 15 numeric range, not membership in the reason-phrase table.
+    /// Unregistered and reserved codes inside the range are valid; this does not recommend their use.
     /// </remarks>
     /// <param name="statusCode">The numeric status code to validate.</param>
-    /// <returns><see langword="true"/> when the supplied code is known; otherwise <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/> for <c>100</c> through <c>599</c>; otherwise <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsValid(int statusCode)
     {
-        for (int i = 0; i < _statusCodes.Length; i++)
-        {
-            if (_statusCodes[i].Key == statusCode)
-            {
-                return true;
-            }
-        }
-        return false;
+        return statusCode is >= 100 and <= 599;
     }
 }

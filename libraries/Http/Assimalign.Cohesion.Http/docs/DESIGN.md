@@ -1867,37 +1867,49 @@ phrase for every code RFC 9110 defines, and the defining RFC's for the rest,
 `226 IM Used` (RFC 3229) included. The registry lists `510` as "Not Extended
 (OBSOLETED)" since RFC 2774 moved to Historic; that annotation is not part of
 the phrase, so the table sends `510 Not Extended`.
-- **One table, read three ways.** `ReasonPhrase` returns the phrase alone,
-  `ToString()` renders `200 OK` for the HTTP/1.1 status line (the transport's
-  head writer and the Http.ProtocolUpgrade `101`/`200` writer), and
-  `IsValid` asks whether a code is in it. Web.ProblemDetails titles an
-  `about:blank` problem with `ReasonPhrase`, and Web.OpenApi describes a
-  response with it. Before #1204 Web.OpenApi kept a private RFC 9110 copy,
+- **The phrase table is not validation.** `ReasonPhrase` returns a registered
+  phrase or an empty string for a code absent from the table. `ToString()`
+  renders `200 OK`, or `299 ` with the separating space and no phrase, for the
+  HTTP/1.1 status line (the transport's head writer and the Http.ProtocolUpgrade
+  `101`/`200` writer). A default-constructed instance still renders an empty
+  string. Web.ProblemDetails and Web.OpenApi read the phrase too. Before #1204
+  Web.OpenApi kept a private RFC 9110 copy,
   because the core still had pre-RFC 9110 wording ("Ok", "Redirect Keep Verb",
   "Request Entity Too Large", "Request Uri Too Long", "Requested Range Not
   Satisfiable", "Un-Processable Entity", "Http Version Not Supported"). That
   wording reached HTTP/1.1 status lines and problem titles in 10.0.0-preview.1.
-- **Left out.** Reserved codes, such as `418 (Unused)` (RFC 9110 §15.5.19), and
-  the registry's temporary registrations, such as `104` for resumable uploads.
-  The reserved `306 (Unused)` (§15.4.7) is the one exception, and not on the
-  merits: the public `HttpStatusCode.Unused => 306` shipped in
-  10.0.0-preview.1, and dropping the code from the table would make that
-  accessor throw. So `306` stays valid with the registry's `(Unused)`, and
-  `Unused` is marked `[Obsolete]` to steer callers off it.
-- **Only registered codes are valid.** RFC 9110 §15 allows any three-digit code
-  from 100 to 599, and a recipient treats an unknown one as the `x00` code of its
-  class. `IsValid` rejects anything not in the table, so the constructor and the
-  implicit conversion from `int` throw for an unregistered code such as `299`. An
-  application therefore cannot send a private or newly registered code until the
-  table learns it. Widening that changes what every transport accepts as a
-  response status, so it is outside #1204 and is recorded as a gap. The
-  `HttpStatusCode` member names are unchanged (`RedirectKeepVerb`,
-  `RequestEntityTooLarge`, `UnProcessableEntity` and others still name their
-  codes), so no caller breaks; only the text changed.
-- **HTTP/2 and HTTP/3** send `:status` digits only, so the phrase never reaches
-  them. RFC 9112 §4 tells an HTTP/1.1 client to ignore it, so the change is
-  cosmetic on the wire. It is user-visible in problem titles and in the OpenAPI
-  document.
+- **Every code from 100 through 599 is valid (#1414).** `IsValid`, the constructor
+  and implicit conversion from `int` accept the inclusive numeric range in
+  [RFC 9110 §15](https://www.rfc-editor.org/rfc/rfc9110.html#section-15). Anything
+  below 100 or above 599 still fails. The original number is preserved; the
+  recipient applies the `x00` class semantics when it does not recognize it.
+  An empty phrase avoids inventing a registered meaning for a private or newly
+  registered code. No new public member or reason-phrase table entry is needed.
+- **Reserved and temporary codes.** The phrase table still omits `418` and
+  temporary registrations such as `104`; both are now numerically valid and
+  have empty phrases. The reserved `306` retains `(Unused)`, and the public
+  `Unused` accessor remains `[Obsolete]`, preserving #1204's compatibility
+  choice. Range validation neither asserts registry assignment nor recommends
+  sending a reserved code.
+- **All three transports.** HTTP/1.1 writes `HTTP/1.1 299 \r\n` with the required
+  space and an empty phrase, as allowed by
+  [RFC 9112 §4](https://www.rfc-editor.org/rfc/rfc9112.html#section-4). HTTP/2 and
+  HTTP/3 write only `:status: 299`; no reason phrase is carried. The existing
+  numeric interim/final rules still apply: `104` and `199` can be sent through
+  the interim seam, while a final response cannot use 1xx. `101` continues to
+  require the protocol-upgrade path.
+- **`IsValid` caller audit.** The only production caller outside the constructor
+  is `ProblemDetailsDefaults.GetTitle`. It now uses `ReasonPhrase` only when
+  nonempty, preserving the prior generic title for an unregistered code:
+  `Error` below 500 and `Internal Server Error` for 5xx. An explicit title is
+  preserved. This title policy is independent of the empty wire phrase.
+
+**Breaking behavior from 10.0.0-preview.1** (decision 15): a caller that relied
+on `IsValid` returning false, or construction throwing, for an unregistered
+100–599 value now gets a valid status. The public members and registered
+phrases are unchanged. Core tests cover every integer in the range, invalid
+boundaries and phrase rendering; transport tests exercise buffered and streamed
+responses on all three protocols, and the unregistered interim encoders.
 
 ## Methods are case-sensitive (RFC 9110 §9.1)
 
