@@ -87,3 +87,11 @@ in process, through `IHttpHealthFeature.Report` or a custom `IHealthResponseWrit
 
 Hosting contributor integration is supplied by `Assimalign.Cohesion.Web.Hosting.Health`.
 `Web.Health` owns the health model and endpoints and references no hosting library (O34).
+
+### Server-side diagnostics
+
+Listen to `Assimalign.Cohesion.Web.Health` with `dotnet-trace`, `dotnet-counters`, or the
+event-source logging forwarder. It reports status worsening and recovery per service instance,
+Verbose thrown/timed-out probes, and the exact `failed-checks` total. Health exceptions include
+their type and message in server-side sinks; dependency messages can contain host, database or
+user names. HTTP response sanitization is independent. See [Diagnostics](DESIGN.md#diagnostics).

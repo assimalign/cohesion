@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Web.Health.Internal;
 /// A thrown or timed-out check gets a fixed description, never one derived from the exception:
 /// health endpoints are typically unauthenticated, and a dependency's exception message can carry
 /// host, database or user names (CWE-209). The exception itself stays on the entry, for in-process
-/// readers only.
+/// readers; server-side diagnostics report its type and message separately.
 /// </para>
 /// </remarks>
 internal sealed class HealthCheckService : IHealthCheckService
@@ -40,10 +40,13 @@ internal sealed class HealthCheckService : IHealthCheckService
         new Dictionary<string, object>(0);
 
     private readonly HealthCheckRegistration[] _registrations;
+    private readonly int[] _lastStatuses;
 
     public HealthCheckService(HealthCheckRegistration[] registrations)
     {
         _registrations = registrations ?? throw new ArgumentNullException(nameof(registrations));
+        _lastStatuses = new int[registrations.Length];
+        Array.Fill(_lastStatuses, -1); // Unknown: no probe has completed for this service's slot.
     }
 
     public async ValueTask<HealthReport> CheckHealthAsync(
@@ -53,8 +56,9 @@ internal sealed class HealthCheckService : IHealthCheckService
         var entries = new Dictionary<string, HealthReportEntry>(StringComparer.OrdinalIgnoreCase);
         long start = Stopwatch.GetTimestamp();
 
-        foreach (HealthCheckRegistration registration in _registrations)
+        for (int index = 0; index < _registrations.Length; index++)
         {
+            HealthCheckRegistration registration = _registrations[index];
             cancellationToken.ThrowIfCancellationRequested();
 
             if (predicate is not null && !predicate(registration))
@@ -62,13 +66,20 @@ internal sealed class HealthCheckService : IHealthCheckService
                 continue;
             }
 
-            entries[registration.Name] = await RunCheckAsync(registration, cancellationToken).ConfigureAwait(false);
+            (HealthReportEntry entry, string cause) = await RunCheckAsync(registration, cancellationToken).ConfigureAwait(false);
+            int previousStatus = Interlocked.Exchange(ref _lastStatuses[index], (int)entry.Status);
+            if (cause != "Reported")
+            {
+                HealthCheckEventSource.Log.CheckFailed(registration, cause, entry.Exception!);
+            }
+            HealthCheckEventSource.Log.StatusChanged(registration.Name, previousStatus, entry.Status, cause, entry.Exception);
+            entries[registration.Name] = entry;
         }
 
         return new HealthReport(entries, Stopwatch.GetElapsedTime(start));
     }
 
-    private static async ValueTask<HealthReportEntry> RunCheckAsync(
+    private static async ValueTask<(HealthReportEntry Entry, string Cause)> RunCheckAsync(
         HealthCheckRegistration registration,
         CancellationToken cancellationToken)
     {
@@ -90,36 +101,36 @@ internal sealed class HealthCheckService : IHealthCheckService
             IHealthCheck check = registration.Factory();
             HealthCheckResult result = await check.CheckAsync(context, checkToken).ConfigureAwait(false);
 
-            return new HealthReportEntry(
+            return (new HealthReportEntry(
                 result.Status,
                 result.Description,
                 Stopwatch.GetElapsedTime(start),
                 result.Exception,
                 result.Data,
-                registration.Tags);
+                registration.Tags), "Reported");
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             // The per-check timeout tripped (the caller's token is still live): fold the timeout
             // into this check's entry rather than failing the whole report. The cancellation
             // exception stays on the entry so an in-process reader can see where the check stopped.
-            return new HealthReportEntry(
+            return (new HealthReportEntry(
                 registration.FailureStatus,
                 TimedOutDescription,
                 Stopwatch.GetElapsedTime(start),
                 exception,
                 _emptyData,
-                registration.Tags);
+                registration.Tags), "Timeout");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return new HealthReportEntry(
+            return (new HealthReportEntry(
                 registration.FailureStatus,
                 ThrewDescription,
                 Stopwatch.GetElapsedTime(start),
                 exception,
                 _emptyData,
-                registration.Tags);
+                registration.Tags), "Exception");
         }
         finally
         {

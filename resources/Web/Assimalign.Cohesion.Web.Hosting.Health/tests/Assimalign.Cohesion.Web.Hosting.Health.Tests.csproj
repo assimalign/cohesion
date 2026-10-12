@@ -13,4 +13,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Health" />
 	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
 </Project>

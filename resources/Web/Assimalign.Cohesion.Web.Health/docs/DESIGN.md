@@ -134,9 +134,8 @@ descriptions verbatim. It does not restore the preview.1 output:
 **Server-side detail.** The exception object stays on the in-process report. An application reads
 it through `IHttpHealthFeature.Report` on the exchange, from `IHealthCheckService.CheckHealthAsync`
 directly, or in its own `IHealthResponseWriter`, which receives the whole report and decides what
-to publish. A `HealthCheckEventSource` that reports failed checks with their exception type and
-message arrives with #1406 (the Web event-source lane, Stage 14); it is not built yet, so until then
-the report is the server-side channel.
+to publish. The internal `HealthCheckEventSource` reports status transitions and failed probes
+with their exception type and message (see Diagnostics).
 
 ## Framework packaging
 
@@ -150,6 +149,41 @@ Framework membership is current, not deferred:
 
 A resource may still reference Web.Health privately when it needs the implementation internally,
 but that is not the only consumption model and does not change App.Web's public API.
+
+## Diagnostics
+
+The internal `HealthCheckEventSource` is named `Assimalign.Cohesion.Web.Health`. It also reports
+`Hosting.Health` contributors adapted by `Web.Hosting.Health`; the adapter raises no second report.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | HealthCheckWorsened | Warning | checkName, previousStatus, status, cause, exceptionType, exceptionMessage |
+| 2 | HealthCheckImproved | Informational | checkName, previousStatus, status |
+| 3 | HealthCheckFailed | Verbose | checkName, failureStatus, cause, exceptionType, exceptionMessage, timeoutMilliseconds |
+
+Transitions are tracked **per health-service instance**. Every `HealthChecksBuilder.Build()` creates
+independent per-registration slots, initially Unknown (-1). A first Healthy observation is silent;
+a first Degraded or Unhealthy observation worsens from Unknown. Each completed probe atomically
+exchanges its slot, so concurrent readiness and liveness probes reporting the same state produce
+one transition. Probes with different results transition in slot-exchange order; synchronous listener
+callbacks can be delivered in a different order. Predicate-skipped checks and caller cancellation
+leave their slots unchanged. Registering one check in two services produces independent transitions.
+
+`cause` is Reported for returned results, Exception for thrown checks and Timeout for check
+cancellation while the caller is still active. Worsening includes returned Unhealthy results even
+without an exception. Repeated identical statuses produce no transition. Transitions are not
+throttled; `HealthCheckFailed` is the Verbose per-probe detail for the two caught failure paths.
+The lazy `failed-checks` PollingCounter counts those paths exactly, including when no listener is
+enabled. Returned Unhealthy results and caller cancellation do not increment it.
+
+Health exceptions carry their full type name and Message, never a stack trace. Dependency exception
+messages can carry host, database or user names: the event-source rule explicitly retains these
+application messages for diagnosis in server-side sinks. No event payload is added to the HTTP
+response; the default response sanitization described above still applies.
+
+**Behavior change from 10.0.0-preview.1 (#1406).** Listeners and configured event-source forwarding
+sinks can now receive health transitions and exception detail that previously had no server-side
+event. This is an observable diagnostics change on decision 15's terms, with no public API change.
 
 ## Non-goals
 
