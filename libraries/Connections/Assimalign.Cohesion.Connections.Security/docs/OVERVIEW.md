@@ -11,6 +11,7 @@ in the Connections area because it composes directly over the connection contrac
 - `Assimalign.Cohesion.Core`
 - `Assimalign.Cohesion.Connections`
 - `Assimalign.Cohesion.Connections.Tls`
+- `Assimalign.Cohesion.Connections.StreamAbort`
 
 ## Key Types
 
@@ -27,7 +28,9 @@ in the Connections area because it composes directly over the connection contrac
   only its connection.
 - The secured connection registers `ITlsConnectionInfo` from `Connections.Tls` under its pinned
   `Tls` name: ALPN protocol, TLS version, cipher suite, and the peer's certificate. Read it with
-  `connection.Tls`. Features registered below the TLS layer pass through automatically.
+  `connection.Tls`. Features registered below the TLS layer pass through automatically except
+  `StreamAbort`: its inner implementation cannot invalidate plaintext buffered by TLS's outer pipes,
+  so `connection.DirectionalAbort` returns `null`.
 
 ## Source Layout
 

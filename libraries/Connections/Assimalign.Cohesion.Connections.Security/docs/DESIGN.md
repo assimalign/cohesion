@@ -48,7 +48,11 @@ listener").
   encrypted pipe as its `Input` / `Output`.
 - It registers itself as `ITlsConnectionInfo` from `Connections.Tls` in `ConfigureFeatures`, with
   `Name = ITlsConnectionInfo.FeatureName` (`Tls`). Its `InnerFeatures` returns `_inner.Features`, so
-  features registered beneath TLS remain visible. An application protocol reads `connection.Tls`
+  features registered beneath TLS remain visible unless TLS hides them. It removes
+  `IMultiplexedStreamAbort.FeatureName` (`StreamAbort`): aborting the inner transport cannot invalidate
+  plaintext already buffered in TLS's outer `PipeReader`, so the inner feature cannot guarantee that
+  every later read fails. `connection.DirectionalAbort` therefore returns `null` through TLS; the
+  inner connection's collection is unchanged. An application protocol reads `connection.Tls`
   without referencing this library: the ALPN application protocol, the TLS
   version, the cipher suite, and the peer's certificate (`SslStream.NegotiatedApplicationProtocol`,
   `SslProtocol`, `NegotiatedCipherSuite`, `RemoteCertificate`), captured once when the handshake
@@ -173,10 +177,30 @@ NativeAOT compatible.
 
 ## Relationships
 
+The TLS layer references the contracts whose features it registers or hides:
+
+```mermaid
+flowchart LR
+    TLS["Connections.Security"] --> CONNECTIONS["Connections"]
+    TLS --> FACTS["Connections.Tls"]
+    TLS --> ABORT["Connections.StreamAbort"]
+    TLS --> CORE["Core"]
+```
+
 - **`Assimalign.Cohesion.Connections`** — the `IConnection` / `IConnectionLayer` contracts, the
   `UseTls` composition points (`IConnectionListener` / `IConnectionFactory`), and the
   `DuplexPipeStream` adapter.
 - **`Assimalign.Cohesion.Connections.Tls`** — the optional handshake-facts contract and accessors.
+- **`Assimalign.Cohesion.Connections.StreamAbort`** — the directional-abort feature name that TLS
+  hides because the inner implementation does not govern its outer pipes.
+- **`Assimalign.Cohesion.Core`** — foundational library support.
 - **Security area (certificate management)** — supplies certificates for the TLS options. The
   platform-agnostic certificate manager is owned by the Security area and is intentionally not a
   dependency of this layer.
+
+## Compatibility with 10.0.0-preview.1
+
+Hiding `StreamAbort` corrects the unreleased #1452 feature propagation behavior. It adds no break
+against 10.0.0-preview.1: that release had neither connection features nor directional aborts.
+Consumers of the unreleased behavior must treat `DirectionalAbort == null` as unsupported on the
+TLS connection. Other inner features and TLS handshake facts remain discoverable.

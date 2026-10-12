@@ -30,6 +30,7 @@ flowchart LR
     P3 --> ABORT
     P3 --> LIMITS
     P4 --> TLS
+    P4 --> ABORT
     P0 --> CORE
     P1 --> P0
     P1 --> CORE
@@ -67,7 +68,7 @@ deliberately no transport abstraction — see the naming rule and full design ra
 | [Assimalign.Cohesion.Connections.Tls](Assimalign.Cohesion.Connections.Tls/docs/OVERVIEW.md) | TLS handshake facts (`ITlsConnectionInfo`), discovered through `connection.Tls`. |
 | [Assimalign.Cohesion.Connections.StreamAbort](Assimalign.Cohesion.Connections.StreamAbort/docs/OVERVIEW.md) | Optional coded per-direction aborts (`IMultiplexedStreamAbort`), discovered through `stream.DirectionalAbort`. |
 | [Assimalign.Cohesion.Connections.StreamLimits](Assimalign.Cohesion.Connections.StreamLimits/docs/OVERVIEW.md) | Optional cumulative inbound stream allowance (`IMultiplexedConnectionStreamLimits`), discovered through `connection.StreamLimits`. |
-| `Assimalign.Cohesion.Connections.Security` | TLS layer; registers TLS facts and passes the wrapped connection's features through. |
+| `Assimalign.Cohesion.Connections.Security` | TLS layer; registers TLS facts and passes the wrapped connection's features through except directional abort, which cannot govern TLS's buffered plaintext. |
 | `Assimalign.Cohesion.Connections.Tcp` | Reliable, ordered, single-stream socket driver (`TcpConnectionListener` / `TcpConnectionFactory`). Serves both TCP over IP and Unix domain sockets (with socket-file lifecycle and honest protocol stamping), plus socket-activation descriptor hand-off. |
 | `Assimalign.Cohesion.Connections.NamedPipes` | Reliable, ordered, single-stream named-pipe driver (`NamedPipeConnectionListener` / `NamedPipeConnectionFactory`) for Windows-native local IPC with ACL/filesystem access control; the peer of the `Tcp` driver's Unix domain socket path. |
 | `Assimalign.Cohesion.Connections.Udp` | Message-oriented UDP datagram driver (`UdpConnectionFactory` → `IDatagramConnection`). |

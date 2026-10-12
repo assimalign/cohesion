@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 257 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 745 |
+| Declared project references | 746 |
 | Declared shared-source links | 18 |
 
 ## Ambiguous project names
@@ -262,6 +262,7 @@ flowchart LR
     N3 --> N6
     N3 --> N8
     N4 --> N0
+    N4 --> N5
     N4 --> N8
     N5 --> N0
     N6 --> N0
@@ -276,7 +277,7 @@ flowchart LR
 | `Assimalign.Cohesion.Connections.InMemory` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.StreamAbort`<br>`Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.Connections.NamedPipes` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.Connections.Quic` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.StreamAbort`<br>`Assimalign.Cohesion.Connections.StreamLimits`<br>`Assimalign.Cohesion.Connections.Tls`<br>`Assimalign.Cohesion.Core` | — | `Assimalign.Cohesion.Connections` | — |
-| `Assimalign.Cohesion.Connections.Security` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Tls`<br>`Assimalign.Cohesion.Core` | — | — | — |
+| `Assimalign.Cohesion.Connections.Security` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.StreamAbort`<br>`Assimalign.Cohesion.Connections.Tls`<br>`Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.Connections.StreamAbort` | `Assimalign.Cohesion.Connections` | — | — | — |
 | `Assimalign.Cohesion.Connections.StreamLimits` | `Assimalign.Cohesion.Connections` | — | — | — |
 | `Assimalign.Cohesion.Connections.Tcp` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Core` | — | `Assimalign.Cohesion.Connections` | — |

@@ -7,5 +7,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tls" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.StreamAbort" />
 	</ItemGroup>
 </Project>

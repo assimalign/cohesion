@@ -65,7 +65,12 @@ internal sealed class TlsConnection : Connection, ITlsConnectionInfo
 
     protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
 
-    protected override void ConfigureFeatures(IConnectionFeatureCollection features) => features.Set<ITlsConnectionInfo>(this);
+    protected override void ConfigureFeatures(IConnectionFeatureCollection features)
+    {
+        // Inner aborts cannot invalidate plaintext buffered by the TLS pipes.
+        features.Remove(IMultiplexedStreamAbort.FeatureName);
+        features.Set<ITlsConnectionInfo>(this);
+    }
 
     public SslApplicationProtocol ApplicationProtocol => _applicationProtocol;
 
