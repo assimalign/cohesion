@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics.Tracing;
 using System.Threading;
 
@@ -27,7 +28,10 @@ internal sealed class HostFilteringEventSource : EventSource
 
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            string hostName = emptyHost ? string.Empty : host.Host;
+            // Split independently of port validation: HttpHost.Host returns raw malformed authorities.
+            ReadOnlySpan<char> hostName = !emptyHost && HttpHost.TrySplitHostPort(host.Value.AsSpan().Trim(" \t"), out ReadOnlySpan<char> component, out _, out _)
+                ? component
+                : ReadOnlySpan<char>.Empty;
             if (hostName.Length > 253)
             {
                 hostName = hostName[..253];
@@ -35,7 +39,7 @@ internal sealed class HostFilteringEventSource : EventSource
 
             RequestRejected(
                 emptyHost ? "EmptyHost" : "HostNotAllowed",
-                hostName,
+                hostName.ToString(),
                 context.Features.Get<IHttpForwardedFeature>() is { TrustedHopCount: > 0 },
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
         }
