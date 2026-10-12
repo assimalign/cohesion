@@ -75,6 +75,8 @@ internal sealed class InMemoryConnection : Connection
     private bool _outputCompleted;
     private bool _outputCompletedCleanly;
     private bool _inputCompleted;
+    // A local receive failure or whole-stream abort cannot become a clean end when a later FIN arrives.
+    private volatile bool _inputFailed;
     // Set when this end abandoned its receiving direction with a code (AbortRead): reads fail from then on.
     private volatile bool _readAborted;
     // Published before either parent connection token fires, so cancellation-driven cleanup cannot
@@ -155,7 +157,7 @@ internal sealed class InMemoryConnection : Connection
     {
         get
         {
-            if (_connectionLoss is not null || _readAborted || _peer is null)
+            if (_connectionLoss is not null || _readAborted || _inputFailed || _peer is null)
             {
                 return false;
             }
@@ -178,6 +180,7 @@ internal sealed class InMemoryConnection : Connection
             }
 
             _state = ConnectionState.Aborted;
+            _inputFailed = true;
             Exception abortReason = reason ?? new ConnectionAbortedException();
             CompleteOutput(abortReason);
             CompleteInput(abortReason);
@@ -337,6 +340,7 @@ internal sealed class InMemoryConnection : Connection
 
             _inputCompleted = true;
             exception = _connectionLoss ?? exception;
+            _inputFailed |= exception is not null;
         }
 
         try
@@ -523,6 +527,7 @@ internal sealed class InMemoryConnection : Connection
                 _inner.AbortInput(errorCode, signalPeer: false);
                 _inner.AbortOutput(errorCode, signalPeer: false);
                 _inner._state = ConnectionState.Aborted;
+                _inner._inputFailed = true;
             }
 
             _inner.CancelConnectionClosed();

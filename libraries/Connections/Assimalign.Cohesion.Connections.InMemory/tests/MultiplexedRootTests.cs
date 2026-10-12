@@ -149,6 +149,74 @@ public class MultiplexedRootTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Connections.InMemory] - Input completion: A later peer FIN cannot hide a local stream abort")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task IsInputCompleted_AfterLocalAbortThenPeerFin_ShouldRemainFalse(bool completeInputFirst, bool codedAbort)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(5));
+        (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
+        await using (client)
+        await using (server)
+        {
+            await using MultiplexedStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedStream receiver = await server.AcceptStreamAsync(cancellation.Token);
+            if (completeInputFirst)
+            {
+                receiver.Input.Complete();
+            }
+
+            // Act
+            if (codedAbort)
+            {
+                receiver.Abort(42);
+            }
+            else
+            {
+                receiver.Abort();
+            }
+            receiver.IsInputCompleted.ShouldBeFalse();
+            await sender.Output.CompleteAsync();
+
+            // Assert
+            receiver.IsInputCompleted.ShouldBeFalse();
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.InMemory] - Input completion: A later peer FIN cannot hide a failed local input completion")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IsInputCompleted_AfterFailedLocalInputThenPeerFin_ShouldRemainFalse(bool completeAsync)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(5));
+        (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
+        await using (client)
+        await using (server)
+        {
+            await using MultiplexedStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedStream receiver = await server.AcceptStreamAsync(cancellation.Token);
+            InvalidOperationException failure = new("The local reader failed");
+
+            // Act
+            if (completeAsync)
+            {
+                await receiver.Input.CompleteAsync(failure);
+            }
+            else
+            {
+                receiver.Input.Complete(failure);
+            }
+            receiver.IsInputCompleted.ShouldBeFalse();
+            await sender.Output.CompleteAsync();
+
+            // Assert
+            receiver.IsInputCompleted.ShouldBeFalse();
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Connections.InMemory] - Coded abort: Roots reject codes outside the driver range")]
     [InlineData(-1L)]
     [InlineData(1L << 62)]

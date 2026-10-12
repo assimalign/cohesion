@@ -155,7 +155,12 @@ This also applies to no-code abort, directional abort and disposal through the s
 path. Compared with 10.0.0-preview.1, callback exceptions no longer escape teardown; this behavior
 break is accepted under decision 15. The coded stream root itself postdates preview.1.
 `IsInputCompleted` is true when the peer completed output cleanly and this end has not aborted
-reading; buffered bytes may still remain. The parent root accepts coded aborts in the same 62-bit
+reading, aborted the stream, or completed input with an error; buffered bytes may still remain.
+Local input failure is recorded separately from directional read cancellation, so a later peer FIN
+cannot turn failed input into clean completion. A whole-stream abort records failure even when the
+holder already completed input cleanly. This corrects the unreleased root contract; input-completion
+reporting did not exist in 10.0.0-preview.1.
+The parent root accepts coded aborts in the same 62-bit
 range as streams; the first abort or disposal decides the pair close and notifies both ends as
 described above.
 
