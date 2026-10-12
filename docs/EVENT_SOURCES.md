@@ -128,7 +128,7 @@ shells. Each row records the reason from
 | Assembly or framework project | Why it has no source |
 | --- | --- |
 | `Assimalign.Cohesion.Web` | Contracts and pure pipeline helpers have no runtime state, loop or swallowed failure; the root must not claim every Web package's signals. |
-| `Assimalign.Cohesion.Web.Server` | Contracts only; Web.Hosting implements the server features, and Http.Connections publishes transport client faults through those contracts. |
+| `Assimalign.Cohesion.Web.Server` | Contracts only; Http.Connections reports transport client faults through core Http's generic `IHttpExchangeControl` seam, and Web.Hosting adapts those reports into the Web.Server features it implements. |
 | `Assimalign.Cohesion.Web.Hosting.Health` | A stateless adapter whose runtime failure throws; Web.Health reports contributor faults and timeouts. |
 | `Assimalign.Cohesion.Web.Testing` | A shipped test harness, like Connections.InMemory, rather than a runtime component; it receives no access to internal sources. |
 | `Assimalign.Cohesion.Web.ApplicationModel` | Invalid declarative plans throw; runtime control-plane outcomes belong to Hosting.Resources. |
