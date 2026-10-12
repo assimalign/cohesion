@@ -77,6 +77,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Bearer/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Authentication.Bearer/tests/Assimalign.Cohesion.Web.Authentication.Bearer.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Certificate/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Certificate/docs/">
+		<File Path="Assimalign.Cohesion.Web.Authentication.Certificate/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Authentication.Certificate/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Certificate/src/">
+		<Project Path="Assimalign.Cohesion.Web.Authentication.Certificate/src/Assimalign.Cohesion.Web.Authentication.Certificate.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Certificate/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Authentication.Certificate/tests/Assimalign.Cohesion.Web.Authentication.Certificate.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Cookie/">
 		<File Path="Assimalign.Cohesion.Web.Authentication.Cookie/README.md" />
 	</Folder>

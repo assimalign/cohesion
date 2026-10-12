@@ -1234,6 +1234,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Authentication.Bearer/tests/Assimalign.Cohesion.Web.Authentication.Bearer.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Authentication.Certificate/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Authentication.Certificate/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Authentication.Certificate/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Authentication.Certificate/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Authentication.Certificate/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Authentication.Certificate/src/Assimalign.Cohesion.Web.Authentication.Certificate.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Authentication.Certificate/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Authentication.Certificate/tests/Assimalign.Cohesion.Web.Authentication.Certificate.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/">
 		<File Path="Web/Assimalign.Cohesion.Web.Authentication.Cookie/README.md" />
 	</Folder>

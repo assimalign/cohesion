@@ -34,6 +34,7 @@ jobs:
             'Assimalign.Cohesion.Web.Api',
             'Assimalign.Cohesion.Web.Authentication',
             'Assimalign.Cohesion.Web.Authentication.Bearer',
+            'Assimalign.Cohesion.Web.Authentication.Certificate',
             'Assimalign.Cohesion.Web.Authentication.Cookie',
             'Assimalign.Cohesion.Web.Authorization',
             'Assimalign.Cohesion.Web.Caching',

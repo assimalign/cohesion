@@ -146,8 +146,9 @@ lived there has to be rebuilt, because they moved assembly while keeping their n
 
 It reports; it does not decide. Requesting, requiring, and validating client certificates is the
 server's TLS configuration (`Assimalign.Cohesion.Connections.Security`'s `TlsServerOptions`, exposed
-on `Web.Hosting`'s endpoints). Authenticating a request from the certificate belongs to an
-authentication handler, which does not exist yet.
+on `Web.Hosting`'s endpoints). Authenticating a request from the validated certificate belongs to
+[`Web.Authentication.Certificate`](../../../../resources/Web/Assimalign.Cohesion.Web.Authentication.Certificate/docs/DESIGN.md),
+which maps the certificate to a principal and supports application-specific mapping and rejection.
 
 ## AOT posture
 

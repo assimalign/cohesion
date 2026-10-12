@@ -5,7 +5,7 @@
 The familiar property-style `context.User` access from ASP.NET Core,
 restored on top of a wire-level HTTP protocol core that does not know
 about identity, **plus the scheme registration model and per-request
-dispatch surface** that concrete scheme handlers (Cookie, Bearer) plug
+dispatch surface** that concrete scheme handlers (Cookie, Bearer, Certificate) plug
 into.
 
 The package began (before #790) as one feature contract, one default
@@ -14,7 +14,7 @@ only. Issue #790 grew it into the home for the **authentication scheme
 model**: the handler contract, the named-scheme registry with
 default-scheme selection, the `ClaimsPrincipal`-based result types, and
 the request-time dispatch service. The concrete handlers still live in
-their own packages (`…Cookie`, `…Bearer`); this package owns only the
+their own packages (`…Cookie`, `…Bearer`, `…Certificate`); this package owns only the
 model they share. See "The scheme model" below.
 
 The design is shaped by three constraints that pull in different
@@ -172,7 +172,7 @@ singleton installed on every request's feature collection (the same
 mechanism `RouterFeature` uses). `context.AuthenticateAsync()` and
 friends resolve it type-keyed from `context.Features` — there is no
 request-time service location. The service reads `AuthenticationOptions`
-live, so schemes registered by chained `AddCookie`/`AddJwtBearer` calls
+live, so schemes registered by chained `AddCookie`/`AddJwtBearer`/`AddCertificate` calls
 that run *after* the service is created are still resolved; and it caches
 each request's handler on `context.Items` so an authenticate followed by
 a challenge reuses one initialized instance.
@@ -201,7 +201,7 @@ registration verb, the `AuthenticationBuilder` scheme surface, and
 `UseAuthentication` live in *this* package, and each handler package
 grafts its own scheme verb onto `AuthenticationBuilder` via
 `extension(...)` (`AddCookie` in the Cookie package, `AddJwtBearer` in
-the Bearer package).
+the Bearer package, `AddCertificate` in the Certificate package).
 
 **Registration is `builder.Services.AddAuthentication(auth => ...)`**
 (owner decisions 34 and 35, 2026-10-09, #1380). The package declares a
@@ -245,16 +245,31 @@ other, so a caller that reads `DataProtectionProvider` (to share the key
 ring with antiforgery, say) fixes it too, and the error says either may
 have read it. `AuthenticationService.Create` and the public
 handler factories (`CookieAuthentication.CreateHandler`,
-`JwtBearerAuthentication.CreateHandler`) remain the seams the verbs use
+`JwtBearerAuthentication.CreateHandler`, `CertificateAuthentication.CreateHandler`) remain the seams the verbs use
 while the concrete handler and service implementations stay `internal`.
 
 ## Family map
 
+The scheme packages reference the shared authentication model; Certificate also reads the TLS
+feature from `Http.Tls`. Arrows show dependencies.
+
+```mermaid
+flowchart LR
+    Bearer["Web.Authentication.Bearer"] --> Auth["Web.Authentication"]
+    Certificate["Web.Authentication.Certificate"] --> Auth
+    Cookie["Web.Authentication.Cookie"] --> Auth
+    Certificate --> Tls["Http.Tls"]
+    Auth --> Http["Http"]
+    Auth --> Web["Web"]
+    Auth --> Protection["Security.DataProtection"]
+```
+
 | Package | Role | Dependencies |
 |---------|------|---------------|
 | `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) + builder-time registration (the `builder.Services.AddAuthentication` component integration over `AuthenticationBuilder`, and `UseAuthentication`) | `Assimalign.Cohesion.Http`, `Assimalign.Cohesion.Web`, `Security.DataProtection` |
-| `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) + the grafted `AddCookie` verb | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
 | `&hellip;Web.Authentication.Bearer` | Bearer-token scheme handler (JWT validation + signature seam) + the grafted `AddJwtBearer` verb | This package, `IdentityModel.Token.JsonWebToken` |
+| `&hellip;Web.Authentication.Certificate` | Validated TLS client-certificate principal, application mapping and validation + the grafted `AddCertificate` verb | This package, `Http.Tls` |
+| `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) + the grafted `AddCookie` verb | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
 
 Dependency direction is one-way: scheme handlers depend on this
 package; this package depends on the protocol core and the root Web
@@ -278,10 +293,10 @@ serialization or runtime-policy surface is consumed by this package.
 
 - **Concrete scheme handlers.** This package defines the scheme *model*
   (the handler contract, the registry, the dispatch service); the actual
-  Cookie and Bearer handlers live in dedicated packages, and any other
-  scheme (API key, mutual-TLS) is a further package or a custom
+  Cookie, Bearer and Certificate handlers live in dedicated packages, and any other
+  scheme (such as API key) is a further package or a custom
   `IAuthenticationHandler`. This package ships no handler.
-- **Concrete scheme verbs.** `AddCookie`/`AddJwtBearer` ship with their
+- **Concrete scheme verbs.** `AddCookie`/`AddJwtBearer`/`AddCertificate` ship with their
   handler packages as `extension(AuthenticationBuilder)` members; this
   package exposes only the scheme-agnostic surface (`AuthenticationBuilder`
   with `AddScheme`, `UseDataProtection` and `Build`, which the projected
