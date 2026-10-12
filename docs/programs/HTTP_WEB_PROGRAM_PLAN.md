@@ -404,11 +404,10 @@ The issue list:
 - Sessions in one row edit the same files, so each runs as one serial session; the rows of a wave run in parallel.
 - Wave 2 needs wave 1 integrated:
   - #1300 builds on the transport changes;
-  - #1398 on #1389;
   - #1401 on #1432;
   - #1404 on #1435;
   - every source on #1448's recorder.
-- Wave 3 needs #1300's source name and #1398 (#1399's own blockers).
+- Wave 3 needs #1300's source name (for #1399), wave 1's #1389 (for #1398) and every wave 2 source (for #1408).
 
 | Session | Issues (in order) | Wave |
 |---|---|---|
@@ -419,18 +418,17 @@ The issue list:
 | 5 | #1448 → #1449 → #1413 → #1435: the recorder's new home (decision 52), StaticFiles' clock fallback (decision 53), HttpsPolicy's redirect-loop docs, the form limit name | 1 |
 | 6 | #1092: the `cohesion-spa` fallback route, verified against a packed SDK | 1 |
 | 7 | #1300: transport rejections and protocol errors through a Meter and an EventSource (decisions 31 and 49) | 2 |
-| 8 | #1398: `WebServerEventSource` replaces #147's `ILogger` diagnostics | 2 |
+| 8 | (moved to session 16: #1398 must land in the same integration as #1399, so visibility never regresses) | — |
 | 9 | #1412 → #1400 → #1434: verifier reuse, `ResourceControlPlaneEventSource`, command outcomes | 2 |
 | 10 | #1401: `ErrorHandlingEventSource` on #1432's latch | 2 |
 | 11 | #1402: the edge group (Cors, SecurityHeaders, HostFiltering, ForwardedHeaders) | 2 |
 | 12 | #1403: the authentication group (Bearer, Cookie, Authorization, Antiforgery), plus Certificate's place in the catalog | 2 |
 | 13 | #1404: the traffic group (RateLimiting, RequestTimeouts, Compression, Forms) | 2 |
-| 14 | #1405: the content group (Caching, StaticFiles, Sessions, WebSockets) | 2 |
+| 14 | #1436 → #1405: session store failures and `IsModified` (decision 55), then the content group (Caching, StaticFiles, Sessions, WebSockets) | 2 |
 | 15 | #1406 → #1407: Health, then Diagnostics | 2 |
-| 16 | #1399 → #1408: default forwarding and NativeAOT delivery, then conformance and the docs roll-up | 3 |
+| 16 | #1398 → #1399 → #1408: `WebServerEventSource` replaces #147's `ILogger` diagnostics, then default forwarding and NativeAOT delivery in the same integration, then conformance and the docs roll-up | 3 |
 
 Not scheduled in this stage:
-- #1436 waits on an owner decision: `IsModified` is a new member on the public `IHttpStoredSession` interface.
 - #1433 belongs to the Security program.
 - #1202 and #1217 wait on the OpenApi program.
 
@@ -458,7 +456,7 @@ The issue list:
 - **FileSystem:** #1181, #1182, #1212–#1216.
 - **ObjectValidation:** #1207, #1222–#1224, #1294, #1295, and #1293 without its Email half.
 - **OpenApi:** #1170, #1171, #1178, #1179, #1201, #1203, #1217's model change, and #1440 (the validation errors map).
-- **Other:** DependencyInjection #1177, Configuration #1220, Database #1219, release #1290, build #1302. Event-source follow-ups outside Web (decision 49): Security.DataProtection #1433, Hosting.Resources #1434, Http.Forms #1435, Http.Sessions #1436.
+- **Other:** DependencyInjection #1177, Configuration #1220, Database #1219, release #1290, build #1302. Event-source follow-ups outside Web (decision 49): Security.DataProtection #1433, Hosting.Resources #1434, Http.Forms #1435; Http.Sessions #1436 is in Stage 14 (decision 55).
 
 #1290 matters to this program: every pending advisory publishes with the next preview promotion, and that promotion needs #1290's batching.
 
@@ -1352,6 +1350,7 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
 52. **The shared `EventSourceRecorder` moves to a neutral test-support location (owner, 2026-10-12; #1448).** A DI package does not own a test helper. It moves before lane G links it.
 53. **StaticFiles falls back to the clock when `Date` is off (owner, 2026-10-12; #1449).** `AddDateHeader = false` removes only the header; `Last-Modified` and the date validators keep working.
 54. **Database's namespaced health routes stay unauthenticated in gateway-managed mode (owner, 2026-10-12).** They publish no exception text since #1409.
+55. **`IHttpStoredSession.IsModified` is a default interface member (owner, 2026-10-12; #1436).** It returns `true` by default, so existing custom stores keep compiling and keep committing every time. The built-in stores override it to skip the commit for an unchanged session. #1436 joins Stage 14's session 14, ahead of the Sessions source that reads it.
 
 ### 7.5 Lineup
 
