@@ -39,20 +39,23 @@ internal sealed class BootstrapTokenVerifier
         });
     }
 
-    internal ResourceCredentialVerification Validate(
+    internal ControlPlaneCredentialVerification Validate(
         string compactToken,
         string expectedAudience,
         DateTimeOffset now)
     {
         if (!_validator.TryValidate(compactToken, now, out JsonWebToken? token))
         {
-            return new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
+            return new(new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null),
+                CredentialRejectionReason.InvalidToken);
         }
 
         var caller = new ResourceCaller(_application, _gateway, ResourceCallerKind.Gateway, []);
         return JsonWebTokenValidator.HasAudience(token, expectedAudience)
-            ? new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, caller, null)
-            : new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, caller, null);
+            ? new(new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, caller, null),
+                CredentialRejectionReason.None)
+            : new(new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, caller, null),
+                CredentialRejectionReason.AudienceMismatch);
     }
 
     private static JsonWebKey ReadApplicationTrustKey(ReadOnlySpan<byte> applicationTrustKey)

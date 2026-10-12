@@ -277,8 +277,9 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
+                HostingResourceEventSource.Log.ContributorFailed(contributor.Name, exception);
                 // Fixed text, never exception.Message: the report reaches unauthenticated probes.
                 contribution = HealthContribution.Unhealthy(ContributorThrewDescription);
             }

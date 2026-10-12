@@ -90,11 +90,14 @@ public static class ResourceControlPlaneMiddleware
             !IsLoopbackPeer(context))
         {
             context.Response.StatusCode = HttpStatusCode.Forbidden;
+            ResourceControlPlaneEventSource.Log.CredentialRejected(resourceContext, context,
+                ResourceCredentialStatus.Forbidden, CredentialRejectionReason.NonLoopbackPeer);
             return;
         }
         if (isNamespacedControlPlanePath && resourceContext.GatewayName is not null)
         {
-            ResourceCredentialStatus status = await AuthorizeAsync(context, resourceContext).ConfigureAwait(false);
+            ControlPlaneCredentialVerification authorization = await AuthorizeAsync(context, resourceContext).ConfigureAwait(false);
+            ResourceCredentialStatus status = authorization.Verification.Status;
             if (status is not ResourceCredentialStatus.Authorized)
             {
                 context.Response.StatusCode = status is ResourceCredentialStatus.Forbidden
@@ -104,6 +107,7 @@ public static class ResourceControlPlaneMiddleware
                 {
                     context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
                 }
+                ResourceControlPlaneEventSource.Log.CredentialRejected(resourceContext, context, status, authorization.Reason);
                 return;
             }
         }
@@ -196,6 +200,7 @@ public static class ResourceControlPlaneMiddleware
                 await controlPlane.RequestStopAsync(context.RequestCancelled).ConfigureAwait(false);
             }
             context.Response.StatusCode = HttpStatusCode.Accepted;
+            ResourceControlPlaneEventSource.Log.StopAccepted(resourceContext, context, responseCompletion is not null);
             return;
         }
 
@@ -237,7 +242,7 @@ public static class ResourceControlPlaneMiddleware
                 return;
             }
 
-            await ExecuteCommandAsync(controlPlane, context).ConfigureAwait(false);
+            await ExecuteCommandAsync(controlPlane, resourceContext, context).ConfigureAwait(false);
             return;
         }
 
@@ -368,8 +373,11 @@ public static class ResourceControlPlaneMiddleware
 
     private static async Task ExecuteCommandAsync(
         IResourceControlPlane controlPlane,
+        ResourceContext resource,
         IHttpContext context)
     {
+        string phase = "Envelope";
+        ReadOnlyMemory<byte> response;
         try
         {
             using JsonDocument document = await JsonDocument.ParseAsync(
@@ -394,34 +402,31 @@ public static class ResourceControlPlaneMiddleware
                 GetRequiredString(root, "key"),
                 payload);
 
-            ReadOnlyMemory<byte> response = context.Request.Method == HttpMethod.Delete
+            phase = "Handler";
+            response = context.Request.Method == HttpMethod.Delete
                 ? await controlPlane.DeleteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false)
                 : await controlPlane.ExecuteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false);
             context.Response.StatusCode = HttpStatusCode.Ok;
             context.Response.Headers[HttpHeaderKey.ContentType] = "application/octet-stream";
             await context.Response.Body.WriteAsync(response, context.RequestCancelled).ConfigureAwait(false);
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or FormatException or ArgumentException)
         {
             context.Response.StatusCode = HttpStatusCode.BadRequest;
-        }
-        catch (FormatException)
-        {
-            context.Response.StatusCode = HttpStatusCode.BadRequest;
-        }
-        catch (ArgumentException)
-        {
-            context.Response.StatusCode = HttpStatusCode.BadRequest;
+            ResourceControlPlaneEventSource.Log.CommandMalformed(resource, context, phase, exception);
+            return;
         }
         catch (NotSupportedException exception)
         {
             context.Response.StatusCode = HttpStatusCode.NotImplemented;
             await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
+            return;
         }
         catch (ResourceCommandRejectedException exception)
         {
             context.Response.StatusCode = HttpStatusCode.Conflict;
             await WriteCommandRefusalAsync(context, exception.Detail).ConfigureAwait(false);
+            return;
         }
     }
 
@@ -492,14 +497,15 @@ public static class ResourceControlPlaneMiddleware
         return address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback);
     }
 
-    private static async ValueTask<ResourceCredentialStatus> AuthorizeAsync(IHttpContext context, ResourceContext resource)
+    private static async ValueTask<ControlPlaneCredentialVerification> AuthorizeAsync(IHttpContext context, ResourceContext resource)
     {
-        ResourceCredentialVerification verification = await VerifyAsync(context, resource).ConfigureAwait(false);
+        ControlPlaneCredentialVerification result = await VerifyAsync(context, resource).ConfigureAwait(false);
+        ResourceCredentialVerification verification = result.Verification;
         if (verification.Status is not ResourceCredentialStatus.Authorized)
         {
-            return verification.Status is ResourceCredentialStatus.Forbidden
-                ? ResourceCredentialStatus.Forbidden
-                : ResourceCredentialStatus.Unauthorized;
+            return new(new ResourceCredentialVerification(
+                verification.Status is ResourceCredentialStatus.Forbidden
+                    ? ResourceCredentialStatus.Forbidden : ResourceCredentialStatus.Unauthorized, null, null), result.Reason);
         }
 
         // The management plane serves only this application's gateway. The default verifier already
@@ -508,11 +514,12 @@ public static class ResourceControlPlaneMiddleware
         return verification.Caller is { Kind: ResourceCallerKind.Gateway } caller &&
             string.Equals(caller.Application, resource.ApplicationName, StringComparison.Ordinal) &&
             string.Equals(caller.Subject, resource.GatewayName, StringComparison.Ordinal)
-                ? ResourceCredentialStatus.Authorized
-                : ResourceCredentialStatus.Forbidden;
+                ? result
+                : new(new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, null, null),
+                    CredentialRejectionReason.CallerMismatch);
     }
 
-    private static async ValueTask<ResourceCredentialVerification> VerifyAsync(IHttpContext context, ResourceContext resource)
+    private static async ValueTask<ControlPlaneCredentialVerification> VerifyAsync(IHttpContext context, ResourceContext resource)
     {
         ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
             context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue header)
@@ -527,12 +534,20 @@ public static class ResourceControlPlaneMiddleware
                 .ConfigureAwait(false);
             if (result.Status is not ResourceCredentialStatus.NoResult)
             {
-                return result;
+                return new(result, result.Status is ResourceCredentialStatus.Authorized
+                    ? CredentialRejectionReason.None : CredentialRejectionReason.VerifierRejected);
             }
+        }
+
+        if (presentation.Scheme.Length == 0 || presentation.Credential.Length == 0)
+        {
+            return new(new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null),
+                CredentialRejectionReason.MissingCredential);
         }
 
         return presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase)
             ? GetVerifier(resource).Validate(presentation.Credential, presentation.ExpectedAudience, presentation.Now)
-            : new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
+            : new(new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null),
+                CredentialRejectionReason.UnsupportedScheme);
     }
 }

@@ -2,6 +2,7 @@ name: Hosting
 on:
   push:
     paths:
+      - "build/TestSupport/**"
       - "libraries/Hosting/**"
       - "!libraries/Hosting/**/*.slnx"
       - "!libraries/Hosting/**/*.md"

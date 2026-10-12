@@ -82,9 +82,9 @@ never the exception's message. Area hosts publish these reports on the bare `/he
 and `/livez` probes, which carry no credential check, and a dependency's exception message
 routinely names hosts, databases, users and ports (CWE-209). Through 10.0.0-preview.1 the control
 plane recorded the message as the description, so every area that exposes the probes published it
-(#1409). `HealthContribution` has no exception member, so the control plane does not keep the
-exception; a contributor that wants its failure diagnosed records it itself before throwing, or
-returns a contribution whose description it has chosen.
+(#1409). The catch hands the exception to this assembly's internal event source before returning
+the fixed report (#1400). `HealthContribution` retains no exception member, and the control plane
+does not retain the exception after the event is written.
 
 The same holds for an exception a contributor returns rather than throws. An `Exception` value in
 `HealthContribution.Data` is replaced in the report by the fixed text
@@ -100,6 +100,43 @@ contributor's own text and are reported as returned.
 
 The control plane is transport-neutral. Area Hosting packages decide how to expose health and
 commands over HTTP or another protocol.
+
+## Diagnostics
+
+The internal `HostingResourceEventSource` is named `Assimalign.Cohesion.Hosting.Resources`.
+It reports contributor failures from every area that uses the shared control plane, including
+direct calls without an HTTP adapter. A tool can enable the provider by its assembly name;
+an application can also configure its own event-source forwarder. Non-Web resource processes
+receive no default forwarding from a nested Web host. This provider is outside the default
+`Assimalign.Cohesion.Web.` prefix, so Web entry points also select it explicitly when forwarding.
+No logging dependency is added here.
+
+| Id | Event | Level | Payload | Throttle |
+| ---: | --- | --- | --- | --- |
+| 1 | `ContributorFailed` | Error | `contributorName`, `exceptionType`, `exceptionMessage`, `suppressedCount:int` | Once per second, process-wide |
+
+The `contributor-failures` polling counter is the exact total of contributor exceptions caught
+while aggregating health, readiness, and liveness. Its backing value increments even without a
+listener and for suppressed events; the counter is created lazily when a listener enables the
+source. Caller-requested cancellation propagates and neither raises an event nor increments the
+counter. An unrelated contributor cancellation is a failure. There is no gauge.
+
+Contributor names come from registered application contributors. Health-check exceptions follow
+the event-source rule's application-exception policy: the type and `Message` are written, never
+`ToString()`, stack traces, inner exceptions, or contribution data. A dependency's message may
+contain host, database, or user names, so configured sinks must be treated accordingly. The HTTP
+report continues to contain only the fixed failure description introduced by #1409. This is an
+additive diagnostic change from 10.0.0-preview.1; report and command behavior are unchanged.
+
+**Boundary choice for #1400.** The internal hand-off remains inside Hosting.Resources: the
+aggregation catch invokes this assembly's source directly. Web.Hosting.Resources cannot recover
+the exception from the sanitized `ResourceHealthReport`. Routing it to that assembly's source
+would require a new public exception/diagnostics seam or a shipped `InternalsVisibleTo` grant.
+Neither is introduced. This producer-owned event is the smallest local alternative under the
+session boundary rules; its placement differs from #1400's requested Web-source ownership and is
+recorded as an escalation. The Web source owns HTTP credential refusals, malformed requests,
+and stop acceptance, and does not duplicate contributor events. No ambient resource name is
+read: this transport-neutral control plane has no reliable resource-context association.
 
 ### Standalone HTTP access (#1431)
 

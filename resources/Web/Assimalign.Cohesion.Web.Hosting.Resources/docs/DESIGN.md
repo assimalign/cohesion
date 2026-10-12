@@ -36,3 +36,52 @@ flowchart LR
     Terminal --> Health["Hosting.Health"]
     Terminal --> JWT["IdentityModel.Token.JsonWebToken"]
 ```
+
+## Diagnostics
+
+The internal `ResourceControlPlaneEventSource` is named `Assimalign.Cohesion.Web.Hosting.Resources`.
+It reports every area's control plane that composes this middleware, identified by `resourceName`:
+Web and the nested HTTP hosts in ApiManager, Database, EmailHub, EventHub, IoTHub, LoadBalancer,
+LogSpace, MediaHub, MessageHub, NatGateway, NotificationHub, Rezolvr and VpnGateway. Non-Web
+resource processes observe it through diagnostic tools or their own EventSource forwarder; nested
+hosts do not receive entry-point Web default forwarding. Area-specific endpoints that bypass the
+shared middleware are outside this source.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | CredentialRejected | Warning | resourceName, requestId, status, reason, route, remoteEndPoint, suppressedCount |
+| 2 | CommandMalformed | Warning | resourceName, requestId, httpMethod, phase, exceptionType, suppressedCount |
+| 3 | StopAccepted | Informational | resourceName, requestId, deferred |
+
+Credential rejection includes the standalone non-loopback refusal introduced by #1431, with
+`reason=non-loopback-peer` and `status=Forbidden`. Other reasons are `missing-credential`,
+`unsupported-scheme`, `invalid-token`, `audience-mismatch`, `caller-mismatch` and `verifier-rejected`.
+A registered verifier's private reason is never copied. `route` is a fixed category (stop, commands,
+endpoints, healthz, readyz, livez or unknown), never a path. The transport peer appears only in
+CredentialRejected and is personal data in the diagnostic sink; forwarded client addresses are not
+used. Request identifiers come from `IWebRequestIdFeature`, never an ambient Activity.
+
+CredentialRejected and CommandMalformed each emit at most once per second across the provider.
+Their next emission includes the number of suppressed enabled-listener occurrences (saturating at
+`Int32.MaxValue`). The `rejected-credentials` PollingCounter remains exact, including refusals when
+disabled or throttled. It is created on first enable, and its backing total uses Interlocked.
+No request-total counter or Meter instrument is added. StopAccepted is the scope's unthrottled
+management lifecycle acknowledgement, with `deferred` indicating response-completion scheduling.
+
+Malformed JSON/base64/argument faults retain HTTP 400. `phase=Envelope` covers parsing and command
+construction; it changes to `Handler` immediately before command dispatch. Only the exception type
+is written: JSON and handler messages can contain command input. No event contains an Authorization
+value, credential, claim, caller identity, command key or command payload. Command execution outcomes
+belong to Hosting.Resources, not this HTTP source.
+
+**Contributor ownership adjustment (#1400).** A throwing contributor is caught and sanitized inside
+Hosting.Resources. Existing contracts cannot carry its exception into this assembly without adding
+a public exception member or a diagnostics forwarding API. The smallest internal hand-off is from
+that catch to Hosting.Resources' own `HostingResourceEventSource.ContributorFailed`; this Web source
+does not duplicate it. Health contributions and probe responses keep their fixed safe descriptions.
+The producer's DESIGN documents the event, counter and exception-message policy. This departs from
+the scope's requested Web-source ownership and is recorded for owner review, with no public API,
+shipped visibility grant, or reverse dependency added.
+
+These diagnostics add operator visibility relative to 10.0.0-preview.1; request status codes, token
+acceptance and probe serialization are unchanged.
