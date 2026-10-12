@@ -915,9 +915,12 @@ flowchart LR
   the declared name into the DDL after checking its shape. An imperative
   `SqlDatabase.ApplySchemaAsync` needs the engine to register the schema's domains already
   (`COHSQLP005` otherwise). The migration planner's `AddDomain` and `DropDomain` steps render no
-  statement: a domain is the engine's, not the database's.
+  statement: a domain declared by the typed schema is engine-registered. E4 SQL domains
+  are database catalog objects and reopen through the merged type environment.
 
-**Not in E3.** A domain over a domain; `NOT NULL` or `DEFAULT` on a domain; casts in assignment
+**E3 scope.** E4 subsequently added SQL `CREATE DOMAIN`, domain `NOT NULL` and literal
+`DEFAULT`, and the `COHESION_SCHEMA.TYPES` and `DOMAINS` views. The remaining exclusions are
+a domain over a domain; casts in assignment
 coercion or overload resolution (an uncast string literal still does not reach a DATE
 parameter: PostgreSQL types it `unknown` and resolves it to the parameter, `parse_func.c`'s
 `func_select_candidate`, which the design's narrow lattice does not, and which is an owner
@@ -926,8 +929,7 @@ from REAL and DOUBLE to NUMERIC (their text forms are a dialect decision; an app
 any of them through `AddCast` meanwhile); a volatility on `SqlCast`, which a phase that runs casts
 in a CHECK, an index or a generated expression, or applies `Implicit` contexts, needs first;
 PostgreSQL's text forms of INTERVAL (the engine reads .NET's `[d.]hh:mm:ss`, so `'12'` is twelve
-days, not seconds); `COHESION_SCHEMA` views of types and casts; and SQL `CREATE DOMAIN`, which is
-E4.
+days, not seconds); and a `COHESION_SCHEMA` view of casts.
 
 ## Declared column bounds (#1418)
 

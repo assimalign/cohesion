@@ -100,13 +100,15 @@ dropped list.
 
 ## A column's domain (phase E3)
 
-A column declared with a domain (`SqlType.CreateDomain` in the SQL engine, owner decision
-68) stores the domain's base type: `SqlCatalogColumn.Type` is the base type with its
+A column declared with a domain (engine-registered through `SqlType.CreateDomain`, owner
+decision 68, or persisted through E4's `CREATE DOMAIN`) stores the domain's base type:
+`SqlCatalogColumn.Type` is the base type with its
 length, precision and scale, and `SqlCatalogColumn.DomainName` the domain's name. The
-catalog keeps the name only: a domain is registered on the engine, in code, and is not a
-catalog object, so the engine that opens the database binds the name to its own
-registration (and, when it registers none, opens the database and refuses writes to the
-column, the SQL engine's `COHSQLE010`). PostgreSQL records a domain column's type as the
+column record keeps the name only. Engine-registered domains remain code; SQL-defined
+domains are catalog objects in kind-11 records. On reopen the engine binds column names
+against the merged engine registrations and persisted SQL domains. An unavailable domain
+leaves the database readable but refuses writes assigning that column with `COHSQLE010`.
+PostgreSQL records a domain column's type as the
 domain's own OID and keeps the domain in `pg_type`; here the base type is what the row
 codec, the key encoding and every comparison read, so they do not consult the domain.
 
@@ -185,10 +187,10 @@ codec, the key encoding and every comparison read, so they do not consult the do
   the table records' physical layout, #1241) is a property of these records
   themselves — so the database-grain marker is catalog
   metadata. (`Database.Indexing` also stamps and checks its own page format on
-  each tree, behind this marker.) The engine writes its version (9) when it
+  each tree, behind this marker.) The engine writes its version (10) when it
   creates a database and refuses to open one whose marker reads anything else; it
   has no upgrade path (owner decisions of 2026-10-01 and 2026-10-02; upgrades are
-  #1152). Versions 5 through 9 are stored as a kind-8 record like version 4. Absent marker
+  #1152). Versions 5 through 10 are stored as a kind-8 record like version 4. Absent marker
   reads as version 1 (pre-marker databases, or a creation interrupted before the
   engine stamped the marker).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**
@@ -371,22 +373,24 @@ same columns. Older index records have no marker and load as ordinary indexes.
 
 ## Persisted SQL expressions are canonical text
 
-Every SQL expression this catalog stores — `SqlCatalogConstraint.CheckExpression`
-and `SqlCatalogColumn.DefaultLiteral` today, and any expression default or view
-query added later — is **canonical SQL that the engine rendered from the parsed
+Every SQL expression this catalog stores — table CHECKs, column literal and function-call
+DEFAULTs, domain CHECKs and literal DEFAULTs, and SQL function bodies — is
+**canonical SQL that the engine rendered from the parsed
 tree** (`SqlExpressionRenderer`, Sql.Language), never the text a user wrote. A check
 declared as `QTY>0   and qty<100` is stored as `QTY > 0 AND qty < 100`; a default
 declared as `'it''s'` or `+5` is stored as `'it''s'` or `5`, the SQL literal rather
 than its bare value. New persisted expressions must follow the same rule; storing
 source text is not an option, because a stored definition must mean the same thing
-under every later parser.
+under every later parser. Future general expression defaults and view queries use this
+same path; CREATE TABLE function-call defaults are already supported in format 10.
 
 The catalog itself stays SQL-agnostic: it has no reference to the language package,
 stores the text as an opaque string in the same tuple fields as before, and validates
 only shape (a check needs non-blank text; a reference needs its columns). The SQL
 engine owns the rule end to end. It renders and verifies the canonical text before
 publishing a definition, and when it opens a database it parses and binds every
-stored check and default once per table version, before any statement runs. A stored
+stored table check and default once per table version, and reconstructs SQL functions
+and domain definitions on open. A stored
 definition that does not load fails that open, naming the table and the constraint or
 column, instead of failing a later write; DDL inside the engine never stores text
 that would not reload. Opening binds a stored definition (its columns resolve, and it

@@ -1329,6 +1329,8 @@ script checksum refusal; the catalog format tests.
 
 *Landed in E4* (#1360). SQL functions execute as the internal sealed SqlExpressionFunction over
 E1's bound tree and E2's scalar ABI; SQL domains use E3's shared resolution, bounds and CHECK path.
+Engine-registered domains remain code; SQL domains are persisted catalog objects reconstructed
+on reopen. The persisted-expression inventory includes CREATE TABLE function-call DEFAULTs.
 Function parameter/result domain names persist and their constraints run inside the SQL scalar leaf.
 Defaults are volatile/called-on-NULL for SQL functions, and CHECK remains Immutable-only. Native
 collisions, native DROP, recursion, volatility violations and dependent DROP are refused. Format
