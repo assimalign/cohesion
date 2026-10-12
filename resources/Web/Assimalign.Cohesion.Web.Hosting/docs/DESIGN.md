@@ -925,10 +925,19 @@ feature reads for payloads happen only while the corresponding event level is en
 | 14 | ControlPlaneDisabled | Warning | resourceName, observedEndpoints |
 | 15 | TelemetryListenerFaulted | Warning | exceptionType, exceptionMessage, suppressedCount:int |
 
-`endPoints` is currently empty: neither `IHttpConnectionListener` nor its concrete implementation
-exposes bound endpoints. A read seam needs owner review; this change adds no public transport
-member, reflection, or cross-library internal grant to obtain it. Protocols and server ids remain
-available to distinguish servers. Connection-fault endpoints come from the opened context.
+`endPoints` comma-joins the actual bound addresses of the TCP, TLS and QUIC listeners composed
+by Web.Hosting, including configuration-bound and development-default endpoints. Internal
+`WebServerEndPoints` associates endpoint readers with each listener-options instance during
+composition. The default server snapshots those readers after the transport materializes its
+listeners, then reads and formats them only inside `ServerBound`'s enabled branch after binding.
+Port-zero listeners therefore report the ports the operating system assigned. Two servers in one
+process retain independent reader snapshots, letting operators map each `serverId` to its addresses.
+
+The aggregate `IHttpConnectionListener` exposes no endpoints. Raw instance/factory registrations
+made directly through Http.Connections remain outside this host-owned capture, so a composition
+that mixes registration styles reports only its Web.Hosting-created listeners. No address is
+invented for an opaque custom listener, and no public transport member, reflection, or cross-library
+internal grant is added. Connection-fault endpoints still come from the opened context.
 
 The three lazily created PollingCounters are `connection-faults`, `connection-cap-waits`, and
 `refused-response-heads`. Their backing values stay exact with no listener. A local per-connection

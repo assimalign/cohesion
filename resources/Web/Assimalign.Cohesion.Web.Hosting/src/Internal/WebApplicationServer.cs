@@ -4,6 +4,7 @@ using System.Collections.Frozen;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using EndPoint = System.Net.EndPoint;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -54,6 +55,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
 
     private readonly IWebApplicationPipeline _pipeline;
     private readonly IHttpConnectionListener _listener;
+    private readonly Func<EndPoint>[] _endPointReaders;
 
     // The stop signals: Draining stops accepting and begins every connection's graceful close;
     // Aborted cancels what is still in flight once the stop's budget runs out.
@@ -96,6 +98,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             ?? throw new ArgumentException("A pipeline must be configured on the server options.", nameof(options));
         _listener = options.Listener
             ?? throw new ArgumentException("A listener must be configured on the server options.", nameof(options));
+        _endPointReaders = options.EndPointReaders;
         ServerId = Interlocked.Increment(ref _nextServerId);
         _telemetryQueryValues = options.TelemetryQueryValues;
         _drainFeature = new WebServerDrainFeature(_drain.Draining);
@@ -197,7 +200,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 return;
             }
 
-            WebServerEventSource.Log.ServerBound(ServerId, _listener.Protocols, MaxConcurrentConnections ?? 0);
+            WebServerEventSource.Log.ServerBound(ServerId, _listener.Protocols, _endPointReaders, MaxConcurrentConnections ?? 0);
             CancellationToken drainingToken = _drain.Draining;
             _acceptLoop = Task.Run(() => AcceptLoopAsync(drainingToken));
         }

@@ -112,7 +112,7 @@ public static class WebHostingExtensions
         {
             ArgumentNullException.ThrowIfNull(configure);
 
-            return options.UseHttp1(() => TcpConnectionListener.Create(configure));
+            return options.UseHttp1(() => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)));
         }
 
         /// <summary>
@@ -125,7 +125,7 @@ public static class WebHostingExtensions
         {
             ArgumentNullException.ThrowIfNull(configure);
 
-            return options.UseHttp2(() => TcpConnectionListener.Create(configure));
+            return options.UseHttp2(() => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)));
         }
 
         /// <summary>
@@ -167,7 +167,7 @@ public static class WebHostingExtensions
 
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http11);
 
-            return options.UseHttp1(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
+            return options.UseHttp1(() => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
         }
 
         /// <summary>
@@ -210,7 +210,7 @@ public static class WebHostingExtensions
 
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http2);
 
-            return options.UseHttp2(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
+            return options.UseHttp2(() => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
         }
 
         /// <summary>
@@ -277,7 +277,7 @@ public static class WebHostingExtensions
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http2, SslApplicationProtocol.Http11);
 
             return options.UseHttp1AndHttp2(
-                () => TcpConnectionListener.Create(configure).UseTls(tlsOptions),
+                () => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)).UseTls(tlsOptions),
                 configureHttp1 ?? (static _ => { }),
                 configureHttp2 ?? (static _ => { }));
         }
@@ -331,7 +331,7 @@ public static class WebHostingExtensions
                 EnsureApplicationProtocols(quicOptions.ServerAuthenticationOptions, SslApplicationProtocol.Http3);
                 EnsureTls13(quicOptions.ServerAuthenticationOptions);
 
-                return new QuicConnectionListener(quicOptions);
+                return WebServerEndPoints.Track(options, new QuicConnectionListener(quicOptions));
             });
         }
 
@@ -417,7 +417,7 @@ public static class WebHostingExtensions
                         ? tlsOptions.HandshakeTimeout
                         : Timeout.InfiniteTimeSpan;
 
-                    return new QuicConnectionListener(quicOptions);
+                    return WebServerEndPoints.Track(options, new QuicConnectionListener(quicOptions));
                 },
                 configureHttp ?? (static _ => { }));
         }

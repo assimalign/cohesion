@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.IO;
+using EndPoint = System.Net.EndPoint;
 using System.Net.Sockets;
 using System.Threading;
 
@@ -37,13 +38,16 @@ internal sealed class WebServerEventSource : EventSource
     internal long RefusedResponseHeads => Interlocked.Read(ref _refusedResponseHeads);
 
     [NonEvent]
-    public void ServerBound(long serverId, HttpProtocol protocols, int maxConcurrentConnections)
+    public void ServerBound(long serverId, HttpProtocol protocols, IReadOnlyList<Func<EndPoint>> endPointReaders, int maxConcurrentConnections)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            // IHttpConnectionListener exposes no endpoints. Keep the payload slot, without
-            // inventing an address or widening the transport contract for diagnostics.
-            ServerBound(serverId, FormatProtocols(protocols), string.Empty, maxConcurrentConnections);
+            string[] endPoints = new string[endPointReaders.Count];
+            for (int index = 0; index < endPoints.Length; index++)
+            {
+                endPoints[index] = endPointReaders[index]().ToString() ?? string.Empty;
+            }
+            ServerBound(serverId, FormatProtocols(protocols), string.Join(", ", endPoints), maxConcurrentConnections);
         }
     }
 

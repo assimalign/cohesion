@@ -94,25 +94,26 @@ public sealed class WebApplicationServerBuilder
             IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
             int featureCount = HostFeatureCount + _builder.StampedFeatureCount;
 
-            IHttpConnectionListener listener = HttpConnectionListener.Create(options =>
+            HttpConnectionListenerOptions options = new();
+            WebServerEndPoints endPoints = WebServerEndPoints.Capture(options);
+            ApplyDefaultInterceptors(options);
+            options.ExchangeFeatureCapacity = featureCount;
+
+            foreach (var action in _configurations)
             {
-                ApplyDefaultInterceptors(options);
-                options.ExchangeFeatureCapacity = featureCount;
+                action.Invoke(serviceProvider, options);
+            }
 
-                foreach (var action in _configurations)
-                {
-                    action.Invoke(serviceProvider, options);
-                }
-
-                // Rounded last, so the slots a configuration added for its middleware's features are
-                // rounded with the host's count.
-                options.ExchangeFeatureCapacity = RoundExchangeFeatureCapacity(options.ExchangeFeatureCapacity);
-            });
+            // Rounded last, so the slots a configuration added for its middleware's features are
+            // rounded with the host's count.
+            options.ExchangeFeatureCapacity = RoundExchangeFeatureCapacity(options.ExchangeFeatureCapacity);
+            IHttpConnectionListener listener = new HttpConnectionListener(options);
 
             return new WebApplicationServer(new WebApplicationServerOptions
             {
                 Pipeline = pipeline,
                 Listener = listener,
+                EndPointReaders = endPoints.Snapshot(),
                 MaxConcurrentConnections = _maxConcurrentConnections ?? _configuredMaxConcurrentConnections,
                 TelemetryQueryValues = _telemetryQueryValues?.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             });
