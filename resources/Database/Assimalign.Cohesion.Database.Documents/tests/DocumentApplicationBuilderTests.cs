@@ -221,7 +221,7 @@ public sealed class DocumentApplicationBuilderTests
             Factory = factory;
             return this;
         }
-        public IDatabaseApplication Build(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public IDatabaseApplication Build() => throw new NotSupportedException();
     }
 
     private sealed class RecordingContext : IDatabaseApplicationContext

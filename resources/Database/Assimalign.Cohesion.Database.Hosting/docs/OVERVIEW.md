@@ -31,7 +31,9 @@ SQL runs cheap schema steps there and defers populated-table work to its own pro
 and row progress through the root instance's model-neutral observation. A deferred failure takes
 that database offline; an inline failure disposes the already-built owned products.
 
-`Build(CancellationToken)` passes its caller's shutdown token into SQL construction and recovery.
+The concrete builder's `Build(CancellationToken)` passes its caller's shutdown token into SQL
+construction and recovery. The root `IDatabaseApplicationBuilder.Build()` remains parameterless
+and forwards with no token, matching the cross-area composition seam.
 There is no construction timeout (`StartupTimeout` bounds service start only), and the host's
 runtime shutdown lifecycle begins after Build. There is no application-level AddServer, AddDatabase
 or Use composition method. Direct model `Create(name, options)` remains available for standalone use.

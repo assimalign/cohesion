@@ -1548,7 +1548,9 @@ Numbering continues the plan of record's table. Each line is the question, then 
     General root `DatabaseInstance.Provisioning` observations let Hosting report Degraded with
     kind/table, original step position and counted rows, then Healthy after completion. No new
     EventSource events were added; batch D owns start/progress/end/failure instrumentation.
-    `Build(CancellationToken)` passes its caller's shutdown token through the root factory context;
+    The concrete `DatabaseApplicationBuilder.Build(CancellationToken)` passes its caller's shutdown
+    token through the root factory context. The root interface keeps parameterless `Build()` and
+    forwards with no token (O34; owner decision 2026-10-11);
     the host runtime has no shutdown lifecycle yet at Build. Physical recovery and logical scrub
     observe cancellation and retain the classification journal after interruption.
 

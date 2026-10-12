@@ -29,7 +29,7 @@ internal sealed class RecordingApplicationBuilder : IDatabaseApplicationBuilder
 
     public DatabaseEngine MaterializeEngine() => Factories[0](new EmptyContext());
 
-    public IDatabaseApplication Build(CancellationToken cancellationToken = default)
+    public IDatabaseApplication Build()
         => throw new NotSupportedException("The hosting layer builds applications.");
 
     private sealed class EmptyContext : IDatabaseApplicationContext

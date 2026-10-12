@@ -18,8 +18,12 @@ deferred provisioning through its own `DatabaseEngineWorkerKind.Provisioning` wo
 use the existing database-offline channel; `StorageOfflineCause.ProvisioningFailure` identifies
 failed migration work, and `RecoveryInterrupted` fences a canceled recovery from shutdown writes.
 
-The existing application Build contract accepts a caller cancellation token, exposed to factories
-on `IDatabaseApplicationContext.BuildCancellationToken`. SQL's composition passes it to its Build.
+The root `IDatabaseApplicationBuilder.Build()` stays parameterless, as O34 specifies for all 18
+areas (owner decision 2026-10-11). The concrete hosting builder retains
+`Build(CancellationToken cancellationToken = default)`, and its explicit interface member forwards
+with no token. `DatabaseApplication.CreateBuilder` returns that concrete builder to `Program.cs`.
+The token remains exposed to factories on `IDatabaseApplicationContext.BuildCancellationToken`;
+SQL's composition passes it to its Build.
 The runtime host shutdown lifecycle starts later, so the application caller supplies the token
 when it needs shutdown during construction. This adds no model reference to Hosting, new public
 interface, friend assembly grant, capability flag, or implementation-only public bridge.

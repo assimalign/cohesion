@@ -265,7 +265,9 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// factory provisions its declared databases here: open, recovery and schema migration run
     /// inside Build with no timeout (<see cref="DatabaseApplicationOptions.StartupTimeout"/> bounds
     /// service start only). Decision 49a passes the caller's cancellation token and defers
-    /// data-scaling SQL migration steps to the engine's worker. A factory's
+    /// data-scaling SQL migration steps to the engine's worker. The parameterless root
+    /// <see cref="IDatabaseApplicationBuilder.Build"/> forwards here without a token; callers that
+    /// need cancellation retain the concrete builder. A factory's
     /// exception, for example a SQL schema migration failure led by <c>COHSQLP001</c> to
     /// <c>COHSQLP005</c>, propagates unchanged after the products built before it are disposed.
     /// </remarks>
@@ -630,7 +632,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return this;
     }
 
-    IDatabaseApplication IDatabaseApplicationBuilder.Build(CancellationToken cancellationToken) => Build(cancellationToken);
+    IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();
 
     private static object? CreateConnectionFactory(string protocol) => string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase) ? new TcpConnectionFactory() : null;
 

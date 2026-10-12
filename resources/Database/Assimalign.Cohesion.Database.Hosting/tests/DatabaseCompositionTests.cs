@@ -24,6 +24,62 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// <summary>Verifies the one-shot composition, infrastructure, and ownership boundary.</summary>
 public sealed class DatabaseCompositionTests
 {
+    /// <summary>Verifies the root's cross-area Build seam remains a parameterless member.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: the root seam is parameterless and supplies no construction token")]
+    public async Task Build_ThroughParameterlessRootDelegate_ShouldUseNoCancellationToken()
+    {
+        // Arrange
+        IDatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        int factoryCalls = 0;
+        CancellationToken observed = new(canceled: true);
+        builder.AddEngine("root", context =>
+        {
+            factoryCalls++;
+            observed = context.BuildCancellationToken;
+            return new RecordingEngine("root");
+        });
+        Func<IDatabaseApplication> build = builder.Build;
+
+        // Act
+        await using IDatabaseApplication application = build();
+
+        // Assert
+        factoryCalls.ShouldBe(1);
+        observed.ShouldBe(CancellationToken.None);
+        application.Context.BuildCancellationToken.ShouldBe(CancellationToken.None);
+        application.Context.GetEngine("root").Name.ShouldBe("root");
+    }
+
+    /// <summary>Verifies the concrete builder preserves cancellation for both engine-factory contexts.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: the concrete token reaches root and hosting engine factories")]
+    public async Task Build_WithCancellationToken_ShouldPropagateToBothFactoryContexts()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        CancellationToken rootToken = default;
+        CancellationToken hostingToken = default;
+        ((IDatabaseApplicationBuilder)builder).AddEngine("root", context =>
+        {
+            rootToken = context.BuildCancellationToken;
+            return new RecordingEngine("root");
+        });
+        builder.AddEngine("hosting", context =>
+        {
+            hostingToken = context.CancellationToken;
+            return new RecordingEngine("hosting");
+        });
+
+        // Act
+        await using DatabaseApplication application = builder.Build(cancellation.Token);
+
+        // Assert
+        rootToken.ShouldBe(cancellation.Token);
+        hostingToken.ShouldBe(cancellation.Token);
+        application.Context.BuildCancellationToken.ShouldBe(cancellation.Token);
+        application.Context.Engines.Count.ShouldBe(2);
+    }
+
     /// <summary>Verifies hosting composes repeated and unrelated engine models without model-specific branches.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: accepts two engines of one model and another model")]
     public async Task Build_WithRepeatedAndDifferentModels_ShouldRetainEveryNamedEngine()

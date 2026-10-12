@@ -90,11 +90,16 @@ A pending/running database makes aggregate health Degraded. Offline databases re
 existing Unhealthy precedence. Completion removes the observation and restores Healthy when no
 other condition prevents it. Health data uses `engine.N.provisioning.M.*` entries.
 
-`Build(CancellationToken)` passes its caller's token through the root application context and
-the concrete build context to engine factories; AddSql passes it into SQL Build. The host's
+The concrete `DatabaseApplicationBuilder.Build(CancellationToken cancellationToken = default)` passes
+its caller's token through the root application context and the concrete build context to engine
+factories; AddSql passes it into SQL Build. The host's
 shutdown wait and service lifecycle start after Build, so no runtime shutdown token exists here.
 Callers that need shutdown during Build provide their process-lifetime token. There is no new
 timeout or Hosting dependency on a model. Cancellation disposes owned products already built.
+The root `IDatabaseApplicationBuilder.Build()` stays parameterless, matching all 18 areas (O34;
+owner decision 2026-10-11). Its explicit implementation forwards to the concrete Build without a
+token. `Program.cs` retains the concrete builder returned by `DatabaseApplication.CreateBuilder` when
+it needs cancellable construction; model factories still read `IDatabaseApplicationContext.BuildCancellationToken`.
 
 The module holds no schema knowledge and provisions nothing. A model's engine builder declares the databases its engine owns, and the engine's own build opens or creates and provisions each of them before it returns (`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` §5.2 and §5.3). The model verb's factory runs that build inside the application's `Build()`, and servers start only when the application starts, so provisioning still precedes accept (area DESIGN, R4) without a hosting service.
 
