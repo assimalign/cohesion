@@ -194,6 +194,37 @@ public class ExceptionBoundaryMiddlewareTests
         context.ResponseBodyText().ShouldBe("owned");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: An unregistered problem status should retain its generic title")]
+    [InlineData(499, "Error")]
+    [InlineData(599, "Internal Server Error")]
+    public async Task InvokeAsync_HandlerWritesUnregisteredProblemStatus_ShouldPreserveStatusAndGenericTitle(int status, string expectedTitle)
+    {
+        // Arrange — integration characterization of #1414's existing title fallback through the boundary.
+        InvalidOperationException fault = new("Application failure.");
+        IErrorHandlingFeature hook = Hook(composition => composition.OnError(async (context, exception, token) =>
+        {
+            await context.Response.WriteProblemDetailsAsync(ProblemDetails.FromStatus(new HttpStatusCode(status)), token);
+            return true;
+        }));
+
+        // Act
+        TestHttpContext context = await RunAsync(null, ctx =>
+        {
+            ctx.Response.Body.Write("partial-body"u8);
+            throw fault;
+        }, hook);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(status);
+        context.Response.Headers[HttpHeaderKey.ContentType].Value.ShouldBe("application/problem+json");
+        context.CancelRequested.ShouldBeFalse();
+        context.Features.Get<IHttpExceptionFeature>().ShouldNotBeNull().Error.ShouldBeSameAs(fault);
+        using JsonDocument document = JsonDocument.Parse(context.ResponseBodyText());
+        document.RootElement.GetProperty("type").GetString().ShouldBe("about:blank");
+        document.RootElement.GetProperty("status").GetInt32().ShouldBe(status);
+        document.RootElement.GetProperty("title").GetString().ShouldBe(expectedTitle);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: Should consult OnError handlers in registration order, first-true wins")]
     public async Task InvokeAsync_MultipleHandlers_ShouldConsultInOrderFirstTrueWins()
     {

@@ -123,6 +123,13 @@ the three-layer model above. It wraps everything downstream in a `try/catch` and
   client-cancellation `OperationCanceledException` (request token tripped) is re-thrown as a clean drain,
   not manufactured into an error response.
 
+An `OnError` handler can write a problem response with an unregistered status accepted by core
+Http (#1414). `ProblemDetails.FromStatus` retains its generic title: `Error` for 499 and
+`Internal Server Error` for 599. The Stage 14 wave 1 boundary characterization covers both after
+the boundary clears a partial response, preserving the numeric status and title and recording the
+original application fault. It pins the integrated behavior without changing production code;
+the boundary's terminal fallback remains 500.
+
 ### The diagnostics hook and its suppression
 
 The boundary exposes an `OnException` observation hook (fault → logging/metrics/tracing, dependency-free
