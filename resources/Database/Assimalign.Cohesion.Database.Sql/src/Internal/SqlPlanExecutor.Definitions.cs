@@ -38,7 +38,8 @@ internal sealed partial class SqlPlanExecutor
                 var definition = _catalog.Functions.FirstOrDefault(function => function.Signature.Equals(signature, StringComparison.OrdinalIgnoreCase));
                 if (definition is null)
                 {
-                    if (environment.Catalog.GetOverloads(drop.Name).Any(function => function is not SqlExpressionFunction))
+                    if (environment.Catalog.GetOverloads(drop.Name).Any(function => function is not SqlExpressionFunction &&
+                        SqlDefinitionBinder.Signature(function.Name, function.Parameters).Equals(signature, StringComparison.OrdinalIgnoreCase)))
                     {
                         throw new DatabaseException($"{SqlDefinitionBinder.NativeCode}: Function '{signature}' is engine-registered and cannot be dropped through SQL.");
                     }

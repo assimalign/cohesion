@@ -1699,6 +1699,9 @@ literal default unless they supply one; explicit DEFAULT NULL overrides inherita
 bounds and NOT NULL apply on writes and CAST. SQL definitions persist as canonical expressions.
 DROP refuses dependencies in other function/domain bodies, CHECK, DEFAULT, casts and domain
 columns. Ordinary DDL cannot drop Schema-owned objects. Engine registrations cannot be dropped.
+DROP FUNCTION checks the requested normalized signature: an engine-registered overload is
+COHSQLD003; an absent overload is COHSQLD001 even when the engine registers another overload
+with the same name. Type aliases and function-name casing do not change that identity.
 
 CREATE TABLE defaults additionally admit column-free scalar function calls, bound once and
 executed for each omitted value. Domain defaults, ADD COLUMN, typed DefaultSql and SDK defaults

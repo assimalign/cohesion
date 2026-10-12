@@ -1333,7 +1333,9 @@ Engine-registered domains remain code; SQL domains are persisted catalog objects
 on reopen. The persisted-expression inventory includes CREATE TABLE function-call DEFAULTs.
 Function parameter/result domain names persist and their constraints run inside the SQL scalar leaf.
 Defaults are volatile/called-on-NULL for SQL functions, and CHECK remains Immutable-only. Native
-collisions, native DROP, recursion, volatility violations and dependent DROP are refused. Format
+collisions, native DROP, recursion, volatility violations and dependent DROP are refused. Native
+DROP matches the requested normalized signature (COHSQLD003); an unknown overload of a native
+name is COHSQLD001. Format
 **10** persists canonical definitions, dependency identities and Adhoc/Schema ownership; the format
 gate refuses 9 and older without a reader or upgrade path. Missing native calls remain unresolved
 on open and fail use/declared Build. CREATE TABLE accepts function-call defaults, evaluated once

@@ -4229,7 +4229,9 @@ Format 10 extends 9 with record kinds 10-13. Bodies, checks and defaults follow 
 persisted-expression rule. Function/domain metadata retains dependency identities and Adhoc/Schema
 ownership. DROP walks those identities and table expressions/domain names. Definition DDL excludes
 other catalog mutations while checking dependencies. It refuses native DROP (COHSQLD003), dependent
-DROP (COHSQLD002) and invalid declarations (COHSQLD001). No interface, new project reference,
+DROP (COHSQLD002) and invalid declarations (COHSQLD001). Native DROP classification matches the
+requested normalized name and parameter signature, not every overload sharing that name;
+an unknown signature is COHSQLD001. No interface, new project reference,
 shipped-to-shipped internal grant or assembly scanning was added.
 
 Scripts use statement-granular recovery. The catalog's scoped receipt enlists in each final DDL

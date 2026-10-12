@@ -473,6 +473,8 @@ The engine stamps format 10, previously 9. Kinds 10/11 store immutable SqlCatalo
 SqlCatalogDomain records: signatures/types, canonical SQL, volatility/null behavior, dependency
 identities and Adhoc/Schema ownership. Publication/removal advances DDL generation. Snapshots
 include both kinds. The engine owns semantic binding and dependency/ownership admission.
+Native function ownership is resolved by the requested normalized signature; an unrelated
+engine overload does not turn a missing SQL definition into an engine-owned one.
 
 Kind 12 stores SqlCatalogScript: case-sensitive name, exact-body SHA-256, statement count and
 committed prefix, initial/latest DDL generations, typed schema hash and created table/index
