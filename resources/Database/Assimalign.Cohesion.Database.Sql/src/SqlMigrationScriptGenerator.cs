@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -138,8 +139,10 @@ public static class SqlMigrationScriptGenerator
             throw InvalidPayload(operation, "the previous and desired column definitions");
         }
         RequireMatchingName(operation, column.Name, "column");
-        if (column.Type != previous.Type || column.Scale != previous.Scale ||
-            !string.Equals(column.CustomType, previous.CustomType, StringComparison.OrdinalIgnoreCase) ||
+        DatabaseTypeInfo type = ResolveAlterColumnType(column, out string? domain);
+        DatabaseTypeInfo previousType = ResolveAlterColumnType(previous, out string? previousDomain);
+        if (type.Type != previousType.Type || type.Scale != previousType.Scale ||
+            !string.Equals(domain, previousDomain, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral),
                 SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral), StringComparison.Ordinal))
         {
@@ -147,6 +150,24 @@ public static class SqlMigrationScriptGenerator
         }
         return new SqlMigrationScriptStep(operation, SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), column),
             SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), previous));
+    }
+
+    private static DatabaseTypeInfo ResolveAlterColumnType(CompiledSchemaColumn column, out string? domain)
+    {
+        if (column.CustomType is not { } declared || SqlTypeCatalog.Standard.Resolve(declared, out _) is not null)
+        {
+            return SqlSchemaProvisioner.ResolveColumnType(column, SqlTypeCatalog.Standard, out domain);
+        }
+
+        // Script generation has no engine catalog. An engine-owned domain is compared by
+        // identity; its immutable bounds are validated when provisioning binds the schema.
+        if (!SqlTypeRules.TrySplit(declared, out string name, out int? first, out _) || first is not null)
+        {
+            throw new DatabaseException($"Column '{column.Name}' is declared with an invalid domain type '{declared}'.");
+        }
+        SqlTypeRules.ValidateDomainName(name);
+        domain = name;
+        return new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision, column.Scale);
     }
 
     private static string? PreviousIndexStatement(

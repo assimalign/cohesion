@@ -56,6 +56,8 @@ internal sealed partial class SqlPlanExecutor
 
     // Unpublished trees are never exported by a checkpoint or by unrelated DDL.
     // A crash discards their directory entries; the pending operation rebuilds them.
+    // This snapshot may miss a concurrent publication. The catalog merges only
+    // this statement's added descriptions under its publication lock.
     private IReadOnlyList<BTreeIndexRegistration> PublishedRegistrations(IReadOnlyList<SqlCatalogIndex> added)
         => _indexManager.ExportRegistrations().Where(registration =>
             _catalog.TryGetIndex(registration.ObjectId, registration.Definition.Name, out _) ||

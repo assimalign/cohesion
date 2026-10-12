@@ -41,6 +41,15 @@ internal sealed partial class SqlSchemaProvisioner
         foreach (var step in script.Steps)
         {
             var operation = step.Operation;
+            // Columns are appended physically. Once an addition is deferred, later
+            // additions to that table must retain declaration order behind it.
+            if (operation.Kind == SqlSchemaMigrationOperationKind.AddColumn && deferred.Any(prior =>
+                prior.Operation.Kind == SqlSchemaMigrationOperationKind.AddColumn &&
+                string.Equals(prior.Operation.ParentName, operation.ParentName, StringComparison.OrdinalIgnoreCase)))
+            {
+                deferred.Add(step);
+                continue;
+            }
             bool scales = operation.Kind is SqlSchemaMigrationOperationKind.AddIndex or SqlSchemaMigrationOperationKind.AddConstraint
                 || operation.Kind == SqlSchemaMigrationOperationKind.AlterColumn && Tightens(operation)
                 || operation.Kind == SqlSchemaMigrationOperationKind.AddColumn &&
@@ -68,14 +77,21 @@ internal sealed partial class SqlSchemaProvisioner
         return deferred;
     }
 
-    private static bool Tightens(SqlSchemaMigrationOperation operation)
-        => operation.Column is { } column && operation.PreviousColumn is { } previous &&
-            (previous.IsNullable && !column.IsNullable ||
-             column.MaxLength is { } length && (previous.MaxLength is null || length < previous.MaxLength) ||
-             column.Precision is { } precision && (previous.Precision is null || precision < previous.Precision));
+    private bool Tightens(SqlSchemaMigrationOperation operation)
+    {
+        if (operation.Column is not { } column || operation.PreviousColumn is not { } previous)
+        {
+            return false;
+        }
+        var type = ResolveColumnType(column, _database.Engine.Types, out _);
+        var previousType = ResolveColumnType(previous, _database.Engine.Types, out _);
+        return previous.IsNullable && !column.IsNullable ||
+            type.MaxLength is { } length && (previousType.MaxLength is null || length < previousType.MaxLength) ||
+            type.Precision is { } precision && (previousType.Precision is null || precision < previousType.Precision);
+    }
 
-    private async ValueTask PrepareDeferredAsync(SqlCompiledSchema schema, List<SqlMigrationScriptStep> steps,
-        int stepCount, CancellationToken cancellationToken)
+    private SqlCatalogPendingMigration CreateDeferredIntent(SqlCompiledSchema schema, List<SqlMigrationScriptStep> steps,
+        int stepCount)
     {
         var previous = _catalog.PendingMigration;
         bool resuming = previous is not null && string.Equals(previous.ContentHash, schema.Hash, StringComparison.Ordinal);
@@ -92,10 +108,18 @@ internal sealed partial class SqlSchemaProvisioner
             next++;
         }
         var ordered = steps.Zip(positions).OrderBy(pair => pair.Second.Position).ToArray();
-        steps = ordered.Select(pair => pair.First).ToList();
-        var intent = new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument,
+        return new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument,
             ordered.Select(pair => pair.Second).ToArray(), resuming ? previous!.StepCount : stepCount);
-        await _catalog.SavePendingMigrationAsync(intent, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask PrepareDeferredAsync(SqlCompiledSchema schema, List<SqlMigrationScriptStep> steps,
+        int stepCount, CancellationToken cancellationToken)
+    {
+        var intent = CreateDeferredIntent(schema, steps, stepCount);
+        steps = intent.Steps.Select(position => steps.Single(step =>
+            step.Operation.Kind.ToString() == position.Kind &&
+            string.Equals(step.Operation.ParentName, position.Table, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(step.Operation.ObjectName, position.ObjectName, StringComparison.OrdinalIgnoreCase))).ToList();
 
         TransactionContext locks = await _database.Coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
         try

@@ -1140,6 +1140,8 @@ validation, required-column addition, additions of columns whose domains carry c
 `SqlProvisioningWorker`. `SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
 Imperative `ApplySchemaAsync` remains inline. Nullable additions validate their immutable missing
 value once; existing rows continue to resolve that value from the catalog without a rewrite.
+Column additions on the same table retain declaration order: once an addition is deferred,
+every later addition to that table follows it on the worker, including nullable additions.
 
 An existing implementation contradicts 49a's catalog-only premise for every drop: `DROP TABLE`
 calls `Storage.FreeOwnerPages`, which clears and WAL-logs each owned data page
@@ -1150,7 +1152,9 @@ existing storage contract.
 
 The catalog's format-9 pending intent contains the complete target document/hash, operation kind,
 table, object name, original one-based execution position and total. Its transaction commits
-after the cheap steps and before scheduling. The prior applied marker stays untrusted while an
+before the first cheap step, so a crash after any publication can resume by database name alone.
+Cancellation and compensation retain that target for retry; a different target is refused until
+the recorded migration completes. The prior applied marker stays untrusted while an
 intent exists; only the transaction recording the fully reconciled target clears the intent.
 
 ```mermaid
@@ -1173,7 +1177,10 @@ the pending tables and any FK parent needed by their DDL. The worker keeps that 
 completion or cancellation. Reservations cover the remaining migration as a set: a later table
 cannot accept work ahead of its pending step. Tables outside that set continue to serve reads,
 writes and DDL. The request admission walk uses those same lock-manager locks before planning
-or capturing an automatic transaction snapshot, including joins and subqueries. It introduces
+or capturing an automatic transaction snapshot, including joins, subqueries and FK parents in
+CREATE TABLE and ALTER ADD COLUMN/CONSTRAINT. Parent unique-key binding therefore observes the
+completed migration. PostgreSQL likewise locks the referenced relation before checking its key
+(`src/backend/commands/tablecmds.c:10171-10177,10304`); no implementation is copied. Admission introduces
 no second waiting graph. The final marker uses the catalog's generation check and retries a
 concurrent unrelated DDL change; it never waits for the global DDL interlock while holding tables.
 
@@ -1184,6 +1191,10 @@ and rebuilds from scratch; abandoned pages follow ordinary DROP INDEX reclamatio
 as `BTreeIndexManager.DropIndexAsync` does. Completed steps survive a later failure and are omitted
 by B2's complete-catalog reconciliation. A failed step takes only its database offline with
 `COHSQLP004` and keeps the intent for the next open, even without a fresh schema declaration.
+Catalog publication merges only affected registrations under its metadata lock. Independently
+finished trees therefore cannot erase one another through stale full-directory snapshots.
+Checkpoint snapshots can fill missing registrations for current descriptions, but preserve
+published fixed-root identities and cannot remove or resurrect indexes.
 
 `DatabaseInstance.Provisioning` carries immutable model-neutral observations: kind, table,
 position/total, pending/running, counted rows and optional failure code. Hosting reports Degraded
@@ -1201,6 +1212,10 @@ disposal cancels and joins its worker work before closing storage.
 Tightening now has an executable DDL path: a full `ALTER COLUMN` definition may change nullability,
 length or precision while retaining storage type, scale, collation, domain and DEFAULT. Existing
 values must already satisfy the new definition; changes that need value conversion remain refused.
+Code-first type spellings resolve before comparing storage, domain identity and scale;
+`VARCHAR(20)` to `VARCHAR(10)` and `DECIMAL(18,2)` to `DECIMAL(10,2)` therefore reach that
+validation-only path. Build classifies tightening from resolved length and precision bounds,
+including declarations whose compiled raw modifier fields are null.
 PostgreSQL's table-rewrite validation separates not-null/constraint checks from rewritten tuples
 (`src/backend/commands/tablecmds.c:6186,6511,6594`, `ATRewriteTable`); Neo4j's background population exposes
 `POPULATING` and `FAILED` (`community/kernel-api/src/main/java/org/neo4j/internal/kernel/api/InternalIndexState.java:29,43`).

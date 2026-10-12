@@ -120,6 +120,28 @@ internal sealed partial class SqlSchemaProvisioner
                 break;
             case SqlAlterTableExpression alter:
                 yield return alter.Table;
+                IEnumerable<SqlConstraintDefinition> constraints = alter.Action switch
+                {
+                    SqlAlterAddConstraintAction add => [add.Constraint],
+                    SqlAlterAddColumnAction add => add.Column.Constraints,
+                    _ => [],
+                };
+                foreach (var constraint in constraints)
+                {
+                    if (constraint.ReferencedTable is { } parent)
+                    {
+                        yield return parent;
+                    }
+                }
+                break;
+            case SqlCreateTableExpression create:
+                foreach (var constraint in create.Constraints)
+                {
+                    if (constraint.ReferencedTable is { } parent)
+                    {
+                        yield return parent;
+                    }
+                }
                 break;
             case SqlCreateIndexExpression create:
                 yield return create.Table;

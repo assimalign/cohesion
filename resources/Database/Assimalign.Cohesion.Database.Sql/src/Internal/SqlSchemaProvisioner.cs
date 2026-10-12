@@ -61,6 +61,11 @@ internal sealed partial class SqlSchemaProvisioner
         {
             ddl = _database.DdlInterlock.EnterApply(schema.Name);
             ValidateSupportedSchema(schema);
+            if (_catalog.PendingMigration is { } intent && !string.Equals(intent.ContentHash, schema.Hash, StringComparison.Ordinal))
+            {
+                throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: a different schema is pending. " +
+                    "Finish the recorded migration before replacing its declaration.");
+            }
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             string targetHash = schema.Hash;
             if (IsApplied(recorded, schema))
@@ -87,6 +92,14 @@ internal sealed partial class SqlSchemaProvisioner
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
             var deferred = deferDataScalingSteps ? FindDeferredSteps(script) : [];
+
+            if (deferred.Count > 0)
+            {
+                // Even the first cheap DDL commit must be recoverable by database name
+                // alone. Keep the complete target durable until convergence clears it.
+                await _catalog.SavePendingMigrationAsync(
+                    CreateDeferredIntent(schema, deferred, script.Steps.Count), cancellationToken).ConfigureAwait(false);
+            }
 
             // This read-only context owns table locks across self-committing statements.
             // Its rollback only releases locks: no schema/data changes enlist in it.
@@ -134,8 +147,8 @@ internal sealed partial class SqlSchemaProvisioner
                 CompensationResult compensation;
                 if (locks is null && applied.Count > 0 && !_database.IsOffline)
                 {
-                    // The deferred handoff released the inline reservation before persisting
-                    // intent. Compensation must acquire locks with a live transaction identity,
+                    // The deferred handoff released the inline reservation. Compensation
+                    // must acquire locks with a live transaction identity,
                     // even when cancellation interrupted that handoff.
                     locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None).ConfigureAwait(false);
                     await using var compensationSession = _database.CreateSchemaSession(schema.Name, CancellationToken.None, locks.Sequence);

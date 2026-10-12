@@ -17,7 +17,7 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(SqlLockWaitCollection.Name)]
-public sealed class SqlDeferredProvisioningTests
+public sealed partial class SqlDeferredProvisioningTests
 {
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - 49a: Build runs cheap DDL, reserves populated tables and serves other tables")]
     [InlineData(false)]
@@ -65,7 +65,7 @@ public sealed class SqlDeferredProvisioningTests
             database.Provisioning.ShouldNotBeNull().IsRunning.ShouldBeTrue();
             await using var blocked = await database.CreateSessionAsync(timeout.Token);
             await using var other = await database.CreateSessionAsync(timeout.Token);
-            Task<QueryResult> waiting = blocked.ExecuteAsync("SELECT Note FROM items", cancellationToken: timeout.Token).AsTask();
+            Task<QueryResult> waiting = blocked.ExecuteAsync("INSERT INTO items (Id, Value) VALUES (1000, NULL)", cancellationToken: timeout.Token).AsTask();
             int writes = 0;
             var elapsed = Stopwatch.StartNew();
             try
@@ -83,7 +83,9 @@ public sealed class SqlDeferredProvisioningTests
             {
                 release.Set();
             }
-            await using var result = (await waiting).ShouldBeAssignableTo<QueryResultSet>();
+            var rejection = await Should.ThrowAsync<DatabaseException>(async () => await waiting);
+            rejection.Message.ShouldContain("Value");
+            rejection.Message.ShouldContain("null");
             await WaitDoneAsync(database, timeout.Token);
 
             // Assert: binding happened after all three expensive steps published.

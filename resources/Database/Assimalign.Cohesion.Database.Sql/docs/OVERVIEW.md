@@ -24,9 +24,10 @@ shared storage, with DDL flowing through the relational catalog
   to select another database or create/drop databases through a session.
 - **Declared databases and provisioning** — the engine builder compiles declarations before I/O,
   then opens/creates their databases and runs data-independent steps. On populated tables, indexes,
-  constraints and validation-only column tightening are persisted as pending and run by the engine's
+  constraints and validation-only column tightening are persisted as pending before any cheap DDL commits and run by the engine's
   provisioning worker. Pending tables are locked before Build returns; independent tables serve
-  throughout, and health reports the step and row progress. `RunMigrationsInline = true` keeps all
+  throughout, and health reports the step and row progress. Same-table column additions retain
+  declaration order across the inline/worker split. `RunMigrationsInline = true` keeps all
   steps in Build per database. Build/BuildAsync accept cancellation, including recovery.
   `ApplySchemaAsync(SqlCompiledSchema)` remains inline. Both paths use the same DDL planner and
   B2's complete catalog snapshot, typed defaults and crash convergence. Format 9 adds ordered

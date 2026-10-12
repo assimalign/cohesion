@@ -68,6 +68,16 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
 
+## Admission during deferred provisioning (49a)
+
+While a code-first migration runs on populated tables, statements referencing its reserved
+tables wait before binding. This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
+ALTER ADD CONSTRAINT, so a pending unique index is available when the FK is checked.
+After admission, writes enforce the completed column nullability and bounds. Unrelated
+tables remain available. Code-first changes to built-in `VARCHAR` length and `DECIMAL`
+precision use the validation-only ALTER path described above; a storage, domain, scale or
+DEFAULT rewrite remains unsupported.
+
 ## Statement completeness (#1068)
 
 A request carries exactly one statement, and the parser either consumes all of
@@ -175,9 +185,9 @@ code when the row is evaluated. `+a` and `+(1 + 2)` reported
 `SQL0003` before unary plus existed. `~` is not a sign of the dialect; see
 [Expressions](#expressions).
 
-**ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]` and
-`DROP CONSTRAINT` parse. Any other action, such as `RENAME TO`, `RENAME COLUMN`,
-`ALTER COLUMN` or `MODIFY`, reports `SQL0003` naming the action at parse time.
+**ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]`,
+`DROP CONSTRAINT` and full-definition `ALTER COLUMN` parse. Any other action, such as
+`RENAME TO`, `RENAME COLUMN` or `MODIFY`, reports `SQL0003` naming the action at parse time.
 The statement then carries no action node. It used to carry a placeholder
 `DROP COLUMN ?` that failed later, in the catalog. A missing action, table name,
 column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
