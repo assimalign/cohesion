@@ -117,6 +117,10 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         if (_orphanedNewSession)
         {
             WebSessionEventSource.Log.SessionOrphaned(_context);
+            if (_storeSession is { IsModified: true })
+            {
+                WebSessionEventSource.Log.SessionStateLost(_context);
+            }
             return;
         }
 

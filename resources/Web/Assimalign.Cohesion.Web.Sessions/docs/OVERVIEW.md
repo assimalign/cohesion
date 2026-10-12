@@ -80,3 +80,9 @@ It returns `true` by default for custom implementations that do not track change
 stores keep committing. Read-only built-in sessions still refresh their idle timeout.
 Store failures can be observed through the `Assimalign.Cohesion.Http.Sessions` EventSource;
 see the [design](DESIGN.md#store-failure-ownership-1436) for payload and ownership details.
+
+Establish a new session before starting the response so its cookie can be delivered. If first
+access occurs after the head starts, the session is discarded after the request. The
+`Assimalign.Cohesion.Web.Sessions` EventSource reports a modified orphan with the throttled
+Warning `SessionStateLost` and the exact `lost-sessions` counter; a read-only orphan emits only
+Verbose `SessionOrphaned`. See [diagnostics](DESIGN.md#diagnostics) for event payloads and counters.
