@@ -29,6 +29,7 @@ using Assimalign.Cohesion.Hosting.Health;
 /// </remarks>
 public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicationContext, IHealthContributor
 {
+    private DatabaseHealthTrace? _healthTrace;
     private readonly HostEnvironment _environment;
     private IReadOnlyList<DatabaseEngine> _engines;
     private IReadOnlyList<DatabaseServer> _servers;
@@ -129,7 +130,18 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// the reopen attempts to the <c>Assimalign.Cohesion.Database.Hosting</c> event source, which
     /// the application's logging forwards (<c>docs/EVENT_SOURCES.md</c>).
     /// </remarks>
-    public async ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
+    public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
+    {
+        if (!DatabaseHostingEventSource.Log.IsEnabled(System.Diagnostics.Tracing.EventLevel.Warning, System.Diagnostics.Tracing.EventKeywords.None) &&
+            !DatabaseHostingEventSource.Log.IsEnabled(System.Diagnostics.Tracing.EventLevel.Informational, System.Diagnostics.Tracing.EventKeywords.None))
+        {
+            return CheckCoreAsync(cancellationToken);
+        }
+        var trace = LazyInitializer.EnsureInitialized(ref _healthTrace, static () => new DatabaseHealthTrace());
+        return trace.CheckAsync(this, cancellationToken);
+    }
+
+    internal async ValueTask<HealthContribution> CheckCoreAsync(CancellationToken cancellationToken)
     {
         var engines = new List<DatabaseEngine>(_engines.Count + _servers.Count);
         var observedEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);

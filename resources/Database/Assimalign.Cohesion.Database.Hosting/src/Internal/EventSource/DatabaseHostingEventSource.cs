@@ -213,6 +213,30 @@ internal sealed class DatabaseHostingEventSource : EventSource
         }
     }
 
+    [NonEvent]
+    public void HealthDegraded(DatabaseApplicationContext context, DatabaseEngine engine, string database,
+        string reason, StorageOfflineCause? cause, DatabaseProvisioningProgress? progress)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            HealthDegraded(context.HostId.ToString(), engine.Name, database, reason, cause?.ToString() ?? string.Empty,
+                Bound(progress?.Operation ?? string.Empty), Bound(progress?.ObjectName ?? string.Empty), progress?.Position ?? 0,
+                progress?.StepCount ?? 0, progress?.RowsProcessed ?? -1, progress?.TotalRows ?? -1);
+        }
+    }
+
+    [NonEvent]
+    public void HealthRestored(DatabaseApplicationContext context, DatabaseEngine engine, string database,
+        string reason, StorageOfflineCause? cause, DatabaseProvisioningProgress? progress)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            HealthRestored(context.HostId.ToString(), engine.Name, database, reason, cause?.ToString() ?? string.Empty,
+                Bound(progress?.Operation ?? string.Empty), Bound(progress?.ObjectName ?? string.Empty), progress?.Position ?? 0,
+                progress?.StepCount ?? 0, progress?.RowsProcessed ?? -1, progress?.TotalRows ?? -1);
+        }
+    }
+
     [Event(1, Level = EventLevel.Warning, Message = "Database '{1}' of engine {0} is offline ({2}); the application reopens it in {3} ms, with backoff.")]
     private void OfflineDatabaseFound(string engineName, string database, string cause, long delayMilliseconds)
         => WriteEvent(1, engineName, database, cause, delayMilliseconds);
@@ -273,7 +297,13 @@ internal sealed class DatabaseHostingEventSource : EventSource
     private void AdminEndpointFailed(string endpoint, string operation, string exceptionType, string exceptionMessage)
         => WriteEvent(15, endpoint, operation, exceptionType, exceptionMessage);
 
-    // Ids 16-17 are reserved for HealthDegraded / HealthRestored after decision 49a.
+    [Event(16, Level = EventLevel.Warning, Message = "HealthDegraded {1}/{2}: {3} {4}, {5} {6}, step {7} of {8}, {9} of {10} rows.")]
+    private void HealthDegraded(string hostId, string engineName, string database, string reason, string cause, string operation, string objectName, int position, int stepCount, long rowsProcessed, long totalRows)
+        => WriteEvent(16, hostId, engineName, database, reason, cause, operation, objectName, position, stepCount, rowsProcessed, totalRows);
+
+    [Event(17, Level = EventLevel.Informational, Message = "HealthRestored {1}/{2}: {3} {4}, {5} {6}, step {7} of {8}, {9} of {10} rows.")]
+    private void HealthRestored(string hostId, string engineName, string database, string reason, string cause, string operation, string objectName, int position, int stepCount, long rowsProcessed, long totalRows)
+        => WriteEvent(17, hostId, engineName, database, reason, cause, operation, objectName, position, stepCount, rowsProcessed, totalRows);
 
     private static double Elapsed(long started) => started == 0 ? 0 : Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 

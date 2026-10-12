@@ -88,7 +88,8 @@ Decision 49a defers populated-table work to SQL's engine-owned worker. Hosting r
 one-based position and total, pending/running, rows processed/total when known, and failure code.
 A pending/running database makes aggregate health Degraded. Offline databases retain their
 existing Unhealthy precedence. Completion removes the observation and restores Healthy when no
-other condition prevents it. Health data uses `engine.N.provisioning.M.*` entries.
+other condition prevents it. Health data uses `engine.N.provisioning.M.*` entries. Enabled tracing reports changes in the
+observed database condition once, with transition deduplication described under Diagnostics.
 SQL inventory enumeration reads its existing published instance snapshot without entering the
 engine's recovery monitor. During automatic reopen, the reopen service's pending entry represents
 the recovering database until its replacement is published; health can still report that state
@@ -158,8 +159,37 @@ The module raises its own events through one internal event source, named for th
 | 13 | `ResourceCommandHandled` | Informational | `kind`, `key`, `operation` (`Execute` or `Delete`) |
 | 14 | `ResourceCommandRejected` | Warning | `kind`, `key`, `operation`, `exceptionType` |
 | 15 | `AdminEndpointFailed` | Error | `endpoint` (scheme and authority only), `operation` (`Start`, `Stop`, `Dispose`), `exceptionType`, `exceptionMessage` |
+| 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
+| 17 | `HealthRestored` | Informational | same as 16; the condition and last observed progress that cleared |
 
-Batch D part 1 reserves **16-17** for `HealthDegraded` and `HealthRestored` after decision 49a.
+Batch D part 2 (#1349) observes database health through the existing root inventory and
+provisioning state, with no SQL dependency or new public seam. The first enabled observation
+of an unhealthy condition writes 16. Later observations write only on a change of reason or
+offline cause, or write 17 when the database is observed healthy again. Pending-to-running,
+step changes and row progress alone do not repeat a degraded transition. Offline has precedence
+over provisioning; a deferred failure therefore changes Provisioning to Offline with cause
+`ProvisioningFailure`, rather than producing a restoration. Reopen-service pending entries
+remain Offline through recovery. A dropped/closed database or disposed engine is forgotten,
+never reported as restored. Healthy first observations write nothing.
+
+This is Hosting's observed transition stream: a condition that begins and ends between health
+observations cannot be reported without a new model subscription seam, which this change does
+not introduce. Each application has its own lazily allocated observer; enabled observations
+serialize and update state before releasing their gate and invoking listeners. Concurrent polls
+cannot repeat a transition, and a listener may reenter health. Concurrent callers can deliver
+already-recorded transitions in a different order. Restored carries the last observed condition,
+not a fabricated final row count; absent progress uses position/count zero and row counts -1.
+Progress identifiers are bounded to 256 characters plus an ellipsis. No user exception text is
+included. Ordinary health results and their precedence are unchanged.
+
+With tracing disabled, `CheckAsync` returns its existing core directly, with no observer,
+extra inventory pass, semaphore, timer or async wrapper. A paired allocation test invokes the
+real public check and that same core against a real SQL engine, taking the minimum of three
+warmed 100-call rounds and requiring zero added bytes in Debug and Release. The transition
+tests pause a real deferred CHECK, race health polls for at least 150 ms and 32 completed calls,
+assert exact payloads and no event 0, reenter from a listener, then test completion, failure
+and offline/reopen transitions.
+
 Build reports only after the resource integration hook succeeds. The existing host lifecycle hooks
 report actual start/stop transitions; repeated start/stop no-ops write nothing. The shared host's
 `OnStartFailedAsync` hook (#1441, owner decision 2026-10-11) writes event 10 once per accepted failed start,
