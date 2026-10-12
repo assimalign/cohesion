@@ -1782,3 +1782,22 @@ Numbering continues the plan of record's table. Each line is the question, then 
 73. **Revision gate.** An optional monotonic schema revision that refuses a downgrade?
     *Recommend:* not in iteration 1; the destructive gate covers the damaging cases.
     > Agree
+
+Decisions raised while B2 and 49a were implemented, answered by the owner on 2026-10-11:
+
+74. **Typed column defaults.** B2 first exposed `Default(selector, string literal)`, a raw SQL
+    literal in the typed C# schema. *Owner:* a typed value as the primary API with a raw-literal
+    escape hatch. *Landed in B2:* `Default<TValue>(selector, TValue value)` renders the column type's
+    canonical literal through one renderer the SDK shares; `DefaultSql(selector, string sqlLiteral)`
+    takes raw SQL; a value the SDK cannot read at build time is `COHDBSDK109`.
+75. **B2's Q8 gate.** "Q8's provisioning phase under 1 ms" means provisioning reconciliation inside
+    Build (measured at 0.007-0.011 ms); opening and recovering the file sets (about 6.5 ms) is a
+    separate budget. *Owner:* agree.
+76. **Cancellable Build and the cross-area seam.** 49a first changed
+    `IDatabaseApplicationBuilder.Build()` to `Build(CancellationToken)`. *Owner:* keep the interface's
+    parameterless `Build()` as every area has it (O34); `Build(CancellationToken)` lives on the
+    concrete `DatabaseApplicationBuilder`, and `IDatabaseApplicationContext.BuildCancellationToken`
+    carries the token to the engine factories.
+77. **DROP TABLE.** 49a assumed every drop is catalog-only; DROP TABLE still reclaims its pages
+    inline, which grows with the table. *Owner:* defer it as 49a defers other data-scaling steps:
+    unpublish in Build, reclaim afterwards (#1443).
