@@ -37,55 +37,63 @@ public sealed partial class SqlCatalog
     /// <summary>Publishes a new SQL function and advances the DDL generation atomically.</summary>
     /// <param name="function">The validated canonical definition.</param>
     /// <param name="cancellationToken">Cancels before publication.</param>
+    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this publication; never applied to another call.</param>
     /// <returns>A completed operation after the durable commit.</returns>
     /// <exception cref="ArgumentNullException">The definition is null.</exception>
     /// <exception cref="SqlCatalogException">The signature exists or the record is too large.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
-    public ValueTask CreateFunctionAsync(SqlCatalogFunction function, CancellationToken cancellationToken = default)
+    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
+    public ValueTask CreateFunctionAsync(SqlCatalogFunction function, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
     {
         ArgumentNullException.ThrowIfNull(function);
         return CreateDefinitionAsync(_functions, function.Signature, function, functionRecordKind,
-            SqlCatalogJsonContext.Default.SqlCatalogFunction, cancellationToken);
+            SqlCatalogJsonContext.Default.SqlCatalogFunction, cancellationToken, scriptReceipt);
     }
 
     /// <summary>Publishes a new SQL domain and advances the DDL generation atomically.</summary>
     /// <param name="domain">The validated canonical definition.</param>
     /// <param name="cancellationToken">Cancels before publication.</param>
+    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this publication; never applied to another call.</param>
     /// <returns>A completed operation after the durable commit.</returns>
     /// <exception cref="ArgumentNullException">The definition is null.</exception>
     /// <exception cref="SqlCatalogException">The name exists or the record is too large.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
-    public ValueTask CreateDomainAsync(SqlCatalogDomain domain, CancellationToken cancellationToken = default)
+    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
+    public ValueTask CreateDomainAsync(SqlCatalogDomain domain, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
     {
         ArgumentNullException.ThrowIfNull(domain);
         return CreateDefinitionAsync(_domains, domain.Name, domain, domainRecordKind,
-            SqlCatalogJsonContext.Default.SqlCatalogDomain, cancellationToken);
+            SqlCatalogJsonContext.Default.SqlCatalogDomain, cancellationToken, scriptReceipt);
     }
 
     /// <summary>Drops a SQL function after the engine has checked ownership and dependencies.</summary>
     /// <param name="signature">The normalized overload identity.</param>
     /// <param name="cancellationToken">Cancels before publication.</param>
+    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this publication; never applied to another call.</param>
     /// <returns>A completed operation after the durable commit.</returns>
     /// <exception cref="SqlCatalogException">The signature does not exist.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
-    public ValueTask DropFunctionAsync(string signature, CancellationToken cancellationToken = default)
-        => DropDefinitionAsync(_functions, signature, cancellationToken);
+    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
+    public ValueTask DropFunctionAsync(string signature, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+        => DropDefinitionAsync(_functions, signature, cancellationToken, scriptReceipt);
 
     /// <summary>Drops a SQL domain after the engine has checked ownership and dependencies.</summary>
     /// <param name="name">The domain name.</param>
     /// <param name="cancellationToken">Cancels before publication.</param>
+    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this publication; never applied to another call.</param>
     /// <returns>A completed operation after the durable commit.</returns>
     /// <exception cref="SqlCatalogException">The name does not exist.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
-    public ValueTask DropDomainAsync(string name, CancellationToken cancellationToken = default)
-        => DropDefinitionAsync(_domains, name, cancellationToken);
+    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
+    public ValueTask DropDomainAsync(string name, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+        => DropDefinitionAsync(_domains, name, cancellationToken, scriptReceipt);
 
     private ValueTask CreateDefinitionAsync<T>(Dictionary<string, DefinitionSlot<T>> directory, string key, T value,
-        int kind, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
+        int kind, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt)
     {
         cancellationToken.ThrowIfCancellationRequested();
         byte[] record = new DatabaseKeyWriter().AppendInt32(kind).AppendString(JsonSerializer.Serialize(value, typeInfo), Collation.Binary).ToArray();
@@ -103,13 +111,13 @@ public sealed partial class SqlCatalog
             }
             using var transaction = _storage.BeginTransaction();
             var location = _storage.InsertRow(transaction, record);
-            CommitCatalogChange(transaction);
+            CommitCatalogChange(transaction, scriptReceipt: scriptReceipt);
             directory.Add(key, new DefinitionSlot<T>(value, location));
         }
         return default;
     }
 
-    private ValueTask DropDefinitionAsync<T>(Dictionary<string, DefinitionSlot<T>> directory, string key, CancellationToken cancellationToken)
+    private ValueTask DropDefinitionAsync<T>(Dictionary<string, DefinitionSlot<T>> directory, string key, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
@@ -121,7 +129,7 @@ public sealed partial class SqlCatalog
             }
             using var transaction = _storage.BeginTransaction();
             _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
-            CommitCatalogChange(transaction);
+            CommitCatalogChange(transaction, scriptReceipt: scriptReceipt);
             directory.Remove(key);
         }
         return default;

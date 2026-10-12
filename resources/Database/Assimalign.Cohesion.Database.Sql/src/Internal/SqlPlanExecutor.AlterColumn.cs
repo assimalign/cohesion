@@ -63,7 +63,7 @@ internal sealed partial class SqlPlanExecutor
             plan.Table.PrimaryKeyColumns, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints, plan.Table.DroppedColumnOrdinals);
         _definitions.Get(replacement);
         await SelfCommitAsync(statement, _catalog.PublishTableAsync(replacement, [], PublishedRegistrations([]),
-            replaceExisting: true, cancellationToken)).ConfigureAwait(false);
+            replaceExisting: true, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 }

@@ -15,7 +15,6 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     private readonly Dictionary<string, DefinitionSlot<SqlCatalogScript>> _scripts = new(StringComparer.Ordinal);
-    private readonly AsyncLocal<SqlCatalogScript?> _scriptStatement = new();
     private SqlCatalogScriptState? _scriptState;
     private (PageId PageId, int SlotIndex)? _scriptStateLocation;
 
@@ -32,24 +31,11 @@ public sealed partial class SqlCatalog
         get { lock (_sync) { ThrowIfOffline(); return _scriptState; } }
     }
 
-    /// <summary>Enlists a statement receipt in catalog mutations performed within the returned scope.</summary>
-    /// <remarks>Object-id reservations advance the generation without completing the statement. Final publication and its receipt commit atomically.</remarks>
-    /// <param name="receipt">The prefix including the statement being executed.</param>
-    /// <returns>A scope restoring the previous receipt.</returns>
-    /// <exception cref="ArgumentNullException">The receipt is null.</exception>
-    public IDisposable BeginScriptStatement(SqlCatalogScript receipt)
-    {
-        ArgumentNullException.ThrowIfNull(receipt);
-        var previous = _scriptStatement.Value;
-        _scriptStatement.Value = receipt;
-        return new ScriptScope(_scriptStatement, previous);
-    }
-
     /// <summary>Saves a receipt after a read or an independently committed data transaction.</summary>
     /// <param name="receipt">The durable prefix.</param>
     /// <param name="cancellationToken">Cancels before the commit.</param>
     /// <returns>A completed durable operation.</returns>
-    /// <exception cref="SqlCatalogException">The checksum changed, progress regressed, or the record is too large.</exception>
+    /// <exception cref="SqlCatalogException">The checksum, statement count or original generation changed, progress regressed, or the record is too large.</exception>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public ValueTask SaveScriptAsync(SqlCatalogScript receipt, CancellationToken cancellationToken = default)
@@ -98,9 +84,11 @@ public sealed partial class SqlCatalog
     private DefinitionSlot<SqlCatalogScript> StageScript(StorageTransaction transaction, SqlCatalogScript receipt)
     {
         _scripts.TryGetValue(receipt.Name, out var existing);
-        if (existing is not null && (existing.Value.ContentHash != receipt.ContentHash || existing.Value.CompletedStatements > receipt.CompletedStatements))
+        if (existing is not null && (existing.Value.ContentHash != receipt.ContentHash ||
+            existing.Value.StatementCount != receipt.StatementCount || existing.Value.BaseGeneration != receipt.BaseGeneration ||
+            existing.Value.CompletedStatements > receipt.CompletedStatements))
         {
-            throw new SqlCatalogException("COHSQLS001: A declared script checksum changed or its completed prefix regressed.");
+            throw new SqlCatalogException("COHSQLS001: A declared script checksum, statement count or original generation changed, or its completed prefix regressed.");
         }
         var record = new DatabaseKeyWriter().AppendInt32(12)
             .AppendString(JsonSerializer.Serialize(receipt, SqlCatalogJsonContext.Default.SqlCatalogScript), Collation.Binary).ToArray();
@@ -111,11 +99,4 @@ public sealed partial class SqlCatalog
         return new DefinitionSlot<SqlCatalogScript>(receipt, UpsertRecord(transaction, existing?.Location, record));
     }
 
-    private sealed class ScriptScope : IDisposable
-    {
-        private readonly AsyncLocal<SqlCatalogScript?> _slot;
-        private readonly SqlCatalogScript? _previous;
-        internal ScriptScope(AsyncLocal<SqlCatalogScript?> slot, SqlCatalogScript? previous) { _slot = slot; _previous = previous; }
-        public void Dispose() => _slot.Value = _previous;
-    }
 }

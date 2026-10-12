@@ -898,7 +898,7 @@ internal sealed partial class SqlPlanExecutor
         // The authoritative step: the catalog checks the drop again under its own lock
         // and commits it. Bind the published version before the statement completes, as
         // every DDL does, so no later write parses its definitions.
-        var updated = await SelfCommitAsync(statement, _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken)).ConfigureAwait(false);
+        var updated = await SelfCommitAsync(statement, _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
         _definitions.Get(updated);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -937,7 +937,7 @@ internal sealed partial class SqlPlanExecutor
         // second, all under the exclusive lock so no writer maintains a ghost.
         var droppedIndexes = _catalog.GetIndexes(table.ObjectId);
 
-        await SelfCommitAsync(statement, _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken)).ConfigureAwait(false);
+        await SelfCommitAsync(statement, _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
 
         foreach (var metadata in droppedIndexes)
         {
@@ -1086,7 +1086,7 @@ internal sealed partial class SqlPlanExecutor
                 statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
                 statement.ProvisioningSchema),
             registrations,
-            cancellationToken)).ConfigureAwait(false);
+            cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -1142,7 +1142,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken)).ConfigureAwait(false);
+        await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
 
         if (_indexManager.TryGetIndex(plan.Table.ObjectId, metadata.Name, out _))
         {

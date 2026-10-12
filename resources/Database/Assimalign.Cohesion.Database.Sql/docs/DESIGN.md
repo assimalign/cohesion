@@ -4237,8 +4237,12 @@ requested normalized name and parameter signature, not every overload sharing th
 an unknown signature is COHSQLD001. No interface, new project reference,
 shipped-to-shipped internal grant or assembly scanning was added.
 
-Scripts use statement-granular recovery. The catalog's scoped receipt enlists in each final DDL
-publication. Object-id reservations advance the generation without completing a statement. Data
+Scripts use statement-granular recovery. An internal `ExecuteScriptAsync(request, receipt)` call
+carries its receipt through that statement's context to the catalog publication method. No
+ambient receipt or mutable session receipt can attach to an unrelated operation. The catalog
+commits the explicit receipt atomically with the publication and requires the next incomplete
+prefix; a completed receipt cannot publish another operation. Only explicit object-id reservations
+advance the generation without completing a statement; direct catalog table creation completes it. Data
 statements add an MVCC receipt in the same logical transaction, in a reserved internal chain
 (owner ulong.MaxValue, which the checked catalog allocator cannot hand out), never exposed as a SQL table. If data commits before catalog progress,
 recovery finds that receipt and advances without replay. The ordinary row recovery protocol
@@ -4249,6 +4253,13 @@ skips reconciliation in O(1), without parsing, hashing, receipt scans or catalog
 requires complete checksum-matching receipts and executes nothing. Script-created table/index
 identities keep typed reconciliation from dropping raw-owned objects. A continuous receipt
 generation chain repairs the typed marker after a crash between typed apply and script completion.
+The typed schema exclusively owns its declared objects. Before any database is opened, declaration
+compilation refuses script ALTER TABLE/DROP TABLE of a typed table and DROP INDEX of a typed index,
+including the primary key, with `COHSQLS005` naming the object and directing the change to the typed
+schema. Thus refusal leaves the database exactly as it was before Build. Scripts may create and
+later alter their own tables, add their own indexes to typed tables, and run DML. The typed marker
+records only typed objects, whose structure scripts cannot change; it is safe to advance its
+generation after script execution or receipt-chain recovery.
 
 Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
 data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v4 typed

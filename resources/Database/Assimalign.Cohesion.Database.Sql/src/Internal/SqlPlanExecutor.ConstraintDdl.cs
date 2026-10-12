@@ -36,7 +36,7 @@ internal sealed partial class SqlPlanExecutor
         // the object-id counter, and the table stays invisible until the publish.
         var table = await _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-            statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
+            statement.ProvisioningSchema, cancellationToken, scriptReceipt: statement.ScriptReceipt).ConfigureAwait(false);
 
         // Lock before publication, and retain the apply's owner through its final marker
         // or compensation. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
@@ -159,7 +159,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             await SelfCommitAsync(statement, _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),
-                replaceExisting, cancellationToken)).ConfigureAwait(false);
+                replaceExisting, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
         }
         catch
         {
@@ -275,7 +275,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             _definitions.Adopt(await SelfCommitAsync(statement,
-                _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken)).ConfigureAwait(false), replacement);
+                _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false), replacement);
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
         // Backfill is logical: missing trailing fields resolve from the immutable
@@ -305,7 +305,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The catalog publishes its own copy of the replacement definition, built from the
             // same column and constraint instances, so it adopts the replacement's bindings.
-            _definitions.Adopt(await SelfCommitAsync(statement, _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken)).ConfigureAwait(false),
+            _definitions.Adopt(await SelfCommitAsync(statement, _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false),
                 replacement);
         }
         else
@@ -324,7 +324,7 @@ internal sealed partial class SqlPlanExecutor
             // The new version no longer carries the constraint, so the dropped predicate is
             // never evaluated again; it keeps the other bindings of the version it came from.
             _definitions.Adopt(await SelfCommitAsync(statement, _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName,
-                cancellationToken)).ConfigureAwait(false), plan.Table);
+                cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false), plan.Table);
         }
         else if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.ConstraintName, out var index) && index.IsUnique)
         {

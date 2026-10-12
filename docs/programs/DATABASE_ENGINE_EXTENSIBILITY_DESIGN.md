@@ -1357,10 +1357,21 @@ run inline; a populated-table CREATE INDEX therefore increases Build latency ins
 worker. The SDK v4 artifact stays typed-only and COHDBSDK110 refuses an extracted Script call rather
 than emitting an incomplete migration; deploy runtime declarations in Apply mode before Verify
 startup. A future script artifact needs a receipt-aware migration runner, not only generated SQL.
-The catalog exposes concrete definition/receipt operations and BeginScriptStatement for atomic
-catalog enlistment; there is no new public interface, assembly-access grant or project reference.
+The catalog exposes concrete definition/receipt operations. The E4 review replaces the public
+ambient BeginScriptStatement switch with optional explicit receipts on publishing operations:
+the catalog commits only the supplied operation's receipt, refuses reuse of a completed prefix,
+and distinguishes ReserveTableAsync from publishing CreateTableAsync. There is no new public
+interface, assembly-access grant or project reference.
 A script cannot adopt an existing table/index, even via IF NOT EXISTS. Event 22 ScriptApplied emits
-engine/database/script/hash, never SQL. New refusals are COHSQLD001-003 and COHSQLS001-004.
+engine/database/script/hash, never SQL. New refusals are COHSQLD001-003 and COHSQLS001-005.
+
+*E4 review owner decision:* the typed schema exclusively owns its declared tables and indexes.
+Scripts may create and later alter their own objects, add their own indexes to typed tables, and
+run DML, but ALTER TABLE/DROP TABLE of a typed table and DROP INDEX of a typed index are refused
+with COHSQLS005 naming the object and directing the change to the typed schema. Preflight runs
+before any database files are opened, preserving the exact pre-Build state on refusal. The typed
+document remains an accurate record of typed objects after script publication; no post-script
+snapshot is substituted for declaration intent.
 
 Validation: Debug and Release each pass SQL 2,014; Language 1,020; Catalog 68; Schema 104;
 Client 350; Hosting 115; root Database 186; SDK Database 100; Database.Testing 5 (zero failures

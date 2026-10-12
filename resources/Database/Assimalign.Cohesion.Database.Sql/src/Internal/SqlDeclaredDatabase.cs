@@ -144,6 +144,7 @@ internal sealed partial class SqlDeclaredDatabase
         }
 
         var scripts = declaration.Scripts.ConvertAll(script => new SqlDeclaredScript(script.Name, script.Sql, parserOptions));
+        ValidateScriptOwnership(compiled, scripts);
         return new SqlDeclaredDatabase(
             declaration.Name,
             collation,

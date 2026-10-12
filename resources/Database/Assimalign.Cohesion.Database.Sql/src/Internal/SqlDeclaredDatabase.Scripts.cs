@@ -16,6 +16,35 @@ internal sealed partial class SqlDeclaredDatabase
     private IReadOnlyList<SqlDeclaredScript> _scripts = [];
     private string _scriptHash = string.Empty;
 
+    private static void ValidateScriptOwnership(SqlCompiledSchema? schema, IReadOnlyList<SqlDeclaredScript> scripts)
+    {
+        if (schema is null) { return; }
+        foreach (var script in scripts)
+        {
+            foreach (var request in script.Statements)
+            {
+                SqlTableReference? target = request.Statement.SqlExpression switch
+                {
+                    SqlAlterTableExpression alter => alter.Table,
+                    SqlDropTableExpression drop => drop.Table,
+                    SqlDropIndexExpression drop => drop.Table,
+                    _ => null,
+                };
+                if (target is null || !(target.SchemaName ?? "dbo").Equals("dbo", StringComparison.OrdinalIgnoreCase)) { continue; }
+                var table = schema.Tables.FirstOrDefault(table => table.Name.Equals(target.TableName, StringComparison.OrdinalIgnoreCase));
+                if (table is null) { continue; }
+                string objectName = "dbo." + table.Name;
+                if (request.Statement.SqlExpression is SqlDropIndexExpression index)
+                {
+                    if (!table.Indexes.Any(declared => declared.Name.Equals(index.IndexName, StringComparison.OrdinalIgnoreCase)) &&
+                        !string.Equals(table.PrimaryKey?.Name, index.IndexName, StringComparison.OrdinalIgnoreCase)) { continue; }
+                    objectName += "." + index.IndexName;
+                }
+                throw new SqlSchemaMigrationException($"COHSQLS005: Declared script '{script.Name}' cannot alter or drop typed schema object '{objectName}'; declare the change in the typed schema. Nothing was opened or written.");
+            }
+        }
+    }
+
     private bool ScriptsApplied(SqlDatabase database)
         => database.Catalog.ScriptState is { } state && state.ContentHash == _scriptHash && state.Generation == database.Catalog.DdlGeneration;
 
@@ -97,9 +126,7 @@ internal sealed partial class SqlDeclaredDatabase
                     {
                         throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}' cannot adopt existing index '{index.IndexName}'.");
                     }
-                    using var enlistment = database.Catalog.BeginScriptStatement(receipt);
-                    session.ScriptReceipt = receipt;
-                    var result = await session.ExecuteAsync(script.Statements[position], cancellationToken).ConfigureAwait(false);
+                    var result = await session.ExecuteScriptAsync(script.Statements[position], receipt, cancellationToken).ConfigureAwait(false);
                     if (result is QueryResultSet rows) { await rows.DisposeAsync().ConfigureAwait(false); }
                     if (result.Status != QueryResultStatus.Success)
                     {

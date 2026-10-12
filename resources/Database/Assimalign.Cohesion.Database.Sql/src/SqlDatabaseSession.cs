@@ -67,7 +67,6 @@ public sealed class SqlDatabaseSession : DatabaseSession
     // isolation syntax (SET TRANSACTION ISOLATION LEVEL) that would change it is not implemented.
     private readonly IsolationLevel _isolationLevel = IsolationLevel.Snapshot;
     private SqlStatementMetrics? _lastStatementMetrics;
-    internal SqlCatalogScript? ScriptReceipt { get; set; }
 
     /// <summary>Opens a session over a database.</summary>
     /// <param name="database">The database.</param>
@@ -199,7 +198,11 @@ public sealed class SqlDatabaseSession : DatabaseSession
     protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
         => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken);
 
-    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
+    /// <summary>Executes one request with a receipt that cannot attach to any later session request.</summary>
+    internal ValueTask<QueryResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScript receipt, CancellationToken cancellationToken)
+        => ExecuteRequestAsync(request, cancellationToken, receipt);
+
+    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt = null)
     {
         _database.ThrowIfOffline();
         // The statement's own metrics are the ones set after this point; a statement that fails
@@ -214,7 +217,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
             }
             using var ddl = _provisioningSchema is null && IsSelfCommitting(request)
                 ? _database.DdlInterlock.EnterStatement(_database.Name.ToString()) : null;
-            return await ExecuteStatementAsync(request, cancellationToken).ConfigureAwait(false);
+            return await ExecuteStatementAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
         }
         catch (Exception exception) when (_database.TranslateOffline(exception, selfCommitted: SelfCommitted(request, previousMetrics)) is var translated
             && !ReferenceEquals(translated, exception))
@@ -299,17 +302,17 @@ public sealed class SqlDatabaseSession : DatabaseSession
             && _lastStatementMetrics is { SelfCommits: > 0 } metrics
             && !ReferenceEquals(metrics, previousMetrics);
 
-    private ValueTask<QueryResult> ExecuteStatementAsync(QueryRequest request, CancellationToken cancellationToken)
-        => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken) : ExecuteStatementCoreAsync(request, cancellationToken);
+    private ValueTask<QueryResult> ExecuteStatementAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt)
+        => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt) : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
 
-    private async ValueTask<QueryResult> ExecuteMetadataStatementAsync(QueryRequest request, CancellationToken cancellationToken)
+    private async ValueTask<QueryResult> ExecuteMetadataStatementAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt)
     {
         using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), request is SqlQueryRequest
             { Statement.SqlExpression: SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression });
-        return await ExecuteStatementCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
     }
 
-    private async ValueTask<QueryResult> ExecuteStatementCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    private async ValueTask<QueryResult> ExecuteStatementCoreAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt)
     {
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
@@ -429,10 +432,10 @@ public sealed class SqlDatabaseSession : DatabaseSession
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress);
+                _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress, scriptReceipt);
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
-            if (ScriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == QueryResultStatus.Success)
+            if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == QueryResultStatus.Success)
             {
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
             }

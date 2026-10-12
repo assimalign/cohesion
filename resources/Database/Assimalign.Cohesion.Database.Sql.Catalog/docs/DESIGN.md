@@ -483,8 +483,18 @@ source-generated System.Text.Json metadata with unknown-member refusal; no refle
 Definitions and receipts must fit the existing one-page record bound. The declaration's body stays
 in application code, not the receipt.
 
-BeginScriptStatement scopes a receipt to the asynchronous execution context. Final catalog
-publication commits it atomically; object-id reservations persist generation without advancing
-the completed prefix. SaveScriptAsync records progress after data/read statements, whose atomic
+Publication methods accept an optional explicit `SqlCatalogScript` receipt. The catalog stages
+it with that operation's metadata and generation in the same transaction. There is no ambient
+receipt switch or disposable scope. The receipt must describe the next incomplete statement;
+reusing a completed receipt for another publication is refused. Only `ReserveTableAsync` marks
+its commit as a reservation and retains the prior prefix; public `CreateTableAsync` publishes
+the table and completes its receipt even though it also advances the identifier counter.
+`SaveScriptAsync` records progress after data/read statements, whose atomic
 DML receipts the engine owns. SaveScriptStateAsync checks generation before saving the O(1)
 marker. No multi-statement catalog transaction was introduced. History is forward-only.
+
+The engine preflights declared scripts against the typed schema before opening files: scripts
+cannot ALTER/DROP typed tables or DROP typed indexes (`COHSQLS005`). Script-created tables may
+evolve through later scripts, and script-created indexes on typed tables remain separately
+tracked. The typed schema document therefore stays an accurate record of its own objects when
+the engine advances its generation after a script commit.

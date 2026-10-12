@@ -21,14 +21,14 @@ internal sealed partial class SqlPlanExecutor
             {
                 var definition = SqlDefinitionBinder.Declare(create, environment, _catalog.DefaultCollation, statement.ProvisioningSchema);
                 EnsureAcyclic("F:" + definition.Signature, definition.Dependencies);
-                await SelfCommitAsync(statement, _catalog.CreateFunctionAsync(definition, cancellationToken)).ConfigureAwait(false);
+                await SelfCommitAsync(statement, _catalog.CreateFunctionAsync(definition, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
                 break;
             }
             case SqlCreateDomainExpression create:
             {
                 var definition = SqlDefinitionBinder.Declare(create, environment, _catalog.DefaultCollation, statement.ProvisioningSchema);
                 EnsureAcyclic(SqlDefinitionBinder.DomainKey(definition.Name), definition.Dependencies);
-                await SelfCommitAsync(statement, _catalog.CreateDomainAsync(definition, cancellationToken)).ConfigureAwait(false);
+                await SelfCommitAsync(statement, _catalog.CreateDomainAsync(definition, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
                 break;
             }
             case SqlDropFunctionExpression drop:
@@ -47,7 +47,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 CheckDefinitionOwner(definition.Name, definition.Owner, definition.OwningSchema, statement);
                 EnsureNoDependents("F:" + signature);
-                await SelfCommitAsync(statement, _catalog.DropFunctionAsync(signature, cancellationToken)).ConfigureAwait(false);
+                await SelfCommitAsync(statement, _catalog.DropFunctionAsync(signature, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
                 break;
             }
             case SqlDropDomainExpression drop:
@@ -63,7 +63,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 CheckDefinitionOwner(definition.Name, definition.Owner, definition.OwningSchema, statement);
                 EnsureNoDependents(SqlDefinitionBinder.DomainKey(drop.Name));
-                await SelfCommitAsync(statement, _catalog.DropDomainAsync(drop.Name, cancellationToken)).ConfigureAwait(false);
+                await SelfCommitAsync(statement, _catalog.DropDomainAsync(drop.Name, cancellationToken, scriptReceipt: statement.ScriptReceipt)).ConfigureAwait(false);
                 break;
             }
         }

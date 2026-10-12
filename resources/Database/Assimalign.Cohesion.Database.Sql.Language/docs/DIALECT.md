@@ -1717,11 +1717,16 @@ expression there would change historical rows on each read. ALTER cannot change 
 | COHSQLS002 | Verify requires a complete receipt with the declared checksum. |
 | COHSQLS003 | Transaction control inside a declared script; the runner owns transactions. |
 | COHSQLS004 | A script statement failed or attempted to adopt an existing table. |
+| COHSQLS005 | A script attempts ALTER TABLE, DROP TABLE or DROP INDEX against an object declared by the typed schema; declare the change in the typed schema. |
 
 SqlDatabaseBuilder.Script(name, sql) runs after the typed schema in declaration order. Names are
 case-sensitive, unique and at most 128 characters. Exact UTF-8 bodies are SHA-256 checked;
 whitespace changes the checksum. Parsing precedes file I/O and lexical semicolon splitting
 respects strings, quoted names and comments. Deleting a declaration undoes nothing. Each statement
 commits with a receipt; crash recovery resumes after its committed prefix, including DML.
+The typed schema exclusively owns its declared tables and indexes. Script ALTER TABLE and DROP
+TABLE against a typed table, and DROP INDEX against a typed index (including its primary key),
+are refused before Build opens or changes the database. Scripts may create and later alter their
+own tables, create their own indexes on typed tables, and run DML against typed tables.
 Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
 SDK v4 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
