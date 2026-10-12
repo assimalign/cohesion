@@ -193,14 +193,19 @@ internal sealed class Http3RequestStreamReader
     public bool IsEndBuffered()
     {
         ReadResult result;
+        bool transportCompleted;
 
         try
         {
+            // Sample completion first: a producer may publish its final bytes between this check and
+            // the pipe probe. Sampling afterward could mistake those newly buffered bytes for no body.
+            transportCompleted = _inputCompletion?.IsInputCompleted == true;
+
             if (!_input.TryRead(out result))
             {
                 // Every read advances examined only to consumed. Therefore a false TryRead here
                 // means the pipe has no unconsumed bytes, rather than examined-but-unread data.
-                return _inputCompletion?.IsInputCompleted == true;
+                return transportCompleted;
             }
         }
         catch (Exception exception) when (exception is IOException or ConnectionException or InvalidOperationException or OperationCanceledException)
@@ -211,7 +216,7 @@ internal sealed class Http3RequestStreamReader
         }
 
         bool ended = !result.IsCanceled && result.Buffer.IsEmpty
-            && (result.IsCompleted || _inputCompletion?.IsInputCompleted == true);
+            && (result.IsCompleted || transportCompleted);
         _input.AdvanceTo(result.Buffer.Start);
         return ended;
     }

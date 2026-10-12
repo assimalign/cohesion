@@ -80,9 +80,9 @@ public sealed class HttpExchangeInterceptorRequestContext
     public string? Protocol { get; init; }
 
     /// <summary>
-    /// Gets whether the request can have a body: content may follow its head, so reading it can still
-    /// fail on the client's side once the request is dispatched. <see langword="false"/> only when the
-    /// transport knows nothing follows the head.
+    /// Gets whether reading the request body can still detect a client fault after dispatch: content
+    /// may follow the head, or declared content still requires validation. <see langword="false"/> only
+    /// when the transport knows there is no body left to read or validate.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -96,9 +96,10 @@ public sealed class HttpExchangeInterceptorRequestContext
     /// (no <c>END_STREAM</c>, RFC 9113 §8.1), whatever <c>content-length</c> it declares: DATA or a trailer
     /// section may still follow, and either can make the request malformed.</description></item>
     /// <item><description><b>HTTP/3</b> — the request stream had not visibly ended with its HEADERS frame
-    /// when the request was dispatched (RFC 9114 §4.1). The end of a QUIC stream can arrive after its
-    /// HEADERS frame, or be seen by the transport only when it reads again, so a request whose end the
-    /// transport has not yet seen can have a body.</description></item>
+    /// when the request was dispatched (RFC 9114 §4.1), or a positive declared content length still
+    /// requires validation. A known end and an empty input otherwise rule out a body, including when
+    /// the QUIC driver exposes its observed end before the input pipe reads zero bytes. A late or
+    /// unobserved end remains conservative.</description></item>
     /// </list>
     /// <para>
     /// A <c>CONNECT</c> never has one: the octets after its head are tunnel traffic, not content (RFC 9110

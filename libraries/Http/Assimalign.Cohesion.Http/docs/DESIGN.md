@@ -1052,11 +1052,14 @@ the request context carries it as a generic fact, as it carries `Protocol` for a
   zero. The transport decides the framing before the head hooks run, so they see it.
 - **HTTP/2** — the HEADERS frame did not carry `END_STREAM`, whatever `content-length` it declares:
   DATA or a trailer section may still follow, and either can make the request malformed.
-- **HTTP/3** — the request stream had not visibly ended with its HEADERS frame. The transport looks
+- **HTTP/3** — the request stream had not visibly ended with its HEADERS frame, or a positive declared
+  content length still requires validation. The transport looks
   for a FIN already buffered behind the frame, without reading or waiting. The QUIC driver publishes
   a clean transport end through Connections' optional `IConnectionInputCompletion` facet (#1427).
-  The transport combines it with an empty pipe buffer, so a head followed directly by FIN reports
-  `false` even before the stream-backed pipe reads zero bytes. Buffered DATA, open streams, and
+  The transport samples completion before probing the pipe, so an asynchronous producer publishing
+  its final DATA between the two cannot hide those bytes. It combines completion with an empty pipe buffer, so a head followed directly by FIN reports
+  `false` even before the stream-backed pipe reads zero bytes, unless a positive content length
+  requires the body read to report missing content. Buffered DATA, open streams, and
   drivers without observed completion remain conservative. The in-memory pipe reports FIN directly.
 - **CONNECT** never has one: the octets after its head are tunnel traffic, not content.
 

@@ -22,7 +22,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// tells the request-parse hooks whether content may follow the head, from the framing only it sees. On
 /// HTTP/1.1 that is a <c>Transfer-Encoding</c> or a non-zero <c>Content-Length</c>; on HTTP/2 a HEADERS
 /// frame without <c>END_STREAM</c>, whatever <c>content-length</c> it declares; on HTTP/3 a request stream
-/// whose end had not arrived with its HEADERS frame. A CONNECT never has one. A generic transport facet
+/// whose end had not arrived with its HEADERS frame, or whose positive content length still requires
+/// validation. A CONNECT never has one. A generic transport facet
 /// exposes a FIN already received by a stream-backed input, even before its pipe reports completion.
 /// </summary>
 public class HttpRequestCanHaveBodyTests
@@ -223,6 +224,42 @@ public class HttpRequestCanHaveBodyTests
         await input.CompleteAsync();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: Completion after an empty pipe probe must not hide newly buffered DATA")]
+    public async Task IsEndBuffered_WithTransportCompletingAfterEmptyProbe_ShouldKeepDataReadable()
+    {
+        // Arrange — publish the final DATA and FIN immediately after the probe sees an empty pipe.
+        Pipe pipe = new();
+        TestConnectionInputCompletion completion = new();
+        byte[] payload = Encoding.ASCII.GetBytes("hello");
+        CompletingInputReader input = new(pipe.Reader, () =>
+        {
+            pipe.Writer.Write(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, payload));
+            pipe.Writer.Complete();
+            completion.IsInputCompleted = true;
+        });
+        Http3RequestStreamReader reader = new(input, completion);
+        await pipe.Writer.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/", "https", "a"));
+        await reader.ReadHeaderSectionAsync(maxHeadersFrameSize: 16 * 1024, CancellationToken.None);
+
+        // Act — the facet changes during the empty probe, so its prior value must remain conservative.
+        bool endBuffered = reader.IsEndBuffered();
+        Http3FrameHeader? frame = await reader.ReadFrameHeaderAsync(CancellationToken.None);
+        byte[] received = new byte[payload.Length];
+        int count = await reader.ReadDataAsync(received, CancellationToken.None);
+
+        // Assert — completion is visible now, but the first probe must not have hidden the DATA.
+        completion.IsInputCompleted.ShouldBeTrue();
+        endBuffered.ShouldBeFalse();
+        frame.ShouldNotBeNull();
+        frame.Value.Type.ShouldBe(0L);
+        frame.Value.Length.ShouldBe(payload.Length);
+        count.ShouldBe(payload.Length);
+        received.ShouldBe(payload);
+        reader.IsEndBuffered().ShouldBeTrue();
+
+        await input.CompleteAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: A transport without a received FIN should remain open")]
     public async Task IsEndBuffered_WithOpenTransport_ShouldNotReportTheEnd()
     {
@@ -292,6 +329,35 @@ public class HttpRequestCanHaveBodyTests
         }
 
         return stream.ToArray();
+    }
+
+    /// <summary>Publishes a transport's final input once, immediately after an empty pipe probe.</summary>
+    private sealed class CompletingInputReader(PipeReader inner, Action completeInput) : PipeReader
+    {
+        private Action? _completeInput = completeInput;
+
+        public override void AdvanceTo(SequencePosition consumed) => inner.AdvanceTo(consumed);
+
+        public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => inner.AdvanceTo(consumed, examined);
+
+        public override void CancelPendingRead() => inner.CancelPendingRead();
+
+        public override void Complete(Exception? exception = null) => inner.Complete(exception);
+
+        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default) => inner.ReadAsync(cancellationToken);
+
+        public override bool TryRead(out ReadResult result)
+        {
+            bool available = inner.TryRead(out result);
+            if (!available)
+            {
+                Action? complete = _completeInput;
+                _completeInput = null;
+                complete?.Invoke();
+            }
+
+            return available;
+        }
     }
 
     /// <summary>Records what the head hook saw for <see cref="HttpExchangeInterceptorRequestContext.CanHaveBody"/>.</summary>
