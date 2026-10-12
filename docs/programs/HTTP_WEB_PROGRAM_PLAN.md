@@ -361,7 +361,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 ### Stage 13 — Web correctness
 
-**Status:** in progress (2026-10-11). The owner approved Stage 12 and every recommendation from its review (decisions 43–49). From this stage on, sessions run in the Codex CLI on Astra 6 at ultra effort, by the owner's instruction of 2026-10-11. Each session works in its own worktree, and the main session integrates and audits the result as before. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
+**Status:** delivered 2026-10-11 on the Phase 2 branch and in owner review (§5). The owner approved Stage 12 and every recommendation from its review (decisions 43–49). From this stage on, sessions run in the Codex CLI on Astra 6 at ultra effort, by the owner's instruction of 2026-10-11. Each session works in its own worktree, and the main session integrates and audits the result as before. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
 
 | Session | Issues (in order) | Wave |
 |---|---|---|
@@ -407,21 +407,23 @@ The issue list:
 - #1303 → #1305: the missing OVERVIEW files; certificate authentication in a new `Web.Authentication.Certificate` (decision 31).
 - #1389: resolve a single per-exchange response interceptor without intermediate lists.
 - #1412: reuse the control plane's bootstrap-token verifier instead of building one per request.
+- #1439: a connection lost mid-body is a cancellation on HTTP/1.1 and HTTP/2 too (decision 45; #1430 did HTTP/3).
+- #1432 with #1300 in lane G: latch a response-side client fault where the exception boundary can read it.
 - #1413: document how an operator recognizes HttpsPolicy's proxy redirect loop.
 - #1414: `HttpStatusCode` accepts unregistered codes from 100 to 599.
 - #1425: an HTTP/3 `PRIORITY_UPDATE` beyond the stream limits is `H3_ID_ERROR`, once the QUIC driver publishes its limit.
 - #1427: the QUIC driver exposes a FIN it already holds, so bodiless HTTP/3 requests skip the response phase.
 - #1202 and #1217's Web.OpenApi follow-up, once the OpenApi program fixes its model.
 - **Lane G — Web event sources** (epic #1396, tasks #1397–#1408; scope in [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md)). 21 internal sources under `event-source.md`; #147's `ILogger` diagnostics move into `WebServerEventSource`.
-  - #1397 (T0) records three owner decisions, taken at the Stage 12 review (decision 49): (a) a default forwarder replaces #147's default visibility; (d) payload hygiene and an `event-source.md` amendment; (f) Sdk.Web turns on `EventSourceSupport` for NativeAOT. Its rule amendment runs in Stage 13 (session 9), so this lane opens with no gate.
+  - #1397 (T0) records three owner decisions, taken at the Stage 12 review (decision 49): (a) a default forwarder replaces #147's default visibility; (d) payload hygiene and an `event-source.md` amendment; (f) Sdk.Web turns on `EventSourceSupport` for NativeAOT. Its rule amendment, the not-instrumented list and the shared recorder landed in Stage 13 (`fc624f6d`), so this lane opens with no gate.
   - Wave 1: #1398 (Web.Hosting) serial after #1389, with #1400–#1407 in parallel. Wave 2: #1399 (forwarding and AOT) with #1398, then #1408 (conformance and docs).
   - Stage 13 rewrites code these sources instrument (#1079 → #1078, #1156, #1388, #1297 → #1325), which is why the lane waits for Stage 14.
 
 **Other programs**, not scheduled here:
 - **FileSystem:** #1181, #1182, #1212–#1216.
 - **ObjectValidation:** #1207, #1222–#1224, #1294, #1295, and #1293 without its Email half.
-- **OpenApi:** #1170, #1171, #1178, #1179, #1201, #1203, #1217's model change.
-- **Other:** DependencyInjection #1177, Configuration #1220, Database #1219, release #1290, build #1302.
+- **OpenApi:** #1170, #1171, #1178, #1179, #1201, #1203, #1217's model change, and #1440 (the validation errors map).
+- **Other:** DependencyInjection #1177, Configuration #1220, Database #1219, release #1290, build #1302. Event-source follow-ups outside Web (decision 49): Security.DataProtection #1433, Hosting.Resources #1434, Http.Forms #1435, Http.Sessions #1436.
 
 #1290 matters to this program: every pending advisory publishes with the next preview promotion, and that promotion needs #1290's batching.
 
@@ -934,6 +936,89 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - **`AddJsonSerialization`** keeps one hidden static factory, `SerializationComponents`. Recommended: accept it. The alternative drops the shorthand in favor of `AddContentSerialization(s => s.AddJson(resolver))`, which breaks every JSON application.
   - **HTTP/2 control frames when the listener sets no rate.** A `null` `MinResponseDataRate` leaves the HTTP/2 output unbounded. The session rejected a flat 2 s fallback because it would abort healthy slow readers. Recommended: accept.
   - **Web event sources (#1397):** decisions (a), (d) and (f) from [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md).
+- **Stage 13 delivered (2026-10-11), in owner review.** Stage 13 fixed the Web correctness defects, the protocol follow-ups Stage 12 found, and the two security holes its decisions opened: #1424's HTTP/3 stream retention and #1431's open standalone control planes.
+  - **How it ran:** by the owner's instruction of 2026-10-11, every session ran in the Codex CLI on Astra 6 at ultra effort.
+    - Each session had a Codex implementer, a Codex reviewer, two Codex skeptics on every serious finding, and a Codex fixer.
+    - Every brief forbade boundary widening and required an Escalations section. After each implement and fix run, a launcher grepped the diff for `InternalsVisibleTo` and interface changes.
+    - A Codex integrator cherry-picked wave 1, and a Codex auditor three-way-checked it. Wave 2 was one session, which the main session cherry-picked.
+    - Every new regression test was shown to fail before its fix.
+  - **Wave 1** (20 issues):
+    - #1424 `f93028ea`: each HTTP/3 request stream is released when its exchange ends, not when the connection closes.
+    - #1423 `0295f022`: with the QPACK dynamic table disabled, encoder-stream inserts and capacity changes are connection errors.
+    - #1428 `706630f6`, `59098ca7`: application interim responses on HTTP/3 take the final-head claim and keep their rate allowance.
+    - #1430 `5842bc9a`: an HTTP/3 connection lost mid-body is a cancellation (decision 45).
+    - #1415 `ae4244c9`: h2c answers `:scheme https` with 421; `AllowAlternateSchemes` is the trusted-gateway opt-out (decision 44).
+    - #1417 `f825173a`, `70fb6d14`, `5a06f9a6`, `6eaae453`: every final response carries a cached `Date`, including 5xx; 1xx carries none. `AddDateHeader` turns it off.
+    - #1079 `b6aa3382`: a failed host start ends Failed even when the rollback faults.
+    - #1078 `beff070f`, `ba2181e1`: `Use` after the pipeline is built throws.
+    - #1410 `35f4b586`: every completion callback runs, and every failure is logged.
+    - #1411 `ae0cf253`: an exchange the boundary aborts is Cancelled, skips completion callbacks, and records `error.type=request_canceled`.
+    - #1426 `70845ac5`: the host's stop budget bounds QUIC stream delivery.
+    - #1431 `3cdf9381`, `84683dce`: without a gateway identity, `/cohesion/v1/*` answers loopback transport peers only, and every other caller gets 403. The bare probes stay open.
+    - #1335 `7d415c5d`, `0146acf1`, `b85242ff` and #1211 `7300edd9`: query and form collections keep every value in order, and a single read returns the first (decision 31). Generated binding fills a collection parameter from the query.
+    - #1208 `74690ad2`: `ValidationFailureException` keeps its errors.
+    - #1209 `f80b29f9`, `3dd861ca`, `df56ee42`: validation errors are keyed by JSON name and index. They go through the new `IValidationJsonPropertyResolver`, whose implementation a new generator emits onto `JsonSerializerContext` partials.
+    - #1297 `33fb7910` and #1325 `e251dacc`, `6eaf97c1`: HTTP logging correlates through the new `IWebRequestActivityFeature` (Web.Server) and captures bodies behind request views.
+    - #1416 `ccc96066`: invalid session and antiforgery cookie names fail at composition.
+    - #1397 `fc624f6d`: the `event-source.md` amendment (decision 49), the not-instrumented catalog, and one shared `EventSourceRecorder`.
+  - **Wave 2** (2 issues):
+    - #1156 `a67deb42`, `04092597`, `135dc527`, `f3634654`, `6d372b48`: `IWebResponseStartingFeature` (Web.Server) runs callbacks once, in reverse order, before the head commits. Cors and SecurityHeaders moved onto it, so CORS headers reach a fault a boundary ahead of `UseCors` catches. Output caching stores only completed responses.
+    - #1388 `f48959b7`: a refused streamed head stays unstarted, and completion can be retried.
+  - **Integration and review fixes:**
+    - The review of #1156 found four defects, confirmed by both skeptics and fixed before integration:
+      - output caching ignored headers added by starting callbacks;
+      - replayed headers gave a replacement response stale framing;
+      - a cancellation inside a starting callback still ran completion callbacks;
+      - invalid preserved headers defeated the replacement 500.
+    - The review of #1428 found that the final-head wait cancelled valid 103s.
+    - The review of #1417 found a CONNECT path that lost `Date`, and an allocation on every response.
+    - The review of #1335 found a cache key that confused absent with empty, and invalid generated parsing calls.
+    - Integration added `84683dce` (the control-plane test fixture) and `1b8e9093` (the AOT guard's validation smoke).
+  - **Merged `main`** (`fb411d7a`): #1429 (`FileSystemPath.Parse` accepts `\\?\` paths). The one conflict, in Core's DESIGN, kept both new sections.
+  - **Advisories** (decision 24): GHSA-p3mc-9jx3-54j4 (#1431, high) and GHSA-hvx5-6gpw-vvx5 (#1424, high). The other preview.1 defects were triaged and need none: harm only to the requester, application-controlled, or not in the tag.
+  - **Verification at `6d372b48`:** 89 suites and 8,554 tests, 0 failures. One skip, Core's `CheckInvalidNamespaces`, predates this stage.
+    - Http 1,599, Http.Connections 1,461, Web.Hosting 447, Web.Routing 387, Core 255, and Connections.Quic 49 over real QUIC.
+    - The guard passes 36/36 under JIT. The release inventory (221) and the dependency graph checks pass.
+    - The guard, published NativeAOT for win-arm64 from a clean worktree at `6d372b48`, has no trim or AOT warnings. The native binary passes 36/36 smoke checks.
+  - **Docs site** ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)), synced by Codex runs and checked for parity against the source. The site builds with no warnings and passes its catalog tests (4/4).
+    - `f66b230` syncs the library pages, including Core's #1429 and `AppEnvironment` rows.
+    - `c3d5451` syncs the Web and area pages, and fixes drift in the ConfigurationStore, LogSpace and SecretStore hosting pages from before this stage.
+    - `cfe1e06` syncs the guides, and removes the CORS boundary-order trade-off.
+  - **Follow-ups filed:**
+    - Stage 14: #1439 (connection loss on HTTP/1.1 and HTTP/2), and #1432 (the response-side fault latch, with #1300).
+    - Other programs: #1433–#1436 (event-source follow-ups outside Web) and #1440 (the OpenAPI validation errors map).
+
+  Behavior changes for the review (decision 15's terms):
+  - **HTTP:**
+    - h2c `:scheme https` gets 421 unless `AllowAlternateSchemes` is set.
+    - Final responses carry `Date`, and an application-set value is kept.
+    - Malformed QPACK encoder streams close the connection.
+    - A lost HTTP/3 connection cancels the exchange.
+  - **Collections:** a single read of a repeated query or form key returns the first value. Urlencoded values were comma-joined before. Absent is distinct from explicitly empty.
+  - **Server:**
+    - A late `Use` throws.
+    - A failed start is observable on retry.
+    - A throwing completion callback no longer stops the rest.
+    - An aborted exchange is Cancelled and runs no completion callbacks.
+  - **Headers:**
+    - Cors and SecurityHeaders stage their fields when the head commits, and a starting-callback failure aborts the exchange.
+    - `UseCors` must run before output caching.
+    - A custom server must supply `IWebResponseStartingFeature` for those packages.
+  - **Validation:** problem+json `errors` keys are JSON names with indexes (`items[2].quantity`).
+  - **Logging:** `span.id` is the server span's, and is absent when there is none. `trace.id` comes from the request id.
+  - **Control plane:** a standalone resource refuses non-loopback management callers with 403.
+  - **Static files:** with `Date` turned off, StaticFiles withholds `Last-Modified` and the date validators.
+
+  Questions for the review:
+  - **New public seams.** Codex disclosed each one under Escalations; none widens an existing interface.
+    - `IValidationJsonPropertyResolver`, plus a generator that emits it onto the application's `JsonSerializerContext` partials (#1209).
+    - `IWebRequestActivityFeature` in Web.Server (#1297).
+    - `IWebResponseStartingFeature` in Web.Server, whose `OnStarting` takes an optional `preservedHeaders` list (#1156).
+
+    Recommended: accept all three. Each is a server- or feature-owned contract in the package decision 20 assigns it to.
+  - **Where the shared `EventSourceRecorder` lives.** #1397 put it in `libraries/DependencyInjection/.../shared/`. Recommended: move it to a neutral test-support location, because a DI package is an odd owner for a test helper.
+  - **StaticFiles without `Date`.** Turning `Date` off also turns off StaticFiles' `Last-Modified`. Recommended: fall back to the clock instead, so the option only removes the header.
+  - **Database's namespaced health routes.** `/cohesion/v1/healthz` and its siblings on the `admin` listener stay unauthenticated in gateway-managed mode, as before #1431. They publish no exception text since #1409. Recommended: accept.
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
