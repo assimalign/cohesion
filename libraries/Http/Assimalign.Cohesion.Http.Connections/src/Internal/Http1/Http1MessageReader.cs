@@ -37,6 +37,7 @@ internal static class Http1MessageReader
     /// Distinct from <paramref name="readTimeout"/>'s token, which is disposed once the head has been
     /// read.
     /// </param>
+    /// <param name="connectionClosed">The driver's closure token, linked for the exchange's lifetime.</param>
     /// <returns>The parsed request context (dispatched at head; its body is read lazily), or <see langword="null"/> on a clean end-of-stream.</returns>
     /// <exception cref="Http1LimitExceededException">
     /// Thrown when the request head violates a configured limit (414 / 431).
@@ -62,7 +63,8 @@ internal static class Http1MessageReader
         int featureCapacity,
         TimeProvider timeProvider,
         Http1ReadTimeout readTimeout,
-        CancellationToken connectionToken)
+        CancellationToken connectionToken,
+        CancellationToken connectionClosed = default)
     {
         CancellationToken readToken = readTimeout.Token;
 
@@ -372,7 +374,8 @@ internal static class Http1MessageReader
                 keepAlive,
                 requestBody,
                 featureCapacity,
-                features)
+                features,
+                connectionClosed)
             {
                 AddedResponseInterceptors = interception is { ResponseInterceptors.Count: > 0 } ? interception.ResponseInterceptors : null,
                 RequestInterception = interception,

@@ -123,6 +123,14 @@ internal sealed class Http2RawClient : IAsyncDisposable
         return WriteFrameAsync(Http2RawFrame.DataType, endStream ? (byte)0x1 : (byte)0x0, streamId, data, cancellationToken);
     }
 
+    /// <summary>Abandons <paramref name="streamId"/> with an RST_STREAM carrying <paramref name="errorCode"/>.</summary>
+    public Task SendResetAsync(int streamId, uint errorCode, CancellationToken cancellationToken)
+    {
+        byte[] payload = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(payload, errorCode);
+        return WriteFrameAsync(Http2RawFrame.RstStreamType, flags: 0, streamId, payload, cancellationToken);
+    }
+
     /// <summary>
     /// Sends a trailer section on <paramref name="streamId"/>: a HEADERS frame carrying END_STREAM and
     /// END_HEADERS whose fields are <paramref name="fields"/> (RFC 9113 §8.1).

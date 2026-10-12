@@ -27,7 +27,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// The stream is single-reader by contract — it is handed to exactly one request
 /// handler. A peer <c>RST_STREAM</c> (or a local reset) fires
 /// <see cref="Http2Stream.RequestAborted"/>, which surfaces here as an
-/// <see cref="OperationCanceledException"/> so a handler blocked reading the body
+/// <see cref="OperationCanceledException"/> carrying the exchange's
+/// <see cref="IHttpContext.RequestCancelled"/> so a handler blocked reading the body
 /// wakes up and unwinds. The stream fires that abort before it fails the pipe with an
 /// <see cref="IOException"/>, so a body cut off by a reset or by the loss of the
 /// connection never reads as a clean end: only the peer's END_STREAM ends the body
@@ -86,7 +87,8 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     // timeout-phase signals as delegates.
     private readonly Func<int, int, CancellationToken, ValueTask> _onConsumed;
     private readonly int _streamId;
-    private readonly CancellationToken _requestAborted;
+    // Starts with the stream's token, then uses the exchange's token once attached (#1439).
+    private CancellationToken _requestAborted;
     // The connection's minimum request-body data rate policy, or null when the stream is a CONNECT tunnel.
     // The rate the body is held to is resolved, and the gate that enforces it started, at the first read:
     // the request's own (#1383) when a parse context is attached, else the listener's.
@@ -149,13 +151,15 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     }
 
     /// <summary>
-    /// Attaches the exchange this body belongs to, whose interim-response path the first read solicits
-    /// the content through (<c>100 Continue</c>, #1385). Called once, when the exchange is built.
+    /// Attaches the exchange this body belongs to, whose cancellation token every aborted read carries
+    /// (#1439) and whose interim-response path solicits the content (<c>100 Continue</c>, #1385).
+    /// Called once, when the exchange is built.
     /// </summary>
     /// <param name="exchange">The owning exchange.</param>
     public void AttachExchange(Http2Context exchange)
     {
         _exchange = exchange;
+        _requestAborted = exchange.RequestCancelled;
     }
 
     /// <inheritdoc />
@@ -394,12 +398,12 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
         {
             return await _reader.WaitToReadAsync(linked.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested
-            && (!cancellationToken.IsCancellationRequested || _owner.ClientFaultFailure is not null))
+        catch (Exception exception) when (exception is OperationCanceledException or IOException
+            && _requestAborted.IsCancellationRequested)
         {
-            // The stream was reset while we waited — re-throw against the abort
-            // token so callers observe the request-abort, not a caller cancel, or
-            // the client's fault when that is what ended the exchange (#1378).
+            // Either the abort or the failed DATA channel can win the pending wait. Both carry the
+            // exact exchange token, including when the caller supplied it, unless a latched body
+            // rejection already ended the exchange (#1378, #1439).
             throw CreateAbortFailure();
         }
     }
@@ -470,8 +474,8 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
                 // wait and look again: the next pass rejects the body if the allowance is spent.
                 Charge(gate, dataRate, start, backpressuredAtStart);
             }
-            catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested
-                && (!cancellationToken.IsCancellationRequested || _owner.ClientFaultFailure is not null))
+            catch (Exception exception) when (exception is OperationCanceledException or IOException
+                && _requestAborted.IsCancellationRequested)
             {
                 throw CreateAbortFailure();
             }

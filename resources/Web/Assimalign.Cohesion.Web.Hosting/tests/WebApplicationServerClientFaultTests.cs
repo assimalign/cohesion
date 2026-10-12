@@ -72,13 +72,13 @@ public class WebApplicationServerClientFaultTests
         response.ShouldStartWith("HTTP/1.1 413");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Client fault: A body the client cuts short by closing its side should be reported to the pipeline as the 400 the transport sends")]
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Client fault: A body the client cuts short by closing its side should cancel the exchange without a client fault")]
     [InlineData("Content-Length: 100\r\n\r\n{")]
     [InlineData("Transfer-Encoding: chunked\r\n\r\n10\r\nshort")]
-    public async Task ClientFault_OnBodyCutShortByTheClient_ShouldReportTheTransportStatus(string framingAndBody)
+    public async Task ClientFault_OnBodyCutShortByTheClient_ShouldCancelWithoutAClientFault(string framingAndBody)
     {
         // Arrange — the client writes part of the body its framing declares, then closes its sending
-        // side. RFC 9112 §8 lets the server answer the incomplete request before it closes the connection.
+        // side. Connection loss after dispatch cancels the exchange, including incomplete EOF (#1439).
         Observed observed = new();
 
         // Act
@@ -91,9 +91,11 @@ public class WebApplicationServerClientFaultTests
         // Assert
         observed.FeaturePresent.ShouldBeTrue();
         observed.BeforeRead.ShouldBeNull();
-        observed.ReadFailure.ShouldBeOfType<EndOfStreamException>();
-        observed.AfterRead.ShouldBe(CohesionHttpStatusCode.BadRequest);
-        response.ShouldStartWith("HTTP/1.1 400");
+        OperationCanceledException canceled = observed.ReadFailure.ShouldBeAssignableTo<OperationCanceledException>()!;
+        observed.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        canceled.CancellationToken.ShouldBe(observed.RequestCancelled);
+        observed.AfterRead.ShouldBeNull();
+        response.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Client fault: A well-formed body should report no client fault")]
@@ -426,7 +428,7 @@ public class WebApplicationServerClientFaultTests
     /// <summary>
     /// Serves <paramref name="request"/> on one raw connection to a default Web server whose pipeline reads
     /// the request body to its end, recording the client-fault feature's report before and after the read
-    /// and the read's failure, then answers <c>204</c>. With <paramref name="closeSendingSide"/> the client
+    /// and the read's failure, then stages <c>204</c>. With <paramref name="closeSendingSide"/> the client
     /// closes its sending side after the request, as a peer that cuts the body short does. Reads until the
     /// server closes the connection and returns everything it wrote.
     /// </summary>
@@ -475,7 +477,7 @@ public class WebApplicationServerClientFaultTests
 
     /// <summary>
     /// Composes a pipeline that reads the request body to its end, recording the client-fault feature's
-    /// report before and after the read and the read's failure, then answers <c>204</c>.
+    /// report before and after the read and the read's failure, then stages <c>204</c>.
     /// </summary>
     private static void UseObservingPipeline(WebApplicationTestFactory factory, Observed observed)
     {
@@ -483,6 +485,7 @@ public class WebApplicationServerClientFaultTests
         {
             IWebClientFaultFeature? feature = context.Features.Get<IWebClientFaultFeature>();
             observed.FeaturePresent = feature is not null;
+            observed.RequestCancelled = context.RequestCancelled;
             observed.BeforeRead = feature?.StatusCode;
             observed.BeforeReadRecorded.TrySetResult();
 
@@ -494,7 +497,7 @@ public class WebApplicationServerClientFaultTests
                 {
                 }
             }
-            catch (Exception exception) when (exception is IOException or InvalidDataException)
+            catch (Exception exception) when (exception is IOException or InvalidDataException or OperationCanceledException)
             {
                 observed.ReadFailure = exception;
             }
@@ -508,6 +511,8 @@ public class WebApplicationServerClientFaultTests
     private sealed class Observed
     {
         public bool FeaturePresent { get; set; }
+
+        public CancellationToken RequestCancelled { get; set; }
 
         public CohesionHttpStatusCode? BeforeRead { get; set; }
 

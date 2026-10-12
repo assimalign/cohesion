@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -14,12 +15,66 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// The HTTP/1.1 exchange control's client-fault report (#1340). A body read after dispatch that fails
 /// on the client's side throws, and the transport latches the status it answers with: <c>400</c> for
 /// malformed chunked framing (#1333), <c>413</c> over the body-size cap and <c>408</c> below the minimum
-/// data rate (#1339), and <c>400</c> for a body the peer cut short by closing the connection.
+/// data rate (#1339). A body the peer cuts short cancels the exchange (#1439).
 /// <see cref="IHttpExchangeControl.ClientFaultStatusCode"/> reports that status to the
 /// code that observes the exception, so it can tell the client's fault from the application's.
 /// </summary>
 public class Http1ExchangeControlClientFaultTests
 {
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: Connection loss should cancel pending and later reads with the exchange token")]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public async Task ReadBody_OnConnectionLoss_ShouldCancelWithExchangeToken(bool gated, bool chunked, bool pendingRead)
+    {
+        // Arrange — connection closure alone must cancel the exchange, even before a read.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        string framing = chunked ? "Transfer-Encoding: chunked\r\n\r\n10\r\na" : "Content-Length: 16\r\n\r\na";
+        TestConnection transport = new(HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\n" + framing), completeInput: false);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(new TestConnectionListener(transport), http1 =>
+            http1.Limits.MinRequestBodyDataRate = gated ? new HttpMinDataRate(1, TimeSpan.FromMinutes(1)) : null);
+        options.Interceptors.Add(new ControlCapturingInterceptor());
+        await using HttpConnectionListener listener = new(options);
+        await using IHttpConnection connection = await listener.AcceptOrListenAsync(timeout.Token);
+        IHttpConnectionContext connectionContext = await connection.OpenAsync(timeout.Token);
+        await using var requests = connectionContext.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
+        (await requests.MoveNextAsync()).ShouldBeTrue();
+        await using IHttpContext exchange = requests.Current;
+        IHttpExchangeControl control = exchange.Features.Get<CapturedControlFeature>().ShouldNotBeNull().Control;
+        CancellationToken requestToken = exchange.RequestCancelled;
+        Task<int>? pending = null;
+        if (pendingRead)
+        {
+            (await exchange.Request.Body.ReadAsync(new byte[1], timeout.Token)).ShouldBe(1);
+            pending = exchange.Request.Body.ReadAsync(new byte[1], timeout.Token).AsTask();
+            pending.IsCompleted.ShouldBeFalse();
+        }
+        TaskCompletionSource cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = requestToken.Register(() => cancelled.TrySetResult());
+
+        // Act
+        transport.Abort();
+        await Task.WhenAny(cancelled.Task, Task.Delay(100, timeout.Token));
+
+        // Assert
+        requestToken.IsCancellationRequested.ShouldBeTrue();
+        if (pending is not null)
+        {
+            Exception? failure = await Record.ExceptionAsync(async () => await pending.WaitAsync(timeout.Token));
+            failure.ShouldBeAssignableTo<OperationCanceledException>().CancellationToken.ShouldBe(requestToken);
+        }
+        Exception? later = await Record.ExceptionAsync(async () => await exchange.Request.Body.ReadAsync(new byte[1], timeout.Token));
+        later.ShouldBeAssignableTo<OperationCanceledException>().CancellationToken.ShouldBe(requestToken);
+        control.ClientFaultStatusCode.ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: A malformed chunked body should be reported as a 400 client fault once the read fails")]
     public async Task ClientFaultStatusCode_OnMalformedChunkedBody_ShouldReportBadRequest()
     {
@@ -74,17 +129,17 @@ public class Http1ExchangeControlClientFaultTests
         observed.Output.ShouldStartWith("HTTP/1.1 408");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: A body the peer cuts short by closing the connection should be reported as a 400 client fault once the read fails")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: A body the peer cuts short should cancel the exchange without a client fault")]
     [InlineData("Content-Length: 100\r\n\r\n{")]
     [InlineData("Transfer-Encoding: chunked\r\n\r\n10\r\nshort")]
     [InlineData("Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n")]
     [InlineData("Transfer-Encoding: chunked\r\n\r\n1")]
-    public async Task ClientFaultStatusCode_OnBodyCutShortByThePeer_ShouldReportBadRequest(string framingAndBody)
+    public async Task ClientFaultStatusCode_OnBodyCutShortByThePeer_ShouldReportCancellation(string framingAndBody)
     {
         // Arrange — the peer closes its side before the body its framing declared is complete: a
         // Content-Length body short of its length, a chunk cut off inside its data, a chunked body cut
-        // off before the next chunk-size line, and one cut off inside a chunk-size line. RFC 9112 §8 lets
-        // the server answer the incomplete request with an error before it closes the connection.
+        // off before the next chunk-size line, and one cut off inside a chunk-size line. Decision 45
+        // classifies loss of the connection as cancellation, including incomplete framing EOF.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\n" + framingAndBody);
 
@@ -93,10 +148,8 @@ public class Http1ExchangeControlClientFaultTests
 
         // Assert
         observed.BeforeRead.ShouldBeNull();
-        observed.ReadFailure.ShouldBeOfType<EndOfStreamException>();
-        observed.AfterRead.ShouldBe(HttpStatusCode.BadRequest);
-        observed.Output.ShouldStartWith("HTTP/1.1 400");
-        observed.Output.ShouldContain("Connection: close");
+        observed.ReadFailure.ShouldBeAssignableTo<OperationCanceledException>();
+        observed.AfterRead.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: A well-formed body should report no client fault")]

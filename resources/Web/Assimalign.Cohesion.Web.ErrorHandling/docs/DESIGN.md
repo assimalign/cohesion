@@ -137,9 +137,8 @@ distinction is deliberate (an observer only watches; a handler owns the response
 ### Client faults are outcomes, not faults (#1340)
 
 A request body that breaks its framing (a malformed chunk size or trailer section) or a configured
-limit (the body-size cap, the minimum data rate, the trailer-section bounds), or that the client cuts
-short by closing the connection before the body is complete, fails the application's read with an
-`InvalidDataException` or an `IOException` (an `EndOfStreamException` for a body cut short). That
+limit (the body-size cap, the minimum data rate, the trailer-section bounds) fails the application's
+read with an `InvalidDataException` or an `IOException`. That
 exception is the transport's answer to the client's bytes: the transport latches a `400`, `413`, `408`
 or `431`, sends it in place of any
 response that has not started, and closes the connection. Before #1340 the boundary treated it as a
@@ -166,6 +165,19 @@ The classification is by exchange state, not by exception type, so it survives a
 read's exception. A custom server that does not install the feature leaves the boundary as it was. The
 reference to `Web.Server` is a feature-to-feature one the Web dependency rule allows; the package is
 already an `App.Web` member.
+
+### A connection lost mid-body cancels the exchange (#1439)
+
+Owner decision 45 applies on HTTP/1.1 and HTTP/2 as well as HTTP/3: if the connection closes or
+resets before the dispatched request body completes, `RequestCancelled` fires and the body read
+throws `OperationCanceledException` carrying that exchange token. `IWebClientFaultFeature.StatusCode`
+remains `null`. The boundary rethrows the cancellation without invoking `OnException` or staging
+an error response, and Web.Hosting records `request_canceled` without an Error log.
+
+This changes observable behavior from 10.0.0-preview.1 under decision 15: a reader can no longer
+rely on a body cut short surfacing as `EndOfStreamException` or another transport exception.
+It also supersedes #1340's HTTP/1.1 incomplete-body `400`; malformed chunk syntax and configured
+request-body limits retain their client-fault status.
 
 ## Status-code pages and the 404 terminal (#881)
 

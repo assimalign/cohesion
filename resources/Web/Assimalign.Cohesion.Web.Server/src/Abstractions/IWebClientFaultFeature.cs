@@ -9,16 +9,18 @@ namespace Assimalign.Cohesion.Web;
 /// <remarks>
 /// <para>
 /// The server dispatches a request at its head, so some of the client's faults surface only while the
-/// application reads the body: a malformed body (broken chunked framing, a malformed trailer section),
-/// a body over a configured limit (its size, its data rate, the bounds on a trailer section), or a body
-/// the client cut short by closing the connection. The read throws as any stream read does, an
-/// <see cref="System.IO.InvalidDataException"/> or an <see cref="System.IO.IOException"/> (an
-/// <see cref="System.IO.EndOfStreamException"/> for a body cut short), and the transport answers the
+/// application reads the body: a malformed body (broken chunked framing, a malformed trailer section)
+/// or a body over a configured limit (its size, its data rate, the bounds on a trailer section).
+/// The read throws an <see cref="System.IO.InvalidDataException"/> or an
+/// <see cref="System.IO.IOException"/>, and the transport answers the
 /// exchange itself with a <c>4xx</c> status in place of a response that has not started, then, on
 /// HTTP/1.1, closes the connection. On HTTP/2 and HTTP/3 a body that contradicts its
 /// <c>content-length</c>, or a malformed trailer section, makes the request malformed, and the transport
 /// resets the stream instead: no status reaches the wire, and the feature reports <c>400</c>, as HTTP/1.1
 /// answers a malformed body.
+/// A connection lost before the body completes instead fires <see cref="IHttpContext.RequestCancelled"/>
+/// and the read throws <see cref="System.OperationCanceledException"/> carrying that exchange token;
+/// this feature reports no client-fault status for the cancellation.
 /// </para>
 /// <para>
 /// This feature tells the code that observes the exception that the client was at fault, so it is not
@@ -42,7 +44,7 @@ public interface IWebClientFaultFeature : IHttpFeature
     /// <summary>
     /// Gets the status the transport answers the exchange with because the client's request was at
     /// fault, or reports for it when an HTTP/2 or HTTP/3 transport resets the stream instead —
-    /// <c>400 Bad Request</c> for a malformed body or one cut short, <c>413 Content Too Large</c>
+    /// <c>400 Bad Request</c> for a malformed body, <c>413 Content Too Large</c>
     /// over the body-size cap, <c>408 Request Timeout</c> below the minimum data rate, or
     /// <c>431 Request Header Fields Too Large</c> for a trailer section over its bounds — or
     /// <see langword="null"/> when no client fault has been reported.

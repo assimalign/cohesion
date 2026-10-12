@@ -1904,27 +1904,19 @@ the transport then replaced. Any client could cause that at will.
 the core report-don't-throw member `IHttpExchangeControl.ClientFaultStatusCode`
 (owner decision 28, after decision 20's seam rule), so a feature package reads it
 from the control its response interceptor captures, as it reads the other probes.
-The exception types are unchanged: the body is a `Stream`, and a reader that
+Malformed-body and limit exception types are unchanged: the body is a `Stream`, and a reader that
 catches `InvalidDataException` or `IOException` keeps working.
 
-- **A body cut short is a client fault too.** A peer that closes the connection
-  before the body its framing declared is complete (a `Content-Length` body short
-  of its length, or a chunked body cut off inside a chunk or a framing line, before
-  its last chunk) fails the read with an `EndOfStreamException` and latches
-  `Http1RequestBodyStream.IsIncomplete`, which `RequestBodyRejectedStatusCode`
-  maps to `400`. Without it nothing was latched, so the cheapest way around the
-  report was `Content-Length: 100`, one octet and a half-close: the host logged the
-  exchange at `Error`, ran its fault observer, and wrote its `500` onto the
-  half-closed connection. RFC 9112 §8 lets a server answer an incomplete request
-  with an error before it closes the connection, Kestrel's
-  `UnexpectedEndOfRequestContent` answers `400` the same way, and the peer that
-  closed only its sending side can still read the answer. The exception type stays
-  `EndOfStreamException`, and the body is not read or drained again.
+- **A body cut short cancels the exchange (#1439).** A fixed-length or chunked body that ends
+  before its framing is complete fires `RequestCancelled` and throws `OperationCanceledException`
+  carrying that token. No client-fault status is latched and no response is attempted. This replaces
+  #1340's incomplete-body `400` mapping under owner decision 45; drivers cannot reliably distinguish
+  a reset from an orderly EOF before their closure signal arrives.
 - **When it reports.** `null` until a read fails on the client's side, then the
   latched status for the rest of the exchange. A read cancelled by the
   application, or one that stopped inside the framing because of it, is not a
   client fault and reports nothing. A body the application never read is found
-  malformed, over its limit or cut short only by the drain, after the response, so
+  malformed or over its limit only by the drain, after the response, so
   its report comes too late for the pipeline; the connection still closes.
 - **The other versions.** `Http2ExchangeControl` and `Http3ExchangeControl` report
   it too since #1378: see "Client faults on HTTP/2 and HTTP/3".
@@ -2721,14 +2713,25 @@ HTTP/3 body before publishing an exchange. On the current streaming implementati
 peer could cause incorrect fault logs and error handling (CWE-755, low severity). There is no public
 signature change or new dependency.
 
-**Source-review findings across HTTP versions (#1430).** HTTP/1.1 still passes the receive-loop token to the exchange and
-body without linking the connection's closure; a reset can surface as raw I/O failure. Clean truncated
-HTTP/1.1 framing remains its separate `400` client-fault contract. HTTP/2 normally cancels a pending
-body before failing its channel, but the exception carries the stream token rather than the exchange's
-linked token; a channel completion racing cancellation can also escape as `IOException`. These
-remaining parity differences are recorded for follow-up; this change is scoped to HTTP/3.
-The HTTP/1.1 reset path and HTTP/2 channel-completion race are source-derived findings, not runtime
-reproductions in this session.
+**Connection loss on HTTP/1.1 and HTTP/2 (#1439, owner decision 45).** Both versions now expose
+`OperationCanceledException` carrying the exchange's exact `RequestCancelled` token. HTTP/1.1 links
+the driver's closure token for the exchange's lifetime, and normalizes transport read failures that
+arrive before that signal. An incomplete body EOF also cancels: TCP can expose a reset as EOF before
+its queued closure signal, so FIN and reset cannot be distinguished reliably here. HTTP/2 attaches
+the exchange token to its body reader and normalizes both cancelled waits and DATA-channel failures
+racing cancellation. Previously latched malformed-body and limit faults retain their precedence.
+`ClientFaultStatusCode` stays null on connection loss. Pending, later, rate-gated and ungated reads
+are covered, including tokenless application reads. Web.Hosting records `request_canceled` through
+`UseErrorHandling()`, with no Error log, `OnException`, or replacement `500`.
+
+**Breaking behavior and advisory triage (#1439).** Against 10.0.0-preview.1, dispatched HTTP/1.1 body
+EOF/transport failures now cancel instead of exposing an I/O failure; incomplete EOF no longer
+latches the later #1340 `400`. HTTP/2 cancellation now carries the exchange token instead of its
+stream token. Malformed framing bytes and pre-dispatch head truncation retain their behavior. The
+released code has both cancellation gaps, reachable by unauthenticated peers on body-reading
+endpoints (CWE-755, low severity: incorrect cancellation and application fault handling). Preview.1
+had no current server Error telemetry; its exception boundary could nevertheless invoke `OnException`
+and attempt a `500`. No new public signature or dependency is introduced.
 
 ### The read reports the fault, not the reset
 
@@ -3235,8 +3238,9 @@ the pipe with an `IOException` instead of completing it (`CutOffBody`). Completi
 it first used to wake a parked reader with a clean end of the body, which it
 returned as a 0-octet read before the abort arrived — a truncated upload, with or
 without a `content-length`, read as complete (#1327). Now a reader sees the abort as
-an `OperationCanceledException`, or the pipe's `IOException`, never a clean end, and
-the request's trailer section is published only at a clean end. HTTP/3 needed no
+an `OperationCanceledException` carrying the exchange token even when the pipe failure wins
+the race (#1439); an already latched client fault still surfaces as its own failure. The request's
+trailer section is published only at a clean end. HTTP/3 needed no
 change: its body reads the request stream directly, and a reset or a closed
 connection fails that read. Graceful close emits the shutdown GOAWAY while
 the pump is still running — the write scheduler serializes it against the pump's

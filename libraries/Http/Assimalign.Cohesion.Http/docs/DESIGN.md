@@ -962,8 +962,7 @@ not a core one.
 exchange with because the client's request was at fault, or `null`. A transport that dispatches a
 request at its head learns some faults only while the application reads the body: the body breaks the
 message framing (a malformed chunk size, a malformed trailer section) or a configured limit (its size,
-its data rate, the bounds on a trailer section), or the client closes the connection before the body
-its framing declared is complete (RFC 9112 §8). The read throws, as any stream read does, and the
+its data rate, the bounds on a trailer section). The read throws, as any stream read does, and the
 transport answers the exchange itself, replacing a response that has not started and closing the
 connection (`Http.Connections` DESIGN, "Reporting the client fault"). The member tells the code that
 observes the exception that it was the client's fault, without inspecting the exception.
@@ -978,13 +977,20 @@ status, as on HTTP/1.1. The reset also fires the exchange's cancellation, so a r
 reports the fault's `IOException` rather than the cancellation (`Http.Connections` DESIGN, "Client
 faults on HTTP/2 and HTTP/3").
 
+A connection lost before the dispatched body completes instead cancels the exchange on every
+protocol (#1430, #1439; owner decision 45). `RequestCancelled` fires, the read throws
+`OperationCanceledException` carrying that exchange token, and `ClientFaultStatusCode` remains
+`null`. This includes HTTP/1.1 EOF before its declared body ends, replacing #1340's incomplete-body
+`400`. The read's exception and token change from 10.0.0-preview.1 under decision 15; malformed
+framing bytes and configured limits retain their client-fault status.
+
 ### Why a probe on the control, not a typed exception or a feature contract
 
 Owner decision 28 (2026-10-09) chose the seam for #1340, under decision 20's rule that the core holds
 base contracts and generic seams only:
 
-- **The body stays a plain `Stream`.** It keeps throwing `InvalidDataException` and `IOException`, so
-  every reader that already catches them keeps working. A core exception type carrying the status would
+- **The body stays a plain `Stream`.** Client-fault statuses still accompany `InvalidDataException`
+  and `IOException`. A core exception type carrying the status would
   be a concern-specific contract in the core, and every wrapper stream (decompression, capture, a form
   parser) would have to preserve it.
 - **The control is the transport's per-exchange surface.** It already reports exchange state through

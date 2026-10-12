@@ -163,7 +163,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         // The exchange was aborted (IHttpContext.Cancel / CancelAsync — the
         // directive is Abort). HTTP/1.1 has no per-exchange reset finer than the connection, so
         // no response is written and the keep-alive loop ends after this exchange.
-        if (http1Context.CancelRequested)
+        if (http1Context.CancelRequested || http1Context.RequestCancelled.IsCancellationRequested)
         {
             http1Context.KeepAlive = false;
             return;
@@ -178,9 +178,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         //     read fail, and a host's fault boundary answered 500;
         //   - RFC 9110 §15.5.22: a chunked body whose trailer section breaks the header-section
         //     bounds is answered 431 (#1375);
-        //   - RFC 9112 §8: a body the peer cut short by closing the connection is an incomplete
-        //     request, answered 400 before the connection closes (#1340). The peer may have closed
-        //     only its sending side, so the answer can still reach it.
+        // A connection lost mid-body cancels the exchange instead (#1439, owner decision 45).
         // The status replaces whatever the application staged, unless it staged that status itself,
         // whose representation is kept; the exchange's status is updated too, so a host reports what
         // went on the wire. The connection then closes, since where the request ends on the wire is no
@@ -220,7 +218,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             return;
         }
 
-        if (http1Context.CancelRequested)
+        if (http1Context.CancelRequested || http1Context.RequestCancelled.IsCancellationRequested)
         {
             http1Context.KeepAlive = false;
             return;
@@ -314,7 +312,8 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 _featureCapacity,
                 _timeProvider,
                 readTimeout,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                Connection.ConnectionClosed).ConfigureAwait(false);
 
             if (context is not null)
             {

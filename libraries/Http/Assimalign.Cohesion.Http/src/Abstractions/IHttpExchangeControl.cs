@@ -65,11 +65,9 @@ public interface IHttpExchangeControl
     /// <para>
     /// A transport that dispatches a request at its head learns some of the client's faults only while
     /// the application reads the request body: the body breaks the message framing, it breaks a
-    /// configured limit (its size, its data rate, the bounds on a trailer section), or the client
-    /// closes the connection before the body its framing declared is complete. The body stream
+    /// configured limit (its size, its data rate, the bounds on a trailer section). The body stream
     /// throws, as any stream does: an <see cref="System.IO.InvalidDataException"/> for a malformed
-    /// body, an <see cref="IOException"/> for a broken limit, and an
-    /// <see cref="System.IO.EndOfStreamException"/> for a body cut short. The transport also latches the
+    /// body or an <see cref="IOException"/> for a broken limit. The transport also latches the
     /// <c>4xx</c> status it answers the exchange with (<c>400</c>, <c>408</c>, <c>413</c> or
     /// <c>431</c>), which replaces any response that has not started, and on HTTP/1.1 it closes the
     /// connection after the exchange. A response that had already started is finished or reset as the
@@ -84,7 +82,10 @@ public interface IHttpExchangeControl
     /// versions every read of the body after the fault throws the fault's exception, an
     /// <see cref="IOException"/>, rather than the cancellation the reset also fires. A client that resets
     /// its own request is not at fault: the read throws the exchange's cancellation, and this member
-    /// reports nothing.
+    /// reports nothing. A connection that closes or resets before the body completes is likewise
+    /// cancellation on every protocol: <see cref="IHttpContext.RequestCancelled"/> fires and the read
+    /// throws <see cref="System.OperationCanceledException"/> carrying that exchange token, with no
+    /// client-fault status.
     /// </para>
     /// <para>
     /// This member reports that latched status. Code that observes the body read's exception, such as

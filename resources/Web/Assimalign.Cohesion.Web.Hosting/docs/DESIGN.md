@@ -363,9 +363,9 @@ exchange's status to the one they answered with, so the server's telemetry repor
 rather than the `500` it staged.
 
 **A client fault is not an application fault (#1340).** The read above throws an
-`InvalidDataException` or an `IOException`, and so does a read the client cuts short by closing the
-connection before the body is complete (an `EndOfStreamException`, which the HTTP/1.1 transport also
-answers `400`, RFC 9112 §8). Before #1340 everything in the pipeline that
+`InvalidDataException` or an `IOException` for malformed framing or a body-limit violation.
+Connection loss while the handler reads the body cancels the exchange instead (#1439; see below).
+Before #1340 everything in the pipeline that
 observed it treated it as an application defect: the HTTP logging middleware logged it at
 `Error`, the exception boundary ran `OnException` and rendered a `500` problem, and the request
 decompression middleware relabeled a framing failure under its decoders as malformed content.
@@ -408,6 +408,18 @@ fault status. The existing host cancellation boundary ends it as `request_cancel
 log, `OnException`, or staged `500`; an unstarted response has no status on the server span. The
 transport's former `IOException` made this an application fault. That streaming-body behavior was
 introduced after 10.0.0-preview.1, which buffered the HTTP/3 body before dispatch.
+
+**HTTP/1.1 and HTTP/2 connection loss (#1439, owner decision 45).** Both follow the same
+exchange-cancellation contract. A pending body read throws `OperationCanceledException` carrying
+the exchange's `RequestCancelled` token, already fired, even if the handler passed no read token.
+HTTP/1.1 includes incomplete EOF after dispatch as well as a reset; HTTP/2 includes connection loss
+and a peer's `RST_STREAM`. Neither latches a client-fault status. `UseErrorHandling()` lets the
+cancellation reach the host, which reports `request_canceled` without an Error log, `OnException`,
+or a staged `500`; no response status is reported before a response starts. This is a behavioral
+break from 10.0.0-preview.1: HTTP/1.1 could surface an I/O failure and run the exception hook, and
+HTTP/2 reported the stream token instead of the exchange token. It also changes the later
+HTTP/1.1 `400` handling for an incomplete body ended by EOF into cancellation. Invalid framing and
+body-limit violations retain their client-fault statuses.
 
 Catching bare `Exception` at each of these points is a deliberate, documented
 departure from the "catch specific exceptions" rule. This is a **fault-isolation
@@ -772,7 +784,7 @@ itself stays with the error boundary, which does not keep it, and with the hosti
 | The response could not be put on the wire (a body or lifecycle hook threw, the write was cut off) | none: the transport marks the head committed before it writes it, so whether it went out is unknown | `response_send_failed` |
 
 **A client fault after the response started (#1340).** An endpoint that starts a streamed response
-and then reads a malformed, over-limit or cut-short body throws after its response started, so the
+and then reads a malformed or over-limit body throws after its response started, so the
 transport's status cannot replace it and the server resets the exchange. Before, that was
 `unhandled_exception`, while the HTTP access log recorded the same exchange as a client fault at its
 configured level; any client could raise it on such an endpoint. `WebExchangeTelemetry.Stop` now reads
@@ -1257,6 +1269,13 @@ faults end the span with the transport's status (the `400` a reset records, on H
 `error.type` and an unset status, that an HTTP/2 exchange the fault's reset or the transport's `413`
 cancels before its response started reports that `400` or `413` the same way, and that an HTTP/3 request
 the client resets mid-body reports `request_canceled`.
+
+`RequestBodyCancellationTests` covers a real HTTP/1.1 TCP reset and HTTP/2 connection EOF and
+`RST_STREAM` while a tokenless body read is pending under `UseErrorHandling()`: the exact exchange
+token is already cancelled when the read throws, the client-fault status remains null, the span
+reports `request_canceled` without a response status, and neither an Error log nor `OnException`
+runs. `WebApplicationServerClientFaultTests` also covers incomplete HTTP/1.1 EOF for fixed-length
+and chunked bodies: both cancel without a response or client-fault status.
 
 The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
 entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an

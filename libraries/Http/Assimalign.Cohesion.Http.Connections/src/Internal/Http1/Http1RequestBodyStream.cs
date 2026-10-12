@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http.Connections.Internal;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -69,7 +70,7 @@ internal sealed class Http1RequestBodyStream : Stream
     private readonly int _maxTrailerFieldCount;
     private readonly int _maxTrailerSectionSize;
     private readonly TimeProvider _timeProvider;
-    private readonly CancellationToken _connectionToken;
+    private CancellationToken _connectionToken;
     private readonly HttpTrailerCollection _trailers;
 
     // The owning exchange, attached by Http1Context's constructor. Consulted before soliciting
@@ -173,6 +174,7 @@ internal sealed class Http1RequestBodyStream : Stream
     internal void SetOwner(TransportHttpContext owner)
     {
         _owner = owner;
+        _connectionToken = owner.RequestCancelled;
     }
 
     /// <summary>
@@ -196,10 +198,9 @@ internal sealed class Http1RequestBodyStream : Stream
     /// <summary>
     /// Whether the peer closed the connection before the body its framing declared was complete: a
     /// <c>Content-Length</c> body short of its length, or a chunked body cut off inside a chunk or a
-    /// framing line before its last chunk. The read fails with an <see cref="EndOfStreamException"/>.
-    /// RFC 9112 §8 lets a server answer an incomplete request with an error before it closes the
-    /// connection, so the exchange's response becomes a <c>400</c> when it has not started, as it does
-    /// for a malformed body. Once set, the body is never read again and is not drained.
+    /// framing line before its last chunk. A dispatched exchange is cancelled (decision 45, #1439);
+    /// EOF cannot distinguish a lost connection from a peer's sending half closing. Once set, the body
+    /// is never read again and is not drained.
     /// </summary>
     internal bool IsIncomplete { get; private set; }
 
@@ -367,6 +368,11 @@ internal sealed class Http1RequestBodyStream : Stream
             return ValueTask.FromException<int>(new Http1LimitExceededException(
                 rejectedStatus,
                 $"The request body was rejected with {rejectedStatus} and is not read further."));
+        }
+
+        if (!IsMalformed)
+        {
+            _connectionToken.ThrowIfCancellationRequested();
         }
 
         if (_completed || buffer.IsEmpty)
@@ -787,6 +793,28 @@ internal sealed class Http1RequestBodyStream : Stream
 
     private async ValueTask<int> ReadFromConnectionAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
+        try
+        {
+            _connectionToken.ThrowIfCancellationRequested();
+            return await ReadFromConnectionCoreAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (_owner is not null && _connectionToken.IsCancellationRequested)
+        {
+            // A rate-gated read may carry an intermediate linked token. Always expose the exchange's.
+            throw _owner.AbortRequestForPeer(exception);
+        }
+        catch (Exception exception) when (_owner is not null
+            && exception is ConnectionException or SocketException
+                or IOException and not EndOfStreamException and not Http1LimitExceededException)
+        {
+            // Drivers can fail the pipe before publishing ConnectionClosed (TCP does). An I/O abort
+            // is cancellation even in that race. Framing EOF is normalized by Truncated as well.
+            throw _owner.AbortRequestForPeer(exception);
+        }
+    }
+
+    private async ValueTask<int> ReadFromConnectionCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    {
         // Always bound the socket read by the connection token so a body read parked on a stalled
         // peer is aborted on connection teardown, whatever token the caller passed (an application
         // may read Request.Body with CancellationToken.None).
@@ -867,13 +895,14 @@ internal sealed class Http1RequestBodyStream : Stream
 
     /// <summary>
     /// Marks the body <see cref="IsIncomplete"/>, because the peer closed the connection before the
-    /// body its framing declared was complete, and returns the exception the caller throws. The type
-    /// stays <see cref="EndOfStreamException"/>, so a reader that catches it keeps working.
+    /// body its framing declared was complete, and cancels a dispatched exchange before returning
+    /// its read failure. Drivers may report a reset as EOF before their closure token fires.
     /// </summary>
-    private EndOfStreamException Truncated(string message)
+    private Exception Truncated(string message)
     {
         IsIncomplete = true;
-        return new EndOfStreamException(message);
+        EndOfStreamException failure = new(message);
+        return _owner is { } owner ? owner.AbortRequestForPeer(failure) : failure;
     }
 
     /// <inheritdoc />

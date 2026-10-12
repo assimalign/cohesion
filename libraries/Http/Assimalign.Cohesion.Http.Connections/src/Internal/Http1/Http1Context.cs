@@ -18,8 +18,9 @@ internal sealed class Http1Context : TransportHttpContext
         bool keepAlive,
         Http1RequestBodyStream requestBody,
         int featureCapacity,
-        IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http11, requestHead, connectionInfo, requestAborted, featureCapacity, features)
+        IHttpFeatureCollection? features = null,
+        CancellationToken connectionClosed = default)
+        : base(HttpVersion.Http11, requestHead, connectionInfo, requestAborted, featureCapacity, features, connectionAborted: connectionClosed)
     {
         KeepAlive = keepAlive;
         _requestBody = requestBody;
@@ -62,12 +63,12 @@ internal sealed class Http1Context : TransportHttpContext
     /// dispatch failed on the client's side, or <see langword="null"/> when it did not: <c>400</c> for a
     /// malformed chunked framing or trailer section (RFC 9112 §5.1, #1333), the latched limit
     /// status for a body over the size cap (<c>413</c>) or below the minimum data rate (<c>408</c>,
-    /// #1339), or for a trailer section over the header-section bounds (<c>431</c>, #1375), and
-    /// <c>400</c> for a body the peer cut short by closing the connection (RFC 9112 §8, #1340). The
-    /// rejection replaces a response that has not started, and the connection closes.
+    /// #1339), or for a trailer section over the header-section bounds (<c>431</c>, #1375).
+    /// A body the peer cut short cancels the exchange instead (#1439). The rejection replaces a
+    /// response that has not started, and the connection closes.
     /// </summary>
     public HttpStatusCode? RequestBodyRejectedStatusCode =>
-        _requestBody.IsMalformed || _requestBody.IsIncomplete
+        _requestBody.IsMalformed
             ? HttpStatusCode.BadRequest
             : _requestBody.RejectedStatusCode;
 

@@ -541,7 +541,7 @@ public class Http1TransportTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "5\r\nhello\r\n");
 
-        await AssertBodyReadThrowsAsync<EndOfStreamException>(payload);
+        await AssertBodyReadThrowsAsync<OperationCanceledException>(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject a chunk that ends before its declared size is reached")]
@@ -553,7 +553,7 @@ public class Http1TransportTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "10\r\nshort");
 
-        await AssertBodyReadThrowsAsync<EndOfStreamException>(payload);
+        await AssertBodyReadThrowsAsync<OperationCanceledException>(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject Content-Length declarations exceeding the body size cap on the body read")]

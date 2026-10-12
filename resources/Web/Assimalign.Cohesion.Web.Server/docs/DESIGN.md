@@ -144,10 +144,9 @@ which sees the exchange's features and not the server.
 
 **`IWebClientFaultFeature`** is the client-fault seam (#1340, owner decision 28). Its `StatusCode` is
 the `4xx` the transport answers an exchange with because the client's request was at fault while the
-application read its body: `400` for a malformed body or one the client cut short by closing the
-connection, `413` over the body-size cap, `408` below the minimum data rate, `431` for a trailer
-section over its bounds. The read throws as any stream read
-does; this feature is how the code that sees the exception learns it was not an application defect.
+application read its body: `400` for a malformed body, `413` over the body-size cap, `408` below
+the minimum data rate, `431` for a trailer section over its bounds. The read throws as any stream
+read does; this feature is how the code that sees the exception learns it was not an application defect.
 `Web.Diagnostics` then logs the exchange at its configured level with the status sent,
 `Web.ErrorHandling` skips `OnException` and the `500` problem, and `Web.Compression` leaves the
 transport's framing failure under a decoder unrelabeled. It is a Web contract because decision 20
@@ -162,6 +161,12 @@ only on a read. It reads `null` until a fault is latched. On HTTP/2 and HTTP/3 a
 content-length, or a malformed trailer section, resets the stream rather than drawing a status, and the
 feature reports `400` for it. The value is read through on each access, because the fault is latched while the pipeline
 runs.
+
+A connection lost before the body completes is cancellation, including an HTTP/1.1 body cut short
+by EOF (#1439, owner decision 45). The read throws `OperationCanceledException` with the exchange's
+`RequestCancelled` token, and the client-fault feature remains `null`. This replaces #1340's
+incomplete-body `400` and changes the transport exception observable in 10.0.0-preview.1 on the
+terms of decision 15; malformed syntax and configured limits still report their status.
 
 **A custom server chooses which contracts it supports.** A custom `IWebApplicationServer` may omit any of them, so each
 reader handles an absent feature (SecurityHeaders and CORS require starting and throw without it): the control plane falls back to a direct stop, WebSockets has

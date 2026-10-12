@@ -23,8 +23,9 @@ handlers read them from `context.Features`.
   lame-duck drain, so a long-lived exchange can end itself within the stop's budget. It cancels
   nothing. `Web.WebSockets` closes open sockets with `1001 Going Away` on it.
 - **Client fault** — `IWebClientFaultFeature.StatusCode` is the `4xx` the transport answers the
-  exchange with because the request body broke its framing or a configured limit while it was read,
-  or the client cut it short by closing the connection (`400`, `413`, `408` or `431`), or `null`. On
+  exchange with because the request body broke its framing or a configured limit while it was read
+  (`400`, `413`, `408` or `431`), or `null`. A connection lost mid-body instead fires `RequestCancelled`
+  and throws `OperationCanceledException` carrying that token, with no client-fault status (#1439). On
   HTTP/2 and HTTP/3 a malformed body resets the stream instead and is reported as `400`. The read still
   throws; this tells the code that sees the exception it was the client's fault, not an application
   defect (#1340, #1378). The default server installs it on a request that can have a body, on every
