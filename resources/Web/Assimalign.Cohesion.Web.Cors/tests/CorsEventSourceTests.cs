@@ -339,6 +339,35 @@ public sealed class CorsEventSourceTests
         actual.ShouldBe(expected);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Cors] - Serialized origin: NUL in a numeric component never reaches the predicate")]
+    [InlineData("https://app.example:81\0")]
+    [InlineData("https://app.example:1\0\0")]
+    [InlineData("https://[::1\0]")]
+    [InlineData("https://[1\0::1]")]
+    [InlineData("https://[1:2:3:4:5:6:7:8\0]")]
+    [InlineData("https://[::1]:81\0")]
+    public void IsOriginAllowed_NulInNumericOriginPart_ShouldRejectBeforePredicate(string value)
+    {
+        // Arrange
+        bool predicateCalled = false;
+        CorsPolicy policy = new CorsPolicyBuilder().SetIsOriginAllowed(_ =>
+        {
+            predicateCalled = true;
+            return true;
+        }).Build();
+        bool normalized = CorsOrigin.TryNormalize(value, out _, out _);
+
+        // Act
+        bool serialized = CorsOrigin.IsSerialized(value);
+        bool allowed = policy.IsOriginAllowed(value);
+
+        // Assert
+        normalized.ShouldBeFalse();
+        serialized.ShouldBeFalse();
+        allowed.ShouldBeFalse();
+        predicateCalled.ShouldBeFalse();
+    }
+
     private static CorsTestContext CreatePreflight(string requestOrigin, string method = "DELETE", string? headers = null)
     {
         CorsTestContext context = CorsTestContext.Preflight(requestOrigin, method, headers, "/sensitive-path");

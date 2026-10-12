@@ -391,6 +391,10 @@ serialized form directly with spans; configuration still normalizes strings once
 joins repeated header fields only after evaluation succeeds. An application-supplied predicate owns any
 allocations inside its delegate.
 
+Ports and IPv6 pieces are checked against their ASCII digit and lowercase-hex alphabets before numeric
+parsing, because the BCL numeric parsers accept trailing NUL characters. Malformed numeric components
+remain rejected before an application predicate runs, matching configuration normalization.
+
 `cause` is `OptionsRouteOwnsPreflight`, `CorsDisabled`, or `NoPolicy`. These events are raised at the
 current preflight decision sites in `CorsMiddleware.InvokePreflight` and the reject branch of
 `CorsResponseHeaders.WritePreflight`; actual-response starting callbacks raise neither event.

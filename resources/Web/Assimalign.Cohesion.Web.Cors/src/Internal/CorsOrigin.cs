@@ -34,6 +34,10 @@ internal static class CorsOrigin
     private static readonly SearchValues<char> _schemeCharacters =
         SearchValues.Create("+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
 
+    // Numeric parsers accept trailing NUL characters, so validate the serialized alphabet first.
+    private static readonly SearchValues<char> _portCharacters = SearchValues.Create("0123456789");
+    private static readonly SearchValues<char> _ipv6PieceCharacters = SearchValues.Create("0123456789abcdef");
+
     /// <summary>
     /// Validates a configured origin and returns its serialized form.
     /// </summary>
@@ -115,6 +119,7 @@ internal static class CorsOrigin
 
         ReadOnlySpan<char> port = suffix[1..];
         return !port.IsEmpty && port.Length <= 5 && (port.Length == 1 || port[0] != '0')
+            && !port.ContainsAnyExcept(_portCharacters)
             && int.TryParse(port, NumberStyles.None, CultureInfo.InvariantCulture, out int number)
             && number <= ushort.MaxValue && number != GetDefaultPort(scheme);
     }
@@ -187,7 +192,7 @@ internal static class CorsOrigin
             ReadOnlySpan<char> piece = text[range];
             if (count == pieces.Length || piece.IsEmpty || piece.Length > 4
                 || (piece.Length > 1 && piece[0] == '0')
-                || ContainsUppercase(piece)
+                || piece.ContainsAnyExcept(_ipv6PieceCharacters)
                 || !ushort.TryParse(piece, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out ushort number))
             {
                 return false;
