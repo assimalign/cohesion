@@ -76,13 +76,22 @@ context.Features.Get<IResponseCompressionFeature>()?.Disable();
 | `RequestDecompressionExtensions` | `UseRequestDecompression(...)` pipeline verb |
 | `RequestDecompressionOptions` | The decompressed-size guard (`MaxDecompressedSizeBytes`) |
 
+## Diagnostics
+
+Enable the `Assimalign.Cohesion.Web.Compression` EventSource to observe decompression limits and
+aborted rejections at Warning, or unsupported and malformed coded bodies at Verbose. The
+`decompression-limit-rejections` counter counts each rejected exchange even when warning events
+are throttled. Events include the request id and recognized coding tokens, never raw header values
+or body content. See [DESIGN.md](DESIGN.md#diagnostics) for payloads and throttling.
+
 ## Dependencies
 
 `Assimalign.Cohesion.Web` (pipeline seams) · `Assimalign.Cohesion.Http` (headers, status codes,
 negotiation primitives) · `Assimalign.Cohesion.Http.Forwarded` (the `EffectiveScheme` read behind the
 BREACH guard) · `Assimalign.Cohesion.Http.Streaming` (the `HasStarted` probe used on the abort path) ·
 `Assimalign.Cohesion.Web.Server` (`IWebClientFaultFeature`, which tells a transport framing failure
-from a decoder's, #1340). Per the Web-area dependency rule it references no hosting module, holds no
+from a decoder's, #1340, and `IWebRequestIdFeature` for diagnostic correlation). Per the Web-area
+dependency rule it references no hosting module, holds no
 DI/configuration/logging state, and is delivered to applications through the `App.Web` shared
 framework. Compression itself rides the BCL `GZipStream` / `BrotliStream` / `ZLibStream` — no
 external packages.

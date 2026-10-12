@@ -42,11 +42,18 @@ internal sealed class TestHttpContext : IHttpContext
 
     public CancellationToken RequestCancelled => CancellationToken.None;
 
+    public int CancelCount { get; private set; }
+
     public void Cancel()
     {
+        CancelCount++;
     }
 
-    public Task CancelAsync() => Task.CompletedTask;
+    public Task CancelAsync()
+    {
+        Cancel();
+        return Task.CompletedTask;
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

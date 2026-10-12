@@ -64,6 +64,7 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         if (!TryParseCodings(contentEncoding, out List<string> codings))
         {
             // An unsupported coding is refused before any handler runs (RFC 9110 §8.4 / §15.5.16).
+            CompressionEventSource.Log.DecompressionRejected(context, "UnsupportedCoding", codings);
             context.Response.StatusCode = HttpStatusCode.UnsupportedMediaType;
             return;
         }
@@ -93,10 +94,12 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         }
         catch (RequestDecompressionLimitException)
         {
+            CompressionEventSource.Log.DecompressionLimitExceeded(context, _options.MaxDecompressedSizeBytes, codings);
             await RejectAsync(context, HttpStatusCode.RequestEntityTooLarge).ConfigureAwait(false);
         }
-        catch (RequestDecompressionFormatException)
+        catch (RequestDecompressionFormatException exception)
         {
+            CompressionEventSource.Log.DecompressionRejected(context, "MalformedContent", codings, exception.InnerException ?? exception);
             await RejectAsync(context, HttpStatusCode.BadRequest).ConfigureAwait(false);
         }
         finally
@@ -169,6 +172,7 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         // response and answer with the status.
         if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
         {
+            CompressionEventSource.Log.RejectionAborted(context, statusCode);
             await context.CancelAsync().ConfigureAwait(false);
             return;
         }

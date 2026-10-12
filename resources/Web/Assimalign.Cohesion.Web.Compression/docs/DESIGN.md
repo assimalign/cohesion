@@ -219,6 +219,39 @@ No reflection anywhere: negotiation is the span-based Http primitive, the media-
 precompiled hash-set lookup, codings are string constants, and compression rides the BCL codecs.
 Nothing in the package or its tests needs dynamic code. `IsAotCompatible=true` holds.
 
+## Diagnostics
+
+The internal `CompressionEventSource` is enabled as `Assimalign.Cohesion.Web.Compression`. It
+reports request decompression failures; successful decompression and response compression raise
+no events.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `DecompressionRejected` | Verbose | `reason` (`UnsupportedCoding` or `MalformedContent`), `codings`, `exceptionType`, `requestId` |
+| 2 | `DecompressionLimitExceeded` | Warning | `limitBytes`, `codings`, `suppressedCount`, `requestId` |
+| 3 | `RejectionAborted` | Warning | `statusCode`, `suppressedCount`, `requestId` |
+
+`codings` contains only the recognized `gzip`, `br` and `deflate` tokens encountered before a
+rejected token, normalized to a fixed-order set. Each token appears at most once, so even a long
+repeated chain produces a bounded payload. Raw `Content-Encoding` values and unsupported tokens
+never reach diagnostics. Malformed content writes only the underlying decoder exception's type,
+never its message or stack trace. A transport framing fault or application exception is not
+reported as malformed coded content. Request ids come from `IWebRequestIdFeature` inside the
+enabled branch; no ambient activity is consulted.
+
+Warnings are throttled independently to one per second per event id, with `suppressedCount`
+reporting the omitted occurrences on the next emitted event. The `decompression-limit-rejections`
+PollingCounter remains exact while warnings are suppressed and while no listener is enabled.
+Its increment occurs in the middleware catch, once per rejected exchange, rather than in the
+stream's throw path: an application can catch a failed read and retry it. It distinguishes this
+package's decompressed-size `413` from a transport body-cap `413` without duplicating request
+metrics. Counters are created lazily when a listener enables the source.
+
+Compared with `10.0.0-preview.1`, this is an additive diagnostics change: the provider now exposes
+rejection events and a counter. On program decision 15's terms, the new entries are a diagnostic
+behavior break for applications forwarding the Web provider prefix into configured sinks.
+It changes no public API, rejection status, or compression behavior.
+
 ## Non-goals
 
 - **No zstd.** The BCL ships no zstd codec; adding one would mean an external dependency, which the

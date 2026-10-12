@@ -84,6 +84,7 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 | `Assimalign.Cohesion.Web.StaticFiles` | WebRootMounted; WebRootUnavailable; TraversalRejected (Verbose); MountLookupFailed (Warning, type only, throttled) | `traversal-rejections`, `mount-lookup-failures` | [StaticFiles DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.StaticFiles/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Sessions` | SessionOrphaned (Verbose), SessionStateLost (modified orphans only, Warning, throttled); store failures belong to Http.Sessions | `orphaned-sessions`, `lost-sessions` | [Sessions DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Sessions/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.WebSockets` | HandshakeRejected, WebSocketOpened, WebSocketClosed, DrainCloseFailed (all Verbose) | `current-websockets`, `total-websockets`, `rejected-handshakes` | [WebSockets DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Compression` | Request decompression refused (Verbose); decompressed size exceeded or rejection aborted after response commit (Warning, throttled) | `decompression-limit-rejections` | [Compression DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Compression/docs/DESIGN.md#diagnostics) |
 
 Deliberately not instrumented: `Connections.InMemory` (a test driver), `Connections.Security` (TLS
 handshakes are already reported by the runtime's `System.Net.Security` source, and a handshake that
