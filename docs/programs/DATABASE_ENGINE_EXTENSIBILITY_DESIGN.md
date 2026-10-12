@@ -1402,6 +1402,17 @@ A separate-process file-backed probe kills its writer during a script INSERT, th
 recovery in two fresh reader processes: no repeated earlier INSERT, callable SQL function, and
 enforced SQL domain. The committed crash-image test also covers every durable write boundary.
 
+E4 review validation: Debug and Release each pass SQL 2,047; Language 1,020; Catalog 90;
+Schema 104; Client 350; Hosting 115; root Database 186; SDK Database 100, with zero failures
+or skips (4,012 tests per configuration). SQL runs with DOTNET_TieredCompilation=0. Final
+Q8 reconciliation with declared scripts measures **0.002543 ms/call Debug** and
+**0.000563 ms/call Release**, each over 1,000 calls with 50 typed tables and zero validation
+walks. Both NativeAOT projects publish in Release for win-arm64 with no IL2xxx/IL3xxx warnings;
+the fresh AotSample passes 19/19 checks. The final gates include the compact call-vector codec:
+its bounded run encoding preserves the original deep-CHECK assertion within the catalog's
+single-page table record. The review did not run Install-Local.ps1 or Database.Testing, per the
+owner's shared-cache restriction; the main session runs Database.Testing after the merge.
+
 Re-derived entry points: Sql/src/SqlDatabaseBuilder.cs:172; Sql.Language/src/SqlQueryParser.Definitions.cs;
 Sql/src/Internal/SqlDefinitionBinder.cs:53; Sql/src/Internal/Functions/SqlExpressionFunction.cs;
 Sql/src/Internal/SqlPlanExecutor.Definitions.cs; Sql/src/Internal/SqlDeclaredDatabase.Scripts.cs:19,93;
