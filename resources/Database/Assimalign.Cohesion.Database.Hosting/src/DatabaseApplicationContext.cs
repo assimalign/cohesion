@@ -141,7 +141,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         return trace.CheckAsync(this, cancellationToken);
     }
 
-    internal async ValueTask<HealthContribution> CheckCoreAsync(CancellationToken cancellationToken)
+    internal async ValueTask<HealthContribution> CheckCoreAsync(CancellationToken cancellationToken, DatabaseHealthTrace.Observation? observation = null)
     {
         var engines = new List<DatabaseEngine>(_engines.Count + _servers.Count);
         var observedEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
@@ -238,7 +238,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                 int databaseIndex = 0;
                 await foreach (var database in engine.GetDatabasesAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    if (database.Provisioning is not { } progress)
+                    var progress = database.Provisioning;
+                    observation?.ObserveDatabase(engine, database, progress);
+                    if (progress is null)
                     {
                         continue;
                     }
@@ -288,6 +290,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     string prefix = $"engine.{engineIndex}.offline.{offlineIndex}";
                     ReopenState? pending = FindPending(reopening, engine, database);
                     StorageOfflineCause? cause = DatabaseReopenService.GetCause(engine, database) ?? pending?.Cause;
+                    observation?.ObserveOffline(engine, database, cause);
                     data[$"{prefix}.name"] = database;
                     if (cause is { } known)
                     {
@@ -323,16 +326,15 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         data["provisioningDatabaseCount"] = provisioningDatabases.Count;
         data["reopenOfflineDatabases"] = ReopenService is not null;
 
-        HealthContribution contribution;
         if (unavailableEngines.Count > 0)
         {
-            contribution = HealthContribution.Unhealthy(
+            return HealthContribution.Unhealthy(
                 $"Unavailable database engines: {string.Join(", ", unavailableEngines)}.",
                 data);
         }
         else if (offlineDatabases.Count > 0)
         {
-            contribution = HealthContribution.Unhealthy(
+            return HealthContribution.Unhealthy(
                 $"Offline databases: {string.Join(", ", offlineDatabases)}. A device operation of their storage failed, or their " +
                 "engine gave up on them after a background worker kept failing, so every operation on them is refused until " +
                 "each is reopened. " + (ReopenService is not null
@@ -351,20 +353,18 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     "returns to Running once its workers complete the work their failures left.");
             }
 
-            contribution = HealthContribution.Degraded(description.ToString(), data);
+            return HealthContribution.Degraded(description.ToString(), data);
         }
         else if (provisioningDatabases.Count > 0)
         {
-            contribution = HealthContribution.Degraded($"Provisioning databases: {string.Join("; ", provisioningDatabases)}.", data);
+            return HealthContribution.Degraded($"Provisioning databases: {string.Join("; ", provisioningDatabases)}.", data);
         }
         else
         {
-            contribution = HealthContribution.Healthy(
+            return HealthContribution.Healthy(
                 $"{engines.Count} database engine(s) running with {workerCount} worker(s).",
                 data);
         }
-
-        return contribution;
     }
 
     /// <summary>

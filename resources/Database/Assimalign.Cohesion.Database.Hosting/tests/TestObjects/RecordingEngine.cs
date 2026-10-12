@@ -28,7 +28,23 @@ internal sealed class RecordingEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
-    public override IReadOnlyList<DatabaseName> OfflineDatabases => Offline;
+    public override IReadOnlyList<DatabaseName> OfflineDatabases
+    {
+        get
+        {
+            OfflineReads++;
+            OnOfflineRead?.Invoke(OfflineReads);
+            return Offline;
+        }
+    }
+
+    internal int OfflineReads { get; private set; }
+
+    internal Action<int>? OnOfflineRead { get; set; }
+
+    internal Exception? InventoryException { get; set; }
+
+    internal Func<CancellationToken, IAsyncEnumerable<DatabaseInstance>>? Inventory { get; set; }
 
     /// <summary>Gets or sets the databases the engine reports offline.</summary>
     internal IReadOnlyList<DatabaseName> Offline { get; set; } = [];
@@ -55,7 +71,7 @@ internal sealed class RecordingEngine : DatabaseEngine
         => throw new NotSupportedException();
 
     protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
-        => AsyncEnumerable.Empty<DatabaseInstance>();
+        => InventoryException is { } failure ? throw failure : Inventory?.Invoke(cancellationToken) ?? AsyncEnumerable.Empty<DatabaseInstance>();
 
     protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {

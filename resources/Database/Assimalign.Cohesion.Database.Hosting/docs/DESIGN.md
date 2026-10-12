@@ -165,7 +165,8 @@ The module raises its own events through one internal event source, named for th
 Batch D part 2 (#1349) observes database health through the existing root inventory and
 provisioning state, with no SQL dependency or new public seam. The first enabled observation
 of an unhealthy condition writes 16. Later observations write only on a change of reason or
-offline cause, or write 17 when the database is observed healthy again. Pending-to-running,
+offline cause or database instance, or write 17 when the database is observed healthy again.
+Pending-to-running,
 step changes and row progress alone do not repeat a degraded transition. Offline has precedence
 over provisioning; a deferred failure therefore changes Provisioning to Offline with cause
 `ProvisioningFailure`, rather than producing a restoration. Reopen-service pending entries
@@ -174,13 +175,23 @@ never reported as restored. Healthy first observations write nothing.
 
 This is Hosting's observed transition stream: a condition that begins and ends between health
 observations cannot be reported without a new model subscription seam, which this change does
-not introduce. Each application has its own lazily allocated observer; enabled observations
-serialize and update state before releasing their gate and invoking listeners. Concurrent polls
-cannot repeat a transition, and a listener may reenter health. Concurrent callers can deliver
-already-recorded transitions in a different order. Restored carries the last observed condition,
-not a fabricated final row count; absent progress uses position/count zero and row counts -1.
-Progress identifiers are bounded to 256 characters plus an ellipsis. No user exception text is
-included. Ordinary health results and their precedence are unchanged.
+not introduce. Each application has its own lazily allocated observer. The health core captures
+its existing inventory, instance, provisioning and offline-cause reads into an enabled-only
+observation; tracing makes no additional engine calls and adds no cancellation point. An empty
+application still returns Healthy for a cancelled token. A core exception or cancellation passes
+through unchanged; disposal or cancellation after its final read cannot replace its result.
+
+Core checks remain concurrent. Successful observations update transition state and enqueue whole
+batches under one short gate; one emitter drains those batches outside the gate. A listener may
+reenter health: its check enqueues and returns, and its events follow the rest of the outer batch.
+Overlapping checks use the latest-started successful observation: after it is recorded, an older
+check's later completion cannot overwrite it, although that caller still receives its own result.
+This orders recorded observations, not atomic snapshots of concurrently changing engines.
+Deduplication retains database identity, including while a pending reopen temporarily has no
+inventory instance, so a replacement with the same name/reason/cause degrades again.
+Restored carries the last observed condition, not a fabricated final row count; absent progress
+uses position/count zero and row counts -1. Progress identifiers are bounded to 256 characters
+plus an ellipsis. No user exception text is included. Health results and precedence are unchanged.
 
 With tracing disabled, `CheckAsync` returns its existing core directly, with no observer,
 extra inventory pass, semaphore, timer or async wrapper. A paired allocation test invokes the
@@ -188,7 +199,12 @@ real public check and that same core against a real SQL engine, taking the minim
 warmed 100-call rounds and requiring zero added bytes in Debug and Release. The transition
 tests pause a real deferred CHECK, race health polls for at least 150 ms and 32 completed calls,
 assert exact payloads and no event 0, reenter from a listener, then test completion, failure
-and offline/reopen transitions.
+and offline/reopen transitions. Review coverage also checks disposal, empty and late cancellation,
+exception identity, same-name replacements, reentrant batches and overlapping observations.
+An identical public-path probe against archived `95d3a7d56` covers empty, healthy and offline
+applications: Release adds zero bytes per check, and Debug allocates 16 fewer bytes after
+removing the result local from the async state machine. Probe, provenance and logs are under
+`_out/provisioning-review`.
 
 Build reports only after the resource integration hook succeeds. The existing host lifecycle hooks
 report actual start/stop transitions; repeated start/stop no-ops write nothing. The shared host's

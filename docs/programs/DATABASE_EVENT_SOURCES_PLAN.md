@@ -493,13 +493,16 @@ Unknown row counts are -1, and the completion always carries the last exact prog
 of throttling. Failure position zero denotes a non-step stage; worker finalization failure does
 not repeat the last successful step. Messages from operation failures are never written.
 
-Health uses an enabled-only, per-application observer over existing root inventory/progress.
-It reports once per observed reason/offline-cause transition, even with concurrent polls;
-progress-only changes stay silent. Offline outranks provisioning, pending reopen stays offline,
-and disappearance is not restoration. Restoration includes the last observed condition.
-This cannot see a transition wholly between polls; adding an event subscription or public
-forwarder solely for tracing was rejected. Listeners run outside the observer's gate, so health
-reentry is safe; concurrent event delivery may reorder already-recorded transitions.
+Health uses an enabled-only, per-application observer over the core's original inventory/progress
+reads, without a second scan or added cancellation point. It reports once per observed
+instance/reason/offline-cause transition, even with concurrent polls; progress-only changes stay
+silent. Offline outranks provisioning, pending reopen stays offline, and disappearance is not
+restoration. Restoration includes the last observed condition. This cannot see a transition
+wholly between polls; adding an event subscription or public forwarder solely for tracing was
+rejected. Completed observations enqueue batches under the observer gate; one emitter drains
+outside it, so reentrant checks enqueue without interrupting the outer batch. Among overlapping
+checks, a recorded later-started successful check supersedes older checks that finish afterward;
+each caller retains its own result. This is observation ordering, not an atomic engine snapshot.
 
 Disabled real-path comparison against the archived base `95d3a7d56` (same probe, .NET 10.0.401,
 Windows arm64, tiering off, 100 warmups and minimum of three 100-operation rounds):
