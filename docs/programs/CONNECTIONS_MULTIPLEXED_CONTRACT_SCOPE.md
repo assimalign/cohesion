@@ -1,24 +1,39 @@
 # Multiplexed Connection Contracts: Scope
 
-**Date:** 2026-10-12. **Status:** scoped, awaiting owner review of decisions (B) correction, (C), (E) and (F).
+**Date:** 2026-10-12, revised the same day after the owner's transport-generality check (§3).
+**Status:** scoped, awaiting owner sign-off on §6.
 **Area:** Connections (epic #324). **Program:** HTTP/Web (`docs/programs/HTTP_WEB_PROGRAM_PLAN.md`), inserted into
 Stage 14 ahead of #1300. **Folds in:** #1451.
 
-Claims that are not plain from the code are tagged **[Certain]** (checked against the code at `abe3751cf`),
-**[Likely]** (a strong inference) or **[Guessing]** (a gap filled by judgment).
+Claims that are not plain from the code are tagged **[Certain]** (checked against the code at `abe3751cf`, or
+against the specification cited), **[Likely]** (a strong inference) or **[Guessing]** (a gap filled by judgment).
 
 ## 1. The owner's asks (2026-10-12)
 
-1. Roll `IMultiplexedStreamAbort` and `IMultiplexedConnectionAbort` into `IMultiplexedConnection`. Revised after
-   review: the connection abort moves to the connection, and the stream aborts move to a new root stream
-   contract, because they act on one stream. The owner accepted that.
-2. Explain `IConnectionInputCompletion`, and consolidate it: could item 3's type become generic enough to
-   carry input completion too?
-3. Replace `IMultiplexedConnectionStreamLimits` with a generic type on the root. Accepted, made more generic
-   per item 2.
+1. Roll `IMultiplexedStreamAbort` and `IMultiplexedConnectionAbort` into the multiplexed root contract.
+2. Explain `IConnectionInputCompletion`, and consolidate it if possible.
+3. Replace `IMultiplexedConnectionStreamLimits` with a generic type on the root, generic enough to carry input
+   completion too.
+4. Before sign-off, make sure none of it is shaped only for HTTP and QUIC. Other multiplexed transports must be
+   able to implement the roots without dead members or conflicting semantics.
 
 ## 2. Findings first
 
+- **[Certain] Ask 4 overturns two of the first recommendations.** The first draft judged each member against
+  the two drivers in this repository, QUIC and in-memory, and both carry codes per direction. The transport
+  survey in §3 shows that is a QUIC-family property:
+  - **Per-direction aborts with codes:** HTTP/2, SSH, yamux and mplex cannot abort one direction alone. SSH,
+    yamux and mplex carry no stream code at all. On the root, these would be members four of six transports
+    cannot honor.
+  - **The cumulative stream allowance:** only QUIC and WebTransport have one. HTTP/2's limit is a concurrency
+    limit, and SSH, yamux and mplex have none. A root limits type would carry one QUIC field that four of six
+    transports leave empty.
+- **What every byte-stream multiplexer does have:**
+  - a half-close, so input completion is observable;
+  - a whole-stream reset;
+  - a connection close.
+  
+  Most can also put a code on the reset and on the close. Those go on the roots.
 - **[Certain] None of the four facets shipped in 10.0.0-preview.1.**
 
   | Facet | Added | Issue |
@@ -27,31 +42,48 @@ Claims that are not plain from the code are tagged **[Certain]** (checked agains
   | `IConnectionInputCompletion` | `5a2ce987`, 2026-10-12 | #1427 |
   | `IMultiplexedConnectionStreamLimits` | `3c0e5c6e`, 2026-10-12 | #1425 |
 
-  Deleting them breaks no released API. What preview.1 did ship is `IMultiplexedConnection` and
-  `MultiplexedConnection`, whose `AcceptStreamAsync` and `OpenStreamAsync` return `IConnection` and `Connection`.
-  Changing those, and adding members, breaks preview.1 implementers (§8).
-- **The recorded reason for facets no longer holds for multiplexed contracts.** The Connections DESIGN says a
-  member "breaks every implementation outside this repository" and "only a transport with codes can honor it: a
-  TCP connection has none to send". TCP has no multiplexed connection. **[Certain]** Both multiplexed drivers,
-  QUIC and in-memory, already carry codes. The first half is the cost the owner accepts during the previews.
+  Deleting or reshaping them breaks nothing released. Preview.1 did ship `IMultiplexedConnection` and
+  `MultiplexedConnection`, so new members and new stream return types break preview.1 implementers (§9).
+- **[Certain] The existing root already has one QUIC-family member.** `OpenStreamAsync(ConnectionDirection.WriteOnly)`
+  opens a unidirectional stream, which HTTP/2, SSH, yamux and mplex do not have. (G) settles what such a
+  transport does.
 - **[Certain] Facets fail silently through decorators.** A decorator hides a facet unless it implements and
-  forwards it by hand.
-  - Five test stream decorators forward by hand. `StreamInputConnection` and `CompletedInputConnection` forward
-    two facets each.
-  - The three test multiplexed decorators forward neither connection facet. That is harmless only because they
-    wrap the in-memory driver, which implements neither.
-  - Over a decorator that forgot, HTTP/3 falls back without a word. A root member turns the forgotten forward
-    into a compile error.
-- **[Certain] HTTP/3 uses facet presence as a capability switch.** `Http3RequestBodyStream.cs:528`, `:540` and
-  `:1038` keep a cancellation-token fallback for streams that cannot carry a code. Once every stream carries
-  codes, that fallback and its branches go.
-- **Input completion is a stream fact; the stream allowance is a connection fact.** That difference decides
-  (C).
-- **[Certain] Correction to the first answer.** It proposed the stream contract as an interface only. The
-  repository rule "Interface-first with a guided abstract base" (`general-rules.md`) and the Connections DESIGN
-  ("each contract ships a public abstract base") call for a base too. (B) adds it.
+  forwards it by hand. Five test stream decorators forward by hand, and the three test multiplexed decorators
+  forward neither connection facet. That is harmless only because they wrap the in-memory driver. A root member
+  turns a forgotten forward into a compile error. That is the case for moving a member to a root wherever every
+  transport can honor it.
 
-## 3. What `IConnectionInputCompletion` does
+## 3. Transport survey
+
+The roots must fit every byte-stream multiplexer, not just the two in this repository.
+
+| | QUIC (RFC 9000) | WebTransport (H3 and H2 drafts) | HTTP/2 streams (RFC 9113) | SSH channels (RFC 4254) | yamux | mplex |
+|---|---|---|---|---|---|---|
+| Half-close, so input completion is observable | FIN | FIN | `END_STREAM` | `CHANNEL_EOF` | FIN | Close |
+| Whole-stream reset | `RESET_STREAM` + `STOP_SENDING` | the same | `RST_STREAM` | `CHANNEL_CLOSE` | RST | Reset |
+| Code on a stream reset | 62-bit | 32-bit | 32-bit | none | none | none |
+| Abort one direction, other unaffected | yes | yes (`WT_RESET_STREAM`, `WT_STOP_SENDING` over H2) | no: `RST_STREAM` closes both | no | no | no |
+| Code on the connection close | 62-bit | 32-bit plus a message (`WT_CLOSE_SESSION`) | 32-bit (`GOAWAY`) | 32-bit plus a description (`DISCONNECT`) | three fixed values (`GoAway`) | none |
+| Cumulative inbound stream allowance | `MAX_STREAMS` | `WT_MAX_STREAMS` | none; `MAX_CONCURRENT_STREAMS` counts concurrent streams | none | none | none |
+| Unidirectional streams | yes | yes | no | no | no | no |
+
+**Sources [Certain]:**
+- RFC 9113 §5, §5.1, §6.4, §6.5.2 and §6.8.
+- RFC 4254 §5.1 and §5.3; RFC 4253 §11.1.
+- The yamux specification (`hashicorp/yamux` `spec.md`): flags, `GoAway` codes 0x0 to 0x2, no stream limit.
+- The mplex specification (`libp2p/specs` `mplex`): Close is a half-close, and Reset carries no code ("No way of
+  propagating errors").
+- draft-ietf-webtrans-http3 §4.4, §5.3 and §6, and draft-ietf-webtrans-http2 §6.2, §6.3, §6.7 and §6.12.
+
+SCTP (RFC 9260) multiplexes message-oriented streams with no per-stream close. It fits the datagram shape, not
+`IMultiplexedConnection`'s duplex pipes, so it does not constrain this contract.
+
+**The rule this scope applies.** A member goes on a root only when every transport in the table can honor its
+documented semantics. A capability only some transports have stays a facet, found with a type test. A member
+that most transports would implement as a no-op, or by breaking its own documentation, is the dead member this
+change must not create.
+
+## 4. What `IConnectionInputCompletion` does
 
 It tells HTTP/3 that the peer's FIN has already arrived, without another read (#1427).
 
@@ -59,14 +91,15 @@ It tells HTTP/3 that the peer's FIN has already arrived, without another read (#
   returns 0. A GET whose FIN arrived with its HEADERS still looked as if a body could follow, so almost every
   HTTP/3 request reported `CanHaveBody = true`.
 - **The cost.** Each such request got the client-fault gate's response sink, control, context and feature (240 B
-  per bodiless request, measured in `Http3InputCompletionAllocationTests`), and automatic `100 Continue` was armed.
+  per bodiless request, measured in Web.Hosting's `Http3InputCompletionAllocationTests`), and automatic
+  `100 Continue` was armed.
 - **The mechanism.** QUIC answers `!_readAborted && ReadsClosed.IsCompletedSuccessfully`.
   `Http3RequestStreamReader.IsEndBuffered` samples it before probing the pipe, and trusts it only when the pipe
   buffer is empty. `false` means only "not known yet".
-- **The alternative, not taken.** A read-ahead pump would make the pipe report the FIN itself. **[Likely]** That
-  costs a task and a buffer per stream, more than the 240 B it saves.
+- **Generality.** Every transport in §3 has a half-close, so every stream can answer, with `false` as the
+  honest default. It belongs on the root stream contract.
 
-## 4. Inventory at `abe3751cf`
+## 5. Inventory at `abe3751cf`
 
 The four facets appear in 42 files (135 occurrences, docs included).
 
@@ -89,14 +122,15 @@ The four facets appear in 42 files (135 occurrences, docs included).
 
 **Consumers in source (all in HTTP/3).** All of these are in `libraries/Http/Assimalign.Cohesion.Http.Connections/src/Internal/Http3/`.
 
-| Site | Today |
-|---|---|
-| `Http3ConnectionContext.cs:962` | `is IMultiplexedConnectionAbort`, else `Abort(reason)` |
-| `Http3ConnectionContext.cs:1006`, `:1024` | `is IMultiplexedStreamAbort` in `ResetStream` and `StopReadingWithCode` |
-| `Http3ConnectionContext.cs:1516` | `is IMultiplexedConnectionStreamLimits` for the `PRIORITY_UPDATE` bound |
-| `Http3ConnectionContext.cs:2062`, `:542`, `:561` | accepted and opened streams typed `IConnection` |
-| `Http3ConnectionContext.cs:2153`, `Http3RequestStreamReader.cs:48` | `as IConnectionInputCompletion` |
-| `Http3RequestBodyStream.cs:528`, `:540`, `:1038` | the no-code cancellation-token fallback |
+| Site | Today | After |
+|---|---|---|
+| `Http3ConnectionContext.cs:962` | `is IMultiplexedConnectionAbort`, else `Abort(reason)` | root `Abort(code, reason)` |
+| `Http3ConnectionContext.cs:1006` (`ResetStream`) | per-direction facet, then `Abort(reason)` | root stream `Abort(code, reason)` |
+| `Http3ConnectionContext.cs:1024` (`StopReadingWithCode`) | per-direction facet | unchanged, QUIC-family facet |
+| `Http3ConnectionContext.cs:1516` | allowance facet for the `PRIORITY_UPDATE` bound | unchanged, QUIC-family facet |
+| `Http3ConnectionContext.cs:2062`, `:542`, `:561` | streams typed `IConnection` | `IMultiplexedStream` |
+| `Http3ConnectionContext.cs:2153`, `Http3RequestStreamReader.cs:48` | `as IConnectionInputCompletion` | root `IsInputCompleted` |
+| `Http3RequestBodyStream.cs:528`, `:540`, `:1038` | no-code fallback for streams without the per-direction facet | unchanged |
 
 **[Likely]** Amqp's `AmqpMultiplexedTransportConnection` holds streams as `IConnection` and compiles unchanged.
 
@@ -110,89 +144,74 @@ Web.WebSockets and Web.Api. #1451 changes that driver's close behavior, so all f
 - Http.Connections DESIGN and Http DESIGN;
 - ten cohesion-docs pages.
 
-## 5. Decisions
+## 6. Decisions for sign-off
 
-### (A) The connection abort with a code moves to the root. Approved 2026-10-12.
+### (A) The connection close with a code moves to the root
 
 `IMultiplexedConnection.Abort(long errorCode, Exception? reason = null)`, abstract on `MultiplexedConnection`.
-- The semantics are `IMultiplexedConnectionAbort`'s:
-  - the first abort or disposal decides the close code;
-  - codes run from 0 to 2^62 - 1, and anything else throws `ArgumentOutOfRangeException`.
-- The in-memory driver must now deliver the code to its peer. That is #1451's missing signal, so (E) folds it in.
-- `IMultiplexedConnectionAbort` is deleted. HTTP/3's `AbortConnection` calls the root member unconditionally.
+It replaces `IMultiplexedConnectionAbort`.
 
-### (B) Stream aborts move to a root stream contract. Approved, with one correction.
+- **Generality:** five of the six transports carry a close code (§3).
+- **The code space is the transport's, not QUIC's.** The root contract does not fix 2^62 - 1. QUIC takes 0 to
+  2^62 - 1; WebTransport, HTTP/2 and SSH take 32-bit codes. A driver throws `ArgumentOutOfRangeException` for a
+  code it cannot carry, and a negative code is never valid.
+- **A transport whose close carries no code** (mplex) closes as `Abort(reason)` does. The close still happens,
+  so the member is not dead; only the code is dropped, which its documentation says.
+- **Kept semantics:** the first abort or disposal decides the close.
 
-`IMultiplexedStream : IConnection` holds `AbortRead(long)` and `AbortWrite(long)` with `IMultiplexedStreamAbort`'s
-semantics. Each direction ends once, and the first signal wins. `AcceptStreamAsync` and `OpenStreamAsync`
-return it.
+### (B) A root stream contract with a whole-stream reset
 
-**Correction: it ships with a guided base.** `public abstract class MultiplexedStream : Connection, IMultiplexedStream`.
-`MultiplexedConnection`'s typed members return `ValueTask<MultiplexedStream>`, and the interface members forward,
-as `ConnectionListener.AcceptAsync` does.
-- **Why:** the repository rule and the family's convention. Every Connections contract has one, and a driver
-  author gets the same guidance as for `Connection`.
-- **Cost [Certain]:** the in-memory `StreamEnd` inherits `InMemoryConnection`, so it cannot also derive from
-  `MultiplexedStream`. The stream end becomes a `MultiplexedStream` that composes the in-memory connection's
-  mechanics. The driver is internal, so nothing outside the package changes.
-- **Alternative:** interface only, as first proposed. It has no restructure, but it is the one Connections
-  contract without a base, and that deviation has to be recorded.
+`IMultiplexedStream : IConnection`, with the guided base `MultiplexedStream : Connection, IMultiplexedStream`.
+`AcceptStreamAsync` and `OpenStreamAsync` return it, and `MultiplexedConnection`'s typed members return
+`ValueTask<MultiplexedStream>`, as `ConnectionListener.AcceptAsync` does.
 
-**Rejected: stream aborts on the connection** (`AbortStream(IConnection, long)`).
-- **[Certain]** `ResetStream` and `StopReadingWithCode` are static and hold only the stream.
-- The connection would need an ownership check. **[Likely]** The in-memory driver keeps no stream registry to
-  check against.
+It carries `Abort(long errorCode, Exception? reason = null)`, which resets the whole stream with a code where
+the transport carries one:
 
-### (C) One generic type for what the transport observes. Owner's item 2; needs a decision.
+| Transport | What the reset sends |
+|---|---|
+| QUIC | `RESET_STREAM` and `STOP_SENDING` |
+| WebTransport | both directions |
+| HTTP/2 | `RST_STREAM` |
+| SSH, yamux, mplex | reset without a code |
 
-The owner asked whether item 3's type can be generic enough to carry input completion. It can share a pattern,
-but not a type: one fact belongs to a stream, the other to its connection.
+It then ends the stream's lifecycle, as `Abort(reason)` does. A direction that already ended keeps its first
+code. Every transport can honor this, and it replaces HTTP/3's three-step `ResetStream`.
 
-| | C1, one shared type (the literal ask) | **C2, one family, one type per level (recommended)** | C3, a typed key bag |
-|---|---|---|---|
-| Shape | `MultiplexedFlow { InboundBidirectionalStreamLimit, IsInputCompleted }` on both roots | `MultiplexedConnectionFlow` on `IMultiplexedConnection.Flow`; `MultiplexedStreamFlow` on `IMultiplexedStream.Flow` | `TryGetValue<T>(ConnectionValue<T>, out T)` on both roots |
-| New types | 1 | 2 | 2 or more |
-| Level safety | none: a stream reports the connection limit as `null` | the compiler rejects reading a connection fact off a stream | none, and checked only at run time |
-| Hot path | a struct copy | a struct copy | **[Likely]** a generic virtual dispatch per request under NativeAOT |
+**Per-direction aborts stay a facet.** `IMultiplexedStreamAbort` (`AbortRead`, `AbortWrite`) keeps its shape and
+its semantics: one direction ends, and the other is unaffected.
+- **Who has it:** QUIC and WebTransport, and the in-memory driver, which models QUIC. HTTP/2, SSH, yamux and mplex
+  do not.
+- **Why it cannot go on the root:** `RST_STREAM`, `CHANNEL_CLOSE` and RST end both directions, so a root
+  `AbortWrite` documented as "the receiving direction is unaffected" would be a lie on four of six transports.
+- **What HTTP/3 keeps:** its type test and its fallback (`Http3RequestBodyStream.cs:528`, `:540`, `:1038`).
+  HTTP/3 runs only over QUIC, where the facet is always present.
 
-- **The risk in C1 is specific.** `null` means "no bound reported", and the `PRIORITY_UPDATE` check skips itself
-  on `null`. That check closed a preview.1 memory-exhaustion hole: `PRIORITY_UPDATE` state grew without bound
-  until `0446aa80`. Read off the wrong object, C1 turns it off silently. Each C1 member is also meaningless at one
-  of the two levels: a connection's `IsInputCompleted` is always `false`.
-- **C3 is ruled out three ways:**
-  - the Connections DESIGN's Non-Goals already exclude "a general-purpose `Items` property bag on the connection";
-  - every transport would hand-cast per key;
-  - it brings back discovery by key, the type tests this change removes.
-- **C2 still consolidates.** Four facet interfaces become root members. There is one pattern: a snapshot struct
-  named `Flow` on each root, the dynamic counterpart of the static `ConnectionCapabilities`. Each struct grows by
-  `init` properties without breaking callers.
-  - **[Certain]** Future connection facts have a home: outbound stream credit, which .NET 10 reports through
-    `QuicConnectionOptions.StreamCapacityCallback`, and the unidirectional allowances.
-  - **[Likely]** So do future stream facts, such as delivery acknowledged (QUIC `WritesClosed`).
-  - Nothing is added before a consumer needs it.
+**Guided base cost [Certain]:** the in-memory `StreamEnd` inherits `InMemoryConnection`, so it becomes a
+`MultiplexedStream` that composes the in-memory connection's mechanics. The driver is internal, so nothing
+outside the package changes.
 
-C2's two structs:
+### (C) Input completion moves to the root; limits stay a facet; no generic type
 
-| Member | Struct | Meaning | Reported by |
-|---|---|---|---|
-| `InboundBidirectionalStreamLimit` (`long?`) | `MultiplexedConnectionFlow` | cumulative, nondecreasing, never understated; `null` when the transport reports none | QUIC; in-memory reports `null` |
-| `IsInputCompleted` (`bool`) | `MultiplexedStreamFlow` | the peer ended input cleanly and every received byte reached `Input`; `false` means not known yet | QUIC; in-memory when its peer completed output cleanly |
+- **`IMultiplexedStream.IsInputCompleted`** replaces `IConnectionInputCompletion`.
+  - It is a plain member, not a struct: the struct had no second general member to carry.
+  - Every transport in §3 can answer it, with `false` meaning "not known yet".
+- **`IMultiplexedConnectionStreamLimits` stays a facet,** documented as a QUIC-family capability:
+  - QUIC's `MAX_STREAMS` and WebTransport's `WT_MAX_STREAMS` can implement it;
+  - HTTP/2's `MAX_CONCURRENT_STREAMS` must not, because a concurrency limit is a different quantity.
+- **No generic limits or "flow" type on the root.** Every limit surveyed is transport-specific: cumulative
+  allowances, concurrency limits, fixed counts, or none. A root type would always hold fields most transports
+  leave empty.
+  - **[Likely]** Revisit this when a limit appears that every transport has and a consumer reads.
+  - The first draft's `Flow` structs (its option C2) are withdrawn.
 
-**Naming is the owner's call.** `Flow` covers both credit and end of input, and it does not collide with the
-lifecycle `State`. The alternatives are `Status`, which sits next to `State`, and `Limits`, which cannot hold
-input completion.
-
-### (D) `ITlsConnectionInfo` stays a facet. Recommended.
+### (D) `ITlsConnectionInfo` stays a facet
 
 - TLS is added by a layer: `TlsConnection` in Connections.Security decorates a plain connection.
 - **[Certain]** A non-connection type implements it too: `HttpTlsConnectionInfo` in Http.Connections.
-- A cleartext connection cannot answer it, and putting it on `IConnection` would make every driver and dozens of
-  test doubles answer `null`.
+- A cleartext connection cannot answer it.
 
-This is the rule the change applies: a member belongs on a root when every implementation can honor it, and a
-facet stays when some transports genuinely cannot.
-
-### (E) Fold #1451 into the same change. Recommended.
+### (E) Fold #1451 into the same change
 
 (A) makes the in-memory driver honor a close code, and the only way to honor one is to tell the peer. When either
 end of an in-memory multiplexed pair aborts or disposes:
@@ -202,79 +221,92 @@ end of an in-memory multiplexed pair aborts or disposes:
 
 #1451 keeps its own issue and commit.
 
-### (F) `StreamId` on `IMultiplexedStream`. Recommended: defer.
+### (F) `StreamId` on `IMultiplexedStream`: defer
 
-- **[Certain]** HTTP/3 derives request stream IDs by counting accepts (`Http3ConnectionContext.cs:406`, `:501`).
-- **[Likely]** That is right as long as the driver delivers streams in ID order, which RFC 9000 §3.2's implicit
-  opening implies.
-- Adding the member later breaks implementers, as any addition does. Add it when a defect or consumer asks.
+- **Generality:** every transport in §3 numbers its streams, from HTTP/2's 31 bits to mplex's 60 and QUIC's 62.
+  SSH numbers each channel once per side. So a `long StreamId` would be a general root member, not a QUIC-ism.
+- **Why not now:**
+  - **[Certain]** HTTP/3 derives request stream IDs by counting accepts (`Http3ConnectionContext.cs:406`, `:501`).
+  - **[Likely]** That is right as long as the driver delivers streams in ID order, which RFC 9000 §3.2's implicit
+    opening implies.
+  - Add it when a defect or a consumer asks.
 
-## 6. Target contract (C2)
+### (G) Unidirectional streams on a bidirectional-only transport
+
+Only QUIC and WebTransport have unidirectional streams. `IMultiplexedConnection.OpenStreamAsync` documents
+`ArgumentException` for `ReadOnly` today and says nothing about `WriteOnly` on a transport without unidirectional
+streams.
+- **Recommended:** document that such a transport throws `NotSupportedException` for `WriteOnly`, and never
+  returns a `ReadOnly` stream from `AcceptStreamAsync`.
+- **Deferred:** a capability flag in `ConnectionCapabilities`, until a bidirectional-only driver exists.
+- **[Likely]** HTTP/3 needs unidirectional streams, so over such a transport it fails at its first
+  `OpenStreamAsync`, which is the right place.
+
+## 7. Target contract
 
 ```csharp
 public interface IMultiplexedConnection : IAsyncDisposable
 {
     // Id, LocalEndPoint, RemoteEndPoint, Capabilities, State, ConnectionClosed: unchanged.
-    MultiplexedConnectionFlow Flow { get; }                                    // (C), replaces IMultiplexedConnectionStreamLimits
     ValueTask<IMultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default);   // (B), was IConnection
     ValueTask<IMultiplexedStream> OpenStreamAsync(
         ConnectionDirection direction = ConnectionDirection.Bidirectional,
-        CancellationToken cancellationToken = default);                       // (B), was IConnection
+        CancellationToken cancellationToken = default);                       // (B), was IConnection; (G) documents WriteOnly
     void Abort(Exception? reason = null);
     void Abort(long errorCode, Exception? reason = null);                     // (A), replaces IMultiplexedConnectionAbort
 }
 
 public interface IMultiplexedStream : IConnection
 {
-    MultiplexedStreamFlow Flow { get; }                                        // (C), replaces IConnectionInputCompletion
-    void AbortRead(long errorCode);                                            // (B), replaces IMultiplexedStreamAbort
-    void AbortWrite(long errorCode);
+    bool IsInputCompleted { get; }                                             // (C), replaces IConnectionInputCompletion
+    void Abort(long errorCode, Exception? reason = null);                     // (B), whole-stream reset with a code
 }
 
-public readonly record struct MultiplexedConnectionFlow
-{
-    public long? InboundBidirectionalStreamLimit { get; init; }
-}
-
-public readonly record struct MultiplexedStreamFlow
-{
-    public bool IsInputCompleted { get; init; }
-}
+// QUIC-family capabilities: unchanged in shape, still found with a type test.
+public interface IMultiplexedStreamAbort { void AbortRead(long errorCode); void AbortWrite(long errorCode); }
+public interface IMultiplexedConnectionStreamLimits { long InboundBidirectionalStreamLimit { get; } }
 ```
 
-The guided bases are `MultiplexedStream : Connection, IMultiplexedStream`, with abstract `Flow`, `AbortRead` and
-`AbortWrite`, and `MultiplexedConnection`, with abstract `Flow`, `Abort(long, Exception?)` and typed
-`ValueTask<MultiplexedStream>` stream members. Each `Flow` read is a snapshot sampled when read, and its members
-are sampled independently.
+Guided bases:
+- `MultiplexedStream : Connection, IMultiplexedStream`, with abstract `IsInputCompleted` and `Abort(long, Exception?)`.
+- `MultiplexedConnection`, with abstract `Abort(long, Exception?)` and typed `ValueTask<MultiplexedStream>` stream
+  members.
 
-## 7. Migration and tests
+The net change: two facets become root members, two QUIC-family facets stay, and one stream contract plus its
+base are added.
+
+## 8. Migration and tests
 
 **Per project:**
-- **Connections:** add the four types and change the root interface and its base. Delete the four facets. Extend
-  `GuidedBaseTests` to `MultiplexedStream` forwarding and the new members.
-- **Connections.Quic:** `QuicStreamConnection` derives `MultiplexedStream`. Its `Flow` comes from `ReadsClosed`.
-  `QuicMultiplexedConnection.Flow` replaces `InboundBidirectionalStreamLimit`. The facet tests (24 references) move
-  to the root members, over real QUIC.
-- **Connections.InMemory:** the `StreamEnd` composition from (B), the code delivery and peer signal from (E), and
-  `Flow`. The tests asserting that a plain in-memory connection lacks the stream facet become "is not an
-  `IMultiplexedStream`".
+- **Connections:**
+  - Add `IMultiplexedStream` and `MultiplexedStream`, and change the root interface and its base.
+  - Delete `IMultiplexedConnectionAbort` and `IConnectionInputCompletion`.
+  - Re-document the two facets that stay as QUIC-family capabilities, with the §3 table.
+  - Extend `GuidedBaseTests` to `MultiplexedStream` forwarding and the new members.
+- **Connections.Quic:**
+  - `QuicStreamConnection` derives `MultiplexedStream` and keeps `IMultiplexedStreamAbort`. Its root
+    `Abort(code, reason)` ends both directions with the code, then the lifecycle.
+  - `QuicMultiplexedConnection.Abort(long, ...)` becomes an override, and it keeps the allowance facet.
+  - The connection-abort and input-completion tests move to the root members, over real QUIC.
+- **Connections.InMemory:**
+  - The `StreamEnd` composition from (B), the root members, and the code delivery and peer signal from (E).
+  - The test asserting that a byte-stream pair offers no code-carrying abort stays: it is still true.
 - **Http.Connections:**
-  - Every site in §4 calls the root members. The `Http3RequestBodyStream` fallback branches are deleted.
-  - The test doubles implement the root members. Queued `TestConnection` streams go through one shared test
-    stream that honors the contract: `AbortRead` fails a read in flight.
-  - A test that pinned the no-code fallback is deleted only where its branch is, and the session lists it.
+  - Apply the "After" column of §5.
+  - The test doubles implement the root members. The per-direction facet stays optional on them, so the no-code
+    fallback paths stay reachable and tested.
 - **Web.Hosting, Amqp and Connections tests:** their doubles implement the root members.
 
 **Gates:**
-- No source or test names the four deleted types.
-- The public surface diff is exactly the types in §6, and no `InternalsVisibleTo` is added.
+- No source or test names `IMultiplexedConnectionAbort` or `IConnectionInputCompletion`.
+- The public surface diff is exactly §7, and no `InternalsVisibleTo` is added.
 - The suites pass: Connections, Connections.Quic (real QUIC, no skips), Connections.InMemory, Http.Connections
   (with `--blame-hang-timeout 5m`), Web.Hosting (three runs), Web.WebSockets, Web.Api, Web.Testing and the Amqp
   suites.
 - The 240 B input-completion allocation test and the interceptor allocation tests hold.
 - The AOT guard smoke passes, and NativeAOT publishes clean for win-arm64.
 
-## 8. Breaking changes against 10.0.0-preview.1
+## 9. Breaking changes against 10.0.0-preview.1
 
 Recorded on decision 15's terms:
 - `IMultiplexedConnection.AcceptStreamAsync` and `OpenStreamAsync` return `ValueTask<IMultiplexedStream>`, was
@@ -283,31 +315,33 @@ Recorded on decision 15's terms:
   - **Implementers:** breaking.
 - `MultiplexedConnection`'s typed stream members return `ValueTask<MultiplexedStream>`, was
   `ValueTask<Connection>`.
-- New members `Flow` and `Abort(long, Exception?)` on `IMultiplexedConnection` and `MultiplexedConnection` break
+- The new member `Abort(long, Exception?)` on `IMultiplexedConnection` and `MultiplexedConnection` breaks
   implementers.
-- The deleted facets, and `QuicMultiplexedConnection.InboundBidirectionalStreamLimit`, postdate preview.1, so
-  they break nothing released.
+- The deleted facets postdate preview.1, so they break nothing released.
 
-## 9. Docs
+## 10. Docs
 
 - **Connections DESIGN:**
   - "The Contract at a Glance": multiplexed connections yield `IMultiplexedStream`.
   - "Guided Abstract Bases" adds `MultiplexedStream`.
-  - The three facet sections become one section on codes and `Flow` on the roots. It records why the "Facets,
-    not members" reasoning no longer holds, and keeps the `ITlsConnectionInfo` section with (D)'s reason.
-  - Non-Goals are unchanged and cited by (C).
+  - A new section, "What every multiplexed transport supports, and what only some do", carries the §3 table and
+    the rule.
+  - The facet sections say why the coded close and input completion moved to the roots, and why per-direction
+    aborts and the allowance stay QUIC-family facets.
+  - The "Facets, not members" reasoning is replaced by the rule. (D)'s reason is kept, and (G)'s `WriteOnly`
+    behavior is documented.
 - **Package docs:** the Connections OVERVIEW and README; the Connections.Quic DESIGN, OVERVIEW and options XML
   docs; the Connections.InMemory DESIGN and OVERVIEW (with #1451); the Http.Connections and Http DESIGNs.
 - **Site:** the ten cohesion-docs pages, in the stage-end docs sync.
 - **Plan:** the owner's answers become decision 56 in `HTTP_WEB_PROGRAM_PLAN.md` §7.4, with the Stage 14 insertion.
 
-## 10. Work breakdown and placement
+## 11. Work breakdown and placement
 
 - **Items:**
-  - One feature under #324: `[L01.01.14.18] Put codes, streams and flow on the multiplexed connection roots`,
-    covering (A), (B) and (C).
+  - One feature under #324: `[L01.01.14.18] Put the members every multiplexed transport supports on the roots`,
+    covering (A), (B), (C) and (G).
   - #1451 (`[L01.01.14.17]`), filed 2026-10-12, folded in as its own commit.
-- **One Codex session** (implement, review, skeptics, fix) on the branch tip at approval.
+- **One Codex session** (implement, review, skeptics, fix) on the branch tip at sign-off.
   - **[Likely]** It can run beside wave 2's remaining sessions: none edits Connections or Http.Connections
     source.
   - The overlap is test code. s14-content edits Web.WebSockets tests that use the in-memory multiplexed driver.
@@ -317,15 +351,15 @@ Recorded on decision 15's terms:
   3. Any remaining docs.
 - **Sequence:**
   1. Land this session first.
-  2. #1300 (s7-transport) starts on top of it, because it instruments exactly the HTTP/3 abort sites in §4.
+  2. #1300 (s7-transport) starts on top of it, because it instruments the HTTP/3 abort sites in §5.
   3. Wave 2's integration then cherry-picks each session from its own base.
 
-## 11. Risks
+## 12. Risks
 
-- **Test doubles that do not honor `AbortRead`.** The no-code fallback cancelled reads with a token. Without it,
-  a double that ignores `AbortRead` hangs a test instead of failing it. Mitigations: one shared test stream, and
-  hang timeouts.
 - **#1451 changes in-memory timing.** Suites that notify the peer by hand today may see the close earlier. Every
-  suite in §7 runs.
+  suite in §8 runs.
+- **A test double's root `Abort(code, reason)` must end the stream.** A double that only records the code would
+  leave HTTP/3 waiting. The base makes the member abstract, so no double can omit it. The session checks each
+  one's behavior, under hang timeouts.
 - **Implementers of preview.1's `IMultiplexedConnection` outside this repository break.** That is accepted
-  during the previews and recorded in §8.
+  during the previews and recorded in §9.
