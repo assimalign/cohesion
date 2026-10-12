@@ -57,6 +57,12 @@ internal sealed class ErrorHandlingEventSource : EventSource
     [NonEvent]
     public bool ErrorHandlerFailed(IHttpContext context, int handlerIndex, IErrorHandler handler, Exception exception)
     {
+        if (context.Features.Get<IWebResponseClientFaultFeature>() is { ResponseAbortedByClient: true })
+        {
+            ResponseAbortedByPeer(context, exception);
+            return false;
+        }
+
         if (CanReportFault(context, exception) && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
             ErrorHandlerFailed(handlerIndex, handler.GetType().FullName ?? handler.GetType().Name,
@@ -81,6 +87,14 @@ internal sealed class ErrorHandlingEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
+            if (context.Features.Get<ResponseAbortedDiagnosticFeature>() is not null)
+            {
+                return;
+            }
+
+            // A handler's false filter and surrounding boundaries observe the same exchange.
+            // Mark it before reporting so wrapping or rethrowing cannot duplicate the peer event.
+            context.Features.Set(ResponseAbortedDiagnosticFeature.Instance);
             ResponseAbortedByPeer(exception.GetType().FullName ?? exception.GetType().Name,
                 exception.Message, GetRequestId(context));
         }

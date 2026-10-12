@@ -295,7 +295,14 @@ the handler's `finally` blocks finish before the filter checks transport state. 
 exceptions with a cancelled request token and explicitly latched client failures are excluded;
 ordinary application exceptions remain reportable even if a handler cancels during unwind.
 
-Event 5 is raised directly from the boundary's existing response-client-fault catch (#1432).
+Event 5 is raised from the boundary's response-client-fault catch (#1432) and from the false
+handler-failure filter used by both the boundary and standalone `HandleAsync`. A peer failure
+while writing an error response propagates unchanged from the handler path and emits Verbose
+`ResponseAbortedByPeer`, never `ErrorHandlerFailed`. The earlier application fault remains
+reported and counted by the boundary; the subsequent peer failure increments neither counter.
+An internal immutable marker on the exchange deduplicates event 5 when a surrounding boundary
+observes the same failure, even if a wrapper changed the exception. The marker is installed only
+when Verbose is enabled and adds no public feature contract or disabled-listener work.
 It uses `IWebResponseClientFaultFeature.ResponseAbortedByClient`, with no exception-type test,
 inner-exception inspection, or second peer classification. Slow readers, resets and STOP_SENDING
 remain cancellation even when a content adapter wraps the write failure.
@@ -312,8 +319,9 @@ exchange, while its originating application fault remains reportable. It increme
 before cancellation; `aborted-responses` independently counts the boundary's abort. Its original
 exception also reaches the existing `OnException` hook and `IHttpExceptionFeature`. Exchange
 completion classification does not change application-fault attribution. A response abandoned
-by its peer increments neither counter. Counter fields are maintained with Interlocked whether listeners are present or absent;
-the counters themselves are created on first enable. No request count or Meter duplicates are added.
+by its peer increments neither counter. Counter fields are maintained with Interlocked whether
+listeners are present or absent; the counters themselves are created on first enable. No request
+count or Meter duplicates are added.
 
 Application exceptions, including handler and diagnostic-callback failures, are written as their
 full type name and **Message**, never stack traces or `Exception.ToString()`. The source does not
@@ -331,7 +339,8 @@ one reporting path if a single log entry is required. The HTTP error response re
 default, and no public signature changes.
 
 The serial `ErrorHandlingEventSourceTests` cover strict manifest validation, payloads and request
-correlation, cancellation/client exclusions, suppression, unchanged handler propagation, and exact
+correlation, cancellation/client exclusions, suppression, unchanged handler propagation, peer-abort
+deduplication across handler and nested-boundary paths, and exact
 counter deltas with and without listeners. Web.Hosting's streamed response tests cover slow readers
 and peer resets on HTTP/1.1, HTTP/2 and HTTP/3, including a wrapped write exception. Both suites link
 the canonical test-only recorder; fresh counter samples prove peer outcomes leave both totals unchanged.

@@ -258,7 +258,107 @@ public sealed class ErrorHandlingEventSourceTests
                 "exceptionType", "exceptionMessage", "responseStarted", "requestId");
             recorded.Payload![1].ShouldBe(originalFault.Message);
         }
-        EventsFor(recorder, context).Length.ShouldBe(useBoundary ? 1 : 0);
+        if (outcome == "ResponseClientFault")
+        {
+            RequireEvent(recorder, context, 5, "ResponseAbortedByPeer", EventLevel.Verbose,
+                "exceptionType", "exceptionMessage", "requestId").Payload![1].ShouldBe(handlerFault.Message);
+        }
+        EventsFor(recorder, context).Length.ShouldBe((useBoundary ? 1 : 0) + (outcome == "ResponseClientFault" ? 1 : 0));
+        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(useBoundary ? 1 : 0);
+        (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Handler peer abort: Should report once before propagation through surrounding boundaries")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task HandleAsync_HandlerPeerAbort_ShouldReportOnceAndPreserveFailure(bool useBoundary, bool surroundingBoundary)
+    {
+        // Arrange
+        using EventSourceRecorder recorder = new(ErrorHandlingEventSource.Log, EventLevel.Verbose);
+        TestHttpContext context = CreateContext();
+        EventSourceResponseClientFaultFeature peer = new();
+        context.Features.Set<IWebResponseClientFaultFeature>(peer);
+        InvalidDataException originalFault = new("Original application failure.");
+        InvalidOperationException handlerFault = new("Adapter wrapped a peer reset.", new IOException("Peer reset."));
+        InvalidOperationException outerWrapper = new("Outer adapter wrapped the handler failure.", handlerFault);
+        IErrorHandlingFeature feature = new ErrorHandlingBuilder().OnError(async (_, _, _) =>
+        {
+            await Task.Yield();
+            context.Features.Set<IHttpResponseStreamingFeature>(new FakeResponseStreamingFeature(true));
+            peer.ResponseAbortedByClient = true;
+            throw handlerFault;
+        }).Build();
+        context.Features.Set(feature);
+        ExceptionBoundaryMiddleware boundary = new(new ExceptionBoundaryOptions());
+        ExceptionBoundaryMiddleware outer = new(new ExceptionBoundaryOptions());
+        int peerEventsBeforeOuter = 0;
+        Exception? handlerFailure = null;
+        async Task InvokeHandlerAsync(IHttpContext exchange)
+        {
+            try
+            {
+                if (useBoundary)
+                {
+                    await boundary.InvokeAsync(exchange, _ => throw originalFault);
+                }
+                else
+                {
+                    await feature.HandleAsync(exchange, originalFault, CancellationToken.None);
+                }
+            }
+            catch (InvalidOperationException failure)
+            {
+                handlerFailure = failure;
+                peerEventsBeforeOuter = EventsFor(recorder, context).Count(value => value.EventId == 5);
+                if (surroundingBoundary)
+                {
+                    throw outerWrapper;
+                }
+                throw;
+            }
+        }
+        long total = ErrorHandlingEventSource.Log.TotalFaults;
+        long aborted = ErrorHandlingEventSource.Log.AbortedResponses;
+
+        // Act — capture directly so cancellation assertions inspect the actual exception.
+        Exception? caught = null;
+        try
+        {
+            if (surroundingBoundary)
+            {
+                await outer.InvokeAsync(context, InvokeHandlerAsync);
+            }
+            else
+            {
+                await InvokeHandlerAsync(context);
+            }
+        }
+        catch (Exception failure)
+        {
+            caught = failure;
+        }
+
+        // Assert
+        handlerFailure.ShouldBeSameAs(handlerFault);
+        if (surroundingBoundary)
+        {
+            caught.ShouldBeOfType<OperationCanceledException>().InnerException.ShouldBeSameAs(outerWrapper);
+        }
+        else
+        {
+            caught.ShouldBeSameAs(handlerFault);
+        }
+        peerEventsBeforeOuter.ShouldBe(1);
+        if (useBoundary)
+        {
+            context.Features.Get<IHttpExceptionFeature>()!.Error.ShouldBeSameAs(originalFault);
+        }
+        RequireEvent(recorder, context, 5, "ResponseAbortedByPeer", EventLevel.Verbose,
+            "exceptionType", "exceptionMessage", "requestId").Payload!.ToArray().ShouldBe(
+                new object?[] { typeof(InvalidOperationException).FullName, handlerFault.Message, RequestId(context) });
+        EventsFor(recorder, context).Length.ShouldBe(useBoundary ? 2 : 1);
         (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(useBoundary ? 1 : 0);
         (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(0);
     }
