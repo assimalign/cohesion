@@ -167,16 +167,19 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 SqlCatalogMigrationStep position = migration.Intent.Steps[index];
+                BeginDeferredTrace(migration, position);
                 PublishProgress(position, migration.Intent.StepCount, running: true, 0);
                 session.ProvisioningProgress = (processed, total) =>
                 {
                     PublishProgress(position, migration.Intent.StepCount, running: true, processed, total);
+                    TraceDeferredProgress(processed, total);
                     DeferredProgress?.Invoke(processed, total);
                 };
                 var step = migration.Steps[index];
                 BeforeDeferredStep?.Invoke(step, cancellationToken);
                 await session.ExecuteAsync(step.Request, cancellationToken).ConfigureAwait(false);
                 StepApplied?.Invoke(step);
+                EndDeferredTrace("Applied");
             }
 
             // The table locks protect this migration. Unrelated DDL may advance the
@@ -207,6 +210,8 @@ internal sealed partial class SqlSchemaProvisioner
         {
             if (!cancellationToken.IsCancellationRequested && !_database.IsClosed)
             {
+                FailDeferredTrace(migration, index, failure);
+                EndDeferredTrace("Error");
                 var position = migration.Intent.Steps[Math.Min(index, migration.Steps.Count - 1)];
                 var coded = new SqlSchemaMigrationException($"{SqlProvisioningCodes.StepFailed}: {Describe()}: " +
                     $"deferred step {position.Position} of {migration.Intent.StepCount} ({position.Kind} '{position.Table}.{position.ObjectName}') failed. " +
@@ -232,6 +237,7 @@ internal sealed partial class SqlSchemaProvisioner
             }
             finally
             {
+                EndDeferredTrace("Cancelled");
                 Volatile.Write(ref _deferred, null);
                 _applyGate.Release();
             }
@@ -240,8 +246,10 @@ internal sealed partial class SqlSchemaProvisioner
 
     private void PublishProgress(SqlCatalogMigrationStep step, int total, bool running,
         long? processed = null, long? rows = null)
-        => _database.ReportProvisioning(new DatabaseProvisioningProgress(step.Kind, step.Table,
+    {
+        _database.ReportProvisioning(new DatabaseProvisioningProgress(step.Kind, step.Table,
             step.Position, total, running, processed, rows));
+    }
 
     internal async ValueTask StopDeferredAsync()
     {

@@ -5,6 +5,7 @@ using System.Threading;
 
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Schema;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -22,8 +23,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// (database event-sources plan, D2), so one provider list and one log query cover all four.
 /// </para>
 /// <para>
-/// Ids 13-15 remain reserved for provisioning (plan section 5); statement execution detail and
-/// extension registration use ids 10-12 and 16-17. A statement's own outcome is the root source's
+/// Provisioning uses ids 13-15 and 18-21; id 17 is retired. Statement execution detail and
+/// extension registration use ids 10-12 and 16. A statement's own outcome is the root source's
 /// (<c>Assimalign.Cohesion.Database</c>), so the server does not repeat it. Every write sits
 /// behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, and every argument that
 /// allocates is computed inside that check. The counters' backing fields are maintained whether or
@@ -330,6 +331,81 @@ internal sealed class SqlDatabaseEventSource : EventSource
         }
     }
 
+    [NonEvent]
+    public long ProvisioningStart(SqlDatabase database, SqlCompiledSchema schema, string mode)
+    {
+        if (!IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            return 0;
+        }
+        ProvisioningStart(database.Engine.Name, database.Name.ToString(), Bound(schema.Name, MaxNameLength), schema.Hash, mode, -1);
+        return Stopwatch.GetTimestamp();
+    }
+
+    [NonEvent]
+    public void ProvisioningStop(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (trace.Started != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ProvisioningStop(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, MaxNameLength), trace.Schema.Hash,
+                trace.StepCount, trace.Outcome, Stopwatch.GetElapsedTime(trace.Started).TotalMilliseconds);
+        }
+    }
+
+    [NonEvent]
+    public void ProvisioningFailed(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (trace.Failure is { } failure && IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            ProvisioningFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, MaxNameLength),
+                trace.Position, trace.Kind, trace.Code, failure.GetType().FullName ?? failure.GetType().Name);
+        }
+    }
+
+    [NonEvent]
+    public long DeferredStepBound(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (!IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            return 0;
+        }
+        DeferredStepBound(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+            trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows);
+        return Stopwatch.GetTimestamp();
+    }
+
+    [NonEvent]
+    public void DeferredStepProgress(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            DeferredStepProgress(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+                trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows);
+        }
+    }
+
+    [NonEvent]
+    public void DeferredStepCompleted(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            DeferredStepCompleted(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+                trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows, trace.Outcome,
+                trace.Started == 0 ? 0 : Stopwatch.GetElapsedTime(trace.Started).TotalMilliseconds);
+        }
+    }
+
+    [NonEvent]
+    public void DeferredStepFailed(SqlDatabase database, SqlProvisioningTrace trace, Exception failure)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            DeferredStepFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+                trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows,
+                SqlProvisioningCodes.StepFailed, failure.GetType().FullName ?? failure.GetType().Name);
+        }
+    }
+
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
         => WriteEvent(1, engineName, sessionId, activeSessions);
@@ -378,7 +454,17 @@ internal sealed class SqlDatabaseEventSource : EventSource
     private void DdlSelfCommitted(string database, string commandType)
         => WriteEvent(12, database, commandType);
 
-    // Ids 13-15 are reserved for provisioning in batch D's second run.
+    [Event(13, Level = EventLevel.Informational, Message = "Provisioning {0}/{1} schema {2} ({3}), mode {4}, steps {5} (-1 before planning).")]
+    private void ProvisioningStart(string engineName, string database, string schema, string schemaHash, string mode, int stepCount)
+        => WriteEvent(13, engineName, database, schema, schemaHash, mode, stepCount);
+
+    [Event(14, Level = EventLevel.Informational, Message = "Provisioned {0}/{1} schema {2} ({3}): {4} steps, {5}, {6} ms.")]
+    private void ProvisioningStop(string engineName, string database, string schema, string schemaHash, int stepCount, string outcome, double durationMilliseconds)
+        => WriteEvent(14, engineName, database, schema, schemaHash, stepCount, outcome, durationMilliseconds);
+
+    [Event(15, Level = EventLevel.Error, Message = "Provisioning {0}/{1} schema {2} failed at step {3} ({4}): {5}, {6}.")]
+    private void ProvisioningFailed(string engineName, string database, string schema, int position, string kind, string code, string exceptionType)
+        => WriteEvent(15, engineName, database, schema, position, kind, code, exceptionType);
 
     [Event(16, Level = EventLevel.Verbose, Message = "Registered SQL extension {0} '{1}'.")]
     private void ExtensionRegistered(string kind, string name)
@@ -387,6 +473,22 @@ internal sealed class SqlDatabaseEventSource : EventSource
     // Id 17 (IndexRegistrationsSaved) is retired and never reused: B2 publishes an index's
     // registration atomically with its description (#1355), so no separate save remains to report;
     // the index DDL itself is event 12.
+
+    [Event(18, Level = EventLevel.Informational, Message = "DeferredStepBound {0}/{1}, {2}.{3}, {4} step {5} of {6}, {7} of {8} rows.")]
+    private void DeferredStepBound(string engineName, string database, string table, string objectName, string kind, int position, int stepCount, long rowsProcessed, long totalRows)
+        => WriteEvent(18, engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows);
+
+    [Event(19, Level = EventLevel.Verbose, Message = "DeferredStepProgress {0}/{1}, {2}.{3}, {4} step {5} of {6}, {7} of {8} rows.")]
+    private void DeferredStepProgress(string engineName, string database, string table, string objectName, string kind, int position, int stepCount, long rowsProcessed, long totalRows)
+        => WriteEvent(19, engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows);
+
+    [Event(20, Level = EventLevel.Informational, Message = "DeferredStepCompleted {0}/{1}, {2}.{3}, {4} step {5} of {6}, {7} of {8} rows.")]
+    private void DeferredStepCompleted(string engineName, string database, string table, string objectName, string kind, int position, int stepCount, long rowsProcessed, long totalRows, string outcome, double durationMilliseconds)
+        => WriteEvent(20, engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows, outcome, durationMilliseconds);
+
+    [Event(21, Level = EventLevel.Error, Message = "DeferredStepFailed {0}/{1}, {2}.{3}, {4} step {5} of {6}, {7} of {8} rows.")]
+    private void DeferredStepFailed(string engineName, string database, string table, string objectName, string kind, int position, int stepCount, long rowsProcessed, long totalRows, string code, string exceptionType)
+        => WriteEvent(21, engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows, code, exceptionType);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

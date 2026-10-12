@@ -54,23 +54,26 @@ internal sealed partial class SqlSchemaProvisioner
         {
             throw new DatabaseObjectLockedException(schema.Name, schema.Name, "APPLY SCHEMA");
         }
+        BeginTrace(schema, "Apply");
         TransactionContext? locks = null;
         IDisposable? ddl = null;
         bool transferred = false;
         try
         {
             ddl = _database.DdlInterlock.EnterApply(schema.Name);
+            TraceStage("Validate", SqlProvisioningCodes.PolicyRefused);
             ValidateSupportedSchema(schema);
+            TraceStage("Planning", SqlProvisioningCodes.PolicyRefused);
             if (_catalog.PendingMigration is { } intent && !string.Equals(intent.ContentHash, schema.Hash, StringComparison.Ordinal))
             {
                 throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: a different schema is pending. " +
                     "Finish the recorded migration before replacing its declaration.");
             }
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
-            string targetHash = schema.Hash;
             if (IsApplied(recorded, schema))
             {
-                return new SqlSchemaMigrationResult(recorded!.ContentHash, targetHash, 0, WasAlreadyApplied: true);
+                TraceOutcome("Skipped", 0);
+                return new SqlSchemaMigrationResult(recorded!.ContentHash, schema.Hash, 0, WasAlreadyApplied: true);
             }
 
             ValidateCatalogOwnership(schema);
@@ -90,6 +93,7 @@ internal sealed partial class SqlSchemaProvisioner
 
             LastPlan = plan;
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
+            TraceStage("Prepare", SqlProvisioningCodes.StepFailed, stepCount: script.Steps.Count);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
             var deferred = deferDataScalingSteps ? FindDeferredSteps(script) : [];
 
@@ -113,6 +117,7 @@ internal sealed partial class SqlSchemaProvisioner
                     {
                         continue;
                     }
+                    TraceStep(script, step);
                     await session.ExecuteAsync(step.Request, cancellationToken).ConfigureAwait(false);
                     applied.Add(step);
                     StepApplied?.Invoke(step);
@@ -122,16 +127,19 @@ internal sealed partial class SqlSchemaProvisioner
                 {
                     // Release the completed inline tables, then reserve every pending table
                     // before handing the engine to a caller. The worker owns this transaction.
+                    TraceStage("Handoff", SqlProvisioningCodes.StepFailed);
                     await _database.Coordinator.RollbackAsync(locks, CancellationToken.None).ConfigureAwait(false);
                     locks = null;
                     await PrepareDeferredAsync(schema, deferred, script.Steps.Count, cancellationToken).ConfigureAwait(false);
                     transferred = true;
-                    return new SqlSchemaMigrationResult(plan.SourceHash, targetHash, applied.Count, WasAlreadyApplied: false);
+                    TraceOutcome("Deferred");
+                    return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, applied.Count, WasAlreadyApplied: false);
                 }
 
                 // IF NOT EXISTS and concurrent ad-hoc DDL must not turn an unowned or
                 // mismatched object into a trusted marker. Capture before validation;
                 // SaveSchemaState checks the generation again under the catalog lock.
+                TraceStage("Finalize", SqlProvisioningCodes.StepFailed);
                 ulong generation = _catalog.DdlGeneration;
                 if (FirstCatalogDifference(schema) is { } difference)
                 {
@@ -139,11 +147,12 @@ internal sealed partial class SqlSchemaProvisioner
                 }
 
                 await _catalog.SaveSchemaStateAsync(
-                    new SqlCatalogSchemaState(targetHash, schema.CanonicalDocument, generation),
+                    new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, generation),
                     cancellationToken).ConfigureAwait(false);
             }
             catch (Exception failure)
             {
+                TraceStepFailure(schema, script, failure);
                 CompensationResult compensation;
                 if (locks is null && applied.Count > 0 && !_database.IsOffline)
                 {
@@ -191,11 +200,17 @@ internal sealed partial class SqlSchemaProvisioner
                     inner);
             }
 
+            TraceOutcome("Applied");
             return new SqlSchemaMigrationResult(
                 plan.SourceHash,
-                targetHash,
+                schema.Hash,
                 plan.Operations.Count,
                 WasAlreadyApplied: false);
+        }
+        catch (Exception failure) when (CaptureTraceFailure(schema, failure))
+        {
+            // The filter only records; it always declines the exception.
+            throw;
         }
         finally
         {
@@ -209,6 +224,7 @@ internal sealed partial class SqlSchemaProvisioner
             finally
             {
                 ddl?.Dispose();
+                EndTrace();
                 if (transferred)
                 {
                     _database.Engine.ScheduleProvisioning(Deferred!);
@@ -239,12 +255,16 @@ internal sealed partial class SqlSchemaProvisioner
         {
             throw new DatabaseObjectLockedException(schema.Name, schema.Name, "VERIFY SCHEMA");
         }
+        BeginTrace(schema, "Verify");
         try
         {
+            TraceStage("Validate", SqlProvisioningCodes.PolicyRefused);
             ValidateSupportedSchema(schema);
+            TraceStage("Verify", SqlProvisioningCodes.Drift, stepCount: 0);
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             if (IsApplied(recorded, schema))
             {
+                TraceOutcome("Verified");
                 return new SqlSchemaMigrationResult(recorded!.ContentHash, schema.Hash, 0, WasAlreadyApplied: true);
             }
 
@@ -255,21 +275,29 @@ internal sealed partial class SqlSchemaProvisioner
                     : $"the catalog DDL generation changed from {recorded.Generation} to {_catalog.DdlGeneration}";
 
             // Name the first object that differs, so the developer need not diff the catalog by hand.
-            if (FirstCatalogDifference(schema) is { } difference)
-            {
-                reason += $"; first difference from the declaration: {difference}";
-            }
+            reason = AppendCatalogDifference(reason, schema);
 
             throw new SqlSchemaMigrationException(
                 $"{SqlProvisioningCodes.Drift}: {Describe()}: the declared schema (hash {schema.Hash}) is not the one " +
                 $"applied: {reason}. The database is declared in Verify mode, so nothing was changed; migrate it out of " +
                 "band, or declare it in Apply mode.");
         }
+        catch (Exception failure) when (CaptureTraceFailure(schema, failure))
+        {
+            throw;
+        }
         finally
         {
+            EndTrace();
             _applyGate.Release();
         }
     }
+
+    // Keep verification's formatting local out of the Debug async state machine.
+    private string AppendCatalogDifference(string reason, SqlCompiledSchema schema)
+        => FirstCatalogDifference(schema) is { } difference
+            ? reason + $"; first difference from the declaration: {difference}"
+            : reason;
 
     /// <summary>
     /// Describes what a compiled schema declares that the SQL DDL executor cannot provision yet,
