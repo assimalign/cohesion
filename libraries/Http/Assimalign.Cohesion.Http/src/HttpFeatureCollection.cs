@@ -138,8 +138,10 @@ public class HttpFeatureCollection : IHttpFeatureCollection
         {
             if (level._features is not null)
             {
-                foreach (IHttpFeature feature in level._features.Values)
+                // Enumerate entries directly: Values lazily creates a wrapper on every fresh exchange.
+                foreach (KeyValuePair<string, IHttpFeature> entry in level._features)
                 {
+                    IHttpFeature feature = entry.Value;
                     if (feature is TFeature match && !IsShadowedAbove(level, feature.Name))
                     {
                         return match;

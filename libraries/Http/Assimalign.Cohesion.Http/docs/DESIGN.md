@@ -1668,18 +1668,50 @@ above it hides by name.
   `OfType<TFeature>().FirstOrDefault()` allocated the LINQ iterator and the
   collection's `yield` enumerator on each call. The lookup now scans the backing
   dictionaries with their struct enumerators and walks the defaults chain itself
-  (raised by the #1077 review).
+  (raised by the #1077 review). #1337 finishes that path by enumerating entries
+  directly: `Dictionary.Values` otherwise creates a 24-byte wrapper on the first
+  lookup of every populated exchange, even after the lookup code is warmed up.
+  Both `Get<T>` and the search in `Set<T>(null)` use this path.
 - **The same answer as enumeration.** A defaults-level feature is skipped when a
   level above installs its name, whatever that level's feature implements, as
   the enumerator skips it. A defaults source of any other type, a derived
   `HttpFeatureCollection` included, is enumerated through its own enumerator,
   because a derived type can re-implement `IEnumerable<IHttpFeature>`. That path
-  allocates as before.
+  now uses a plain loop, removing the LINQ iterator; any allocation in the
+  implementation's own enumerator remains. Exact-type checks preserve custom
+  enumeration order and disposal. A universal allocation guarantee would need
+  an optional public lookup seam; #1337 leaves that boundary question open and
+  adds no public interface member.
 - **Still `O(n)`.** The scan covers typically fewer than ten features. A caller
   that needs `O(1)` caches the resolved feature.
 
-`HttpFeatureCollectionTests` pins the zero-allocation lookup and checks the
-shadowing cases against enumeration.
+The #1381 capacity hint still sizes the same name-keyed dictionary; no second
+index or invalidation cache is needed. Web.Compression, Web.RequestTimeouts,
+Web.Rewrite and Web.Diagnostics request views forward `_inner.Features`, so they
+retain the same collection and use the same fast path.
+
+`HttpFeatureCollectionTests` pins warmed hits/misses through defaults and checks
+shadowing against enumeration. `HttpFeatureLookupTests` also checks fresh
+presized exchanges, typed removal, reused slots and a derived collection's
+custom enumeration. The ordering tests pin existing behavior; the six allocation
+cases fail on the Stage 14 base with 24,000 bytes for 1,000 fresh exchanges and
+pass with zero after this fix.
+
+**Allocation comparison (#1337).** Windows x64, .NET 10.0, Debug, 1,000 fresh
+exchanges with code warmed on a separate collection, four hits and four misses
+per exchange; construction and stamping are outside the measured region:
+
+| Features / initial capacity | preview.1 LINQ lookup expression | Stage 14 base fast path | #1337 entry scan |
+|---|---:|---:|---:|
+| 4 | 1,112 B/exchange | 24 B/exchange | 0 B/exchange |
+| 16 | 1,112 B/exchange | 24 B/exchange | 0 B/exchange |
+
+The comparison evaluates the original LINQ expression against today's collection,
+not a whole-server benchmark of preview.1. The repeated-lookup cost is 136 bytes
+per LINQ lookup plus the first 24-byte Values wrapper; the entry scan allocates
+zero on the first lookup and thereafter. Run the core tests filtered to
+`HttpFeatureLookupTests` with the normal console logger to reproduce the numbers.
+Lookup semantics and the public surface are unchanged from 10.0.0-preview.1.
 
 ## Forwarding headers (RFC 7239 `Forwarded` + `X-Forwarded-*`)
 

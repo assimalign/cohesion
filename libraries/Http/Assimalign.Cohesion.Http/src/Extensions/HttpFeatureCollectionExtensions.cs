@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -24,7 +23,7 @@ namespace Assimalign.Cohesion.Http;
 /// context carries, a lookup allocates nothing: it scans the backing
 /// dictionaries directly instead of enumerating through <c>OfType</c>, and
 /// returns the feature enumeration would return. Any other implementation is
-/// enumerated, which allocates its enumerator.
+/// enumerated without LINQ; any enumerator allocation belongs to that implementation.
 /// </para>
 /// </remarks>
 public static class HttpFeatureCollectionExtensions
@@ -79,8 +78,19 @@ public static class HttpFeatureCollectionExtensions
     // re-implement IEnumerable<IHttpFeature>, and the fast path must return what enumeration would.
     private static TFeature? Find<TFeature>(IHttpFeatureCollection features) where TFeature : class, IHttpFeature
     {
-        return features.GetType() == typeof(HttpFeatureCollection)
-            ? ((HttpFeatureCollection)features).GetFeature<TFeature>()
-            : features.OfType<TFeature>().FirstOrDefault();
+        if (features.GetType() == typeof(HttpFeatureCollection))
+        {
+            return ((HttpFeatureCollection)features).GetFeature<TFeature>();
+        }
+
+        foreach (IHttpFeature feature in features)
+        {
+            if (feature is TFeature match)
+            {
+                return match;
+            }
+        }
+
+        return null;
     }
 }
