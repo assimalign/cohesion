@@ -1372,6 +1372,21 @@ captures the observed http/https port lazily once; if it is unknown, the wrapper
 dispatch without calling the terminal. The shared terminal itself treats null as no port gate,
 which preserves filler behavior. A known port gates all paths, including bare probes.
 
+The enabled pipeline holds an explicit control-plane verifier lifetime lease (#1412), retaining
+the ECDSA verification handle until the service provider disposes the pipeline after host shutdown.
+An unknown listener port acquires no lease. The `UseResourceControlPlane` composition path transfers
+its lease through the root's optional `IWebApplicationLifetime` seam, implemented by
+`WebApplicationContext`. That context releases registered objects once by reference identity, in
+reverse registration order, after service-provider disposal, including build rollback. It attempts
+every release even when the provider or another resource throws and then aggregates failures.
+Registration after teardown begins fails. A normal stop leaves these resources alive for restart;
+only final application disposal releases them. Final teardown attempts provider, middleware and
+endpoint-certificate disposal even when host shutdown fails. It preserves a lone failure's identity
+and stack and aggregates multiple failures. The host becomes terminal even when disposal reports a
+failure, so a later start cannot use disposed services or middleware. **Breaking behavior change from 10.0.0-preview.1
+(#1412, decision 15's preview terms):** a service stop failure no longer skips these final releases.
+Existing public interfaces and borrowed instance ownership are unchanged.
+
 This module consumes the plain `Hosting` lifecycle plus the opt-in `Hosting.Resources`
 runtime/control-plane and `Hosting.Health` contribution contracts. It never references
 `Web.ApplicationModel` (a COHRES002 exclusion) or `Web.Health`. The no-argument and options

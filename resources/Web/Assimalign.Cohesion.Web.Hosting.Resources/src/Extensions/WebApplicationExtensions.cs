@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 namespace Assimalign.Cohesion.Web.Hosting.Resources;
 
@@ -16,8 +17,8 @@ public static class WebApplicationExtensions
         /// <param name="controlPlanePort">An optional listener-port gate for every route, including bare probes; null serves every listener.</param>
         /// <returns>The same pipeline builder.</returns>
         /// <exception cref="ArgumentNullException">A required argument is null.</exception>
-        /// <exception cref="InvalidOperationException">A managed resource lacks a valid identity or public trust key.</exception>
-        /// <remarks>Install first on a private listener. Bare probes are public; namespaced routes require an ES256 bearer token when a gateway identity is present.</remarks>
+        /// <exception cref="InvalidOperationException">A managed resource lacks a valid identity or public trust key, or the pipeline context has no <see cref="IWebApplicationLifetime"/>.</exception>
+        /// <remarks>Install first on a private listener. The application lifetime owns the verification handle. Bare probes are public; namespaced routes require an ES256 bearer token when a gateway identity is present.</remarks>
         public IWebApplicationPipelineBuilder UseResourceControlPlane(
             IResourceControlPlane controlPlane,
             ResourceContext resourceContext,
@@ -30,8 +31,42 @@ public static class WebApplicationExtensions
             ArgumentNullException.ThrowIfNull(isApplicationReady);
             ResourceControlPlaneMiddleware.Validate(resourceContext);
 
-            return builder.Use(next => context => ResourceControlPlaneMiddleware.InvokeAsync(
-                controlPlane, resourceContext, isApplicationReady(), controlPlanePort, context, next));
+            return builder.Use((application, next) =>
+            {
+                if (application is not IWebApplicationLifetime owner)
+                {
+                    if (resourceContext.GatewayName is not null)
+                    {
+                        throw new InvalidOperationException(
+                            "Managed control-plane middleware requires an IWebApplicationLifetime. " +
+                            "Manual hosts can own ResourceControlPlaneMiddleware.CreateLifetime and compose InvokeAsync.");
+                    }
+                    return context => ResourceControlPlaneMiddleware.InvokeAsync(
+                        controlPlane, resourceContext, isApplicationReady(), controlPlanePort, context, next);
+                }
+
+                var lifetime = (ResourceControlPlaneLifetime)ResourceControlPlaneMiddleware.CreateLifetime(resourceContext);
+                bool registered = false;
+                try
+                {
+                    owner.RegisterForDisposal(lifetime);
+                    registered = true;
+                }
+                finally
+                {
+                    if (!registered)
+                    {
+                        lifetime.Dispose();
+                    }
+                }
+
+                return context =>
+                {
+                    lifetime.ThrowIfDisposed();
+                    return ResourceControlPlaneMiddleware.InvokeAsync(
+                        controlPlane, resourceContext, isApplicationReady(), controlPlanePort, context, next);
+                };
+            });
         }
     }
 }

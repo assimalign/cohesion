@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -39,19 +40,54 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     /// <inheritdoc />
     protected override async ValueTask DisposeAsync(bool disposing)
     {
-        await base.DisposeAsync(disposing).ConfigureAwait(false);
+        List<Exception>? failures = null;
+        try
+        {
+            await base.DisposeAsync(disposing).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failures = new List<Exception> { exception };
+        }
+
         if (disposing)
         {
-            // The application owns its service provider: disposing it releases every service a
-            // registered factory created, after the host has stopped them. Instance registrations
-            // stay with their callers.
-            await _context.DisposeServiceProviderAsync().ConfigureAwait(false);
+            // Stop failures are reported after the host has attempted every service. Final teardown
+            // must still release factory-owned services, middleware lifetimes and endpoint keys.
+            try
+            {
+                await _context.DisposeServiceProviderAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= new List<Exception>()).Add(exception);
+            }
 
             foreach (X509Certificate2 certificate in _context.EndpointCertificates)
             {
-                certificate.Dispose();
+                try
+                {
+                    certificate.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    (failures ??= new List<Exception>()).Add(exception);
+                }
             }
             _context.EndpointCertificates.Clear();
+        }
+
+        // A failed StopAsync leaves the base disposal flag unset. All final releases have now
+        // been attempted, so seal the host without retrying stop or allowing a later restart.
+        await base.DisposeAsync(disposing: false).ConfigureAwait(false);
+
+        if (failures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        }
+        if (failures is not null)
+        {
+            throw new AggregateException("One or more application teardown operations failed.", failures);
         }
     }
 

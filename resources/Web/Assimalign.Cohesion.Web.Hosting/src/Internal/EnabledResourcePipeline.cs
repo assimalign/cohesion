@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -8,13 +9,15 @@ using Assimalign.Cohesion.Web.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
-internal sealed class EnabledResourcePipeline : IWebApplicationPipeline
+internal sealed class EnabledResourcePipeline : IWebApplicationPipeline, IDisposable
 {
     private readonly IResourceControlPlane _controlPlane;
     private readonly ResourceContext _resourceContext;
     private readonly WebApplicationContext _applicationContext;
     private readonly int? _controlPlanePort;
     private readonly IWebApplicationPipeline _next;
+    private readonly IDisposable? _lifetime;
+    private int _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EnabledResourcePipeline"/> class.
@@ -36,14 +39,26 @@ internal sealed class EnabledResourcePipeline : IWebApplicationPipeline
         _applicationContext = applicationContext;
         _controlPlanePort = controlPlanePort;
         _next = next;
+        _lifetime = controlPlanePort is null ? null : ResourceControlPlaneMiddleware.CreateLifetime(resourceContext);
     }
 
-    public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default) =>
+    public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         // An unknown ambient listener disables Web's control plane. The shared terminal's null
         // port means no gate, so this wrapper must forward without invoking it in that case.
-        _controlPlanePort is null
+        return _controlPlanePort is null
             ? _next.ExecuteAsync(context, cancellationToken)
             : ResourceControlPlaneMiddleware.InvokeAsync(_controlPlane, _resourceContext,
                 _applicationContext.State is HostState.Started, _controlPlanePort, context,
                 nextContext => _next.ExecuteAsync(nextContext, cancellationToken));
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _lifetime?.Dispose();
+        }
+    }
 }

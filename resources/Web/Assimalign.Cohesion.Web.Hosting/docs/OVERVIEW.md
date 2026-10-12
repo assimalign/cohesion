@@ -26,6 +26,11 @@ its own failures — a listener that cannot bind, a connection fault, a drain th
 short — through `builder.Logging`, never with request content. Disposing the application
 disposes the service provider and every factory-created service.
 
+Pipeline composition can use `IWebApplicationLifetime` on the application context to register
+disposable resources. Final application disposal releases them after the service provider, in
+reverse registration order; a stop followed by restart keeps them alive. The control-plane
+middleware uses this owner for its retained bootstrap verification handle (#1412).
+
 Register middleware with `Use` before starting the application or explicitly building its
 pipeline. A later `Use` throws `InvalidOperationException` because the pipeline is already built.
 

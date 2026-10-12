@@ -25,13 +25,29 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources;
 // entry shared with UseResourceControlPlane, without a runtime-module dependency.
 public static class ResourceControlPlaneMiddleware
 {
-    // Direct callers and composed pipelines share one verifier per resource invocation.
-    // Weak keys allow completed invocations to be collected; Lazy serializes initialization.
+    // Parsed trust is cached per invocation. Cryptographic handles are retained only while an
+    // explicit lifetime lease exists; the weak table itself owns no unmanaged lifetime.
     private static readonly ConditionalWeakTable<ResourceContext, Lazy<BootstrapTokenVerifier>> _verifiers = new();
 
     private static BootstrapTokenVerifier GetVerifier(ResourceContext resource) =>
         _verifiers.GetValue(resource, static context => new Lazy<BootstrapTokenVerifier>(
             () => new BootstrapTokenVerifier(context), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+
+    /// <summary>Retains the resource's bootstrap verification handle until the returned owner is disposed.</summary>
+    /// <param name="resourceContext">The resource identity and application trust key.</param>
+    /// <returns>An idempotent lifetime lease. Dispose it after the owning pipeline's requests drain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="resourceContext"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">A managed resource lacks a valid identity or public trust key.</exception>
+    /// <remarks>
+    /// Concurrent owners for the same context share one handle; the last disposal releases it.
+    /// Manual hosts retain this lease across calls to <see cref="InvokeAsync"/>. Calls without a
+    /// lease remain supported and use a temporary handle per validation, with no unmanaged cache.
+    /// </remarks>
+    public static IDisposable CreateLifetime(ResourceContext resourceContext)
+    {
+        Validate(resourceContext);
+        return new ResourceControlPlaneLifetime(resourceContext.GatewayName is null ? null : GetVerifier(resourceContext));
+    }
 
     private const string HealthJsonContentType = "application/health+json; charset=utf-8";
     private const string HealthPath = "/healthz";

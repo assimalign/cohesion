@@ -133,6 +133,16 @@ rules between the two. The ECDSA key is created per validation and disposed befo
 returns, so `JsonWebKey` and the validator hold no disposable state; an unusable trusted key
 rejects the token instead of throwing.
 
+The stateless `Es256JsonWebTokenValidation` helper in this project's `shared/` folder holds these
+rules in one source location (#1412). The public validator compiles that helper with its existing
+per-call key ownership. Web.Hosting.Resources also compiles it and supplies an
+`IJsonWebTokenSignatureVerifier` over a middleware-owned ECDSA handle while an explicit lifetime
+owner is present. The helper still resolves the issuer, selects the trusted `kid`, enforces ES256,
+and applies the same document and profile rules before accepting a token. Its caller must bind a
+borrowed verifier to the selected trusted key and coordinate verification with disposal. The helper
+has no mutable static state, no handle ownership, and no public API. Public validators retain their
+existing contract and token acceptance relative to 10.0.0-preview.1.
+
 The Cohesion claim names and ceilings (`cohesion_token_use`, `scope=telemetry`, `cohesion-export`,
 24 hours, 8 hours) are not here: they belong to the resource credential seam, so they live in
 `Assimalign.Cohesion.Hosting.Resources.ResourceCredentialProfile`, which this package does not

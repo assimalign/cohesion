@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -25,8 +26,10 @@ using Assimalign.Cohesion.Web.Hosting.Internal;
 /// the default server captures the fully composed pipeline). Both snapshots are reused for every
 /// start, stop, and rollback pass.
 /// </remarks>
-public sealed class WebApplicationContext : HostContext, IWebApplicationContext
+public sealed class WebApplicationContext : HostContext, IWebApplicationContext, IWebApplicationLifetime
 {
+    private readonly Lock _lifetimeLock = new();
+    private readonly List<IDisposable> _lifetimeResources = new();
     private IServiceProvider? _serviceProvider;
     private IReadOnlyList<IHostService> _applicationServices = Array.Empty<IHostService>();
     private Lazy<IWebApplicationServer[]>? _servers;
@@ -87,6 +90,26 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 
     public IEnumerable<IHttpFeature> Features => ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
 
+    /// <inheritdoc />
+    public void RegisterForDisposal(IDisposable resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+
+        lock (_lifetimeLock)
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _isServiceProviderDisposed) != 0, this);
+            foreach (IDisposable registered in _lifetimeResources)
+            {
+                if (ReferenceEquals(registered, resource))
+                {
+                    return;
+                }
+            }
+
+            _lifetimeResources.Add(resource);
+        }
+    }
+
     internal void SetServiceProvider(IServiceProvider serviceProvider)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
@@ -108,16 +131,56 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
     }
 
     /// <summary>
-    /// Disposes the service provider, which disposes every service a registered factory created.
+    /// Disposes the service provider and then every resource registered by pipeline composition.
     /// </summary>
-    internal ValueTask DisposeServiceProviderAsync()
+    internal async ValueTask DisposeServiceProviderAsync()
     {
-        if (_serviceProvider is IAsyncDisposable serviceProvider &&
-            Interlocked.Exchange(ref _isServiceProviderDisposed, 1) == 0)
+        if (Interlocked.Exchange(ref _isServiceProviderDisposed, 1) != 0)
         {
-            return serviceProvider.DisposeAsync();
+            return;
         }
 
-        return ValueTask.CompletedTask;
+        List<Exception>? failures = null;
+        try
+        {
+            if (_serviceProvider is IAsyncDisposable serviceProvider)
+            {
+                await serviceProvider.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception)
+        {
+            failures = new List<Exception> { exception };
+        }
+        finally
+        {
+            IDisposable[] resources;
+            lock (_lifetimeLock)
+            {
+                resources = _lifetimeResources.ToArray();
+                _lifetimeResources.Clear();
+            }
+
+            for (int index = resources.Length - 1; index >= 0; index--)
+            {
+                try
+                {
+                    resources[index].Dispose();
+                }
+                catch (Exception exception)
+                {
+                    (failures ??= new List<Exception>()).Add(exception);
+                }
+            }
+        }
+
+        if (failures is not null)
+        {
+            if (failures.Count == 1)
+            {
+                ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            }
+            throw new AggregateException("One or more application resources failed to dispose.", failures);
+        }
     }
 }

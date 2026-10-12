@@ -8,6 +8,7 @@ using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.Web.Hosting.Resources.Tests;
 
@@ -72,7 +73,11 @@ public sealed class BootstrapVerifierReuseTests
         ResourceContext other = CreateContext(otherIdentity);
         string first = identity.Issue("resource");
         string rotated = identity.Issue("resource");
-        ResourceControlPlaneMiddleware.Validate(context);
+        await using WebApplication application = WebApplication.CreateBuilder().Build();
+        var builder = (IWebApplicationPipelineBuilder)application;
+        builder.UseResourceControlPlane(new RecordingControlPlane(), context, () => true);
+        builder.UseResourceControlPlane(new RecordingControlPlane(), other, () => true);
+        _ = builder.Build();
 
         // Act
         HttpStatusCode[] statuses = await Task.WhenAll(Enumerable.Range(0, 32).Select(index => Task.Run(async () =>
