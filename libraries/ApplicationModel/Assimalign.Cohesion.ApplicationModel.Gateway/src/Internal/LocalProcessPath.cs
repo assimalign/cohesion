@@ -36,11 +36,10 @@ internal static partial class LocalProcessPath
             return command;
         }
 
-        string fullPath = Path.GetFullPath(path);
-        // Leave short commands to Process.Start, including its quoting and search rules.
-        return RemoveExtendedPrefix(fullPath).Length < maxPath
+        // Leave a short fully qualified command to Process.Start, including its quoting.
+        return IsUsableAsWritten(path)
             ? command
-            : ResolveWindowsPath(fullPath, "executable", shortPathResolver);
+            : ResolveWindowsPath(Path.GetFullPath(path), "executable", shortPathResolver);
     }
 
     public static string ResolveWorkingDirectory(string path, Func<string, string?> shortPathResolver)
@@ -51,11 +50,17 @@ internal static partial class LocalProcessPath
             return path;
         }
 
-        string fullPath = Path.GetFullPath(path);
-        return RemoveExtendedPrefix(fullPath).Length < maxPath
+        return IsUsableAsWritten(path)
             ? path
-            : ResolveWindowsPath(fullPath, "working directory", shortPathResolver);
+            : ResolveWindowsPath(Path.GetFullPath(path), "working directory", shortPathResolver);
     }
+
+    // CreateProcess measures a relative path joined to the current directory before it removes
+    // ".." segments, so a deep current directory refuses a path whose full form is short. A
+    // relative path, or one 260+ characters as written, is therefore passed in its full form: the
+    // same file or directory, resolved against the same current directory.
+    private static bool IsUsableAsWritten(string path) =>
+        Path.IsPathFullyQualified(path) && RemoveExtendedPrefix(path).Length < maxPath;
 
     internal static string ResolveWindowsPath(
         string fullPath,

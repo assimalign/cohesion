@@ -70,9 +70,12 @@ public class LocalProbePathTests
             artifact = quoted ? $"\"{artifact}\"" : artifact;
             string capture = Path.Combine(root, "capture.txt");
             string[] arguments = ["capture-launch", "", "two words", "a\"b", @"trailing\"];
-            var baseline = new ProcessStartInfo(command)
+            // A relative path from a deep current directory can pass MAX_PATH as written, which
+            // CreateProcess refuses, so the direct launch uses the full form of the same file.
+            bool relative = form == "relative";
+            var baseline = new ProcessStartInfo(relative ? (quoted ? $"\"{executable}\"" : executable) : command)
             {
-                WorkingDirectory = workingDirectory,
+                WorkingDirectory = relative ? directory : workingDirectory,
                 UseShellExecute = false,
             };
             foreach (string argument in arguments)

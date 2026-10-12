@@ -156,10 +156,14 @@ the registration under the same lock.
   ordinary drive or UNC path, never the `\\?\` prefix. The child working directory comes from
   that launch path. On Windows, paired surrounding quotes are removed before resolving a
   resource executable, deriving a working directory, or looking up a long command's short name.
-  Exec probes retain short commands verbatim (quoted or unquoted, absolute, relative with a
-  directory, or bare names on PATH), preserving `Process.Start` file lookup and argument handling.
-  Their working directory is still the configured host's directory, relative to the gateway's
-  current directory when relative, or inherited when empty; only a long directory is shortened.
+  Exec probes retain a fully qualified command under 260 characters verbatim, quoted or unquoted,
+  and a bare name stays on PATH, preserving `Process.Start` file lookup and argument handling.
+  A relative command or working directory is passed in its full form, resolved against the
+  gateway's current directory as CreateProcess would resolve it: CreateProcess measures a relative
+  path joined to a deep current directory before it removes `..` segments, and refuses one past
+  260 characters even when its full form is short. A qualified path 260+ characters as written is
+  normalized the same way. The working directory is still the configured host's directory, or
+  inherited when empty; only a directory long in its full form is shortened.
   The command and working directory are resolved independently, so a probe does not require a
   short name for a host executable it never starts. Render and gather share the Windows quote rule.
   `COHLOCAL001` refuses a launch without a usable short name before `Process.Start`, naming the
@@ -709,7 +713,10 @@ usable short name. A per-gateway internal resolver seam forces the no-short-name
 changing the volume, and portable unit tests cover absent/unchanged/too-long results and the
 259/260-character boundary. Process tests compare direct `Process.Start` with probes for quoted
 and unquoted short absolute, relative, and PATH commands, including empty arguments, embedded
-quotes, spaces, and trailing backslashes. Quoted short and long resource launches also retain
+quotes, spaces, and trailing backslashes; the direct launch of a relative command uses its full
+form, because from a deep checkout the relative path itself passes MAX_PATH. Unit tests pin a
+relative command and directory that are 260+ characters as written but short in full form,
+whatever the current directory's depth. Quoted short and long resource launches also retain
 their working directories. Reconcile tests cover multiple failures, latest details, equal resource
 names in separate applications, a forwarding manager with an earlier subscriber holding its
 Failed event, late or absent foreign terminal events, deterministically reversed built-in events,
