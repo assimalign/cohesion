@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanExecutor
     private async Task BuildDeferredIndexAsync(SqlCatalogTable table, IndexDefinition definition,
         int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken)
     {
-        // Counting is worker work too. Build only probes for the first stored record.
+        // Counting is worker work too. Build only checks owner allocation metadata.
         long total = 0;
         foreach (var row in ScanVersions(table, cancellationToken))
         {

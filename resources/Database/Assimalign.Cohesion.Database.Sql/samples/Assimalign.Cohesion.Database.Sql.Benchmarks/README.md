@@ -348,7 +348,7 @@ running `Prepare-Q8PhaseInstrumentation.ps1 -TreeRoot C:/cw/b2/_out/q49/src -Lab
 Run its native executable five times with `--cases Q8 --iterations 5 --rows 1`; retain the final
 five `already_applied=1` timing lines per invocation, as the helper's comments specify.
 
-The final campaign at `24691e207` repeats the same archive/publish/run procedure after the
+The handoff campaign at `24691e207` repeats the same archive/publish/run procedure after the
 handoff-compensation correction. Its logs and metadata are under `_out/q49-final` (substitute
 that directory in the commands above); publication again emitted zero IL2xxx/IL3xxx diagnostics.
 
@@ -360,5 +360,22 @@ that directory in the commands above); publication again emitted zero IL2xxx/IL3
 | 4 | 0.0073 | 0.0081 | 11.9434 |
 | 5 | 0.0106 | 0.0116 | 12.6566 |
 
-The final best medians are **0.0073 ms** for reconciliation and **0.0081 ms** for post-open
+The handoff campaign's best medians are **0.0073 ms** for reconciliation and **0.0081 ms** for post-open
 provisioning, below 1 ms in every invocation. Concurrent tests again shared the host.
+
+The final source campaign at `e18586332` repeats that procedure after replacing the table's
+page-directory snapshot probe with a constant-time native allocation query. Logs and metadata
+are under `_out/q49-probe`; publication emitted zero IL2xxx/IL3xxx diagnostics.
+
+| Round | Reconciliation inside Build | Post-open provisioning | Complete provisioning including open/recovery |
+|---|---:|---:|---:|
+| 1 | 0.0075 | 0.0083 | 8.0086 |
+| 2 | 0.0083 | 0.0092 | 8.3925 |
+| 3 | 0.0075 | 0.0084 | 7.8866 |
+| 4 | 0.0051 | 0.0061 | 7.9029 |
+| 5 | 0.0058 | 0.0064 | 6.2920 |
+
+The final best medians are **0.0051 ms** for reconciliation and **0.0061 ms** for post-open
+provisioning. Every invocation remains below 1 ms; opening/recovery remains a separate budget.
+The same host and flags were used, with concurrent tests, so these are gate measurements rather
+than a speedup comparison between the campaigns.
