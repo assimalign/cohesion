@@ -332,23 +332,30 @@ public class HttpRequestCanHaveBodyTests
     }
 
     /// <summary>Publishes a transport's final input once, immediately after an empty pipe probe.</summary>
-    private sealed class CompletingInputReader(PipeReader inner, Action completeInput) : PipeReader
+    private sealed class CompletingInputReader : PipeReader
     {
-        private Action? _completeInput = completeInput;
+        private readonly PipeReader _inner;
+        private Action? _completeInput;
 
-        public override void AdvanceTo(SequencePosition consumed) => inner.AdvanceTo(consumed);
+        public CompletingInputReader(PipeReader inner, Action completeInput)
+        {
+            _inner = inner;
+            _completeInput = completeInput;
+        }
 
-        public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => inner.AdvanceTo(consumed, examined);
+        public override void AdvanceTo(SequencePosition consumed) => _inner.AdvanceTo(consumed);
 
-        public override void CancelPendingRead() => inner.CancelPendingRead();
+        public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => _inner.AdvanceTo(consumed, examined);
 
-        public override void Complete(Exception? exception = null) => inner.Complete(exception);
+        public override void CancelPendingRead() => _inner.CancelPendingRead();
 
-        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default) => inner.ReadAsync(cancellationToken);
+        public override void Complete(Exception? exception = null) => _inner.Complete(exception);
+
+        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default) => _inner.ReadAsync(cancellationToken);
 
         public override bool TryRead(out ReadResult result)
         {
-            bool available = inner.TryRead(out result);
+            bool available = _inner.TryRead(out result);
             if (!available)
             {
                 Action? complete = _completeInput;

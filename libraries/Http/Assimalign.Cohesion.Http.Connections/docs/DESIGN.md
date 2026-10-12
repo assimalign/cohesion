@@ -2952,6 +2952,11 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
   introduced after that release. Compared with intervening builds, hooks now observe `false`
   when the driver already knows there are no bytes after the head.
 
+  The completion-race regression uses a delegating pipe reader that publishes DATA and FIN
+  immediately after an empty probe. Its explicit constructor stores the inner reader in a
+  readonly field and the one-shot completion callback in a separate mutable field, following
+  the same constructor convention as production code.
+
 ### Behavior changes
 
 - *Observable by applications.* On HTTP/2, a read of a body the transport rejected now throws the
