@@ -71,15 +71,42 @@ attributing every added byte to the Web server source alone.
 | RID | Disabled bytes | Enabled bytes | Delta bytes | Evidence |
 | --- | ---: | ---: | ---: | --- |
 | `win-arm64` | 15,854,080 | 17,645,568 | 1,791,488 (+11.30%) | Local Windows ARM64 Release publish, 2026-10-12; enabled native smoke passed, including lifecycle payload names and no event 0. |
-| `linux-x64` | CI | CI | CI | `resource-web.yml`'s Web NativeAOT job records both sizes and their delta in its job summary. |
+| `linux-x64` | 15,220,216 | 16,895,272 | 1,675,056 (+11.01%) | Local Ubuntu 24.04 Release cross-publish, 2026-10-12, source `75a699d12`; enabled x64 native smoke passed all 37 checks, including lifecycle payload names and no event 0. |
 
-The local Windows ARM64 host cannot cross-compile NativeAOT to Linux, and its WSL environment has no
-.NET SDK. The linux-x64 figure comes from CI. On Windows, publish from a short worktree path and
-prepend the Visual Studio Installer directory containing `vswhere.exe` to `PATH` before publishing;
-the native toolchain locator otherwise fails during linking on this host.
+The linux-x64 measurement used a disposable `mcr.microsoft.com/dotnet/sdk:10.0.300-noble-aot`
+container with .NET SDK 10.0.300, runtime 10.0.8, clang 18.1.3 and the GCC 13.3.0 x64 cross toolchain.
+The container ran on ARM64 Linux under WSL; both output executables are x64 ELF binaries. The enabled
+executable ran through QEMU user-mode 10.2.2 with x64 libc, OpenSSL, ICU and zlib installed in the
+container. The smoke exit code was zero: 36 application checks plus the EventSource lifecycle check
+passed. This is a binary-size measurement, not a comparison of execution speed under emulation.
 
-From the repository root, publish the guard twice with `-r win-arm64` (or `-r linux-x64` in CI), separate
-output directories, and `-p:EventSourceSupport=false` / `-p:EventSourceSupport=true`:
+The enabled publish emitted no trim/AOT warnings. The initial clean dependency compilation reported
+the nine existing DependencyInjection warnings tracked by #1177 and the two Configuration warnings
+tracked by #1220; neither native compilation emitted a trim/AOT warning. The CI Web NativeAOT job
+continues recording both sizes and their delta on each run.
+
+From the repository root on Linux, use separate output directories and change only
+`EventSourceSupport` between the two publishes:
+
+```bash
+export DOTNET_PROCESSOR_COUNT=2
+guard=resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj
+dotnet build build/Tasks -c Release -m:1 -p:UseSharedCompilation=false
+dotnet restore "$guard" -r linux-x64 --disable-parallel
+dotnet publish "$guard" --no-restore -c Release -r linux-x64 -m:1 -p:UseSharedCompilation=false -p:EventSourceSupport=false -o _out/aot-web-linux-no-events
+dotnet publish "$guard" --no-restore -c Release -r linux-x64 -m:1 -p:UseSharedCompilation=false -p:EventSourceSupport=true -o _out/aot-web-linux-events
+stat -c '%n %s bytes' _out/aot-web-linux-no-events/Assimalign.Cohesion.Web.AotGuard _out/aot-web-linux-events/Assimalign.Cohesion.Web.AotGuard
+./_out/aot-web-linux-events/Assimalign.Cohesion.Web.AotGuard --smoke
+```
+
+The final command runs directly on x64 Linux. For the measured ARM64 Linux run, the container also
+installed `gcc-x86-64-linux-gnu`, `binutils-x86-64-linux-gnu` and the x64 development/runtime libraries,
+and prefixed that command with `qemu-x86_64-static`. No Windows-to-Linux NativeAOT cross-publish was
+used.
+
+On Windows ARM64, publish from a short worktree path and prepend the Visual Studio Installer
+directory containing `vswhere.exe` to `PATH` before publishing; the native toolchain locator otherwise
+fails during linking on this host:
 
 ```powershell
 $guard = 'resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj'
