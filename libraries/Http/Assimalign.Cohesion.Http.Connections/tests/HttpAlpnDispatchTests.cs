@@ -90,7 +90,7 @@ public class HttpAlpnDispatchTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - UseHttp1AndHttp2: Should serve HTTP/1.1 to a connection that does not report its handshake")]
     public async Task UseHttp1AndHttp2_WhenConnectionDoesNotReportHandshake_ShouldServeHttp11()
     {
-        // Arrange — a TLS layer that does not implement ITlsConnectionInfo reports no protocol.
+        // Arrange — a TLS layer that does not register a Tls feature reports no protocol.
         TestConnection connection = new(
             HttpProtocolPayloadFactory.CreateHttp1Request(Http1Request),
             capabilities: TestTlsConnection.TlsCapabilities);

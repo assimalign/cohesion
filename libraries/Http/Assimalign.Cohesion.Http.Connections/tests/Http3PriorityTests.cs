@@ -330,6 +330,12 @@ public class Http3PriorityTests
             InboundBidirectionalStreamLimit = limit;
         }
 
+        public string Name => IMultiplexedConnectionStreamLimits.FeatureName;
+
+        protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
+        protected override void ConfigureFeatures(IConnectionFeatureCollection features) => features.Set(this);
+
         public long InboundBidirectionalStreamLimit { get; }
 
         public Exception? AbortReason { get; private set; }

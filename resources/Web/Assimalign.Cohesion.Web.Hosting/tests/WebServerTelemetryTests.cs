@@ -800,7 +800,7 @@ public class WebServerTelemetryTests
             endStream: false,
             cancellationToken);
         await firstRead.Task.WaitAsync(cancellationToken);
-        ((IMultiplexedStreamAbort)stream).AbortWrite(0x10c);
+        stream!.DirectionalAbort!.AbortWrite(0x10c);
         Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
 
         // Assert

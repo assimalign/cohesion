@@ -31,6 +31,19 @@ contracts (`IHttpConnectionListener`, `IHttpConnection`,
 `IHttpConnectionContext`) are standalone interfaces that wrap a
 connection and project HTTP semantics over it.
 
+### Optional connection features (#1452)
+
+The transport references `Connections.Tls`, `Connections.StreamAbort` and
+`Connections.StreamLimits` explicitly. It reads `Tls`, `DirectionalAbort` and
+`StreamLimits` from each connection's feature collection. Wrapping connections
+pass features through with `InnerFeatures`; replacing or removing a named feature
+is deliberate. A stream never inherits its multiplexed connection's features.
+
+The request-body reader resolves its directional abort feature at the first operation
+that needs it, caches both presence and absence, and reuses it for later reads and
+end probes. A known FIN creates no stream feature collection. Coded connection close
+and input completion keep their existing contracts pending Part 2 of decision 56.
+
 ### Structural listener registration
 
 `HttpConnectionListenerOptions` binds concrete listeners to protocols
@@ -275,14 +288,14 @@ one never reaches this package (see "Accept-side isolation: where the
 handshake runs").
 
 What the handshake *negotiated* is a per-connection fact the capability
-cannot carry. HTTP reads it through the contracts library's
-`ITlsConnectionInfo`, which the connection that ran the handshake implements
-(the TLS layer's secured connection, a QUIC connection), for two purposes:
+cannot carry. HTTP reads it through `connection.Tls`, the registered
+`ITlsConnectionInfo` feature from `Connections.Tls` (the TLS layer's secured
+connection or a QUIC connection), for two purposes:
 choosing the protocol of a dual listener (next section) and republishing
 the facts on each exchange's connection info (see "The TLS session on every
-exchange"). The package still depends only on `Assimalign.Cohesion.Connections`
-and core Http; it references neither the TLS layer nor the HTTP TLS feature
-package (`Assimalign.Cohesion.Http.Tls`).
+exchange"). The package references core Http, Connections and the three
+connection-feature packages; it references neither the TLS layer nor the HTTP
+TLS feature package (`Assimalign.Cohesion.Http.Tls`).
 
 ### Serving HTTP/1.1 and HTTP/2 on one TLS listener (ALPN)
 
@@ -297,20 +310,20 @@ keeps its own options, captured at registration like those of
 `UseHttp1`/`UseHttp2`, and both share the listener-wide interceptors.
 
 Each accepted connection is dispatched by the protocol its handshake
-negotiated, read through `ITlsConnectionInfo`:
+negotiated, read through `connection.Tls`:
 
 | Negotiated | Served |
 |---|---|
 | `h2` | HTTP/2 |
 | `http/1.1` | HTTP/1.1 |
-| none: the client sent no ALPN extension, or the connection does not implement `ITlsConnectionInfo` | HTTP/1.1, what a client that does not negotiate expects of an `https` origin |
+| none: the client sent no ALPN extension, or the connection has no `Tls` feature | HTTP/1.1, what a client that does not negotiate expects of an `https` origin |
 | anything else, which the server offered through an application-supplied list (`acme-tls/1`, say) | the connection is closed; the accept loop keeps accepting |
 
 The flow for one accepted connection:
 
 ```mermaid
 flowchart TD
-    Accept["accept loop: listener.AcceptAsync, TLS already negotiated"] --> Read["read ITlsConnectionInfo.ApplicationProtocol"]
+    Accept["accept loop: listener.AcceptAsync, TLS already negotiated"] --> Read["read connection.Tls.ApplicationProtocol"]
     Read -->|"h2"| H2["Http2ConnectionFactory: HTTP/2 connection"]
     Read -->|"http/1.1 or none"| H1["Http1ConnectionFactory: HTTP/1.1 connection"]
     Read -->|"another protocol"| Close["close the connection, keep accepting"]
@@ -477,7 +490,7 @@ thread-safe; all per-request state belongs in the context's feature collection.
     `H3_REQUEST_REJECTED` — the request was refused before any application
     processing, so the peer may retry it (RFC 9114 §4.1.1) — leaving the QUIC
     connection and its other streams intact. The code reaches the wire through
-    the stream's code-carrying abort (`IMultiplexedStreamAbort`, #1080), on the
+    the stream's `DirectionalAbort` feature (`Connections.StreamAbort`, #1080), on the
     QUIC driver as on the in-memory one.
 
   In every case the request-parse interceptor pipeline has already torn down the
@@ -911,17 +924,17 @@ assembly dependency changes.
 
 ### What it is
 
-Every exchange that arrived over TLS has a connection info that also implements the contracts
-library's `ITlsConnectionInfo`: the client certificate, the TLS protocol version, the cipher suite,
+Every exchange that arrived over TLS has a connection info that also implements
+`Connections.Tls`'s `ITlsConnectionInfo`: the client certificate, the TLS protocol version, the cipher suite,
 and the application protocol ALPN selected. The transport does not run TLS, so it copies these from
-the connection that did, through that same interface:
+the connection that did, through its `Tls` feature:
 
 | Version | Source of the handshake facts |
 |---|---|
 | HTTP/1.1, HTTP/2 | the accepted `IConnection`, which the TLS layer secured |
 | HTTP/3 | the accepted `IMultiplexedConnection`: QUIC's own TLS 1.3 handshake (RFC 9001) |
 
-A connection that does not implement `ITlsConnectionInfo` (cleartext, or secured by a layer that
+A connection without a registered `Tls` feature (cleartext, or secured by a layer that
 does not report its handshake) gives its exchanges a plain `HttpConnectionInfo`.
 
 The transport installs no HTTP TLS feature and references no package that declares one.
@@ -949,13 +962,13 @@ those hooks could not see it, because they run before the exchange exists.
 
 ### Why a facet and not a feature
 
-Core Http holds base contracts only, and a concern-specific feature lives in its own package (owner
-decision 20, 2026-10-09). The transport could install a feature only by referencing the package that
-declares it. `Http.Connections` is a member of every area's framework, so that reference would add
-the package to 18 framework lists, and it would make the transport reference a feature package. A
-facet needs neither: the contracts library already declares `ITlsConnectionInfo`, and the transport
-already references it. The per-exchange `Features.Set` the transport used to make is gone too, so an
-exchange that never reads the session pays nothing for it.
+Core Http holds base contracts only, and the application-facing HTTP TLS feature lives in its own
+package (owner decision 20, 2026-10-09). The transport references `Connections.Tls` for the handshake
+facts and snapshots them onto HTTP's connection-info object. `Http.Tls` keeps reading that object;
+it does not need the live connection. Owner decision 56 moves the connection contract into its own
+package and makes it an App kernel root, so this adds no repeated area-framework entries. The
+transport never installs an HTTP TLS feature: an exchange that never reads `context.TlsConnection`
+pays for no HTTP TLS feature object.
 
 ### Sharing and ownership
 
@@ -1333,7 +1346,7 @@ invites the body:
   runs out, `FailSlowResponse` resets the request stream with `H3_REQUEST_CANCELLED`
   and trips the exchange's `RequestCancelled`, and the read throws that cancellation.
   The bound is needed because the request-body rate does not cover the `100`: on a
-  driver that implements `IMultiplexedStreamAbort` (QUIC and in-memory) its deadline
+  driver that registers `DirectionalAbort` (QUIC and in-memory) its deadline
   stops the receiving direction with `STOP_SENDING(H3_NO_ERROR)` and is left out of the
   read's token, so a client that granted no stream credit for the `100` held the handler's
   first read with nothing to reclaim it. A final head waiting for the `100` is held to the
@@ -4571,10 +4584,11 @@ The signals and their RFC 9114 §8.1 codes:
 | QPACK decompression failure | connection close | `QPACK_DECOMPRESSION_FAILED` | RFC 9204 §2.2 |
 
 **The codes reach the wire through the connection contracts' code-carrying
-aborts (#1080).** The QUIC and in-memory drivers implement both facets, and the
-transport finds them with a type test:
+aborts (#1080).** QUIC and in-memory streams register the `DirectionalAbort` feature
+from `Connections.StreamAbort`. The coded connection-close contract remains
+`IMultiplexedConnectionAbort`, found with a type test until Part 2 of decision 56:
 
-- **`STOP_SENDING`** is `IMultiplexedStreamAbort.AbortRead(code)` on the
+- **`STOP_SENDING`** is `DirectionalAbort.AbortRead(code)` on the
   request stream.
 - **A reset** is `AbortWrite(code)` and `AbortRead(code)`, then
   `IConnection.Abort(Http3StreamException)`. The abort keeps its job of ending
@@ -4585,7 +4599,7 @@ transport finds them with a type test:
   Http3ConnectionException)`, so the QUIC `CONNECTION_CLOSE` carries the error's
   code (`AbortConnection`).
 
-On a stream or connection without the facets, such as a test double, the code
+On a stream without the feature, or connection without the close contract, the code
 travels only as the reason, and the driver sends its own default. The in-memory
 driver reports a code to the peer as `ConnectionResetException.ApplicationErrorCode`,
 which is how the in-memory tests assert codes. A real QUIC peer sees
@@ -4945,7 +4959,7 @@ queue is a `System.Threading.Channels` channel.
   enforced (see "HTTP/2 and HTTP/3 connection timeouts and data rates (#1085)").
 - **Error codes on a driver without the code-carrying facets.** The transport
   decides every RFC 9114 §8.1 code (see the table under "Request streams") and
-  puts it on the wire through `IMultiplexedStreamAbort` and
+  puts it on the wire through the `DirectionalAbort` feature and
   `IMultiplexedConnectionAbort` (#1080). A multiplexed driver that implements
   neither, such as a third-party transport or a test double, sends its own
   defaults, and the code travels only as the abort reason.
@@ -5618,7 +5632,7 @@ state**:
   the connection with `H3_ID_ERROR` (RFC 9218 §7.2, #1083). So does a request
   `PRIORITY_UPDATE` whose Prioritized Element ID is not a client-initiated
   bidirectional stream, or whose stream ordinal (`ID / 4`) is at or beyond the
-  generic `IMultiplexedConnectionStreamLimits.InboundBidirectionalStreamLimit`
+  optional `StreamLimits.InboundBidirectionalStreamLimit` feature
   published by its transport (#1425). Division avoids overflow at the maximum QUIC
   ID. The ID is checked even when an oversized Priority Field Value will be skipped.
   Until #1083 the push frame was only recorded and the drain

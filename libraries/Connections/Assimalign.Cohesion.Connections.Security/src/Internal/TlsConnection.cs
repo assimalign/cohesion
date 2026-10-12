@@ -61,6 +61,12 @@ internal sealed class TlsConnection : Connection, ITlsConnectionInfo
 
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
+    public string Name => ITlsConnectionInfo.FeatureName;
+
+    protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
+    protected override void ConfigureFeatures(IConnectionFeatureCollection features) => features.Set<ITlsConnectionInfo>(this);
+
     public SslApplicationProtocol ApplicationProtocol => _applicationProtocol;
 
     public SslProtocols TlsProtocol => _tlsProtocol;

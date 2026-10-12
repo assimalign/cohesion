@@ -74,7 +74,7 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
 
         // Assert
         secured.Id.ShouldBe(server.Id);
-        secured.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(expected);
+        secured.Tls.ShouldNotBeNull().RemoteCertificate!.Thumbprint.ShouldBe(expected);
         await WhenClosedAsync(refusedServer, timeout.Token);
         await refusedHandshake;
     }

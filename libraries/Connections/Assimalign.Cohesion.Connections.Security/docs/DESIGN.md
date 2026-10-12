@@ -46,8 +46,10 @@ listener").
 - The returned `TlsConnection` delegates `Id`, endpoints, `Direction`, `State`, `ConnectionClosed`,
   and `Abort` to the inner connection, reports `Capabilities` with `Security = Tls`, and exposes the
   encrypted pipe as its `Input` / `Output`.
-- It also implements the contracts' `ITlsConnectionInfo`, so an application protocol can read what
-  the handshake negotiated without referencing this library: the ALPN application protocol, the TLS
+- It registers itself as `ITlsConnectionInfo` from `Connections.Tls` in `ConfigureFeatures`, with
+  `Name = ITlsConnectionInfo.FeatureName` (`Tls`). Its `InnerFeatures` returns `_inner.Features`, so
+  features registered beneath TLS remain visible. An application protocol reads `connection.Tls`
+  without referencing this library: the ALPN application protocol, the TLS
   version, the cipher suite, and the peer's certificate (`SslStream.NegotiatedApplicationProtocol`,
   `SslProtocol`, `NegotiatedCipherSuite`, `RemoteCertificate`), captured once when the handshake
   completes. HTTP reads them to serve HTTP/2 or HTTP/1.1 on one listener and to show its handlers
@@ -136,7 +138,8 @@ How it is applied, and why:
   TLS-layered listener"). Before #1304 the failure came out of `AcceptAsync`, so `RequireClientCertificate`
   made every client without a certificate stop the listener.
 
-Reading the certificate after the handshake is the application's job (`ITlsConnectionInfo`, and over
+Reading the certificate after the handshake is the application's job (`connection.Tls` from
+`Connections.Tls`, and over
 HTTP `context.TlsConnection` from `Assimalign.Cohesion.Http.Tls`); authenticating a user from it is out
 of scope here.
 
@@ -173,6 +176,7 @@ NativeAOT compatible.
 - **`Assimalign.Cohesion.Connections`** — the `IConnection` / `IConnectionLayer` contracts, the
   `UseTls` composition points (`IConnectionListener` / `IConnectionFactory`), and the
   `DuplexPipeStream` adapter.
+- **`Assimalign.Cohesion.Connections.Tls`** — the optional handshake-facts contract and accessors.
 - **Security area (certificate management)** — supplies certificates for the TLS options. The
   platform-agnostic certificate manager is owned by the Security area and is intentionally not a
   dependency of this layer.

@@ -39,6 +39,8 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
         }
     }
 
+    protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
     public override ConnectionId Id => _inner.Id;
     public override EndPoint? LocalEndPoint => _inner.LocalEndPoint;
     public override EndPoint? RemoteEndPoint => _inner.RemoteEndPoint;
@@ -69,7 +71,7 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
     public override void Abort(Exception? reason = null) => _inner.Abort(reason);
     public override ValueTask DisposeAsync() => _inner.DisposeAsync();
 
-    private sealed class TrackedConnection : Connection, IMultiplexedStreamAbort
+    private sealed class TrackedConnection : Connection
     {
         private readonly Connection _inner;
         private readonly CompletionReader _input;
@@ -83,6 +85,8 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
 
         public bool InputCompleted => _input.IsCompleted;
         public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+        protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
         public override ConnectionId Id => _inner.Id;
         public override EndPoint? LocalEndPoint => _inner.LocalEndPoint;
         public override EndPoint? RemoteEndPoint => _inner.RemoteEndPoint;
@@ -93,8 +97,6 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
         public override ConnectionState State => _inner.State;
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
-        public void AbortRead(long errorCode) => ((IMultiplexedStreamAbort)_inner).AbortRead(errorCode);
-        public void AbortWrite(long errorCode) => ((IMultiplexedStreamAbort)_inner).AbortWrite(errorCode);
         public override async ValueTask DisposeAsync()
         {
             await _inner.DisposeAsync().ConfigureAwait(false);

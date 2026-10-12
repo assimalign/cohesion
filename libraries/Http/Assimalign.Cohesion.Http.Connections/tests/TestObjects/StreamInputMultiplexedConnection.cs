@@ -24,6 +24,9 @@ internal sealed class StreamInputMultiplexedConnection : MultiplexedConnection
     }
 
     /// <inheritdoc />
+    protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
+    /// <inheritdoc />
     public override ConnectionId Id => _inner.Id;
 
     /// <inheritdoc />

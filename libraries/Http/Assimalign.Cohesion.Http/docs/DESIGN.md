@@ -1196,9 +1196,11 @@ publication can still use an `Items` key.
 A transport never puts a feature contract in this core. It publishes what it
 knows about a connection as a *facet* on the exchange's connection info: an
 extra interface the `HttpConnectionInfo` it hands out also implements, found
-with a type test (the TLS handshake is the Connections library's
+with a type test on that HTTP snapshot (the TLS handshake contract is the `Connections.Tls` package's
 `ITlsConnectionInfo`, which `Assimalign.Cohesion.Http.Tls` turns into
-`context.TlsConnection`). A wire mechanism only the transport can perform is
+`context.TlsConnection`). The transport obtains these TLS facts through the underlying
+connection's `Tls` feature; connection decorators forward `InnerFeatures` (#1452).
+A wire mechanism only the transport can perform is
 offered through `IHttpExchangeControl`, which a feature package wraps
 (`context.Upgrade` over `TakeOver`, `context.ExtendedConnect` over
 `AcceptTunnelAsync`). A request fact a hook needs that the parsed head cannot

@@ -12,6 +12,33 @@ public class InMemoryMultiplexedConnectionTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
+    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Features: Both multiplexed stream ends register directional abort")]
+    public async Task Features_OnMultiplexedStreams_ShouldRegisterDirectionalAbort()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
+        await using (client)
+        await using (server)
+        {
+            // Act
+            await using Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+            IMultiplexedStreamAbort clientAbort = clientStream.DirectionalAbort.ShouldNotBeNull();
+            IMultiplexedStreamAbort serverAbort = serverStream.DirectionalAbort.ShouldNotBeNull();
+
+            // Assert
+            clientAbort.Name.ShouldBe(IMultiplexedStreamAbort.FeatureName);
+            serverAbort.Name.ShouldBe(IMultiplexedStreamAbort.FeatureName);
+            clientStream.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeSameAs(clientAbort);
+            serverStream.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeSameAs(serverAbort);
+            clientAbort.ShouldBeSameAs(clientStream);
+            serverAbort.ShouldBeSameAs(serverStream);
+            client.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeNull();
+            server.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeNull();
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Multiplexed BindAsync: Logical bind should complete until listener disposal")]
     public async Task BindAsync_BeforeAndAfterDispose_ShouldRespectTerminalDisposal()
     {
@@ -215,7 +242,7 @@ public class InMemoryMultiplexedConnectionTests
         Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
 
         // Act — the in-memory STOP_SENDING.
-        serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x100);
+        serverStream.DirectionalAbort.ShouldNotBeNull().AbortRead(0x100);
 
         // Assert — the client learns of it at once and its next write carries the code; the server's own
         // stream keeps its lifecycle and can still send.
@@ -245,7 +272,7 @@ public class InMemoryMultiplexedConnectionTests
         ValueTask<System.IO.Pipelines.ReadResult> pendingRead = clientStream.Input.ReadAsync(cancellation.Token);
 
         // Act — the in-memory RESET_STREAM.
-        serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortWrite(0x10e);
+        serverStream.DirectionalAbort.ShouldNotBeNull().AbortWrite(0x10e);
 
         // Assert — the client's read in flight fails with the code.
         ConnectionResetException reset = await Should.ThrowAsync<ConnectionResetException>(async () => await pendingRead);
@@ -269,7 +296,7 @@ public class InMemoryMultiplexedConnectionTests
         Task<System.IO.Pipelines.ReadResult> pendingRead = serverStream.Input.ReadAsync(cancellation.Token).AsTask();
 
         // Act
-        serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x100);
+        serverStream.DirectionalAbort.ShouldNotBeNull().AbortRead(0x100);
 
         // Assert — the waiting read and every later one fail; the client never had to send or end anything.
         await Should.ThrowAsync<ConnectionAbortedException>(() => pendingRead.WaitAsync(_testTimeout));
@@ -289,7 +316,7 @@ public class InMemoryMultiplexedConnectionTests
         Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
 
         // Act — a reset with a code, then the lifecycle abort with a reason of its own.
-        IMultiplexedStreamAbort abort = serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!;
+        IMultiplexedStreamAbort abort = serverStream.DirectionalAbort.ShouldNotBeNull();
         abort.AbortWrite(0x10b);
         abort.AbortRead(0x10b);
         serverStream.Abort(new InvalidOperationException("the reason stays local"));
@@ -319,8 +346,8 @@ public class InMemoryMultiplexedConnectionTests
         Connection readOnly = await server.AcceptStreamAsync(cancellation.Token);
 
         // Act
-        writeOnly.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x100);
-        readOnly.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortWrite(0x100);
+        writeOnly.DirectionalAbort.ShouldNotBeNull().AbortRead(0x100);
+        readOnly.DirectionalAbort.ShouldNotBeNull().AbortWrite(0x100);
 
         // Assert — neither end was told the other abandoned the stream, and the data still flows.
         writeOnly.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
@@ -342,7 +369,7 @@ public class InMemoryMultiplexedConnectionTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
         Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        IMultiplexedStreamAbort abort = clientStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!;
+        IMultiplexedStreamAbort abort = clientStream.DirectionalAbort.ShouldNotBeNull();
 
         // Act / Assert
         Should.Throw<ArgumentOutOfRangeException>(() => abort.AbortRead(errorCode));
@@ -359,8 +386,8 @@ public class InMemoryMultiplexedConnectionTests
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Assert — a single-stream transport has no per-direction code to carry.
-        client.ShouldNotBeAssignableTo<IMultiplexedStreamAbort>();
-        server.ShouldNotBeAssignableTo<IMultiplexedStreamAbort>();
+        client.DirectionalAbort.ShouldBeNull();
+        server.DirectionalAbort.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Multiplexed: A peer ending its side of a stream should not signal the other end's ConnectionClosed")]

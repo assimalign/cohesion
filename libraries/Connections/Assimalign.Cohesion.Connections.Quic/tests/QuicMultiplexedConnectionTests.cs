@@ -29,6 +29,43 @@ public class QuicMultiplexedConnectionTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Features: Registers distinct connection features and isolated stream abort features over real QUIC")]
+    public async Task Features_OnRealQuic_ShouldRegisterNamedFeaturesWithoutParentFallback()
+    {
+        // Arrange — this gate must execute against QUIC rather than silently return when unsupported.
+        QuicListener.IsSupported.ShouldBeTrue();
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+
+        // Act
+        ITlsConnectionInfo tls = pair.Server.Tls.ShouldNotBeNull();
+        IMultiplexedConnectionStreamLimits limits = pair.Server.StreamLimits.ShouldNotBeNull();
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Assert
+            tls.ShouldNotBeSameAs(limits);
+            tls.Name.ShouldBe(ITlsConnectionInfo.FeatureName);
+            limits.Name.ShouldBe(IMultiplexedConnectionStreamLimits.FeatureName);
+            pair.Server.Features.Get(ITlsConnectionInfo.FeatureName).ShouldBeSameAs(tls);
+            pair.Server.Features.Get(IMultiplexedConnectionStreamLimits.FeatureName).ShouldBeSameAs(limits);
+            pair.Client.Tls.ShouldNotBeNull().Name.ShouldBe(ITlsConnectionInfo.FeatureName);
+            pair.Client.StreamLimits.ShouldNotBeNull().Name.ShouldBe(IMultiplexedConnectionStreamLimits.FeatureName);
+            clientStream.DirectionalAbort.ShouldNotBeNull().Name.ShouldBe(IMultiplexedStreamAbort.FeatureName);
+            serverStream.DirectionalAbort.ShouldNotBeNull().Name.ShouldBe(IMultiplexedStreamAbort.FeatureName);
+            clientStream.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeSameAs(clientStream.DirectionalAbort);
+            serverStream.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeSameAs(serverStream.DirectionalAbort);
+            clientStream.Tls.ShouldBeNull();
+            serverStream.Tls.ShouldBeNull();
+            clientStream.Features.Get(IMultiplexedConnectionStreamLimits.FeatureName).ShouldBeNull();
+            serverStream.Features.Get(IMultiplexedConnectionStreamLimits.FeatureName).ShouldBeNull();
+            clientStream.Abort();
+            serverStream.Abort();
+        }
+    }
+
     [QuicTheory(DisplayName = "Cohesion Test [Connections.Quic] - Stream limits: Releasing inbound bidirectional streams should advance the cumulative allowance once")]
     [InlineData(1)]
     public async Task InboundBidirectionalStreamLimit_OnSuccessiveDisposals_ShouldReplenishOnce(int initialLimit)
@@ -40,7 +77,7 @@ public class QuicMultiplexedConnectionTests
             certificate,
             cancellation.Token,
             configureListener: options => options.MaxBidirectionalStreamCount = initialLimit);
-        IMultiplexedConnectionStreamLimits limits = pair.Server.ShouldBeAssignableTo<IMultiplexedConnectionStreamLimits>();
+        IMultiplexedConnectionStreamLimits limits = pair.Server.StreamLimits.ShouldNotBeNull();
         limits.InboundBidirectionalStreamLimit.ShouldBe(initialLimit);
 
         for (int index = 0; index < 3; index++)
@@ -74,8 +111,8 @@ public class QuicMultiplexedConnectionTests
             certificate,
             cancellation.Token,
             configureListener: options => options.MaxBidirectionalStreamCount = 1);
-        IMultiplexedConnectionStreamLimits clientLimits = pair.Client.ShouldBeAssignableTo<IMultiplexedConnectionStreamLimits>();
-        IMultiplexedConnectionStreamLimits serverLimits = pair.Server.ShouldBeAssignableTo<IMultiplexedConnectionStreamLimits>();
+        IMultiplexedConnectionStreamLimits clientLimits = pair.Client.StreamLimits.ShouldNotBeNull();
+        IMultiplexedConnectionStreamLimits serverLimits = pair.Server.StreamLimits.ShouldNotBeNull();
         clientLimits.InboundBidirectionalStreamLimit.ShouldBe(0);
         serverLimits.InboundBidirectionalStreamLimit.ShouldBe(1);
         await using Connection clientStream = await pair.Client.OpenStreamAsync(direction, cancellation.Token);
@@ -119,7 +156,7 @@ public class QuicMultiplexedConnectionTests
         await using (serverStream)
         {
             // Assert
-            pair.Server.ShouldBeAssignableTo<IMultiplexedConnectionStreamLimits>().InboundBidirectionalStreamLimit.ShouldBe(initialLimit);
+            pair.Server.StreamLimits.ShouldNotBeNull().InboundBidirectionalStreamLimit.ShouldBe(initialLimit);
             clientStream.Abort();
             serverStream.Abort();
         }
@@ -172,8 +209,8 @@ public class QuicMultiplexedConnectionTests
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
 
         // Assert — the QUIC handshake is a TLS 1.3 handshake (RFC 9001), so both peers expose it.
-        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
-        pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
+        pair.Server.Tls.ShouldNotBeNull().ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
+        pair.Client.Tls.ShouldNotBeNull().ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - TlsProtocol and CipherSuite: Should report the TLS 1.3 session on both peers")]
@@ -190,8 +227,8 @@ public class QuicMultiplexedConnectionTests
 
         // Act
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
-        ITlsConnectionInfo server = pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!;
-        ITlsConnectionInfo client = pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!;
+        ITlsConnectionInfo server = pair.Server.Tls.ShouldNotBeNull();
+        ITlsConnectionInfo client = pair.Client.Tls.ShouldNotBeNull();
 
         // Assert
         server.TlsProtocol.ShouldBe(SslProtocols.Tls13);
@@ -229,8 +266,8 @@ public class QuicMultiplexedConnectionTests
             });
 
         // Assert
-        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(clientCertificate.Thumbprint);
-        pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(certificate.Thumbprint);
+        pair.Server.Tls.ShouldNotBeNull().RemoteCertificate!.Thumbprint.ShouldBe(clientCertificate.Thumbprint);
+        pair.Client.Tls.ShouldNotBeNull().RemoteCertificate!.Thumbprint.ShouldBe(certificate.Thumbprint);
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - RemoteCertificate: Should be null on the server when the client presents none")]
@@ -249,7 +286,7 @@ public class QuicMultiplexedConnectionTests
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
 
         // Assert
-        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate.ShouldBeNull();
+        pair.Server.Tls.ShouldNotBeNull().RemoteCertificate.ShouldBeNull();
     }
 
     [Fact]
@@ -581,7 +618,7 @@ public class QuicMultiplexedConnectionTests
         await using (serverStream)
         {
             // Act
-            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x42);
+            serverStream.DirectionalAbort.ShouldNotBeNull().AbortRead(0x42);
 
             // Assert — the client's sending direction is stopped with the code, and the server's own
             // stream keeps its lifecycle: aborting one direction is not the stream ending.
@@ -617,7 +654,7 @@ public class QuicMultiplexedConnectionTests
             await BufferWithoutExaminingAsync(serverStream.Input, 4, cancellation.Token);
 
             // Act
-            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x42);
+            serverStream.DirectionalAbort.ShouldNotBeNull().AbortRead(0x42);
 
             // Assert — the contract: every later read fails, buffered octets included, as on the in-memory driver.
             QuicException read = await Should.ThrowAsync<QuicException>(
@@ -646,7 +683,7 @@ public class QuicMultiplexedConnectionTests
         await using (serverStream)
         {
             // Act
-            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortWrite(0x43);
+            serverStream.DirectionalAbort.ShouldNotBeNull().AbortWrite(0x43);
 
             // Assert — the client's read sees the server's sending direction reset with the code.
             QuicException exception = await Should.ThrowAsync<QuicException>(
@@ -676,7 +713,7 @@ public class QuicMultiplexedConnectionTests
         await using (serverStream)
         {
             // Act — the reset an HTTP/3 server sends: both directions with the code, then the lifecycle abort.
-            IMultiplexedStreamAbort abort = serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!;
+            IMultiplexedStreamAbort abort = serverStream.DirectionalAbort.ShouldNotBeNull();
             abort.AbortWrite(0x10e);
             abort.AbortRead(0x10e);
             serverStream.Abort();
@@ -713,7 +750,7 @@ public class QuicMultiplexedConnectionTests
         await using (serverStream)
         {
             // Act
-            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x100);
+            serverStream.DirectionalAbort.ShouldNotBeNull().AbortRead(0x100);
             await serverStream.Output.WriteAsync(response, cancellation.Token);
             await serverStream.Output.CompleteAsync();
 
@@ -808,7 +845,7 @@ public class QuicMultiplexedConnectionTests
                 if (codedReset)
                 {
                     errorCode = 0x10c;
-                    IMultiplexedStreamAbort abort = serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>();
+                    IMultiplexedStreamAbort abort = serverStream.DirectionalAbort.ShouldNotBeNull();
                     abort.AbortRead(errorCode);
                     abort.AbortWrite(errorCode);
                 }
@@ -1014,7 +1051,7 @@ public class QuicMultiplexedConnectionTests
         }
         else
         {
-            pair.ServerStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortWrite(0x42);
+            pair.ServerStream.DirectionalAbort.ShouldNotBeNull().AbortWrite(0x42);
         }
 
         // Assert — the client reads the whole response and its FIN, never a RESET_STREAM.
@@ -1098,7 +1135,7 @@ public class QuicMultiplexedConnectionTests
         await using (clientStream)
         await using (serverStream)
         {
-            IMultiplexedStreamAbort abort = serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!;
+            IMultiplexedStreamAbort abort = serverStream.DirectionalAbort.ShouldNotBeNull();
 
             // Act / Assert
             Should.Throw<ArgumentOutOfRangeException>(() => abort.AbortRead(errorCode));

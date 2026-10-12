@@ -17,14 +17,15 @@ handshake (RFC 8446 §4.3.2). HTTP/2 rules out asking later (RFC 9113 §9.2.3), 
 ## Shape
 
 An arrow means "references". The transport and this package never reference each other: they meet
-on the contracts library's `ITlsConnectionInfo`, which the transport publishes and this package reads.
+on `Connections.Tls`'s `ITlsConnectionInfo`, which the transport publishes on HTTP's connection-info
+snapshot and this package reads.
 
 ```mermaid
 flowchart LR
     App["Application"]
     Tls["Http.Tls"]
     Core["Http (core)"]
-    Conn["Connections (contracts)"]
+    Conn["Connections.Tls (feature contract)"]
     Transport["Http.Connections (transport)"]
     App --> Tls
     Tls --> Core
@@ -38,7 +39,7 @@ flowchart LR
 | `IHttpTlsConnectionFeature` | this package | The contract: `ClientCertificate`, `Protocol`, `CipherSuite`, `ApplicationProtocol`. |
 | `HttpTlsConnectionExtensions` | this package | `context.TlsConnection`: the installed feature, or one built from the facet, or `null`. |
 | `HttpTlsConnectionFeature` | this package (internal) | The feature the accessor builds, a copy of the facet's four values. |
-| `ITlsConnectionInfo` | `Assimalign.Cohesion.Connections` | The handshake facet. A TLS connection implements it, and the transport's connection info carries it. |
+| `ITlsConnectionInfo` | `Assimalign.Cohesion.Connections.Tls` | The connection's registered TLS feature; HTTP's connection-info snapshot carries the same contract. |
 | `HttpTlsConnectionInfo` | `Assimalign.Cohesion.Http.Connections` (internal) | The transport's connection info for a TLS exchange: the endpoints plus a snapshot of the facet. |
 
 The package surfaces its types under the `Assimalign.Cohesion.Http` namespace, not the assembly name.
@@ -49,7 +50,7 @@ while the feature lived in core Http compiles unchanged. This matches `Http.Cook
 ## How the session reaches a handler
 
 1. **The transport publishes facts, not a feature.** When `Http.Connections` builds an exchange's
-   `HttpConnectionInfo` and the accepted connection implements `ITlsConnectionInfo`, it builds an
+   `HttpConnectionInfo` and the accepted connection has a `Tls` feature, it builds an
    internal subclass that also implements `ITlsConnectionInfo` and copies the four values. That
    happens once per connection for HTTP/1.1 and HTTP/2, and once per request stream for HTTP/3,
    which already built a connection info per stream. The transport sets nothing on `Features`.
@@ -91,28 +92,30 @@ package (owner decision 20 of the Stage 10 review, 2026-10-09). A transport publ
 facts as facets on its connection info, or offers wire mechanisms through `IHttpExchangeControl`. The
 feature packages own the application-facing contracts (core Http DESIGN, "Where things live").
 
-The facet is the idiom the Connections contracts library already documents for this data: a consumer
-finds `ITlsConnectionInfo` with a type test on the object it holds (Connections DESIGN, "Handshake
-facts"). The transport extends that one hop, from the connection to the exchange's connection info,
-without referencing an HTTP TLS type.
+The live connection exposes `ITlsConnectionInfo` through `connection.Tls`, backed by its layered
+feature collection (owner decision 56). The transport copies those facts into the exchange's
+connection-info object, where the existing type test remains appropriate: HTTP connection info is
+a snapshot, not an `IConnection`. This package keeps reading that snapshot without retaining the
+live connection or making the transport reference an HTTP TLS type.
 
 Alternatives rejected:
 
 - **The contract in core Http**, where #1065 first placed it. The transport could then install the
   feature without referencing a feature package, but core would carry a concern-specific contract,
   which owner decision 20 rules out.
-- **A contract-only package the transport references.** `Http.Connections` is a member of every
-  area's framework (17 private entries and a public one in App.Web), so a transport reference would
-  add the package to all 18 framework lists. It would also make the transport reference a feature
-  package, the reverse of core's layering table. The facet costs one App.Web entry.
+- **The HTTP feature contract in a package the transport references.** That would couple the
+  transport to the application-facing feature. The transport instead references the connection's
+  handshake contract; owner decision 56 places `Connections.Tls` beside Connections as an App kernel
+  root, avoiding repeated entries across the 18 area frameworks.
 - **An `Items`-key bridge.** A session of four typed values, one of them a certificate with an
   owner, would travel as an untyped object, and the package would only cast it back.
 - **New members on `IHttpConnectionInfo`.** Adding members to the interface breaks every
   implementation, test doubles included, while a TLS session is optional by construction.
 
-`ITlsConnectionInfo` stays in the Connections contracts library. The TLS layer and the QUIC driver
-both implement it, and HTTP reads it to choose the protocol through ALPN. Moving it into
-`Connections.Security` would make all three depend on the `SslStream` layer.
+`ITlsConnectionInfo` lives in the independent `Connections.Tls` package. The TLS layer and the QUIC
+driver register it, and HTTP reads `connection.Tls` to choose the protocol through ALPN. The contract
+package has no dependency on the `Connections.Security` `SslStream` layer. Its move supersedes owner
+decision 20's earlier placement in Connections while preserving the HTTP snapshot design.
 
 ## The facet travels with the connection info object
 

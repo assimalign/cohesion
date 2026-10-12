@@ -104,8 +104,9 @@ writes. A clean completion (`Output` without an error, the FIN) is a half-close 
 To see an errored `Input` completion, a stream end hands out a thin delegating `PipeReader` instead of
 the pipe's own reader.
 
-**A stream end carries application error codes (#1080).** It implements the contracts'
-`IMultiplexedStreamAbort`, the in-memory `STOP_SENDING` and `RESET_STREAM` with a code, so a protocol
+**A stream end carries application error codes (#1080, #1452).** It registers itself as the
+`IMultiplexedStreamAbort` feature from `Connections.StreamAbort`, available through
+`stream.DirectionalAbort`: the in-memory `STOP_SENDING` and `RESET_STREAM` with a code, so a protocol
 tested over this driver puts its codes where the QUIC driver puts them:
 
 - `AbortRead(errorCode)` completes the end's receive pipe with a `ConnectionResetException` whose
@@ -118,12 +119,26 @@ tested over this driver puts its codes where the QUIC driver puts them:
   direction that has already ended or that a unidirectional end lacks. A later `Abort(reason)` or
   dispose does not complete an aborted direction again, so the other end keeps seeing the code, not the
   reason. Codes outside 0 to 2^62 - 1 throw, as on the QUIC driver.
-- The ends of a byte-stream pair do not implement the facet: a single-stream transport has no code to
-  carry, and a consumer's type test should say so. The stream ends are a private subclass of the
-  connection type, created only for multiplexed streams.
+- The ends of a byte-stream pair do not register the feature: a single-stream transport has no code to
+  carry, and its `DirectionalAbort` is `null`. The stream ends are a private subclass of the connection
+  type, created only for multiplexed streams.
 
 The multiplexed connection itself does not implement `IMultiplexedConnectionAbort`: its abort reaches
 no peer, so a close code would have nowhere to go.
+
+## Connection features (#1452)
+
+The stream's `ConfigureFeatures` registers it once on first access, with
+`IConnectionFeature.Name` returning `IMultiplexedStreamAbort.FeatureName` (`"StreamAbort"`).
+Byte-stream pairs and multiplexed parent connections have empty collections. Each multiplexed
+stream owns its collection; parent features never appear on the stream. A wrapper forwards the
+stream's features by overriding `InnerFeatures`, which removes the need to reimplement and forward
+every optional capability. A wrapper can replace or remove a named slot when its semantics demand it.
+
+The core `Features` additions break external implementers of the connection interfaces shipped
+in 10.0.0-preview.1, accepted under owner decisions 15 and 56; subclasses inherit the guided-base
+implementation. The directional-abort contract itself postdates preview.1, so its package move
+breaks no released API.
 
 ## Dial / Accept Model
 
@@ -165,6 +180,8 @@ compatible (`IsAotCompatible=true`).
 - **`Assimalign.Cohesion.Connections`** — the `Connection` / `ConnectionListener` /
   `ConnectionFactory` guided bases and their multiplexed counterparts this driver implements, plus
   `ConnectionCapabilities`, `ConnectionProtocol.Memory`, and `ConnectionAbortedException`.
+- **`Assimalign.Cohesion.Connections.StreamAbort`** — the optional directional-abort contract
+  registered by each multiplexed stream.
 - **Transport test projects** (`Connections`, `Connections.Security`, `Http.Connections`,
   `Amqp.Connections`) — consumers that previously each carried a private pipe-pair double and now
   build their test connections on this driver.

@@ -18,7 +18,7 @@ internal abstract class HttpStreamConnectionContext : HttpConnectionContext
         Stream = connection.AsStream();
         // One connection info per connection, shared by every exchange it carries. A connection that
         // reports its TLS handshake gives it the ITlsConnectionInfo facet (see HttpTlsConnectionInfo).
-        ConnectionInfo = HttpTlsConnectionInfo.Create(connection.LocalEndPoint, connection.RemoteEndPoint, connection as ITlsConnectionInfo);
+        ConnectionInfo = HttpTlsConnectionInfo.Create(connection.LocalEndPoint, connection.RemoteEndPoint, connection.Tls);
         IsSecure = isSecure;
     }
 

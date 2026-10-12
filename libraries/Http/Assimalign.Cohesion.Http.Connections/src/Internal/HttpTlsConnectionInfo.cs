@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// The connection info of an exchange that arrived over TLS: the endpoints, plus what the handshake
-/// negotiated, published as the contracts library's <see cref="ITlsConnectionInfo"/> facet so a reader
+/// negotiated, published as Connections.Tls's <see cref="ITlsConnectionInfo"/> facet so a reader
 /// finds it with a type test on <see cref="IHttpContext.ConnectionInfo"/> (or on an interceptor
 /// context's <c>ConnectionInfo</c>).
 /// </summary>
@@ -41,6 +41,9 @@ internal sealed class HttpTlsConnectionInfo : HttpConnectionInfo, ITlsConnection
     }
 
     /// <inheritdoc />
+    public string Name => ITlsConnectionInfo.FeatureName;
+
+    /// <inheritdoc />
     public SslApplicationProtocol ApplicationProtocol { get; }
 
     /// <inheritdoc />
@@ -55,7 +58,7 @@ internal sealed class HttpTlsConnectionInfo : HttpConnectionInfo, ITlsConnection
     /// <summary>
     /// Creates the connection info for an exchange: one that also carries the handshake facts when the
     /// connection reports them, or a plain <see cref="HttpConnectionInfo"/> when it does not (a cleartext
-    /// connection, or a TLS layer that does not implement <see cref="ITlsConnectionInfo"/>).
+    /// connection, or a TLS layer that does not register <see cref="ITlsConnectionInfo"/>).
     /// </summary>
     /// <param name="localEndPoint">The local endpoint of the connection or stream.</param>
     /// <param name="remoteEndPoint">The remote endpoint of the connection or stream.</param>

@@ -12,6 +12,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Connections.Security.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
@@ -44,8 +45,8 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
             timeout.Token);
 
         // Assert
-        server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(SslApplicationProtocol.Http2);
-        client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(SslApplicationProtocol.Http2);
+        server.Tls.ShouldNotBeNull().ApplicationProtocol.ShouldBe(SslApplicationProtocol.Http2);
+        client.Tls.ShouldNotBeNull().ApplicationProtocol.ShouldBe(SslApplicationProtocol.Http2);
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Security] - ApplicationProtocol: Should report http/1.1 when the client offers only it")]
@@ -61,7 +62,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
             timeout.Token);
 
         // Assert
-        server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(SslApplicationProtocol.Http11);
+        server.Tls.ShouldNotBeNull().ApplicationProtocol.ShouldBe(SslApplicationProtocol.Http11);
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Security] - ApplicationProtocol: Should report no protocol when the client sends no ALPN extension")]
@@ -77,7 +78,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
             timeout.Token);
 
         // Assert
-        server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.Protocol.IsEmpty.ShouldBeTrue();
+        server.Tls.ShouldNotBeNull().ApplicationProtocol.Protocol.IsEmpty.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Security] - TlsProtocol and CipherSuite: Should report what both peers negotiated")]
@@ -88,8 +89,8 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
 
         // Act
         (IConnection client, IConnection server) = await UpgradePairAsync(null, null, timeout.Token);
-        ITlsConnectionInfo serverTls = server.ShouldBeAssignableTo<ITlsConnectionInfo>()!;
-        ITlsConnectionInfo clientTls = client.ShouldBeAssignableTo<ITlsConnectionInfo>()!;
+        ITlsConnectionInfo serverTls = server.Tls.ShouldNotBeNull();
+        ITlsConnectionInfo clientTls = client.Tls.ShouldNotBeNull();
 
         // Assert — a modern platform negotiates TLS 1.2 or 1.3, and both ends agree on the session.
         serverTls.TlsProtocol.ShouldBeOneOf(SslProtocols.Tls12, SslProtocols.Tls13);
@@ -108,7 +109,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         (IConnection client, IConnection _) = await UpgradePairAsync(null, null, timeout.Token);
 
         // Assert
-        client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(_fixture.Certificate.Thumbprint);
+        client.Tls.ShouldNotBeNull().RemoteCertificate!.Thumbprint.ShouldBe(_fixture.Certificate.Thumbprint);
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Security] - RemoteCertificate: Should be null on the server when no client certificate was requested")]
@@ -121,7 +122,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         (IConnection _, IConnection server) = await UpgradePairAsync(null, null, timeout.Token);
 
         // Assert
-        server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate.ShouldBeNull();
+        server.Tls.ShouldNotBeNull().RemoteCertificate.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Security] - RemoteCertificate: Should report the client's certificate on the server and release it with the connection")]
@@ -137,13 +138,36 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
             timeout.Token,
             serverOptions => serverOptions.AllowClientCertificate(static (_, _, _) => true),
             clientOptions => UseClientCertificate(clientOptions, _fixture.ClientCertificate));
-        X509Certificate2 certificate = server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate.ShouldNotBeNull();
+        X509Certificate2 certificate = server.Tls.ShouldNotBeNull().RemoteCertificate.ShouldNotBeNull();
         string thumbprint = certificate.Thumbprint;
         await server.DisposeAsync();
 
         // Assert — the connection owned the certificate and released it with itself.
         thumbprint.ShouldBe(_fixture.ClientCertificate.Thumbprint);
         certificate.Handle.ShouldBe(IntPtr.Zero);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Security] - Features: TLS exposes its handshake and the wrapped connection's features")]
+    public async Task Features_WithFeatureBelowTlsLayer_ShouldExposeTlsAndInnerFeature()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        TestConnectionFeature innerFeature = new();
+
+        // Act
+        (IConnection client, IConnection server) = await UpgradePairAsync(
+            null,
+            null,
+            timeout.Token,
+            configureConnection: connection => connection.Features.Set(innerFeature));
+        await using IConnection clientLifetime = client;
+        await using IConnection serverLifetime = server;
+
+        // Assert
+        server.Tls.ShouldNotBeNull().Name.ShouldBe(ITlsConnectionInfo.FeatureName);
+        server.Features.Get(ITlsConnectionInfo.FeatureName).ShouldBeSameAs(server.Tls);
+        server.Features.Get<TestConnectionFeature>().ShouldBeSameAs(innerFeature);
+        server.Features.Get(innerFeature.Name).ShouldBeSameAs(innerFeature);
     }
 
     internal static void UseClientCertificate(TlsClientOptions options, X509Certificate2 certificate)
@@ -157,7 +181,8 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         List<SslApplicationProtocol>? clientProtocols,
         CancellationToken cancellationToken,
         Action<TlsServerOptions>? configureServer = null,
-        Action<TlsClientOptions>? configureClient = null)
+        Action<TlsClientOptions>? configureClient = null,
+        Action<Connection>? configureConnection = null)
     {
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
         TlsServerOptions serverOptions = new()
@@ -177,6 +202,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
                 RemoteCertificateValidationCallback = static (_, _, _, _) => true
             }
         };
+        configureConnection?.Invoke(server);
         configureServer?.Invoke(serverOptions);
         configureClient?.Invoke(clientOptions);
 

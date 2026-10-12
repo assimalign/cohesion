@@ -105,6 +105,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private readonly Http3ConnectionContext _connection;
     private readonly Http3RequestStreamReader _reader;
     private readonly IConnection _streamConnection;
+    // Resolve only when a read or end probe needs it, so a known FIN creates no feature collection.
+    private IMultiplexedStreamAbort? _directionalAbort;
+    private bool _directionalAbortResolved;
     private readonly long _streamId;
     private readonly HttpTrailerCollection _trailers;
     private readonly long? _declaredContentLength;
@@ -415,7 +418,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             return;
         }
 
-        Http3ConnectionContext.StopReadingWithCode(_streamConnection, Http3ErrorCode.NoError);
+        DirectionalAbort?.AbortRead((long)Http3ErrorCode.NoError);
     }
 
     /// <summary>
@@ -478,6 +481,26 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         base.Dispose(disposing);
     }
 
+    private IMultiplexedStreamAbort? DirectionalAbort
+    {
+        get
+        {
+            if (!Volatile.Read(ref _directionalAbortResolved))
+            {
+                lock (_gate)
+                {
+                    if (!_directionalAbortResolved)
+                    {
+                        _directionalAbort = _streamConnection.DirectionalAbort;
+                        Volatile.Write(ref _directionalAbortResolved, true);
+                    }
+                }
+            }
+
+            return _directionalAbort;
+        }
+    }
+
     private async ValueTask<int> ReadCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         if (ClientFaultStatusCode is not null)
@@ -525,11 +548,11 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
             rateDeadline = new CancellationTokenSource(allowance, _timeProvider);
 
-            if (_streamConnection is IMultiplexedStreamAbort)
+            if (DirectionalAbort is not null)
             {
                 stopOnDeadline = rateDeadline.Token.UnsafeRegister(
-                    static state => Http3ConnectionContext.StopReadingWithCode((IConnection)state!, Http3ErrorCode.NoError),
-                    _streamConnection);
+                    static state => ((IMultiplexedStreamAbort)state!).AbortRead((long)Http3ErrorCode.NoError),
+                    DirectionalAbort);
             }
 
             rateStart = _timeProvider.GetTimestamp();
@@ -537,7 +560,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
         (CancellationToken readToken, CancellationTokenSource? linked) = LinkAbort(
             cancellationToken,
-            rateDeadline is not null && _streamConnection is not IMultiplexedStreamAbort ? rateDeadline.Token : default);
+            rateDeadline is not null && DirectionalAbort is null ? rateDeadline.Token : default);
 
         try
         {
@@ -1035,7 +1058,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     {
         // Cancelling a pending read on the QUIC driver would stop the stream with the driver's default code, so
         // a stream that carries a code is stopped with H3_NO_ERROR instead, which fails the read.
-        CancellationTokenSource? cancellation = _streamConnection is IMultiplexedStreamAbort ? null : new CancellationTokenSource();
+        CancellationTokenSource? cancellation = DirectionalAbort is not null ? null : new CancellationTokenSource();
         ValueTask<Http3FrameHeader?> pending = _reader.ReadFrameHeaderAsync(cancellation?.Token ?? CancellationToken.None);
 
         if (!pending.IsCompleted)
@@ -1106,7 +1129,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
         if (!_reader.IsCompleted)
         {
-            Http3ConnectionContext.StopReadingWithCode(_streamConnection, Http3ErrorCode.NoError);
+            DirectionalAbort?.AbortRead((long)Http3ErrorCode.NoError);
             reason = new Http3StreamException(
                 Http3ErrorCode.NoError,
                 "The server stopped reading the request stream after sending a complete response (RFC 9114 §4.1).");

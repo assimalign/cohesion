@@ -78,7 +78,7 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
         }
     }
 
-    private sealed class ResponseConnection : Connection, IMultiplexedStreamAbort
+    private sealed class ResponseConnection : Connection
     {
         private readonly Connection _inner;
         private readonly PipeWriter _writer;
@@ -88,6 +88,8 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
             _inner = inner;
             _writer = writer;
         }
+
+        protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
 
         public override ConnectionId Id => _inner.Id;
         public override EndPoint? LocalEndPoint => _inner.LocalEndPoint;
@@ -99,8 +101,6 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
         public override ConnectionState State => _inner.State;
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
-        public void AbortRead(long errorCode) => (_inner as IMultiplexedStreamAbort)?.AbortRead(errorCode);
-        public void AbortWrite(long errorCode) => (_inner as IMultiplexedStreamAbort)?.AbortWrite(errorCode);
         public override ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
@@ -145,6 +145,8 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
             _owner = owner;
             _inner = inner;
         }
+
+        protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
 
         public override ConnectionId Id => _inner.Id;
         public override EndPoint? LocalEndPoint => _inner.LocalEndPoint;

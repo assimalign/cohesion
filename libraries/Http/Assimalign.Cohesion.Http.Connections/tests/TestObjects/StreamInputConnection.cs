@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// transport completion independently from the stream-backed pipe. Everything else is the inner connection's, including the
 /// coded stream aborts of a multiplexed stream end.
 /// </summary>
-internal sealed class StreamInputConnection : Connection, IMultiplexedStreamAbort, IConnectionInputCompletion
+internal sealed class StreamInputConnection : Connection, IConnectionInputCompletion
 {
     private readonly Connection _inner;
 
@@ -27,6 +27,9 @@ internal sealed class StreamInputConnection : Connection, IMultiplexedStreamAbor
         _inner = inner;
         Input = PipeReader.Create(inner.Input.AsStream());
     }
+
+    /// <inheritdoc />
+    protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
 
     /// <inheritdoc />
     public override ConnectionId Id => _inner.Id;
@@ -85,12 +88,6 @@ internal sealed class StreamInputConnection : Connection, IMultiplexedStreamAbor
 
     /// <inheritdoc />
     public override void Abort(Exception? reason = null) => _inner.Abort(reason);
-
-    /// <inheritdoc />
-    public void AbortRead(long errorCode) => (_inner as IMultiplexedStreamAbort)?.AbortRead(errorCode);
-
-    /// <inheritdoc />
-    public void AbortWrite(long errorCode) => (_inner as IMultiplexedStreamAbort)?.AbortWrite(errorCode);
 
     /// <inheritdoc />
     public override ValueTask DisposeAsync() => _inner.DisposeAsync();

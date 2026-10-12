@@ -12,7 +12,8 @@ protocols and configure their limits. Generic exchange interceptors let HTTP fea
 behavior such as streaming, protocol upgrades and extended CONNECT.
 
 TLS is composed onto the underlying listener before registration. The transport publishes the
-negotiated handshake through the connection's `ITlsConnectionInfo` facet; `Http.Tls` provides the
+negotiated handshake from the connection's `Tls` feature as an `ITlsConnectionInfo` facet on HTTP's
+connection-info snapshot; `Http.Tls` provides the
 application accessor. Routing, authentication, form parsing and session policy belong to consumers.
 
 ## Dependencies

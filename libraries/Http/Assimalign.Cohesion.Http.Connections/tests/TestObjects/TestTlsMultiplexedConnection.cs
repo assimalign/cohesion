@@ -25,6 +25,12 @@ internal sealed class TestTlsMultiplexedConnection : MultiplexedConnection, ITls
         RemoteCertificate = remoteCertificate;
     }
 
+    public string Name => ITlsConnectionInfo.FeatureName;
+
+    protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
+    protected override void ConfigureFeatures(IConnectionFeatureCollection features) => features.Set<ITlsConnectionInfo>(this);
+
     public SslApplicationProtocol ApplicationProtocol => SslApplicationProtocol.Http3;
 
     public SslProtocols TlsProtocol => SslProtocols.Tls13;

@@ -156,6 +156,13 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         QuicConnectionEventSource.Log.StreamOpened(Id, connectionId, Direction);
     }
 
+    string IConnectionFeature.Name => IMultiplexedStreamAbort.FeatureName;
+
+    protected override void ConfigureFeatures(IConnectionFeatureCollection features)
+    {
+        features.Set(this);
+    }
+
     /// <inheritdoc />
     public bool IsInputCompleted => !_readAborted && _readsClosed.IsCompletedSuccessfully;
 

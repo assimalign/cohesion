@@ -24,6 +24,12 @@ internal sealed class StallingConnection : Connection, IMultiplexedStreamAbort
         Writer = new StallingPipeWriter(inner.Output);
     }
 
+    public string Name => IMultiplexedStreamAbort.FeatureName;
+
+    protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
+    protected override void ConfigureFeatures(IConnectionFeatureCollection features) => features.Set(this);
+
     /// <summary>Gets the stalling output, which the test stalls and credits.</summary>
     public StallingPipeWriter Writer { get; }
 
@@ -70,14 +76,14 @@ internal sealed class StallingConnection : Connection, IMultiplexedStreamAbort
     /// <inheritdoc />
     public void AbortRead(long errorCode)
     {
-        (_inner as IMultiplexedStreamAbort)?.AbortRead(errorCode);
+        _inner.DirectionalAbort?.AbortRead(errorCode);
     }
 
     /// <inheritdoc />
     public void AbortWrite(long errorCode)
     {
         WriteAbortCode ??= errorCode;
-        (_inner as IMultiplexedStreamAbort)?.AbortWrite(errorCode);
+        _inner.DirectionalAbort?.AbortWrite(errorCode);
     }
 
     /// <inheritdoc />

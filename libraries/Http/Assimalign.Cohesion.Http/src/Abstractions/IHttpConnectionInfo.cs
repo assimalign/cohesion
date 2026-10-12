@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http;
 /// A transport may publish further facts about the connection as <em>facets</em>: additional
 /// interfaces the object it hands out also implements, found with a type test. The server transport
 /// (<c>Assimalign.Cohesion.Http.Connections</c>) publishes what a TLS handshake negotiated as the
-/// Connections contracts library's <c>ITlsConnectionInfo</c>, which the
+/// <c>Assimalign.Cohesion.Connections.Tls</c> package's <c>ITlsConnectionInfo</c>, which the
 /// <c>context.TlsConnection</c> accessor (<c>Assimalign.Cohesion.Http.Tls</c>) reads. A facet keeps
 /// this interface free of members only some connections can answer. Code that wraps an
 /// <see cref="IHttpContext"/> therefore forwards the inner context's connection info rather than

@@ -424,6 +424,13 @@ internal class InMemoryConnection : Connection
         {
         }
 
+        string IConnectionFeature.Name => IMultiplexedStreamAbort.FeatureName;
+
+        protected override void ConfigureFeatures(IConnectionFeatureCollection features)
+        {
+            features.Set(this);
+        }
+
         /// <inheritdoc />
         public void AbortRead(long errorCode) => AbortInput(errorCode);
 

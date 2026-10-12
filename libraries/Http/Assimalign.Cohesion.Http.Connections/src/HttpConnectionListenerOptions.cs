@@ -361,7 +361,7 @@ public sealed class HttpConnectionListenerOptions
     /// <c>http/1.1</c>, or no protocol at all because the client sent no ALPN extension, is served
     /// HTTP/1.1. A connection that negotiated any other protocol is closed: the handshake bound it to a
     /// protocol this registration does not speak. The protocol is read through
-    /// <see cref="ITlsConnectionInfo"/> on the accepted connection, so a connection that does not
+    /// the <c>Tls</c> feature on the accepted connection, so a connection that does not
     /// report its handshake is served HTTP/1.1.
     /// </para>
     /// <para>

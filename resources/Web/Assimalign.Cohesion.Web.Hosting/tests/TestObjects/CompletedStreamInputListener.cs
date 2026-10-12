@@ -46,6 +46,8 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
             _publishCompletion = publishCompletion;
         }
 
+        protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
         public override ConnectionId Id => _inner.Id;
 
         public override EndPoint? LocalEndPoint => _inner.LocalEndPoint;
@@ -87,7 +89,7 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
         public override ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
-    private sealed class CompletedInputConnection : Connection, IConnectionInputCompletion, IMultiplexedStreamAbort
+    private sealed class CompletedInputConnection : Connection, IConnectionInputCompletion
     {
         private readonly Connection _inner;
         private readonly MemoryStream _payload;
@@ -102,6 +104,8 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
         }
 
         public bool IsInputCompleted => _publishCompletion && _payload.Position == _payload.Length;
+
+        protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
 
         public override ConnectionId Id => _inner.Id;
 
@@ -122,10 +126,6 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
-
-        public void AbortRead(long errorCode) => (_inner as IMultiplexedStreamAbort)?.AbortRead(errorCode);
-
-        public void AbortWrite(long errorCode) => (_inner as IMultiplexedStreamAbort)?.AbortWrite(errorCode);
 
         public override async ValueTask DisposeAsync()
         {

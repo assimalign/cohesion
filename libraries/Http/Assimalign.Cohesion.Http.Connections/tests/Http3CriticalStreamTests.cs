@@ -75,7 +75,7 @@ public class Http3CriticalStreamTests
         server!.AbortErrorCode.ShouldBeNull();
 
         // Act — the client resets its control stream (RESET_STREAM).
-        control.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortWrite(0x10c);
+        control.DirectionalAbort.ShouldNotBeNull().AbortWrite(0x10c);
         await server.ConnectionClosed.WhenCancelledAsync();
 
         // Assert — the connection closes with the code, and the receive enumeration ends.

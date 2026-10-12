@@ -83,11 +83,14 @@ $script:CohesionReleaseLibrary = @(
 
     # libraries/Connections
     'libraries/Connections/Assimalign.Cohesion.Connections'
-    'libraries/Connections/Assimalign.Cohesion.Connections.Tcp'
-    'libraries/Connections/Assimalign.Cohesion.Connections.Udp'
+    'libraries/Connections/Assimalign.Cohesion.Connections.InMemory'
     'libraries/Connections/Assimalign.Cohesion.Connections.Quic'
     'libraries/Connections/Assimalign.Cohesion.Connections.Security'
-    'libraries/Connections/Assimalign.Cohesion.Connections.InMemory'
+    'libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort'
+    'libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits'
+    'libraries/Connections/Assimalign.Cohesion.Connections.Tcp'
+    'libraries/Connections/Assimalign.Cohesion.Connections.Tls'
+    'libraries/Connections/Assimalign.Cohesion.Connections.Udp'
 
     # libraries/Content
     'libraries/Content/Assimalign.Cohesion.Content'

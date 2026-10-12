@@ -11,8 +11,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The negotiated protocol is read through <see cref="ITlsConnectionInfo"/>, which the connection that
-/// ran the handshake implements; this package never runs TLS itself. <c>h2</c> selects HTTP/2;
+/// The negotiated protocol is read through the connection's registered <see cref="ITlsConnectionInfo"/>
+/// feature; this package never runs TLS itself. <c>h2</c> selects HTTP/2;
 /// <c>http/1.1</c> selects HTTP/1.1, and so does a connection that negotiated no protocol (a client
 /// that sent no ALPN extension, or a connection that does not report its handshake), because HTTP/1.1
 /// is what a client that does not negotiate expects of an <c>https</c> origin.
@@ -62,9 +62,7 @@ internal sealed class HttpAlpnConnectionFactory : HttpConnectionFactory
 
     public override HttpConnection? Create(IConnection connection, bool isSecure)
     {
-        SslApplicationProtocol protocol = connection is ITlsConnectionInfo tls
-            ? tls.ApplicationProtocol
-            : default;
+        SslApplicationProtocol protocol = connection.Tls?.ApplicationProtocol ?? default;
 
         if (protocol == SslApplicationProtocol.Http2)
         {

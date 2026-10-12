@@ -40,7 +40,7 @@ namespace Assimalign.Cohesion.Connections.Quic;
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConnectionInfo, IMultiplexedConnectionAbort, IMultiplexedConnectionStreamLimits
+public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiplexedConnectionAbort
 {
     // RFC 9000 §16 — an application error code is a variable-length integer.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
@@ -109,18 +109,18 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         IsMultiplexed: true,
         ConnectionSecurity.Tls);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="ITlsConnectionInfo.ApplicationProtocol" />
     /// <remarks>QUIC requires ALPN (RFC 9001 §8.1), so an established connection always reports one.</remarks>
     public SslApplicationProtocol ApplicationProtocol { get; }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="ITlsConnectionInfo.TlsProtocol" />
     /// <remarks>QUIC carries TLS 1.3 (RFC 9001 §4), so this is <see cref="SslProtocols.Tls13"/>.</remarks>
     public SslProtocols TlsProtocol { get; }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="ITlsConnectionInfo.CipherSuite" />
     public TlsCipherSuite CipherSuite { get; }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="ITlsConnectionInfo.RemoteCertificate" />
     /// <remarks>
     /// The connection owns the certificate and disposes it when the connection is disposed.
     /// </remarks>
@@ -132,8 +132,15 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     /// <inheritdoc />
     public override CancellationToken ConnectionClosed => _connectionClosedSource.Token;
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="IMultiplexedConnectionStreamLimits.InboundBidirectionalStreamLimit" />
     public long InboundBidirectionalStreamLimit => Volatile.Read(ref _inboundBidirectionalStreamLimit);
+
+    /// <inheritdoc />
+    protected override void ConfigureFeatures(IConnectionFeatureCollection features)
+    {
+        features.Set(new QuicTlsConnectionInfo(this));
+        features.Set(new QuicConnectionStreamLimits(this));
+    }
 
     internal int TrackedStreamCount => _streams.Count;
 

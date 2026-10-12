@@ -65,7 +65,7 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         // Assert
         validated.ShouldNotBeNull();
         validated.Thumbprint.ShouldBe(_fixture.ClientCertificate.Thumbprint);
-        secured.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(_fixture.ClientCertificate.Thumbprint);
+        secured.Tls.ShouldNotBeNull().RemoteCertificate!.Thumbprint.ShouldBe(_fixture.ClientCertificate.Thumbprint);
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Security] - RequireClientCertificate: Should refuse a client that presents no certificate")]
@@ -111,7 +111,7 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         await client;
 
         // Assert
-        secured.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate.ShouldBeNull();
+        secured.Tls.ShouldNotBeNull().RemoteCertificate.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Security] - AllowClientCertificate: Should refuse an untrusted certificate under the platform's default validation")]
@@ -144,7 +144,7 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         await client;
 
         // Assert
-        secured.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate.ShouldBeNull();
+        secured.Tls.ShouldNotBeNull().RemoteCertificate.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Security] - RequireClientCertificate: Should not overwrite an application's validation callback")]

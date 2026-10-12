@@ -385,7 +385,7 @@ public class WebApplicationServerClientFaultTests
             endStream: false,
             cancellationToken);
         await firstRead.Task.WaitAsync(cancellationToken);
-        ((IMultiplexedStreamAbort)stream).AbortWrite(0x10c);
+        stream!.DirectionalAbort!.AbortWrite(0x10c);
         (Exception failure, bool cancelled, CohesionHttpStatusCode? fault) = await failed.Task.WaitAsync(cancellationToken);
         (IReadOnlyList<int> statuses, long? resetCode) = await Http3RawClient.ReadResponseAsync(stream, cancellationToken);
 

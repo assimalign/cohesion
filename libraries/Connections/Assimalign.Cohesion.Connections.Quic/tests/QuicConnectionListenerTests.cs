@@ -129,7 +129,7 @@ public class QuicConnectionListenerTests
 
         // Assert — the accept that was pending when the refusal happened returned the second client.
         acceptEndedByRefusal.ShouldBeFalse();
-        server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(clientCertificate.Thumbprint);
+        server.Tls.ShouldNotBeNull().RemoteCertificate!.Thumbprint.ShouldBe(clientCertificate.Thumbprint);
     }
 
     [Fact]

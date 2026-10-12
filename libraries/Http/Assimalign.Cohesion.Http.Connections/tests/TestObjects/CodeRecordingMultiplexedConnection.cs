@@ -29,6 +29,9 @@ internal sealed class CodeRecordingMultiplexedConnection : MultiplexedConnection
     public Exception? AbortReason { get; private set; }
 
     /// <inheritdoc />
+    protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
+    /// <inheritdoc />
     public override ConnectionId Id => _inner.Id;
 
     /// <inheritdoc />

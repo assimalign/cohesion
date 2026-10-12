@@ -24,8 +24,13 @@ namespace Assimalign.Cohesion.Connections;
 /// layer that returns the connection it was given keeps it visible.
 /// </para>
 /// </remarks>
-public interface ITlsConnectionInfo
+public interface ITlsConnectionInfo : IConnectionFeature
 {
+    /// <summary>
+    /// The name of the TLS connection feature.
+    /// </summary>
+    public const string FeatureName = "Tls";
+
     /// <summary>
     /// Gets the application protocol the handshake selected through Application-Layer Protocol
     /// Negotiation (ALPN, RFC 7301), or <see langword="default"/> when no protocol was selected

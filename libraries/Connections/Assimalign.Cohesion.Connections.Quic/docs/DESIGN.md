@@ -24,14 +24,37 @@ correct for the protocols that run over it.
 | `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
 | `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes, and the bound on disposal's wait for stream delivery (`CloseDeliveryTimeout`, see "Lifecycle and teardown"). The listener also exposes `HandshakeTimeout`. Both default ALPN to HTTP/3 (see "Error model"). |
-| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Implements the contracts library's `ITlsConnectionInfo` (see "Handshake facts") and `IMultiplexedConnectionAbort` (see "Application error codes"). |
-| `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. Implements `IMultiplexedStreamAbort`. |
+| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Registers `Tls` and `StreamLimits` feature objects (see below), and implements `IMultiplexedConnectionAbort` (see "Application error codes"). |
+| `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. Registers itself as the `DirectionalAbort` feature. |
 
 `QuicMultiplexedConnection` and the listener/factory are `public sealed`
 concretes (not interface-first `internal` implementations) because they
 *are* the driver's surface: consumers select the driver by constructing
 it, then immediately fall back to the `IMultiplexedConnection` /
 `IConnection` contracts. This mirrors the Tcp/Udp sibling drivers.
+
+## Connection features (#1452)
+
+The driver references `Connections.Tls`, `Connections.StreamLimits` and `Connections.StreamAbort`.
+Its lazy `ConfigureFeatures` hook registers separate TLS and stream-limit objects, each returning
+its contract's pinned `FeatureName`. Distinct objects matter because one feature has only one name.
+The existing public facts properties remain on `QuicMultiplexedConnection`; the TLS and limits
+contracts are implemented only by the two dedicated objects. Keeping both contracts on the
+connection would give it two incompatible required feature names through the single
+`IConnectionFeature.Name` member. Each QUIC stream registers itself only for `DirectionalAbort`.
+Stream collections never fall back to their parent connection.
+
+Applications read `connection.Tls`, `connection.StreamLimits` and `stream.DirectionalAbort`,
+which continue through layers that override `InnerFeatures`. Features allocate only on first
+access. Cache a discovered feature when using it repeatedly on a connection or stream.
+
+Adding `Features` to the three connection interfaces breaks implementers of 10.0.0-preview.1
+under owner decisions 15 and 56; the guided bases cover subclasses. Moving these optional
+contracts breaks no released API because they postdate preview.1. Removing
+`ITlsConnectionInfo` and `IMultiplexedConnectionStreamLimits` from the public concrete connection
+is an additional public-surface change required by the one-object, one-name rule, recorded for
+owner review under escalations. These implementations also postdate preview.1; existing public
+facts properties remain available, while consumers discover the contracts through the features.
 
 ## Stream surfacing
 
@@ -99,7 +122,8 @@ the API is additive; the incremental HTTP/3 body signal it improves was introduc
 
 ## Inbound stream allowance (#1425)
 
-`QuicMultiplexedConnection` implements the generic `IMultiplexedConnectionStreamLimits` facet.
+`QuicMultiplexedConnection` registers an `IMultiplexedConnectionStreamLimits` feature from
+`Connections.StreamLimits`, available through `connection.StreamLimits`.
 Its `InboundBidirectionalStreamLimit` starts at the inbound bidirectional concurrency configured
 for the connection and increases once per inbound bidirectional stream whose disposal starts,
 saturating at QUIC's maximum of 2^60 streams. Outbound streams and unidirectional streams do not
@@ -127,12 +151,12 @@ or HTTP-specific semantics are added. The facet is an additive API relative to
 ## Handshake facts
 
 QUIC runs a TLS 1.3 handshake inside its own (RFC 9001), so a QUIC connection is a TLS-terminating
-connection in the contracts' sense. `QuicMultiplexedConnection` implements `ITlsConnectionInfo` and
-reports what that handshake negotiated: the ALPN application protocol, the TLS version (always
+connection in the contracts' sense. `QuicMultiplexedConnection` registers an `ITlsConnectionInfo`
+feature from `Connections.Tls`, available through `connection.Tls`, reporting what that handshake negotiated: the ALPN application protocol, the TLS version (always
 TLS 1.3), the cipher suite, and the peer's certificate (the client's on a server-side connection,
 present when the listener's `ServerAuthenticationOptions` requested one). The values are captured
 when the connection is wrapped, after `System.Net.Quic` has completed the handshake, and are the
-same on every stream of the connection; the streams themselves do not implement the facet. The
+same for the lifetime of the connection; streams do not inherit the connection's features. The
 driver reads the values and never branches on them, so it stays free of protocol semantics.
 
 Reading `QuicConnection.RemoteCertificate` hands the certificate's ownership to the reader (a
@@ -290,8 +314,9 @@ is routine for streams released after their owning connection closed.
 
 ## Application error codes
 
-The driver implements the contracts library's two code-carrying facets
-(#1080), so a protocol chooses the code each abort puts on the wire:
+The driver registers the `Connections.StreamAbort` directional-abort feature and
+implements core's `IMultiplexedConnectionAbort` contract (#1080), so a protocol
+chooses the code each abort puts on the wire:
 
 | Call | `System.Net.Quic` call | Frame |
 | --- | --- | --- |

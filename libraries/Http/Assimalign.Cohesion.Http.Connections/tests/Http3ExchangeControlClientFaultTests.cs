@@ -205,7 +205,7 @@ public class Http3ExchangeControlClientFaultTests
         Task<int> pending = context.Request.Body.ReadAsync(new byte[256]).AsTask();
 
         // Act — RESET_STREAM(H3_REQUEST_CANCELLED): the client cancels its own request (RFC 9114 §4.1.1).
-        ((IMultiplexedStreamAbort)request).AbortWrite((long)Http3ErrorCode.RequestCancelled);
+        request!.DirectionalAbort!.AbortWrite((long)Http3ErrorCode.RequestCancelled);
         Exception? failure = await CaptureFailureAsync(pending);
         bool cancelledWhenReadFailed = context.RequestCancelled.IsCancellationRequested;
         Exception? laterFailure = await TryReadToEndAsync(context.Request.Body);
@@ -310,7 +310,7 @@ public class Http3ExchangeControlClientFaultTests
                 await controlStream.Output.CompleteAsync();
                 break;
             case ConnectionFailure.ControlReset:
-                ((IMultiplexedStreamAbort)controlStream).AbortWrite((long)Http3ErrorCode.RequestCancelled);
+                controlStream!.DirectionalAbort!.AbortWrite((long)Http3ErrorCode.RequestCancelled);
                 break;
             case ConnectionFailure.ForbiddenControlFrame:
                 expectedCode = Http3ErrorCode.UnexpectedFrame;

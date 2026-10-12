@@ -11,9 +11,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-		<!-- ITlsConnectionInfo, the handshake facet the server transport publishes on each
-		     exchange's connection info. Connections is an App kernel root, so this adds no
-		     framework member. -->
-		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<!-- ITlsConnectionInfo is the connection feature contract carried by HTTP connection info. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tls" />
 	</ItemGroup>
 </Project>

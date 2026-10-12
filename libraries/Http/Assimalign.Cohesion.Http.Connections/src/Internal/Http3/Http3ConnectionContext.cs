@@ -26,6 +26,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     // The QUIC handshake's facts, published on every request stream's connection info as the
     // ITlsConnectionInfo facet; null when the connection does not report them (see HttpTlsConnectionInfo).
     private readonly ITlsConnectionInfo? _tls;
+    private readonly IMultiplexedConnectionStreamLimits? _streamLimits;
     private readonly Http3QPackOptions _qpackOptions;
     private readonly Http3PeerSettings _peerSettings = new();
     // Cancelled when the receive enumeration tears down — the consumer ended it, or a connection error
@@ -147,7 +148,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     {
         _connection = connection;
         _isSecure = isSecure;
-        _tls = connection as ITlsConnectionInfo;
+        _tls = connection.Tls;
+        _streamLimits = connection.StreamLimits;
         _limits = limits;
         _responseHeaderPolicy = responseHeaderPolicy ?? HttpResponseHeaderPolicy.Default;
         _requestInterceptors = requestInterceptors;
@@ -1003,7 +1005,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="reason">The stream error, carrying the code.</param>
     internal static void ResetStream(IConnection streamConnection, Http3StreamException reason)
     {
-        if (streamConnection is IMultiplexedStreamAbort coded)
+        if (streamConnection.DirectionalAbort is { } coded)
         {
             coded.AbortWrite((long)reason.ErrorCode);
             coded.AbortRead((long)reason.ErrorCode);
@@ -1021,7 +1023,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="errorCode">The RFC 9114 §8.1 code the peer receives.</param>
     internal static void StopReadingWithCode(IConnection streamConnection, Http3ErrorCode errorCode)
     {
-        if (streamConnection is IMultiplexedStreamAbort coded)
+        if (streamConnection.DirectionalAbort is { } coded)
         {
             coded.AbortRead((long)errorCode);
         }
@@ -1513,7 +1515,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         // RFC 9218 §7.2 — IDs at or beyond four times the cumulative stream allowance are invalid.
         // Divide the nonnegative ID instead of multiplying the limit, which could overflow.
-        if (_connection is IMultiplexedConnectionStreamLimits limits
+        if (_streamLimits is { } limits
             && prioritizedStreamId / 4 >= limits.InboundBidirectionalStreamLimit)
         {
             return new Http3ConnectionException(

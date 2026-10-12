@@ -7,8 +7,13 @@ namespace Assimalign.Cohesion.Connections;
 /// Consumers discover this facet with a type test on <see cref="IMultiplexedConnection"/>.
 /// It supplies transport facts without requiring a connection to interpret application protocols.
 /// </remarks>
-public interface IMultiplexedConnectionStreamLimits
+public interface IMultiplexedConnectionStreamLimits : IConnectionFeature
 {
+    /// <summary>
+    /// Gets the name of the connection feature.
+    /// </summary>
+    public const string FeatureName = "StreamLimits";
+
     /// <summary>
     /// Gets a conservative upper bound on the cumulative number of bidirectional streams the peer
     /// may have been permitted to initiate during this connection's lifetime.

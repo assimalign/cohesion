@@ -37,6 +37,9 @@ internal sealed class StallingMultiplexedConnection : MultiplexedConnection
     }
 
     /// <inheritdoc />
+    protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
+
+    /// <inheritdoc />
     public override ConnectionId Id => _inner.Id;
 
     /// <inheritdoc />

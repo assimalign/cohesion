@@ -312,7 +312,7 @@ public class ResponseClientFaultTests
             }
             else
             {
-                ((IMultiplexedStreamAbort)requestStream!).AbortRead(0x10c);
+                requestStream!.DirectionalAbort!.AbortRead(0x10c);
             }
             writeAgain.TrySetResult();
 

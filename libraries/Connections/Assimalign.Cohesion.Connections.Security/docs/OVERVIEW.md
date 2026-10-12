@@ -10,6 +10,7 @@ in the Connections area because it composes directly over the connection contrac
 
 - `Assimalign.Cohesion.Core`
 - `Assimalign.Cohesion.Connections`
+- `Assimalign.Cohesion.Connections.Tls`
 
 ## Key Types
 
@@ -24,8 +25,9 @@ in the Connections area because it composes directly over the connection contrac
   `TlsServerOptions.MaxConcurrentHandshakes` (default 512) bounds the handshakes a TLS-layered
   listener runs at once. Each handshake runs on its own task, and one that fails or times out closes
   only its connection.
-- The secured connection implements the contracts' `ITlsConnectionInfo`: ALPN protocol, TLS
-  version, cipher suite, and the peer's certificate.
+- The secured connection registers `ITlsConnectionInfo` from `Connections.Tls` under its pinned
+  `Tls` name: ALPN protocol, TLS version, cipher suite, and the peer's certificate. Read it with
+  `connection.Tls`. Features registered below the TLS layer pass through automatically.
 
 ## Source Layout
 

@@ -7,6 +7,9 @@
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections.StreamAbort" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections.StreamLimits" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tls" />
     </ItemGroup>
     <ItemGroup>
         <!-- The driver's pipe plumbing (StreamPipeOptionsContext and PipeOptionsFactory, which

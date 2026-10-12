@@ -1021,6 +1021,28 @@
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Security/tests/">
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Security/tests/Assimalign.Cohesion.Connections.Security.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort/" />
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort/docs/">
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort/docs/DESIGN.md" />
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort/src/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort/src/Assimalign.Cohesion.Connections.StreamAbort.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort/tests/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.StreamAbort/tests/Assimalign.Cohesion.Connections.StreamAbort.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits/" />
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits/docs/">
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits/docs/DESIGN.md" />
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits/src/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits/src/Assimalign.Cohesion.Connections.StreamLimits.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits/tests/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.StreamLimits/tests/Assimalign.Cohesion.Connections.StreamLimits.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/" />
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/docs/">
 		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.Tcp/docs/DESIGN.md" />
@@ -1031,6 +1053,17 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/tests/">
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Tcp/tests/Assimalign.Cohesion.Connections.Tcp.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tls/" />
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tls/docs/">
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.Tls/docs/DESIGN.md" />
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.Tls/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tls/src/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Tls/src/Assimalign.Cohesion.Connections.Tls.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tls/tests/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Tls/tests/Assimalign.Cohesion.Connections.Tls.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Udp/" />
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Udp/docs/">

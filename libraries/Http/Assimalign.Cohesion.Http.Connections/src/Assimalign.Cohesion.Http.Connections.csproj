@@ -6,6 +6,9 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tls" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.StreamAbort" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.StreamLimits" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 	</ItemGroup>
 

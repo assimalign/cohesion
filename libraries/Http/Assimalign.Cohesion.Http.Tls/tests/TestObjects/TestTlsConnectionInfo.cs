@@ -24,6 +24,8 @@ internal sealed class TestTlsConnectionInfo : HttpConnectionInfo, ITlsConnection
         CipherSuite = cipherSuite;
     }
 
+    public string Name => ITlsConnectionInfo.FeatureName;
+
     public SslApplicationProtocol ApplicationProtocol { get; }
 
     public SslProtocols TlsProtocol { get; }

@@ -78,11 +78,11 @@ public class Http3ResponseClientFaultTests
         // Act
         if (stopSending)
         {
-            ((IMultiplexedStreamAbort)request).AbortRead((long)Http3ErrorCode.RequestCancelled);
+            request!.DirectionalAbort!.AbortRead((long)Http3ErrorCode.RequestCancelled);
         }
         else
         {
-            ((IMultiplexedStreamAbort)request).AbortWrite((long)Http3ErrorCode.RequestCancelled);
+            request!.DirectionalAbort!.AbortWrite((long)Http3ErrorCode.RequestCancelled);
         }
 
         OperationCanceledException failure;

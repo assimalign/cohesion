@@ -14,7 +14,7 @@ packages whose dependencies go beyond the root are drawn.
 ```mermaid
 flowchart LR
     Root["Http — area root"]
-    Conn["Assimalign.Cohesion.Connections — L1"]
+    Conn["Connections family — L1"]
     Cookies["Http.Cookies"]
     Forms["Http.Forms"]
     Antiforgery["Http.Antiforgery"]
@@ -70,8 +70,9 @@ concern and belongs there.
 In the repo's L1/L2/L3 model (see [docs/programs/DELIVERY_ROADMAP.md](../../docs/programs/DELIVERY_ROADMAP.md)),
 this area is **L1 — foundation**. It sits on `Assimalign.Cohesion.Core`, which the root
 `Assimalign.Cohesion.Http` references, and, for
-`Http.Connections` and `Http.Tls`, on `Assimalign.Cohesion.Connections`: the transport publishes a
-connection's TLS handshake as that library's `ITlsConnectionInfo` facet, and `Http.Tls` reads it,
+`Http.Connections`, on `Assimalign.Cohesion.Connections` and its feature packages, and
+`Http.Tls`, on `Assimalign.Cohesion.Connections.Tls`: the transport reads the connection's
+`Tls` feature and publishes an `ITlsConnectionInfo` snapshot on HTTP connection info. `Http.Tls` reads it,
 so neither of the two references the other. It references no `Assimalign.Cohesion.Hosting*`
 library and no resource area, and it never will: hosting composition, dependency injection, and
 configuration binding are `*.Hosting` concerns one layer up.

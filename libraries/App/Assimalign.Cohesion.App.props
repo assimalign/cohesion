@@ -126,6 +126,9 @@
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting.Resources" />
         <!-- Generated resource accessors and every area hosting module depend on Connections. -->
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections.StreamAbort" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections.StreamLimits" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections.Tls" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting.Telemetry" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Configuration.CommandLine" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Configuration.EnvironmentVariables" />

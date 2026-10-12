@@ -268,7 +268,7 @@ public class HttpExpectContinueTests
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
         IHttpContext context = await peer.NextContextAsync();
-        ((IMultiplexedStreamAbort)request).AbortRead((long)Http3ErrorCode.RequestCancelled);
+        request!.DirectionalAbort!.AbortRead((long)Http3ErrorCode.RequestCancelled);
 
         // Act
         Exception? failure = null;

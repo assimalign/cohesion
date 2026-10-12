@@ -34,10 +34,12 @@ endpoint's TLS options (`TlsServerOptions.RequireClientCertificate` or `AllowCli
 ## Dependencies
 
 - `Assimalign.Cohesion.Http`, the protocol core: `IHttpContext` and the feature collection.
-- `Assimalign.Cohesion.Connections`, the contracts library: `ITlsConnectionInfo`, the handshake facet.
+- `Assimalign.Cohesion.Connections.Tls`: `ITlsConnectionInfo`, the connection feature contract also
+  carried by HTTP's connection-info snapshot.
 
 The server transport (`Assimalign.Cohesion.Http.Connections`) does not reference this package. It
-publishes the handshake as the `ITlsConnectionInfo` facet of each exchange's `ConnectionInfo`, and
+reads the connection's `Tls` feature, publishes the handshake as the `ITlsConnectionInfo` facet of
+each exchange's `ConnectionInfo`, and
 the accessor builds the feature from that facet on first read. A request-parse interceptor, which
 runs before the exchange exists, reads the facet directly from its context's `ConnectionInfo`. The
 `App.Web` shared framework delivers this package to web applications.

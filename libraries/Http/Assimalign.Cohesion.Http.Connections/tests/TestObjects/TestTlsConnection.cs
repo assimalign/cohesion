@@ -44,6 +44,12 @@ internal sealed class TestTlsConnection : Connection, ITlsConnectionInfo
     /// </summary>
     public TestConnection Inner { get; }
 
+    public string Name => ITlsConnectionInfo.FeatureName;
+
+    protected override IConnectionFeatureCollection InnerFeatures => Inner.Features;
+
+    protected override void ConfigureFeatures(IConnectionFeatureCollection features) => features.Set<ITlsConnectionInfo>(this);
+
     public SslApplicationProtocol ApplicationProtocol { get; }
 
     public SslProtocols TlsProtocol { get; }

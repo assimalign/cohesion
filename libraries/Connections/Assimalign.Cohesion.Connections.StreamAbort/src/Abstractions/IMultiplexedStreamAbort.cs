@@ -30,8 +30,13 @@ namespace Assimalign.Cohesion.Connections;
 /// <see cref="System.IO.Pipelines.IDuplexPipe.Output"/> stays the graceful end of the sending direction.
 /// </para>
 /// </remarks>
-public interface IMultiplexedStreamAbort
+public interface IMultiplexedStreamAbort : IConnectionFeature
 {
+    /// <summary>
+    /// Gets the name of the connection feature.
+    /// </summary>
+    public const string FeatureName = "StreamAbort";
+
     /// <summary>
     /// Abandons the receiving direction: data not yet read is discarded, and the peer is asked to stop sending
     /// with <paramref name="errorCode"/> (a QUIC <c>STOP_SENDING</c> frame, RFC 9000 §19.5).

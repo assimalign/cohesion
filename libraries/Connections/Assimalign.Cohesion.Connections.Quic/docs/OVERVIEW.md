@@ -16,10 +16,10 @@ as every other transport.
 - `QuicMultiplexedConnection` — one QUIC connection; accepts and opens
   streams, each surfaced as a `Connection`, and reports its TLS 1.3
   handshake (ALPN protocol, cipher suite, peer certificate) through the
-  contracts' `ITlsConnectionInfo`. It and its streams carry the caller's
+  `Tls` feature from `Connections.Tls`. It and its streams carry the caller's
   QUIC application error codes through the contracts'
   `IMultiplexedConnectionAbort` (`CONNECTION_CLOSE`) and
-  `IMultiplexedStreamAbort` (`STOP_SENDING`, `RESET_STREAM`).
+  `DirectionalAbort` feature (`STOP_SENDING`, `RESET_STREAM`).
 - Options types covering endpoint, TLS/ALPN, stream limits, pipe buffer
   sizes, default QUIC application error codes (defaulting to the
   HTTP/3 codes, matching the default ALPN), and how long disposing a
@@ -34,7 +34,7 @@ unidirectional streams.
 Streams optionally expose `IConnectionInputCompletion`: a clean transport end already observed,
 without another read. Check the input pipe for buffered bytes as well before treating it as empty.
 
-The connection exposes `IMultiplexedConnectionStreamLimits.InboundBidirectionalStreamLimit`, a
+The connection exposes `connection.StreamLimits.InboundBidirectionalStreamLimit`, a
 conservative cumulative upper bound on the peer's bidirectional stream allowance. It grows as
 inbound bidirectional streams begin disposal, unlike the fixed concurrent limit configured by
 `MaxBidirectionalStreamCount`. Set that option before binding the listener; the bound listener
@@ -48,6 +48,9 @@ using the facet to validate references, because pending disposals may include un
   library's `shared/` folder (`CohesionSharedSource`). Diagnostics are the
   driver's own internal event source, `Assimalign.Cohesion.Connections.Quic`
   (see DESIGN.md, "Diagnostics").
+- `Assimalign.Cohesion.Connections.Tls`, `.StreamAbort` and `.StreamLimits` — optional
+  capability contracts and extension properties. Each connection registers its own features;
+  streams expose `DirectionalAbort` without inheriting connection TLS or limits.
 - `System.Net.Quic` (BCL) — the underlying QUIC implementation; platform
   support follows it (`windows` / `linux` / `macos`, gate with
   `QuicListener.IsSupported`).
@@ -81,7 +84,7 @@ ReadResult rest = await stream.Input.ReadAsync(cancellationToken);
 // Or refuse the rest of the peer's data with a code of the protocol's choosing (STOP_SENDING).
 // Completing Input without one stops it with DefaultStreamErrorCode. Once both halves are
 // complete the QUIC stream is released.
-if (stream is IMultiplexedStreamAbort abort)
+if (stream.DirectionalAbort is { } abort)
 {
     abort.AbortRead(0x100); // H3_NO_ERROR
 }
