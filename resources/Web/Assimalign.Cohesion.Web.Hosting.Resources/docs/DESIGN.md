@@ -69,10 +69,24 @@ No request-total counter or Meter instrument is added. StopAccepted is the scope
 management lifecycle acknowledgement, with `deferred` indicating response-completion scheduling.
 
 Malformed JSON/base64/argument faults retain HTTP 400. `phase=Envelope` covers parsing and command
-construction; it changes to `Handler` immediately before command dispatch. Only the exception type
+construction; it changes to `Handler` immediately before command dispatch. A handler failure
+already reported by the shared control plane is omitted from this source (#1434); custom control
+planes still report `Handler` when they throw a JSON, format or argument exception. Only the exception type
 is written: JSON and handler messages can contain command input. No event contains an Authorization
 value, credential, claim, caller identity, command key or command payload. Command execution outcomes
 belong to Hosting.Resources, not this HTTP source.
+
+The two assemblies compile one stateless internal `CommandFailureDiagnostics` helper. It uses the
+existing exception metadata carrier to associate a reported failure with its original command
+invocation. The BCL weak table stored there keys by reference identity and is consumed by this
+middleware: repeated or concurrent reuse of an exception cannot suppress another command, and no
+command payload is retained by the metadata. Registered control-plane wrappers pass the same
+invocation through. No shared static state, reflection, public diagnostic API or shipped visibility
+grant is involved. Marking happens even when the producer is disabled or throttled, so enabling
+only the Web source never moves execution events into it. An application-defined exception whose
+`Data` is read-only or throws cannot carry the marker; diagnostics preserve the original failure
+and HTTP status, and the HTTP source may also report that unusual handler fault. Exact de-duplication
+for such custom carriers needs a producer-owned public dispatch seam and remains an escalation.
 
 **Contributor ownership adjustment (#1400).** A throwing contributor is caught and sanitized inside
 Hosting.Resources. Existing contracts cannot carry its exception into this assembly without adding

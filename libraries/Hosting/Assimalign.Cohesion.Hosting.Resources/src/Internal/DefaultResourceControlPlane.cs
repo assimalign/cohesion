@@ -183,9 +183,11 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
         ArgumentException.ThrowIfNullOrWhiteSpace(command.Kind);
         ArgumentException.ThrowIfNullOrWhiteSpace(command.Owner);
         ArgumentException.ThrowIfNullOrWhiteSpace(command.Key);
+        ResourceCommand invocation = command;
         command = command with { Payload = command.Payload.ToArray() };
 
         await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        string? registeredKind = null;
         try
         {
             IResourceCommandHandler handler;
@@ -197,6 +199,7 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
                 {
                     throw new NotSupportedException($"Resource command kind '{command.Kind}' is not implemented by this control plane.");
                 }
+                registeredKind = command.Kind;
                 found = _commands.TryGetValue(command.Key, out existing);
                 if (found && !string.Equals(existing.Command.Owner, command.Owner, StringComparison.Ordinal))
                 {
@@ -220,19 +223,40 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
                         throw new ResourceCommandRejectedException($"Command id '{command.Id}' for owner '{command.Owner}' was already used for a different declaration.");
                     }
                 }
-                if (!delete && found && existing.Command.Id == command.Id)
-                {
-                    return existing.Response.ToArray();
-                }
             }
 
+            if (!delete && found && existing.Command.Id == command.Id)
+            {
+                ReadOnlyMemory<byte> replay = existing.Response.ToArray();
+                HostingResourceEventSource.Log.CommandApplied(registeredKind, delete);
+                return replay;
+            }
             if (delete && !found)
             {
+                HostingResourceEventSource.Log.CommandApplied(registeredKind, delete);
                 return ReadOnlyMemory<byte>.Empty;
             }
-            ReadOnlyMemory<byte> response = delete
-                ? await handler.DeleteAsync(existing.Command, cancellationToken).ConfigureAwait(false)
-                : await handler.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
+            ReadOnlyMemory<byte> response;
+            try
+            {
+                response = delete
+                    ? await handler.DeleteAsync(existing.Command, cancellationToken).ConfigureAwait(false)
+                    : await handler.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ResourceCommandRejectedException)
+            {
+                throw;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                HostingResourceEventSource.Log.CommandHandlerFailed(registeredKind, delete, exception);
+                CommandFailureDiagnostics.MarkReported(exception, invocation);
+                throw;
+            }
             lock (_sync)
             {
                 if (delete)
@@ -244,7 +268,18 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
                     _commands[command.Key] = (command, response.ToArray());
                 }
             }
+            HostingResourceEventSource.Log.CommandApplied(registeredKind, delete);
             return response;
+        }
+        catch (NotSupportedException) when (registeredKind is null)
+        {
+            HostingResourceEventSource.Log.CommandUnknownKind(delete);
+            throw;
+        }
+        catch (ResourceCommandRejectedException)
+        {
+            HostingResourceEventSource.Log.CommandConflict(registeredKind!, delete);
+            throw;
         }
         finally
         {

@@ -104,8 +104,8 @@ commands over HTTP or another protocol.
 ## Diagnostics
 
 The internal `HostingResourceEventSource` is named `Assimalign.Cohesion.Hosting.Resources`.
-It reports contributor failures from every area that uses the shared control plane, including
-direct calls without an HTTP adapter. A tool can enable the provider by its assembly name;
+It reports contributor failures and command execution outcomes from every area that uses the
+shared control plane, including direct calls without an HTTP adapter. A tool can enable the provider by its assembly name;
 an application can also configure its own event-source forwarder. Non-Web resource processes
 receive no default forwarding from a nested Web host. This provider is outside the default
 `Assimalign.Cohesion.Web.` prefix, so Web entry points also select it explicitly when forwarding.
@@ -114,12 +114,54 @@ No logging dependency is added here.
 | Id | Event | Level | Payload | Throttle |
 | ---: | --- | --- | --- | --- |
 | 1 | `ContributorFailed` | Error | `contributorName`, `exceptionType`, `exceptionMessage`, `suppressedCount:int` | Once per second, process-wide |
+| 2 | `CommandApplied` | Informational | `kind`, `operation` | None |
+| 3 | `CommandUnknownKind` | Warning | `kind` (empty), `operation`, `suppressedCount:int` | Once per second, process-wide |
+| 4 | `CommandConflict` | Warning | `kind`, `operation`, `suppressedCount:int` | Once per second, process-wide |
+| 5 | `CommandHandlerFailed` | Error | `kind`, `operation`, `exceptionType`, `suppressedCount:int` | Once per second, process-wide |
 
 The `contributor-failures` polling counter is the exact total of contributor exceptions caught
 while aggregating health, readiness, and liveness. Its backing value increments even without a
 listener and for suppressed events; the counter is created lazily when a listener enables the
 source. Caller-requested cancellation propagates and neither raises an event nor increments the
 counter. An unrelated contributor cancellation is a failure. There is no gauge.
+
+Command outcomes are counted once per completed dispatch, even without listeners or when their
+events are throttled. Their polling counters are also created lazily on the first enable:
+
+| Counter | Exact transition |
+| --- | --- |
+| `commands-applied` | Successful apply or delete, including an identical replay or an already-absent deletion |
+| `unknown-command-kinds` | No registered handler exists for the supplied kind; the HTTP adapter maps this to 501 |
+| `command-conflicts` | The ledger or handler throws `ResourceCommandRejectedException`; HTTP maps this to 409 |
+| `command-handler-failures` | Another exception escapes the actual handler invocation, except caller-requested cancellation |
+
+`operation` is the fixed value `Apply` or `Delete`. A `kind` is written only after lookup in the
+registered-handler dictionary succeeds. An unknown or merely advertised kind is written as the
+empty string, never copied from the request. No command payload, key, identifier, owner/caller
+identity, credential, exception message, or exception data is written. Command handler faults use
+the event-source rule's type-only exception carve-out. A handler's `NotSupportedException` or an
+independent cancellation is a handler failure; neither means its already-registered kind was
+unknown. Cancellation requested by the caller propagates without any outcome counter or event.
+
+Each throttled event has its own process-wide one-second window. Its next emission carries the
+number of suppressed enabled-listener occurrences, saturating at `Int32.MaxValue`; all counters
+remain exact. Applied outcomes indicate a successful dispatch, not necessarily a repeated
+mutation: concurrent identical declarations execute their handler once while every replay
+receives its own success outcome. An already-absent deletion also succeeds without invoking a
+handler. No event is raised while holding the ledger's snapshot lock.
+
+**Command boundary (#1434).** This source owns command execution; Web.Hosting.Resources owns
+the HTTP envelope and status mapping. When a handler throws, an internal stateless helper marks
+the original invocation in the exception's existing `Data` dictionary after recording the failure.
+The marker is a BCL `ConditionalWeakTable<ResourceCommand, object>` with weak invocation keys,
+so a reused exception can track concurrent calls without retaining their payloads. The Web
+adapter consumes only its exact invocation marker and retains HTTP 400 for handler JSON, format,
+and argument exceptions without also raising `CommandMalformed`. Custom control planes that do
+not record an execution failure still produce the HTTP source's `phase=Handler` event. The helper
+is shared source, not a shared provider or a shipped visibility grant; neither a new public
+diagnostics API nor a command dependency on Web is introduced. A custom exception with unusable
+`Data` prevents the private hand-off; diagnostics preserve the original exception and HTTP
+behavior, but that exceptional case can also produce the HTTP malformed event.
 
 Contributor names come from registered application contributors. Health-check exceptions follow
 the event-source rule's application-exception policy: the type and `Message` are written, never

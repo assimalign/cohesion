@@ -377,6 +377,7 @@ public static class ResourceControlPlaneMiddleware
         IHttpContext context)
     {
         string phase = "Envelope";
+        ResourceCommand? command = null;
         ReadOnlyMemory<byte> response;
         try
         {
@@ -395,7 +396,7 @@ public static class ResourceControlPlaneMiddleware
             byte[] payload = root.TryGetProperty("payload", out JsonElement payloadElement)
                 ? payloadElement.GetBytesFromBase64()
                 : Array.Empty<byte>();
-            var command = new ResourceCommand(
+            command = new ResourceCommand(
                 GetRequiredString(root, "id"),
                 GetRequiredString(root, "kind"),
                 GetRequiredString(root, "owner"),
@@ -413,7 +414,10 @@ public static class ResourceControlPlaneMiddleware
         catch (Exception exception) when (exception is JsonException or FormatException or ArgumentException)
         {
             context.Response.StatusCode = HttpStatusCode.BadRequest;
-            ResourceControlPlaneEventSource.Log.CommandMalformed(resource, context, phase, exception);
+            if (!Assimalign.Cohesion.Hosting.Resources.Internal.CommandFailureDiagnostics.TryConsume(exception, command))
+            {
+                ResourceControlPlaneEventSource.Log.CommandMalformed(resource, context, phase, exception);
+            }
             return;
         }
         catch (NotSupportedException exception)
