@@ -38,6 +38,8 @@ using Assimalign.Cohesion.Web.Routing;
 /// logged at the configured level with the status the transport sends, marked with
 /// <see cref="HttpLoggingAttributes.ClientFault"/>, and carries no exception, whether or not the
 /// exception reached this middleware.
+/// An <see cref="OperationCanceledException"/> after the exchange's cancellation token fires also
+/// stays at the configured level without an exception; cancellation alone adds no client-fault marker.
 /// </para>
 /// </remarks>
 internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
@@ -340,7 +342,11 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 
         // A client fault carries no exception: the exception is the transport's answer to the client's
         // bytes, not an application defect, and the status and the client-fault attribute record it.
-        bool applicationFault = exception is not null && clientFault is null;
+        // Match the server's cancellation boundary. A dependency's unrelated cancellation on
+        // a live exchange is still an application fault; the exception's own token is not proof
+        // that this request was canceled.
+        bool requestCanceled = exception is OperationCanceledException && context.RequestCancelled.IsCancellationRequested;
+        bool applicationFault = exception is not null && clientFault is null && !requestCanceled;
 
         var entry = new LoggerEntry(
             applicationFault ? LogLevel.Error : _snapshot.Level,

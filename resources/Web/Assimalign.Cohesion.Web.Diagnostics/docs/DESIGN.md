@@ -137,12 +137,13 @@ One entry per completed exchange, emitted in the middleware's `finally`:
 
 - **Level** — `Options.Level` (default `Information`); escalated to `Error` with the exception
   attached when the downstream pipeline throws (the exception is rethrown — observing is this
-  package's job, the exception *boundary* is #881's), unless the exchange is a client fault (below).
+  package's job, the exception *boundary* is #881's), except for client faults and exchange
+  cancellation (below).
 - **Message** — `"GET /orders -> 200 in 12.345 ms"`, composed only from enabled fields
-  (invariant culture, `string.Create`); `"(faulted)"` appended on exceptions, `"(client fault)"` on a
+  (invariant culture, `string.Create`); `"(faulted)"` appended on application faults, `"(client fault)"` on a
   client fault.
-- **Client faults (#1340).** A request body that breaks its framing or a configured limit, or that the
-  client cuts short by closing the connection, fails the application's read, and the transport answers
+- **Client faults (#1340).** A request body that breaks its framing or a configured limit
+  fails the application's read, and the transport answers
   the exchange itself with `400`, `413`, `408` or `431`.
   Any client can cause that, so it is not an application defect, and escalating it filled the log with
   `Error` entries on demand. The server reports it through `IWebClientFaultFeature` (`Web.Server`,
@@ -163,6 +164,20 @@ One entry per completed exchange, emitted in the middleware's `finally`:
   exception, holds, and `http.client_fault` lets a reader filter the entries out or route them
   elsewhere. The server's own diagnostics (`Web.Hosting`'s `WebApplicationServerLog`) write no entry
   per exchange, a client fault included, so this entry is the one place it is logged.
+- **Exchange cancellation (#1439 integration).** When downstream throws `OperationCanceledException`
+  after `RequestCancelled` is canceled, the entry stays at the configured level, carries no exception
+  and is not marked `(faulted)`. Cancellation alone adds no `http.client_fault` attribute. This
+  matches the server's cancellation boundary and does not require the exception's token to equal
+  the request token. An unrelated cancellation exception with a live request, or any ordinary
+  application exception even after request cancellation, remains an application fault.
+  The logged status is the response value visible during unwinding: a peer that abandons a body
+  before the response starts can therefore leave a staged `200` in the entry while the transport
+  sends no response. It is not evidence that a 200 reached the peer.
+  **Behavior change from 10.0.0-preview.1:** request-cancellation exceptions now stay at the
+  configured level instead of Error. Following #1439, peer-truncated HTTP/1.1 bodies cancel the
+  exchange without a response or client-fault marker; this replaces the sent-400 behavior
+  introduced during the HTTP/Web program. The temporary Error classification introduced by
+  #1439's new cancellation path is corrected here.
 - **Attributes** — per the `HttpLoggingAttributes` contract, only for enabled fields.
 - **Never throws.** Attribute building is guarded; a logging failure cannot fail an exchange or
   mask an application exception mid-unwind. Sink failures are already isolated by the logging

@@ -522,23 +522,34 @@ public class HttpLoggingEndToEndTests
         entry.Attributes[HttpLoggingAttributes.ClientFault].ShouldBe(true);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: A body the client cuts short is logged as a client fault with the 400 sent, not escalated to Error")]
+    [Theory(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: Peer disconnect during a body read keeps the configured log level and sends no response")]
     [InlineData("Content-Length: 100\r\n\r\n{")]
     [InlineData("Transfer-Encoding: chunked\r\n\r\n10\r\nshort")]
-    public async Task Fault_BodyCutShortByTheClient_ShouldLogAClientFaultWithTheSentStatus(string framingAndBody)
+    public async Task Cancellation_BodyCutShortByTheClient_ShouldLogWithoutAnApplicationFault(string framingAndBody)
     {
         // Arrange — the client writes part of the body its framing declares, then closes its sending side,
-        // so the read throws EndOfStreamException and the transport answers 400 (RFC 9112 §8).
+        // so the transport cancels the active request and closes without a response (#1439).
         using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
+        bool requestCancelled = false;
 
         await using InMemoryConnectionListener transport = new();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
         factory.Application
             .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
-            .Use(ReadBodyToEndAsync);
+            .Use(async (context, next) =>
+            {
+                try
+                {
+                    await ReadBodyToEndAsync(context, next);
+                }
+                finally
+                {
+                    requestCancelled = context.RequestCancelled.IsCancellationRequested;
+                }
+            });
 
         // Act
         string response = await ExchangeRawAsync(
@@ -549,14 +560,17 @@ public class HttpLoggingEndToEndTests
             closeSendingSide: true);
 
         // Assert
-        response.ShouldStartWith("HTTP/1.1 400");
+        response.ShouldBeEmpty();
 
         ILoggerEntry entry = (await WaitForEntriesAsync(recorded, 1, cancellation.Token))[0];
+        requestCancelled.ShouldBeTrue();
         entry.Level.ShouldBe(LogLevel.Information);
         entry.Exception.ShouldBeNull();
-        entry.Message.ShouldStartWith("POST /widgets -> 400");
-        entry.Attributes[HttpLoggingAttributes.ResponseStatusCode].ShouldBe(400);
-        entry.Attributes[HttpLoggingAttributes.ClientFault].ShouldBe(true);
+        entry.Message.ShouldStartWith("POST /widgets -> 200");
+        entry.Message.ShouldNotContain("(faulted)", Case.Sensitive);
+        // No response head committed: the entry retains the staged default status, not a sent 200.
+        entry.Attributes[HttpLoggingAttributes.ResponseStatusCode].ShouldBe(200);
+        entry.Attributes.ContainsKey(HttpLoggingAttributes.ClientFault).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: A well-formed body read to its end carries no client-fault attribute")]

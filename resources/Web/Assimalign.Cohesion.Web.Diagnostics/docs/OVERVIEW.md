@@ -74,7 +74,7 @@ preflight that names it, which is logged with the configured fields.
 | `Assimalign.Cohesion.Web.Routing` | reads the endpoint metadata bag for per-endpoint overrides |
 | `Assimalign.Cohesion.Http.Forwarded` | the effective scheme, host, and client address (`Effective*`), resolved by `UseForwardedHeaders` behind a trusted proxy |
 | `Assimalign.Cohesion.Logging` | the emission model (`ILogger`, `LoggerEntry`, `LoggerProvider`) |
-| `Assimalign.Cohesion.Web.Server` | request-id and server-activity features for trace correlation (#1297); `IWebClientFaultFeature` for logging malformed, over-limit or cut-short bodies at the configured level with the transport's status (#1340, #1378) |
+| `Assimalign.Cohesion.Web.Server` | request-id and server-activity features for trace correlation (#1297); `IWebClientFaultFeature` for logging malformed or over-limit bodies at the configured level with the transport's status (#1340, #1378) |
 | `Assimalign.Cohesion.Http.Streaming` | whether the response had started, so a client fault logs the status that reached the wire |
 
 With `HttpLoggingFields.TraceContext` enabled, `trace.id` comes from
@@ -90,6 +90,11 @@ fault the default Web server reports, on any version: an entry marked `http.clie
 configured level, without the exception, whose `http.response.status` is the `400`, `413`, `408` or
 `431` the transport answered with. On HTTP/2 and HTTP/3 a malformed body resets the stream instead of
 drawing a status, and is logged as the `400` the transport reports for it (#1378).
+
+An `OperationCanceledException` after the exchange's cancellation token fires also stays at the
+configured level without an exception; cancellation alone adds no client-fault marker. A peer
+disconnect before the response starts sends no response, even when the entry still shows the
+staged default status of 200. An unrelated cancellation exception on a live exchange remains Error.
 
 ## Sink diagnostics
 
