@@ -104,6 +104,8 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   and the date-form `If-Range` strength check. `Last-Modified` and all date validators therefore
   keep working. A valid response `Date` remains authoritative, with no fallback clock read.
   StaticFiles never adds or rewrites `Date`; a missing header stays missing.
+  This also applies to both `SendFileAsync` overloads and to a `WriteStreamAsync` caller's
+  supplied `lastModified`; their public helper documentation describes the same clock fallback.
   This restores the no-`Date` validation that #1417 inadvertently disabled after
   10.0.0-preview.1. **Breaking behavior against 10.0.0-preview.1 (decision 15)** remains the
   future-date clamp and the one-second date `If-Range` strength rule introduced by #1185:
