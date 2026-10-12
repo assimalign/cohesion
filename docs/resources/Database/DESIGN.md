@@ -8,6 +8,26 @@ This document is the durable architecture record for the multi-model OLTP databa
 
 ## 1. What we are building
 
+### Provisioning state and Build cancellation (decision 49a)
+
+`DatabaseInstance.Provisioning` is an immutable, nullable `DatabaseProvisioningProgress` snapshot
+published by a model through a protected setter. Its vocabulary is operation, object name,
+position/total, running state, optional processed/total rows and failure code. It carries no SQL
+schema capability, executor, or interface. Hosting can report Degraded while an engine performs
+deferred provisioning through its own `DatabaseEngineWorkerKind.Provisioning` worker. Failures
+use the existing database-offline channel; `StorageOfflineCause.ProvisioningFailure` identifies
+failed migration work, and `RecoveryInterrupted` fences a canceled recovery from shutdown writes.
+
+The root `IDatabaseApplicationBuilder.Build()` stays parameterless, as O34 specifies for all 18
+areas (owner decision 2026-10-11). The concrete hosting builder retains
+`Build(CancellationToken cancellationToken = default)`, and its explicit interface member forwards
+with no token. `DatabaseApplication.CreateBuilder` returns that concrete builder to `Program.cs`.
+The token remains exposed to factories on `IDatabaseApplicationContext.BuildCancellationToken`;
+SQL's composition passes it to its Build.
+The runtime host shutdown lifecycle starts later, so the application caller supplies the token
+when it needs shutdown during construction. This adds no model reference to Hosting, new public
+interface, friend assembly grant, capability flag, or implementation-only public bridge.
+
 A **multi-model OLTP database platform**: five independent database engines — **SQL**, **Documents**, **Graph**, **Blob**, and **KeyValuePair** — that share one durable kernel (storage, write-ahead logging, transactions, indexing) while keeping model semantics explicit and separate. Inspirations: PostgreSQL (relational engine discipline, MVCC, WAL), RavenDB (document model, embedded + server duality), Neo4j (native graph storage and traversal).
 
 The platform runs in two modes, matching Cohesion's identity:
@@ -34,7 +54,7 @@ The platform runs in two modes, matching Cohesion's identity:
 
 | # | Requirement | Where it lands |
 |---|---|---|
-| R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines and their servers, and declares the databases each engine owns with their C# schemas on the model's engine builder (`builder.AddSql("orders-sql", sql => sql.AddDatabase("sales", database => database.Schema(...)))`). `Database.Sql.Schema` owns SQL tables, custom types (domains of the SQL engine since E3) and database-scoped principals (refused at engine Build until their DDL exists, and at the SDK build with `COHDBSDK108`). Runtime and static build compilation produce the same canonical `SqlCompiledSchema` document/hash (format `cohesion/database-schema/v3`); the SDK writes one artifact pair per declared database, `$(IntermediateOutputPath)cohesion/database/<database>.schema.json` and `.schema.sha256`, from the inline `database.Schema(...)` or a `SqlSchema.Create`/`Compile` declaration (owner decision 59 of 2026-10-09). The area root holds no schema type (owner decision 50 of 2026-10-09); other models own their own vocabulary. Setting `CohesionApplicationModel=enabled` also produces the resource manifest and typed ambient accessors. | `Database.Sql.Schema` + `Sdk.Database` targets/Tasks (#857–#859, A3) |
+| R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines and their servers, and declares the databases each engine owns with their C# schemas on the model's engine builder (`builder.AddSql("orders-sql", sql => sql.AddDatabase("sales", database => database.Schema(...)))`). `Database.Sql.Schema` owns SQL tables, custom types (domains of the SQL engine since E3) and database-scoped principals (refused at engine Build until their DDL exists, and at the SDK build with `COHDBSDK108`). Runtime and static build compilation produce the same canonical `SqlCompiledSchema` document/hash (format `cohesion/database-schema/v4`); the SDK writes one artifact pair per declared database, `$(IntermediateOutputPath)cohesion/database/<database>.schema.json` and `.schema.sha256`, from the inline `database.Schema(...)` or a `SqlSchema.Create`/`Compile` declaration (owner decision 59 of 2026-10-09). The area root holds no schema type (owner decision 50 of 2026-10-09); other models own their own vocabulary. Setting `CohesionApplicationModel=enabled` also produces the resource manifest and typed ambient accessors. | `Database.Sql.Schema` + `Sdk.Database` targets/Tasks (#857–#859, A3) |
 | R8 | **Migrations as a build tool.** The SQL model gets a migration tool implemented in the Database SDK: for one declared database (`CohesionDatabaseName`, optional when the project declares one), diff its compiled schema model against that database's ordinal baseline under `Migrations/<database>/` (or a live catalog), emit ordered engine-dialect migration scripts, and apply with destructive compatibility checks, idempotent catalog hashing, and reverse-order compensation of completed reversible statements. The landed catalog remains self-committing per statement, so fully atomic destructive multi-statement DDL awaits a batch-transaction seam. | `Sdk.Database` Tasks (`Assimalign.Cohesion.Sdk.Database.Migration.targets`), runtime apply engine in `Database.Sql` + durable state in `Database.Sql.Catalog` |
 | R9 | **Model-specific build tools, loaded by model.** The SDK inspects `$(CohesionDatabaseModel)` on the consumer project and selects from explicit static imports (`Sdk.Database.Sql.targets`, `Sdk.Database.KeyValuePair.targets`). SQL compiles schema artifacts and generates migrations. After A3 removed the shared collection shape, KeyValuePair compilation and migration generation fail explicitly until that model supplies its own schema package and catalog/statement surface. Static allowlisted MSBuild imports — no consumer-controlled path or runtime plugin loading — keep this AOT-clean. | `sdks/Assimalign.Cohesion.Sdk.Database/Targets/` |
 

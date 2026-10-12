@@ -9,6 +9,7 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -17,11 +18,18 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// the imperative <see cref="SqlDatabase.ApplySchemaAsync"/> path and phase 6 of the engine
 /// builder's build (<see cref="SqlDeclaredDatabase"/>) share it.
 /// </summary>
-internal sealed class SqlSchemaProvisioner
+internal sealed partial class SqlSchemaProvisioner
 {
     private readonly SqlDatabase _database;
     private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private string? _validatedHash;
+
+    // Instance-local test hooks, reached only by this assembly's tests. A skip must not
+    // enter any catalog traversal; crash tests capture durable storage after each step.
+    internal int CatalogWalkCount { get; private set; }
+    internal SqlSchemaMigrationPlan? LastPlan { get; private set; }
+    internal Action<SqlMigrationScriptStep>? StepApplied { get; set; }
 
     internal SqlSchemaProvisioner(SqlDatabase database, SqlCatalog catalog)
     {
@@ -31,23 +39,41 @@ internal sealed class SqlSchemaProvisioner
 
     internal async ValueTask<SqlSchemaMigrationResult> ApplyAsync(
         SqlCompiledSchema schema,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferDataScalingSteps = false)
     {
         ArgumentNullException.ThrowIfNull(schema);
-        ValidateSupportedSchema(schema);
-
-        await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (deferDataScalingSteps && TryGetDeferredResult(schema) is { } deferredResult)
+        {
+            return deferredResult;
+        }
+        // The worker retains this gate after handoff. Never queue outside the lock
+        // manager: a caller may own a transaction the current migration needs.
+        if (!await _applyGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            throw new DatabaseObjectLockedException(schema.Name, schema.Name, "APPLY SCHEMA");
+        }
+        TransactionContext? locks = null;
+        IDisposable? ddl = null;
+        bool transferred = false;
         try
         {
-            ValidateCatalogOwnership(schema);
+            ddl = _database.DdlInterlock.EnterApply(schema.Name);
+            ValidateSupportedSchema(schema);
+            if (_catalog.PendingMigration is { } intent && !string.Equals(intent.ContentHash, schema.Hash, StringComparison.Ordinal))
+            {
+                throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: a different schema is pending. " +
+                    "Finish the recorded migration before replacing its declaration.");
+            }
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             string targetHash = schema.Hash;
-            string canonicalDocument = schema.CanonicalDocument;
             if (IsApplied(recorded, schema))
             {
                 return new SqlSchemaMigrationResult(recorded!.ContentHash, targetHash, 0, WasAlreadyApplied: true);
             }
 
+            ValidateCatalogOwnership(schema);
             SqlCompiledSchema? current = ReadCurrentSchema(recorded, schema);
             SqlSchemaMigrationPlan plan;
             try
@@ -62,25 +88,76 @@ internal sealed class SqlSchemaProvisioner
                     refused);
             }
 
+            LastPlan = plan;
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
+            var deferred = deferDataScalingSteps ? FindDeferredSteps(script) : [];
 
-            await using SqlDatabaseSession session = _database.CreateSchemaSession(schema.Name, cancellationToken);
+            if (deferred.Count > 0)
+            {
+                // Even the first cheap DDL commit must be recoverable by database name
+                // alone. Keep the complete target durable until convergence clears it.
+                await _catalog.SavePendingMigrationAsync(
+                    CreateDeferredIntent(schema, deferred, script.Steps.Count), cancellationToken).ConfigureAwait(false);
+            }
+
+            // This read-only context owns table locks across self-committing statements.
+            // Its rollback only releases locks: no schema/data changes enlist in it.
+            locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
+            await using SqlDatabaseSession session = _database.CreateSchemaSession(schema.Name, cancellationToken, locks.Sequence);
             try
             {
                 foreach (SqlMigrationScriptStep step in script.Steps)
                 {
+                    if (deferred.Contains(step))
+                    {
+                        continue;
+                    }
                     await session.ExecuteAsync(step.Request, cancellationToken).ConfigureAwait(false);
                     applied.Add(step);
+                    StepApplied?.Invoke(step);
+                }
+
+                if (deferred.Count > 0)
+                {
+                    // Release the completed inline tables, then reserve every pending table
+                    // before handing the engine to a caller. The worker owns this transaction.
+                    await _database.Coordinator.RollbackAsync(locks, CancellationToken.None).ConfigureAwait(false);
+                    locks = null;
+                    await PrepareDeferredAsync(schema, deferred, script.Steps.Count, cancellationToken).ConfigureAwait(false);
+                    transferred = true;
+                    return new SqlSchemaMigrationResult(plan.SourceHash, targetHash, applied.Count, WasAlreadyApplied: false);
+                }
+
+                // IF NOT EXISTS and concurrent ad-hoc DDL must not turn an unowned or
+                // mismatched object into a trusted marker. Capture before validation;
+                // SaveSchemaState checks the generation again under the catalog lock.
+                ulong generation = _catalog.DdlGeneration;
+                if (FirstCatalogDifference(schema) is { } difference)
+                {
+                    throw new SqlSchemaMigrationException($"{Describe()}: the applied catalog differs: {difference}.");
                 }
 
                 await _catalog.SaveSchemaStateAsync(
-                    new SqlCatalogSchemaState(targetHash, canonicalDocument),
+                    new SqlCatalogSchemaState(targetHash, schema.CanonicalDocument, generation),
                     cancellationToken).ConfigureAwait(false);
             }
             catch (Exception failure)
             {
-                CompensationResult compensation = await CompensateAsync(session, applied).ConfigureAwait(false);
+                CompensationResult compensation;
+                if (locks is null && applied.Count > 0 && !_database.IsOffline)
+                {
+                    // The deferred handoff released the inline reservation. Compensation
+                    // must acquire locks with a live transaction identity,
+                    // even when cancellation interrupted that handoff.
+                    locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None).ConfigureAwait(false);
+                    await using var compensationSession = _database.CreateSchemaSession(schema.Name, CancellationToken.None, locks.Sequence);
+                    compensation = await CompensateAsync(compensationSession, applied).ConfigureAwait(false);
+                }
+                else
+                {
+                    compensation = await CompensateAsync(session, applied).ConfigureAwait(false);
+                }
 
                 // A canceled token can also surface as the failure of the step it interrupted (a
                 // commit whose record could not be written is an aborted transaction), so the
@@ -122,28 +199,49 @@ internal sealed class SqlSchemaProvisioner
         }
         finally
         {
-            _applyGate.Release();
+            try
+            {
+                if (locks?.State == TransactionState.Active && !_database.IsOffline)
+                {
+                    await _database.Coordinator.RollbackAsync(locks, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                ddl?.Dispose();
+                if (transferred)
+                {
+                    _database.Engine.ScheduleProvisioning(Deferred!);
+                }
+                else
+                {
+                    _applyGate.Release();
+                }
+            }
         }
     }
 
     /// <summary>
     /// Verifies, without running any DDL, that the database holds exactly the schema: the recorded
-    /// hash and canonical document are the schema's, and the live schema-owned catalog matches it.
+    /// hash and generation match the declaration and the current catalog generation.
     /// </summary>
     /// <param name="schema">The declared schema.</param>
-    /// <param name="cancellationToken">Observed while the apply gate is awaited.</param>
+    /// <param name="cancellationToken">Observed before the nonblocking admission check.</param>
     /// <returns>The result, always already applied.</returns>
+    /// <exception cref="DatabaseObjectLockedException">An apply, verification or deferred migration is already active.</exception>
     /// <exception cref="SqlSchemaMigrationException">The database drifted (<c>COHSQLP003</c>).</exception>
     internal async ValueTask<SqlSchemaMigrationResult> VerifyAsync(
         SqlCompiledSchema schema,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(schema);
-        ValidateSupportedSchema(schema);
-
-        await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (!await _applyGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            throw new DatabaseObjectLockedException(schema.Name, schema.Name, "VERIFY SCHEMA");
+        }
         try
         {
+            ValidateSupportedSchema(schema);
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             if (IsApplied(recorded, schema))
             {
@@ -154,7 +252,7 @@ internal sealed class SqlSchemaProvisioner
                 ? "the database records no applied schema"
                 : !string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal)
                     ? $"the database records schema hash {recorded.ContentHash}"
-                    : "the live catalog no longer matches the recorded schema";
+                    : $"the catalog DDL generation changed from {recorded.Generation} to {_catalog.DdlGeneration}";
 
             // Name the first object that differs, so the developer need not diff the catalog by hand.
             if (FirstCatalogDifference(schema) is { } difference)
@@ -275,7 +373,8 @@ internal sealed class SqlSchemaProvisioner
     }
 
     /// <summary>
-    /// Binds every CHECK a compiled schema declares to the engine's function catalog and its table's
+    /// Validates every DEFAULT against its column's effective type and bounds, and binds every
+    /// CHECK a compiled schema declares to the engine's function catalog and its table's
     /// declared columns, as the DDL that applies it will, without touching a database: the text must
     /// be exactly one predicate, every column and function must resolve, every call must match an
     /// overload, and every function must be <see cref="SqlFunctionVolatility.Immutable"/> (owner
@@ -286,12 +385,33 @@ internal sealed class SqlSchemaProvisioner
     /// <param name="defaultCollation">The collation of the database the schema is for.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
     /// <param name="parserOptions">The engine's parser options.</param>
-    /// <exception cref="DatabaseException">A declared CHECK does not bind; the message names its table and constraint.</exception>
+    /// <exception cref="DatabaseException">A declared DEFAULT or CHECK does not bind; the message names its table and column or constraint.</exception>
     internal static void BindDeclaredChecks(SqlCompiledSchema schema, Collation defaultCollation, SqlFunctionEnvironment functions,
         SqlQueryParserOptions parserOptions)
     {
         foreach (CompiledSchemaTable table in schema.Tables)
         {
+            foreach (CompiledSchemaColumn column in table.Columns)
+            {
+                try
+                {
+                    if (CanonicalDefault(column.DefaultLiteral) is { } literal)
+                    {
+                        var boundColumn = new SqlCatalogColumn(column.Name,
+                            ResolveColumnType(column, functions.Types, out string? domain), column.IsNullable,
+                            literal, domainName: domain);
+                        // Use the DDL path before any storage exists: domain base types and
+                        // numeric/length bounds must accept exactly the same literal here.
+                        SqlPlanExecutor.ResolveDefault(boundColumn, SqlPersistedExpression.LoadDefaultValue(literal,
+                            $"DEFAULT on column '{table.Name}.{column.Name}'"));
+                    }
+                }
+                catch (DatabaseException exception)
+                {
+                    throw new DatabaseException($"DEFAULT on column '{table.Name}.{column.Name}' does not bind: {exception.Message}", exception);
+                }
+            }
+
             SqlCatalogTable? shape = null;
             foreach (CompiledSchemaConstraint constraint in table.Constraints)
             {
@@ -321,12 +441,12 @@ internal sealed class SqlSchemaProvisioner
         }
     }
 
-    // The recorded hash, the recorded canonical document and the live catalog all agree with the schema.
+    // The identity is cached on the immutable declaration. Generation equality proves that
+    // no committed catalog change happened since that identity was recorded.
     private bool IsApplied(SqlCatalogSchemaState? recorded, SqlCompiledSchema schema)
-        => recorded is not null &&
+        => recorded is not null && _catalog.PendingMigration is null &&
             string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal) &&
-            string.Equals(recorded.CanonicalDocument, schema.CanonicalDocument, StringComparison.Ordinal) &&
-            FirstCatalogDifference(schema) is null;
+            recorded.Generation == _catalog.DdlGeneration;
 
     // Names where a provisioning message happened: the engine and the database.
     private string Describe() => $"SQL engine '{_database.Engine.Name}', database '{_database.Name}'";
@@ -340,13 +460,12 @@ internal sealed class SqlSchemaProvisioner
         SqlCatalogSchemaState? recorded,
         SqlCompiledSchema desired)
     {
-        if (recorded is not null)
+        if (recorded is not null && recorded.Generation == _catalog.DdlGeneration)
         {
             try
             {
                 SqlCompiledSchema persisted = SqlCompiledSchemaSerializer.Deserialize(recorded.CanonicalDocument);
-                if (string.Equals(recorded.ContentHash, persisted.Hash, StringComparison.Ordinal) &&
-                    FirstCatalogDifference(persisted) is null)
+                if (string.Equals(recorded.ContentHash, persisted.Hash, StringComparison.Ordinal))
                 {
                     return persisted;
                 }
@@ -364,10 +483,11 @@ internal sealed class SqlSchemaProvisioner
 
     private SqlCompiledSchema? SnapshotCatalog(SqlCompiledSchema desired)
     {
+        CatalogWalkCount++;
         IReadOnlyList<SqlCatalogTable> catalogTables = _catalog.Tables
             .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, desired.Name))
             .ToList();
-        if (catalogTables.Count == 0)
+        if (catalogTables.Count == 0 && desired.Types.Count == 0)
         {
             return null;
         }
@@ -388,13 +508,6 @@ internal sealed class SqlSchemaProvisioner
             var columns = new List<CompiledSchemaColumn>(catalogTable.Columns.Count);
             foreach (SqlCatalogColumn column in catalogTable.Columns)
             {
-                if (column.DefaultLiteral is not null)
-                {
-                    throw new SqlSchemaMigrationException(
-                        $"{Describe()}: the live SQL catalog column '{catalogTable.Name}.{column.Name}' has a default literal, " +
-                        "which the compiled schema contract cannot represent yet.");
-                }
-
                 columns.Add(SnapshotColumn(column, desiredTable));
             }
             CompiledSchemaKey? primaryKey = null;
@@ -431,7 +544,9 @@ internal sealed class SqlSchemaProvisioner
             SqlCompiledSchema.CurrentFormat,
             desired.Name,
             allowsDestructiveChanges: false,
-            Array.Empty<CompiledSchemaType>(),
+            // E3 domains are already registered on the engine before provisioning. They
+            // have no database DDL or durable catalog record to replay after a crash.
+            desired.Types,
             tables,
             Array.Empty<CompiledSchemaPrincipal>());
     }
@@ -444,26 +559,33 @@ internal sealed class SqlSchemaProvisioner
     private CompiledSchemaColumn SnapshotColumn(SqlCatalogColumn column, CompiledSchemaTable? desiredTable)
     {
         CompiledSchemaColumn? declared = desiredTable?.Columns.FirstOrDefault(candidate =>
-            candidate.CustomType is not null && string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
+            string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
+        string? defaultLiteral = declared is not null &&
+            string.Equals(CanonicalDefault(declared.DefaultLiteral), column.DefaultLiteral, StringComparison.Ordinal)
+                ? declared.DefaultLiteral : column.DefaultLiteral;
+        bool nullable = declared is not null &&
+            column.IsNullable == (declared.IsNullable && !IsPrimaryKeyColumn(desiredTable!.PrimaryKey, column.Name))
+                ? declared.IsNullable : column.IsNullable;
         if (declared is not null && DescribeTypeDifference(declared, column) is null)
         {
-            return new CompiledSchemaColumn(column.Name, declared.Type, column.IsNullable, declared.MaxLength, declared.Precision,
-                declared.Scale, declared.CustomType);
+            return new CompiledSchemaColumn(column.Name, declared.Type, nullable, declared.MaxLength, declared.Precision,
+                declared.Scale, declared.CustomType, defaultLiteral);
         }
 
         return new CompiledSchemaColumn(column.Name, column.Type.Type, column.IsNullable, column.Type.MaxLength, column.Type.Precision,
-            column.Type.Scale, column.DomainName);
+            column.Type.Scale, column.DomainName, defaultLiteral);
     }
 
     /// <summary>
     /// Compares the live schema-owned catalog with a schema and describes the first object that
-    /// differs, or returns null when the catalog matches it: the skip test of an apply and the
+    /// differs, or returns null when the catalog matches it: final apply validation and the
     /// reason a Verify drift names, so the developer need not diff the catalog by hand.
     /// </summary>
     /// <param name="schema">The schema the catalog should hold.</param>
     /// <returns>The first difference, described for a message, or null.</returns>
     private string? FirstCatalogDifference(SqlCompiledSchema schema)
     {
+        CatalogWalkCount++;
         var ownedTables = _catalog.Tables
             .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, schema.Name))
             .ToList();
@@ -603,9 +725,9 @@ internal sealed class SqlSchemaProvisioner
                     $"{(actualColumn.IsNullable ? "nullable" : "not nullable")}, declared {(expectedIsNullable ? "nullable" : "not nullable")}";
             }
 
-            if (actualColumn.DefaultLiteral is not null)
+            if (!string.Equals(actualColumn.DefaultLiteral, CanonicalDefault(expectedColumn.DefaultLiteral), StringComparison.Ordinal))
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' has a default the declaration does not have";
+                return $"table '{expected.Name}': column '{expectedColumn.Name}' has a different default from its declaration";
             }
         }
 
@@ -674,6 +796,26 @@ internal sealed class SqlSchemaProvisioner
         }
     }
 
+    // DEFAULT NULL is stored as absence by the DDL planner. Every other supported
+    // DEFAULT is one literal, rendered from its parsed node rather than pasted SQL.
+    internal static string? CanonicalDefault(string? declared)
+    {
+        if (declared is null)
+        {
+            return null;
+        }
+
+        var expression = SqlPersistedExpression.ParseDeclaration(declared, new SqlQueryParserOptions());
+        if (!SqlPersistedExpression.IsDefaultLiteral(expression))
+        {
+            throw new DatabaseException("Only literal DEFAULT values are supported.");
+        }
+
+        return expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null }
+            ? null
+            : SqlPersistedExpression.Canonicalize(expression, "Compiled column DEFAULT");
+    }
+
     /// <summary>
     /// Reconstructs a live CHECK's compiled text: the desired schema's own spelling when it is
     /// the same predicate, so reconciliation plans no change for it, and otherwise the canonical
@@ -691,6 +833,7 @@ internal sealed class SqlSchemaProvisioner
 
     private void ValidateCatalogOwnership(SqlCompiledSchema schema)
     {
+        CatalogWalkCount++;
         foreach (CompiledSchemaTable table in schema.Tables)
         {
             if (!_catalog.TryGetTable("dbo", table.Name, out SqlCatalogTable actual))
@@ -742,6 +885,11 @@ internal sealed class SqlSchemaProvisioner
 
     private void ValidateSupportedSchema(SqlCompiledSchema schema)
     {
+        if (string.Equals(_validatedHash, schema.Hash, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         if (!string.Equals(schema.Name, _database.Name.ToString(), StringComparison.OrdinalIgnoreCase))
         {
             throw new SqlSchemaMigrationException(
@@ -762,6 +910,7 @@ internal sealed class SqlSchemaProvisioner
         if (_database.Engine.FindDeclaration(_database.Name) is { Schema: { } declared } &&
             string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
         {
+            _validatedHash = schema.Hash;
             return;
         }
 
@@ -769,6 +918,7 @@ internal sealed class SqlSchemaProvisioner
         {
             BindDeclaredTypes(schema, _database.Definitions.Functions.Types);
             BindDeclaredChecks(schema, _catalog.DefaultCollation, _database.Definitions.Functions, _database.Engine.ParserOptions);
+            _validatedHash = schema.Hash;
         }
         catch (DatabaseException invalid)
         {

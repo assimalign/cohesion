@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -32,8 +33,14 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// DDL operations are self-committing: each runs in its own storage transaction and
 /// is durable when the call returns. Interleaving DDL with an open DML transaction
 /// is deliberately not supported in the MVP (the catalog cache updates on commit,
-/// and half-visible schema changes are a correctness trap) — the engine serializes
-/// DDL per database.
+/// and half-visible schema changes are a correctness trap). The engine locks the
+/// affected tables; this catalog serializes metadata publication under its lock.
+/// </para>
+/// <para>
+/// A commit whose record was appended but whose durability was not confirmed takes
+/// this catalog's storage offline. Every subsequent catalog read and mutation throws
+/// <see cref="StorageOfflineException"/> until the database is reopened: its cached
+/// identities, generations and record locations may no longer describe durable state.
 /// </para>
 /// <para>
 /// Records are encoded with the shared self-describing tuple codec, one record per
@@ -60,6 +67,7 @@ public sealed class SqlCatalog
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
     private const int defaultCollationRecordKind = 7;
+    private const int _pendingMigrationRecordKind = 9;
 
     // The record-space format marker from version 4 on (#1099). Catalogs written
     // before format 4 (through 10.0.0-preview.1) load kinds 1-7 only and refuse
@@ -85,6 +93,7 @@ public sealed class SqlCatalog
     private readonly Dictionary<(ulong TableObjectId, string Name), IndexSlot> _indexes = new(IndexNameComparer.Instance);
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
+    private ulong _ddlGeneration;
     private int _recordSpaceFormatVersion = 1;
     private Collation _defaultCollation = Collation.Binary;
     private (PageId PageId, int SlotIndex)? _counterLocation;
@@ -94,6 +103,8 @@ public sealed class SqlCatalog
     private List<(PageId PageId, int SlotIndex)> _schemaStateLocations = [];
     private IReadOnlyList<BTreeIndexRegistration> _registrations = Array.Empty<BTreeIndexRegistration>();
     private SqlCatalogSchemaState? _schemaState;
+    private SqlCatalogPendingMigration? _pendingMigration;
+    private List<(PageId PageId, int SlotIndex)> _pendingMigrationLocations = [];
 
     private SqlCatalog(SqlStorage storage)
     {
@@ -108,6 +119,7 @@ public sealed class SqlCatalog
     /// <returns>The catalog.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="storage"/> is null.</exception>
     /// <exception cref="SqlCatalogException">A persisted record is malformed.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public static SqlCatalog Open(SqlStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -132,6 +144,7 @@ public sealed class SqlCatalog
     /// default. Their index keys are encoded through the collation they inherited, so it cannot be
     /// changed.
     /// </exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public static SqlCatalog Open(SqlStorage storage, Collation defaultCollation)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -146,10 +159,12 @@ public sealed class SqlCatalog
     /// Captures the table directory, index descriptions, and default collation atomically.
     /// </summary>
     /// <returns>A read-only capture unaffected by later catalog publications.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public SqlCatalogSnapshot CaptureSnapshot()
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation);
         }
     }
@@ -163,12 +178,14 @@ public sealed class SqlCatalog
     /// because every index key on a column that inherited it is encoded through its
     /// byte transform.
     /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public Collation DefaultCollation
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _defaultCollation;
             }
         }
@@ -186,6 +203,7 @@ public sealed class SqlCatalog
         ArgumentNullException.ThrowIfNull(collation);
         lock (_sync)
         {
+            ThrowIfOffline();
             if (collation.Id == _defaultCollation.Id)
             {
                 return;
@@ -199,7 +217,7 @@ public sealed class SqlCatalog
             writer.AppendInt32(defaultCollationRecordKind).AppendInt8((sbyte)collation.Id);
             using var transaction = _storage.BeginTransaction();
             var location = UpsertRecord(transaction, _defaultCollationLocation, writer.ToArray());
-            transaction.Commit();
+            CommitCatalogChange(transaction);
             _defaultCollationLocation = location;
             _defaultCollation = collation;
         }
@@ -209,13 +227,50 @@ public sealed class SqlCatalog
     /// Gets the canonical compiled schema most recently applied to this database,
     /// or <see langword="null"/> when no schema has been recorded.
     /// </summary>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public SqlCatalogSchemaState? SchemaState
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _schemaState;
+            }
+        }
+    }
+
+    /// <summary>Gets the durable deferred migration, or null when no migration is pending.</summary>
+    /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
+    public SqlCatalogPendingMigration? PendingMigration
+    {
+        get
+        {
+            lock (_sync)
+            {
+                ThrowIfOffline();
+                return _pendingMigration;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the durable generation of committed catalog changes. Schema application state
+    /// records this value to detect later DDL, including changes to ad-hoc objects.
+    /// </summary>
+    /// <remarks>
+    /// The counter and the metadata change share one transaction. Recording applied-schema
+    /// state or saving an unchanged index directory does not advance the generation.
+    /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    public ulong DdlGeneration
+    {
+        get
+        {
+            lock (_sync)
+            {
+                ThrowIfOffline();
+                return _ddlGeneration;
             }
         }
     }
@@ -223,12 +278,14 @@ public sealed class SqlCatalog
     /// <summary>
     /// Gets every table in the catalog.
     /// </summary>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<SqlCatalogTable> Tables
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _tables.Values.Select(slot => slot.Table).ToList();
             }
         }
@@ -241,10 +298,12 @@ public sealed class SqlCatalog
     /// <param name="name">The table name.</param>
     /// <param name="table">When this method returns true, the table.</param>
     /// <returns>True when the table exists; otherwise false.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public bool TryGetTable(string schema, string name, out SqlCatalogTable table)
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_tables.TryGetValue((schema, name), out var slot))
             {
                 table = slot.Table;
@@ -267,6 +326,7 @@ public sealed class SqlCatalog
     /// <returns>The created table with its assigned object identity.</returns>
     /// <exception cref="SqlCatalogException">A table with the name already exists, or the definition is invalid.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> CreateTableAsync(
         string schema,
         string name,
@@ -295,6 +355,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_tables.ContainsKey((schema, name)))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
@@ -302,14 +363,13 @@ public sealed class SqlCatalog
 
             ValidateColumns(schema, name, columns, primaryKeyColumns);
 
-            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
+            var table = new SqlCatalogTable(_nextObjectId, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
             ValidateConstraints(table);
 
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeTable(table));
-                PersistCounter(transaction);
-                transaction.Commit();
+                CommitCatalogChange(transaction, checked(_nextObjectId + 1));
                 _tables[(schema, name)] = new TableSlot(table, location);
             }
 
@@ -326,12 +386,14 @@ public sealed class SqlCatalog
     /// <returns>A task that completes once the drop is durable.</returns>
     /// <exception cref="SqlCatalogException">The table does not exist, or another table references it.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask DropTableAsync(string schema, string name, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (!_tables.TryGetValue((schema, name), out var slot))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
@@ -378,12 +440,14 @@ public sealed class SqlCatalog
                     _storage.DeleteRow(transaction, indexSlot.Location.PageId, indexSlot.Location.SlotIndex);
                 }
 
+                var registrationsLocation = _registrationsLocation;
                 if (droppedIndexes.Count > 0)
                 {
-                    _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
+                    registrationsLocation = UpsertRecord(transaction, registrationsLocation, EncodeRegistrations(remainingRegistrations));
                 }
 
-                transaction.Commit();
+                CommitCatalogChange(transaction);
+                _registrationsLocation = registrationsLocation;
             }
 
             _tables.Remove((schema, name));
@@ -418,6 +482,7 @@ public sealed class SqlCatalog
     /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="column"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> AddColumnAsync(string schema, string name, SqlCatalogColumn column, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(column);
@@ -425,6 +490,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             var slot = GetSlot(schema, name);
 
             if (slot.Table.FindColumn(column.Name) is not null)
@@ -460,12 +526,14 @@ public sealed class SqlCatalog
     /// every dropped column's physical ordinal, no longer fits one catalog record.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> DropColumnAsync(string schema, string name, string columnName, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_sync)
         {
+            ThrowIfOffline();
             var slot = GetSlot(schema, name);
             int ordinal = -1;
             for (int index = 0; index < slot.Table.Columns.Count; index++)
@@ -541,10 +609,12 @@ public sealed class SqlCatalog
     /// </summary>
     /// <param name="tableObjectId">The table's object identity.</param>
     /// <returns>The table's index descriptions; empty when it has none.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<SqlCatalogIndex> GetIndexes(ulong tableObjectId)
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             var result = new List<SqlCatalogIndex>();
 
             foreach (var slot in _indexes.Values)
@@ -566,10 +636,12 @@ public sealed class SqlCatalog
     /// <param name="name">The index name.</param>
     /// <param name="index">When this method returns true, the index description.</param>
     /// <returns>True when the index exists; otherwise false.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public bool TryGetIndex(ulong tableObjectId, string name, out SqlCatalogIndex index)
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_indexes.TryGetValue((tableObjectId, name), out var slot))
             {
                 index = slot.Index;
@@ -589,12 +661,13 @@ public sealed class SqlCatalog
     /// registration would promise uniqueness no tree enforces).
     /// </summary>
     /// <param name="index">The index description to persist.</param>
-    /// <param name="registrations">The full registration set to persist alongside (replaces the stored set).</param>
+    /// <param name="registrations">A physical registration snapshot containing exactly one registration for the created index, matching its table, name (case-insensitively), and uniqueness, with B-tree kind and a positive root page id. Only that registration is merged into the current directory.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created index description.</returns>
-    /// <exception cref="SqlCatalogException">The table does not exist, a key column does not exist, or an index with the name already exists on the table.</exception>
+    /// <exception cref="SqlCatalogException">The table or a key column does not exist, the index name already exists on the table, or the required matching physical registration is missing, duplicated, or invalid.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="index"/> or <paramref name="registrations"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogIndex> CreateIndexAsync(SqlCatalogIndex index, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(index);
@@ -603,6 +676,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             var table = FindTableByObjectId(index.TableObjectId)
                 ?? throw new SqlCatalogException($"No table with object id {index.TableObjectId} exists.");
 
@@ -620,32 +694,35 @@ public sealed class SqlCatalog
                 }
             }
 
+            var mergedRegistrations = MergePublishedRegistrations(registrations, [index]);
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeIndex(index));
-                _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
-                transaction.Commit();
+                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
+                CommitCatalogChange(transaction);
+                _registrationsLocation = registrationsLocation;
                 _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, location);
             }
 
-            _registrations = registrations.ToList();
+            _registrations = mergedRegistrations;
             return new ValueTask<SqlCatalogIndex>(index);
         }
     }
 
     /// <summary>
-    /// Drops an index description and persists the given physical registrations in
+    /// Drops an index description and removes its current physical registration in
     /// the same self-committing catalog transaction (see
     /// <see cref="CreateIndexAsync"/> for why the two writes are atomic).
     /// </summary>
     /// <param name="tableObjectId">The table's object identity.</param>
     /// <param name="name">The index name.</param>
-    /// <param name="registrations">The full registration set to persist alongside (replaces the stored set).</param>
+    /// <param name="registrations">The caller's remaining registration snapshot. Unrelated registrations are retained from the current directory instead of this possibly stale snapshot.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the drop is durable.</returns>
     /// <exception cref="SqlCatalogException">The index does not exist.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask DropIndexAsync(ulong tableObjectId, string name, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(registrations);
@@ -653,61 +730,61 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (!_indexes.TryGetValue((tableObjectId, name), out var slot))
             {
                 throw new SqlCatalogException($"No index named '{name}' exists on object {tableObjectId}.");
             }
 
+            var remainingRegistrations = _registrations.Where(registration =>
+                registration.ObjectId != tableObjectId ||
+                !string.Equals(registration.Definition.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
             using (var transaction = _storage.BeginTransaction())
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
-                _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
-                transaction.Commit();
+                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
+                CommitCatalogChange(transaction);
+                _registrationsLocation = registrationsLocation;
             }
 
             _indexes.Remove((tableObjectId, name));
-            _registrations = registrations.ToList();
+            _registrations = remainingRegistrations;
             return default;
         }
     }
 
-    /// <summary>
-    /// Persists the physical index registrations exported by the index manager, so
-    /// indexes re-attach when the database reopens.
-    /// </summary>
-    /// <param name="registrations">The registrations to persist (replaces the stored set).</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>A task that completes once the registrations are durable.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
-    public ValueTask SaveIndexRegistrationsAsync(IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
+    // Called only under _sync. Publishers can finish trees and capture snapshots
+    // independently, so only their own new descriptions may change the directory.
+    private BTreeIndexRegistration[] MergePublishedRegistrations(
+        IReadOnlyList<BTreeIndexRegistration> registrations, IReadOnlyList<SqlCatalogIndex> indexes)
     {
-        ArgumentNullException.ThrowIfNull(registrations);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        lock (_sync)
+        var merged = _registrations.ToDictionary(registration =>
+            (registration.ObjectId, registration.Definition.Name), IndexNameComparer.Instance);
+        foreach (var index in indexes)
         {
-            byte[] record = EncodeRegistrations(registrations);
-
-            using (var transaction = _storage.BeginTransaction())
+            var matches = registrations.Where(registration => registration.ObjectId == index.TableObjectId &&
+                string.Equals(registration.Definition.Name, index.Name, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (matches.Length != 1 || matches[0].Definition.IsUnique != index.IsUnique ||
+                matches[0].Definition.Kind != IndexKind.BTree || matches[0].RootPageId <= 0)
             {
-                _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, record);
-                transaction.Commit();
+                throw new SqlCatalogException(
+                    $"Index '{index.Name}' requires exactly one matching B-tree registration with a positive root page id in the same publication.");
             }
-
-            _registrations = registrations.ToList();
-            return default;
+            merged[(index.TableObjectId, index.Name)] = matches[0];
         }
+        return merged.Values.ToArray();
     }
 
     /// <summary>
     /// Loads the persisted index registrations.
     /// </summary>
     /// <returns>The stored registrations, empty when none were saved.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<BTreeIndexRegistration> GetIndexRegistrations()
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             return _registrations;
         }
     }
@@ -722,12 +799,14 @@ public sealed class SqlCatalog
     /// format changes — the engine reads this at open and refuses a data storage
     /// on any version but its own (it has no upgrade path).
     /// </summary>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public int RecordSpaceFormatVersion
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _recordSpaceFormatVersion;
             }
         }
@@ -746,6 +825,7 @@ public sealed class SqlCatalog
     /// <returns>A task that completes once the marker is durable.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="version"/> is zero or negative.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask SetRecordSpaceFormatVersionAsync(int version, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(version);
@@ -753,6 +833,12 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
+            if (_formatLocation is not null && version == _recordSpaceFormatVersion)
+            {
+                return default;
+            }
+
             int kind = version >= firstFencedRecordSpaceFormatVersion
                 ? fencedRecordSpaceFormatKind
                 : recordSpaceFormatKind;
@@ -762,8 +848,9 @@ public sealed class SqlCatalog
 
             using (var transaction = _storage.BeginTransaction())
             {
-                _formatLocation = UpsertRecord(transaction, _formatLocation, record);
-                transaction.Commit();
+                var formatLocation = UpsertRecord(transaction, _formatLocation, record);
+                CommitCatalogChange(transaction);
+                _formatLocation = formatLocation;
             }
 
             _recordSpaceFormatVersion = version;
@@ -779,12 +866,35 @@ public sealed class SqlCatalog
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the state is durable.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="state"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The state's generation differs from the current catalog generation.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask SaveSchemaStateAsync(SqlCatalogSchemaState state, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(state);
         cancellationToken.ThrowIfCancellationRequested();
 
+        return SaveSchemaDocument(state, pending: null, cancellationToken);
+    }
+
+    /// <summary>Atomically records a migration intent before its worker may execute.</summary>
+    /// <param name="migration">The target schema and deferred step order.</param>
+    /// <param name="cancellationToken">Observed before writing the intent.</param>
+    /// <returns>A task that completes when the intent is durable.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="migration"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
+    public ValueTask SavePendingMigrationAsync(SqlCatalogPendingMigration migration, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(migration);
+        cancellationToken.ThrowIfCancellationRequested();
+        string document = JsonSerializer.Serialize(migration, SqlCatalogJsonContext.Default.SqlCatalogPendingMigration);
+        return SaveSchemaDocument(new SqlCatalogSchemaState(migration.ContentHash, document, DdlGeneration), migration, cancellationToken);
+    }
+
+    private ValueTask SaveSchemaDocument(SqlCatalogSchemaState state, SqlCatalogPendingMigration? pending, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         byte[] document = _strictUtf8.GetBytes(state.CanonicalDocument);
         int chunkCount = document.Length == 0
             ? 1
@@ -797,20 +907,36 @@ public sealed class SqlCatalog
             int length = Math.Min(schemaStateChunkSize, document.Length - offset);
             records.Add(EncodeSchemaStateChunk(
                 state.ContentHash,
+                state.Generation,
                 index,
                 chunkCount,
-                document.AsSpan(offset, length)));
+                document.AsSpan(offset, length), pending is null ? schemaStateRecordKind : _pendingMigrationRecordKind));
         }
 
         lock (_sync)
         {
+            ThrowIfOffline();
+            if (state.Generation != _ddlGeneration)
+            {
+                throw new SqlCatalogException("The applied-schema state does not describe the current DDL generation.");
+            }
+
             var locations = new List<(PageId PageId, int SlotIndex)>(records.Count);
 
             using (var transaction = _storage.BeginTransaction())
             {
-                foreach (var location in _schemaStateLocations)
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var location in pending is null ? _schemaStateLocations : _pendingMigrationLocations)
                 {
                     _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                }
+
+                if (pending is null)
+                {
+                    foreach (var location in _pendingMigrationLocations)
+                    {
+                        _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                    }
                 }
 
                 foreach (byte[] record in records)
@@ -821,8 +947,18 @@ public sealed class SqlCatalog
                 transaction.Commit();
             }
 
-            _schemaStateLocations = locations;
-            _schemaState = state;
+            if (pending is null)
+            {
+                _schemaStateLocations = locations;
+                _schemaState = state;
+                _pendingMigrationLocations = [];
+                _pendingMigration = null;
+            }
+            else
+            {
+                _pendingMigrationLocations = locations;
+                _pendingMigration = pending;
+            }
             return default;
         }
     }
@@ -831,7 +967,9 @@ public sealed class SqlCatalog
 
     private void Load()
     {
+        ThrowIfOffline();
         var schemaStateChunks = new List<SchemaStateChunk>();
+        var pendingChunks = new List<SchemaStateChunk>();
         using var iterator = _storage.GetUnitIterator();
 
         while (iterator.MoveNext())
@@ -861,6 +999,17 @@ public sealed class SqlCatalog
                         _nextObjectId = persisted;
                     }
 
+                    if (reader.IsAtEnd)
+                    {
+                        throw new SqlCatalogException(
+                            "Unsupported catalog counter format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.");
+                    }
+                    _ddlGeneration = (ulong)reader.ReadInt64();
+                    if (!reader.IsAtEnd || _counterLocation is not null)
+                    {
+                        throw new SqlCatalogException("Malformed catalog counter record.");
+                    }
+
                     _counterLocation = (unit.PageId, unit.SlotIndex);
                     break;
 
@@ -881,9 +1030,11 @@ public sealed class SqlCatalog
                     break;
 
                 case schemaStateRecordKind:
+                case _pendingMigrationRecordKind:
                     var chunk = DecodeSchemaStateChunk(ref reader);
-                    schemaStateChunks.Add(new SchemaStateChunk(
+                    (kind == schemaStateRecordKind ? schemaStateChunks : pendingChunks).Add(new SchemaStateChunk(
                         chunk.ContentHash,
+                        chunk.Generation,
                         chunk.Index,
                         chunk.Count,
                         chunk.Document,
@@ -908,6 +1059,34 @@ public sealed class SqlCatalog
         {
             _schemaState = AssembleSchemaState(schemaStateChunks);
             _schemaStateLocations = schemaStateChunks.Select(chunk => chunk.Location).ToList();
+        }
+
+        if (pendingChunks.Count > 0)
+        {
+            SqlCatalogSchemaState pending = AssembleSchemaState(pendingChunks);
+            try
+            {
+                _pendingMigration = JsonSerializer.Deserialize(pending.CanonicalDocument,
+                    SqlCatalogJsonContext.Default.SqlCatalogPendingMigration)
+                    ?? throw new SqlCatalogException("Malformed pending migration: no intent.");
+                if (!string.Equals(pending.ContentHash, _pendingMigration.ContentHash, StringComparison.Ordinal))
+                {
+                    throw new SqlCatalogException("Malformed pending migration: target hashes differ.");
+                }
+            }
+            catch (Exception failure) when (failure is JsonException or ArgumentException)
+            {
+                throw new SqlCatalogException($"Malformed pending migration: {failure.Message}");
+            }
+            _pendingMigrationLocations = pendingChunks.Select(chunk => chunk.Location).ToList();
+        }
+    }
+
+    private void ThrowIfOffline()
+    {
+        if (_storage.OfflineError is { } offline)
+        {
+            throw offline;
         }
     }
 
@@ -941,7 +1120,7 @@ public sealed class SqlCatalog
         using (var transaction = _storage.BeginTransaction())
         {
             var location = UpsertRecord(transaction, slot.Location, record);
-            transaction.Commit();
+            CommitCatalogChange(transaction);
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
         }
     }
@@ -971,11 +1150,28 @@ public sealed class SqlCatalog
         }
     }
 
-    private void PersistCounter(StorageTransaction transaction)
+    private void CommitCatalogChange(StorageTransaction transaction, ulong? nextObjectId = null)
+    {
+        if (_ddlGeneration == ulong.MaxValue)
+        {
+            throw new SqlCatalogException("The catalog DDL generation is exhausted.");
+        }
+
+        ulong generation = _ddlGeneration + 1;
+        ulong identity = nextObjectId ?? _nextObjectId;
+        var location = PersistCounter(transaction, identity, generation);
+        transaction.Commit();
+        _counterLocation = location;
+        _nextObjectId = identity;
+        _ddlGeneration = generation;
+    }
+
+    private (PageId PageId, int SlotIndex) PersistCounter(
+        StorageTransaction transaction, ulong nextObjectId, ulong generation)
     {
         var writer = new DatabaseKeyWriter();
-        writer.AppendInt32(counterRecordKind).AppendInt64((long)_nextObjectId);
-        _counterLocation = UpsertRecord(transaction, _counterLocation, writer.ToArray());
+        writer.AppendInt32(counterRecordKind).AppendInt64((long)nextObjectId).AppendInt64((long)generation);
+        return UpsertRecord(transaction, _counterLocation, writer.ToArray());
     }
 
     private static void ValidateColumns(
@@ -1399,6 +1595,7 @@ public sealed class SqlCatalog
     /// <see cref="PublishTableAsync"/> succeeds; abandoning a reservation never reuses
     /// its identity. Callers serialize DDL, and a reservation does not lock the name.
     /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> ReserveTableAsync(
         string schema, string name, IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<string>? primaryKeyColumns, IReadOnlyList<SqlCatalogConstraint> constraints,
@@ -1411,18 +1608,18 @@ public sealed class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_tables.ContainsKey((schema, name)))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
             }
             ValidateColumns(schema, name, columns, primaryKeyColumns);
-            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
+            var table = new SqlCatalogTable(_nextObjectId, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
             ValidateConstraints(table);
             // Persist the identity before physical trees are created. A crash can
             // leave unused trees, but can never reuse their identity for a table.
             using var transaction = _storage.BeginTransaction();
-            PersistCounter(transaction);
-            transaction.Commit();
+            CommitCatalogChange(transaction, checked(_nextObjectId + 1));
             return new ValueTask<SqlCatalogTable>(table);
         }
     }
@@ -1433,7 +1630,7 @@ public sealed class SqlCatalog
     /// </summary>
     /// <param name="table">The reserved table, or a replacement definition with the existing table's identity.</param>
     /// <param name="indexes">New index descriptions whose physical trees have already been committed.</param>
-    /// <param name="registrations">The complete durable index registration set, replacing the stored set.</param>
+    /// <param name="registrations">A physical registration snapshot containing exactly one registration per new index, matching its table, name (case-insensitively), and uniqueness, with B-tree kind and a positive root page id. Only those registrations are merged into the current directory.</param>
     /// <param name="replaceExisting">Whether the definition replaces an existing table with the same identity.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task representing durable publication of all supplied metadata.</returns>
@@ -1455,6 +1652,7 @@ public sealed class SqlCatalog
     /// another column. The catalog owns metadata persistence; physical tree creation and row
     /// validation remain the caller's responsibility.
     /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask PublishTableAsync(
         SqlCatalogTable table, IReadOnlyList<SqlCatalogIndex> indexes,
         IReadOnlyList<BTreeIndexRegistration> registrations, bool replaceExisting = false,
@@ -1466,6 +1664,7 @@ public sealed class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfOffline();
             if (!replaceExisting && (table.ObjectId == 0 || table.ObjectId >= _nextObjectId))
             {
                 throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has no reserved catalog identity.");
@@ -1490,26 +1689,24 @@ public sealed class SqlCatalog
             foreach (SqlCatalogIndex index in indexes)
             {
                 if (index.TableObjectId != table.ObjectId || !names.Add(index.Name) ||
-                    index.ColumnNames.Any(column => table.FindColumn(column) is null) ||
-                    !registrations.Any(registration => registration.ObjectId == table.ObjectId &&
-                        string.Equals(registration.Definition.Name, index.Name, StringComparison.Ordinal) &&
-                        registration.Definition.IsUnique == index.IsUnique))
+                    index.ColumnNames.Any(column => table.FindColumn(column) is null))
                 {
-                    throw new SqlCatalogException($"Index '{index.Name}' does not describe a registered index on '{table.Schema}.{table.Name}'.");
+                    throw new SqlCatalogException($"Index '{index.Name}' does not describe a new index on '{table.Schema}.{table.Name}'.");
                 }
             }
+            var mergedRegistrations = MergePublishedRegistrations(registrations, indexes);
             using var transaction = _storage.BeginTransaction();
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
-            var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
-            transaction.Commit();
+            var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
+            CommitCatalogChange(transaction);
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
             {
                 _indexes[(table.ObjectId, slot.Index.Name)] = slot;
             }
             _registrationsLocation = registrationsLocation;
-            _registrations = registrations.ToArray();
+            _registrations = mergedRegistrations;
             return default;
         }
     }
@@ -1565,6 +1762,7 @@ public sealed class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfOffline();
             var slot = GetSlot(schema, name);
             if (_indexes.ContainsKey((slot.Table.ObjectId, constraint.Name)))
             {
@@ -1592,6 +1790,7 @@ public sealed class SqlCatalog
     /// <exception cref="SqlCatalogException">The table or constraint does not exist.</exception>
     /// <exception cref="StorageException">The backing storage cannot persist the metadata change.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> DropConstraintAsync(
         string schema, string name, string constraintName, CancellationToken cancellationToken = default)
     {
@@ -1601,6 +1800,7 @@ public sealed class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfOffline();
             var slot = GetSlot(schema, name);
             var constraints = slot.Table.Constraints.Where(constraint =>
                 !string.Equals(constraint.Name, constraintName, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -1697,26 +1897,40 @@ public sealed class SqlCatalog
 
     private static byte[] EncodeSchemaStateChunk(
         string contentHash,
+        ulong generation,
         int index,
         int count,
-        ReadOnlySpan<byte> document)
+        ReadOnlySpan<byte> document,
+        int kind)
     {
         var writer = new DatabaseKeyWriter();
-        writer.AppendInt32(schemaStateRecordKind)
+        writer.AppendInt32(kind)
               .AppendString(contentHash, Collation.Binary)
               .AppendInt32(index)
               .AppendInt32(count)
-              .AppendBinary(document);
+              .AppendBinary(document)
+              .AppendInt64((long)generation);
         return writer.ToArray();
     }
 
     private static SchemaStateChunk DecodeSchemaStateChunk(ref DatabaseKeyReader reader)
-        => new(
-            reader.ReadString(out _),
-            reader.ReadInt32(),
-            reader.ReadInt32(),
-            reader.ReadBinary(),
-            default);
+    {
+        string contentHash = reader.ReadString(out _);
+        int index = reader.ReadInt32();
+        int count = reader.ReadInt32();
+        byte[] document = reader.ReadBinary();
+        if (reader.IsAtEnd)
+        {
+            throw new SqlCatalogException(
+                "Unsupported applied-schema state format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.");
+        }
+        ulong generation = (ulong)reader.ReadInt64();
+        if (!reader.IsAtEnd)
+        {
+            throw new SqlCatalogException("Malformed applied-schema state: a chunk contains trailing values.");
+        }
+        return new SchemaStateChunk(contentHash, generation, index, count, document, default);
+    }
 
     private static SqlCatalogSchemaState AssembleSchemaState(IReadOnlyList<SchemaStateChunk> chunks)
     {
@@ -1731,7 +1945,7 @@ public sealed class SqlCatalog
 
         foreach (SchemaStateChunk chunk in chunks)
         {
-            if (chunk.Count != first.Count ||
+            if (chunk.Count != first.Count || chunk.Generation != first.Generation ||
                 !string.Equals(chunk.ContentHash, first.ContentHash, StringComparison.Ordinal) ||
                 chunk.Index < 0 ||
                 chunk.Index >= ordered.Length ||
@@ -1759,7 +1973,7 @@ public sealed class SqlCatalog
 
         try
         {
-            return new SqlCatalogSchemaState(first.ContentHash, _strictUtf8.GetString(document));
+            return new SqlCatalogSchemaState(first.ContentHash, _strictUtf8.GetString(document), first.Generation);
         }
         catch (DecoderFallbackException)
         {
@@ -1773,6 +1987,7 @@ public sealed class SqlCatalog
 
     private sealed record SchemaStateChunk(
         string ContentHash,
+        ulong Generation,
         int Index,
         int Count,
         byte[] Document,

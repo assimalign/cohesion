@@ -48,7 +48,10 @@ public interface IDatabaseApplicationBuilder
     /// <remarks>
     /// Build runs each owned engine factory synchronously, in registration order. A model's factory
     /// can do I/O here: a SQL engine's opens, recovers and provisions the databases its builder
-    /// declares, with no timeout and no cancellation (owner decision 49 of 2026-10-09). A factory's
+    /// declares, with no timeout. This cross-area member remains parameterless; its implementation
+    /// supplies no construction cancellation token. Cancellable construction is a concrete hosting
+    /// builder operation, and engine factories observe its token through the application context.
+    /// Data-scaling SQL steps run on the engine's provisioning worker. A factory's
     /// exception propagates after the products built before it are disposed.
     /// </remarks>
     IDatabaseApplication Build();

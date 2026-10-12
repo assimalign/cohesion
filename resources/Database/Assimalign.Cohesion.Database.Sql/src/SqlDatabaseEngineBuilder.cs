@@ -271,21 +271,24 @@ public sealed class SqlDatabaseEngineBuilder
     /// Builds the engine, then provisions every declared database: <see cref="BuildAsync"/>, bridged
     /// on the thread pool, so the caller's synchronization context is never captured.
     /// </summary>
-    /// <returns>The operational engine, every declared database provisioned and its servers still stopped.</returns>
+    /// <param name="cancellationToken">Cancels recovery and inline provisioning; owned resources are disposed.</param>
+    /// <returns>The operational engine with cheap steps complete, pending tables reserved, and servers still stopped.</returns>
+    /// <exception cref="OperationCanceledException">The build was canceled.</exception>
     /// <exception cref="InvalidOperationException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="SqlSchemaMigrationException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="AggregateException">See <see cref="BuildAsync"/>.</exception>
-    public SqlDatabaseEngine Build()
-        => Task.Run(async () => await BuildAsync(CancellationToken.None).ConfigureAwait(false)).GetAwaiter().GetResult();
+    public SqlDatabaseEngine Build(CancellationToken cancellationToken = default)
+        => Task.Run(async () => await BuildAsync(cancellationToken).ConfigureAwait(false)).GetAwaiter().GetResult();
 
     /// <summary>
-    /// Freezes composition, builds the engine with its workers and servers, and provisions every
-    /// declared database before it returns.
+    /// Freezes composition, builds the engine with its workers and servers, and applies cheap
+    /// schema steps. Populated-table data-scaling steps are persisted and their tables reserved
+    /// for the provisioning worker unless the database enables inline migrations.
     /// </summary>
     /// <param name="cancellationToken">Observed between the phases and by each provisioning step.</param>
-    /// <returns>The operational engine, every declared database provisioned and its servers still stopped.</returns>
+    /// <returns>The operational engine with cheap steps complete, pending tables reserved, and servers still stopped.</returns>
     /// <exception cref="InvalidOperationException">
     /// A build was already attempted; a factory returned null; or the engine refused a product (a
     /// duplicate worker name, a product returned twice, a server that fronts another engine).
@@ -350,6 +353,7 @@ public sealed class SqlDatabaseEngineBuilder
             {
                 await declaration.ProvisionAsync(engine, cancellationToken).ConfigureAwait(false);
             }
+            cancellationToken.ThrowIfCancellationRequested();
         }
         catch (Exception failure) when (failure is not OutOfMemoryException)
         {
@@ -358,6 +362,7 @@ public sealed class SqlDatabaseEngineBuilder
         }
 
         // Phase 7.
+        engine.CompleteProvisioningBuild();
         return engine;
     }
 

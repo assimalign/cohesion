@@ -186,8 +186,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         instance.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(schema.Hash);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Schema apply: matching hash repairs a malformed canonical document")]
-    public async Task ApplySchema_WhenRecordedHashMatchesButDocumentIsMalformed_ShouldRepairState()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Schema apply: stale generation repairs a malformed canonical document")]
+    public async Task ApplySchema_WhenGenerationMovedAndDocumentIsMalformed_ShouldRepairState()
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -198,7 +198,9 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await database.ApplySchemaAsync(schema);
 
         var instance = database.ShouldBeOfType<SqlDatabase>();
-        await instance.Catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(schema.Hash, "not-json"));
+        await instance.Catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(schema.Hash, "not-json", instance.Catalog.DdlGeneration));
+        await using var adhoc = await database.CreateSessionAsync();
+        await adhoc.ExecuteAsync("CREATE TABLE unrelated (id INT)");
 
         // Act
         SqlSchemaMigrationResult result = await database.ApplySchemaAsync(schema);
@@ -455,8 +457,10 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await Should.ThrowAsync<DatabaseObjectLockedException>(
             async () => await reopenedSession.ExecuteAsync("DROP INDEX ix_orders_id ON orders;"));
         await reopenedSession.ExecuteAsync("DROP TABLE scratch;");
-        (await reopened.ApplySchemaAsync(schema))
-            .WasAlreadyApplied.ShouldBeTrue();
+        // B2: even unrelated ad-hoc DDL moves the generation and requires a replan.
+        var reconciled = await reopened.ApplySchemaAsync(schema);
+        reconciled.WasAlreadyApplied.ShouldBeFalse();
+        reconciled.OperationCount.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Ownership: schema apply may remove owned columns indexes and tables")]
@@ -499,10 +503,10 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false)], []);
         await database.ApplySchemaAsync(initial);
         await session.ExecuteAsync("CREATE INDEX adhoc_index ON orders (id);");
-        (await database.ApplySchemaAsync(initial)).WasAlreadyApplied.ShouldBeTrue();
+        (await database.ApplySchemaAsync(initial)).OperationCount.ShouldBe(0);
 
         var catalog = database.ShouldBeOfType<SqlDatabase>().Catalog;
-        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(initial.Hash, "invalid-json"));
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(initial.Hash, "invalid-json", catalog.DdlGeneration));
         SqlCompiledSchema desired = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)], []);

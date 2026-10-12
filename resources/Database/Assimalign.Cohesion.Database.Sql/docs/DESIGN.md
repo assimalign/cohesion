@@ -159,8 +159,8 @@ flowchart TD
   the column and every INSERT omitting it reads, where each use converted the text
   before. A DEFAULT that does not convert, which DDL never stores, binds as a
   `SqlBoundFailure` that fails each use as before, so the table still opens. Bound
-  trees and converted values are immutable and failure nodes construct a new exception
-  per throw, so sharing them across threads is safe.
+  trees and immutable converted values are shared; binary defaults are copied on delivery.
+  Failure nodes construct a new exception per throw, so sharing the cache across threads is safe.
 - **Allocation.** Literals and parameters are boxed once per statement instead of per
   row; predicates return shared boxed Booleans; `COUNT(*)` accumulates a shared boxed
   sentinel; a projected value already of its declared type is not converted and boxed
@@ -1012,8 +1012,8 @@ binary values. Stored row bytes and canonical DEFAULT text retain their existing
 
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). It has two entry points over one internal
-`SqlSchemaProvisioner` per database: the engine builder provisions every database it declares
-before its build returns (next section), and the typed `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema,
+`SqlSchemaProvisioner` per database: the engine builder completes inline work and reserves deferred
+work for every database it declares before its build returns (next section), and the typed `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema,
 CancellationToken)` applies a schema imperatively, for tools, Studio and tests (decision 53). The
 public member checks disposal, a null schema and the token first, then refuses an offline database
 (`COHSQLT004`). Until B1 the root `DatabaseInstance` carried the capability
@@ -1024,8 +1024,8 @@ database name, and a shape the shipped SQL DDL surface can represent. It then
 reconstructs or reads the last canonical catalog state, uses
 `SqlSchemaMigrationPlanner` from `Database.Sql.Schema` for deterministic ordering/destructive gating, and
 `SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
-steps are table, column, and secondary-index add/drop; alter/rebuild operations
-and advanced objects (principals/grants) fail before execution rather than
+steps are table, column, and secondary-index add/drop, plus validation-only column changes;
+operations requiring a rewrite and advanced objects (principals/grants) fail before execution rather than
 recording a false applied hash. Foreign keys and checks now render into provisioning
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
 the engine and the database. A plan the planner refuses (a destructive step the schema does not
@@ -1033,9 +1033,196 @@ allow) and a schema that would adopt a table or index it did not create lead wit
 before any step runs; a failed step leads with `COHSQLP004` and names "step k of n" and its
 operation. A failed apply whose token was canceled throws `OperationCanceledException` once its
 completed steps are compensated: a canceled commit surfaces as the aborted transaction of the step
-it interrupted, so the token decides, not the failure's type. The skip test and a `Verify` drift
-share one catalog comparison, which describes the first object that differs (a missing table,
-column, constraint or index, an undeclared one, or a column's type or nullability).
+it interrupted, so the token decides, not the failure's type. The skip checks the cached declaration hash and catalog DDL generation. When either differs,
+`Verify` describes the first live object that differs (a missing table, column, constraint or
+index, an undeclared one, or a column's type, nullability or default).
+
+### Provisioning hardening (B2)
+
+The B2 core introduced format **8** (superseded by format **9** for 49a below): format 7's rows and index pages are unchanged, but the catalog
+counter now persists its DDL generation, and every chunk of the applied-schema document carries
+the generation it describes. The counter advances in the same storage transaction as each catalog
+change, regardless of ownership. A table reservation and its publication are separate commits and
+advance it separately. Unchanged maintenance writes do nothing; recording the applied-schema
+marker does not advance it. An older database is refused by the existing format gate, with no
+upgrade or legacy counter reader. If catalog decoding fails before reaching an older database's
+format marker, the engine reads only the unchanged marker tuple and invokes that same gate. This
+failure-only read adds no traversal to a successful open and preserves the actionable `Unavailable`
+wire refusal. A marker-free catalog containing one genuine old counter tuple is refused as format 1;
+duplicate counters, unknown record kinds, and malformed or ambiguous markers remain corruption.
+
+The marker retains the canonical document for migration history, alongside `{hash, generation}`.
+Equal declared hash and current generation return immediately: no ownership scan, snapshot,
+document deserialization, serialization or SHA-256 in the provisioning phase. Declaration identity
+is computed before I/O in Build phase 3; immutable retained `SqlSchema` declarations cache their
+compiled schema, and compiled schemas cache their document and hash. A fresh declaration still has
+to be compiled and hashed once. The instance-local `CatalogWalkCount` hook covers every provisioner
+catalog traversal; its own assembly's tests assert zero on the second Build. Schema's own tests
+assert its identity computation counters stay at one on repeated reads and compilation.
+The required open-time binding pass also retains its first unresolved CHECK and domain at that
+generation. Post-provisioning declaration validation reuses those results until DDL changes the
+generation, avoiding two further table walks on an unchanged Build. Its internal
+`ValidationWalkCount` stays zero after reopen; an ad-hoc DDL invalidates the cached validation.
+
+A different hash with the same generation can use the recorded document after validating its
+hash. A moved generation never trusts that document: planning starts from the live schema-owned
+objects. Ad-hoc objects survive reconciliation and still cannot be adopted. Even unrelated ad-hoc
+DDL forces this path; a zero-step plan refreshes the marker. Verify mode reports the changed state
+without writing it. After all statements, the live catalog is checked once more against the
+declaration, so a concurrent name collision cannot be recorded as convergence. The marker is
+saved last with the generation captured before that check, which the catalog checks
+under its metadata lock. A failed or crashed multi-statement apply leaves earlier committed steps
+visible; recovery restores their counter atomically with their DDL, and the next Build plans only
+the uncommitted tail. There is no multi-statement atomicity claim.
+
+The snapshot covers ordered columns, storage types and bounds, named SQL types/domains, effective
+primary-key nullability, literal DEFAULTs, composite primary keys, ordinary and unique indexes,
+foreign keys with delete actions, and CHECK predicates. Equivalent DEFAULT and CHECK text retains
+the desired spelling so the planner does not invent changes. The desired CLR row identity and
+primary-key name are retained when the catalog's corresponding structure matches; neither is SQL
+catalog metadata. E3 domains are engine registrations made before provisioning, so registered
+declared domains are included in the snapshot even when no table exists; their planner operations
+emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain explicitly refused.
+
+`table.Default(selector, value)` renders a typed C# value through the schema package's shared
+renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
+on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
+Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
+has the same canonical document and hash. The document remains `cohesion/database-schema/v4`:
+this changes declaration syntax and literal admission, not the document shape.
+The engine validates one literal before writing anything and
+resolves its column's effective type, including a domain's base type. Preflight calls the same
+`SqlPlanExecutor.ResolveDefault` conversion as CREATE TABLE and ADD COLUMN, which uses
+`SqlCastConverter.ParseNumericText` and `ApplyModifiers` for numeric rounding and effective
+length, precision and scale bounds. Conversion failures and values outside those bounds fail
+Build with `COHSQLP001` before either file set exists; finite and underflow checks for floating
+defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
+therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
+and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
+`cohesion/database-schema/v4`, because strict v3 readers cannot read `defaultLiteral`. Null defaults
+are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
+existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
+same schema renderer and preserves the same text and hash.
+
+Negative numeric defaults admit exactly one unary-minus node over one integer or floating literal,
+including values such as `-7` and `-1.2500`. The DDL parser reads that node, and provisioning,
+DDL planning and persisted-default loading apply the same literal-only rule. Arithmetic,
+nested unary expressions and function calls remain refused. Temporal values and UUIDs use quoted invariant
+text and the existing column conversions. The raw form for a date is `'2026-01-01'`;
+the `DATE '2026-01-01'` typed SQL prefix is outside the current dialect.
+
+Binary defaults use a quoted `\x` prefix followed by an even number of hexadecimal digits;
+the typed renderer writes uppercase digits. This follows PostgreSQL's bytea hex marker
+(`src/backend/utils/adt/bytea.c:201-224`), with no octal or whitespace alternative. DEFAULT
+conversion alone decodes the bytes and enforces the column's length bounds; general text-to-binary
+assignment and CAST are unchanged. The table-version cache keeps the converted bytes privately
+and clones them whenever a default is delivered, including backfill of older rows, so caller
+mutation cannot change subsequent defaults.
+
+`SqlProvisioningHardeningTests` captures Sql's crash-storage strategy after every committed step of
+a migration containing all eight executable add/drop operation kinds, including a unique-index
+drop, DEFAULT columns, domains with bounds, primary keys, CHECKs and foreign keys. Every recovered
+engine Build's plan must equal the remaining suffix and its final marker must equal the declared
+hash and current generation. A separate compiled-schema test covers unique-index creation and a
+composite primary key, which the retained builder does not declare.
+
+### Deferred data-scaling steps (B2, decision 49a)
+
+If cancellation interrupts the handoff after cheap-step locks were released, compensation owns a
+fresh transaction. An ended reservation is never reused to acquire compensation locks.
+Hosting's existing offline-reopen policy still applies, including its backoff when the same
+database fails again. The provisioning worker itself makes one attempt per scheduled migration.
+
+Build probes each affected table's physical allocation through `Storage.HasOwnerPages`, a
+constant-time query that does not copy the owner page directory. It runs creation, nullable column
+addition, drops, and work on empty tables inline. Populated-table index creation, constraint
+validation, required-column addition, additions of columns whose domains carry checks, and validation-only column tightening run on the engine's
+`SqlProvisioningWorker`. `SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
+Imperative `ApplySchemaAsync` remains inline. Nullable additions validate their immutable missing
+value once; existing rows continue to resolve that value from the catalog without a rewrite.
+Column additions on the same table retain declaration order: once an addition is deferred,
+every later addition to that table follows it on the worker, including nullable additions.
+
+An existing implementation contradicts 49a's catalog-only premise for every drop: `DROP TABLE`
+calls `Storage.FreeOwnerPages`, which clears and WAL-logs each owned data page
+(`Database.Storage/src/Storage.cs:2111`). Drops remain inline as the accepted classification
+requires. Moving that physical reclamation out of Build needs a separate decision: deferring the
+drop would contradict that classification, while silently removing reclamation would change its
+existing storage contract.
+
+The catalog's format-9 pending intent contains the complete target document/hash, operation kind,
+table, object name, original one-based execution position and total. Its transaction commits
+before the first cheap step, so a crash after any publication can resume by database name alone.
+Cancellation and compensation retain that target for retry; a different target is refused until
+the recorded migration completes. The prior applied marker stays untrusted while an
+intent exists; only the transaction recording the fully reconciled target clears the intent.
+
+```mermaid
+stateDiagram-v2
+    state "Pending: durable target and ordered steps; table locks reserved" as Pending
+    state "Running: DDL with row progress" as Running
+    state "Done: applied marker and pending removal commit together" as Done
+    state "Failed: database offline; COHSQLP004; intent retained" as Failed
+    [*] --> Pending
+    Pending --> Running
+    Running --> Done
+    Running --> Failed
+    Running --> Pending: "Restart or cancellation"
+    Failed --> Pending: "Next open retries"
+    Done --> [*]
+```
+
+Before Build returns, one read-only transaction reserves exclusive lock-manager table locks for
+the pending tables and any FK parent needed by their DDL. The worker keeps that transaction until
+completion or cancellation. Reservations cover the remaining migration as a set: a later table
+cannot accept work ahead of its pending step. Tables outside that set continue to serve reads,
+writes and DDL. The request admission walk uses those same lock-manager locks before planning
+or capturing an automatic transaction snapshot, including joins, subqueries and FK parents in
+CREATE TABLE and ALTER ADD COLUMN/CONSTRAINT. Parent unique-key binding therefore observes the
+completed migration. PostgreSQL likewise locks the referenced relation before checking its key
+(`src/backend/commands/tablecmds.c:10171-10177,10304`); no implementation is copied. Admission introduces
+no second waiting graph. The final marker uses the catalog's generation check and retries a
+concurrent unrelated DDL change; it never waits for the global DDL interlock while holding tables.
+
+Index population commits bounded 64-version brackets, releasing the coordinator's statement apply gate between
+batches. Counts and scans run on the worker. Unpublished trees never enter a catalog directory,
+including through checkpoints or another table's DDL. Restart discards their in-memory identity
+and rebuilds from scratch; abandoned pages follow ordinary DROP INDEX reclamation (future vacuum),
+as `BTreeIndexManager.DropIndexAsync` does. Completed steps survive a later failure and are omitted
+by B2's complete-catalog reconciliation. A failed step takes only its database offline with
+`COHSQLP004` and keeps the intent for the next open, even without a fresh schema declaration.
+Catalog publication merges only affected registrations under its metadata lock. Independently
+finished trees therefore cannot erase one another through stale full-directory snapshots.
+Every new description requires its matching registration in the same catalog commit.
+There is no separate registration-save API: checkpoint and shutdown persist committed
+catalog state without exporting the index manager's directory. A stale snapshot therefore
+cannot attach a dropped tree to a same-name replacement published without a registration;
+such incomplete publication is refused before any catalog write.
+
+`DatabaseInstance.Provisioning` carries immutable model-neutral observations: kind, table,
+position/total, pending/running, counted rows and optional failure code. Hosting reports Degraded
+until completion, then Healthy; offline takes precedence over provisioning. No EventSource
+events were added for this worker (see Diagnostics).
+
+Build and BuildAsync accept cancellation. Hosting passes the caller's application Build token
+through `IDatabaseApplicationContext.BuildCancellationToken`; the host's runtime shutdown lifecycle
+has not begun at Build, so its caller must supply the shutdown token. Recovery observes it in
+journal initialization/replay, page reconstruction and transaction scrub, and between checkpoint
+phases. An interrupted logical scrub fences the unpublished database's storage from shutdown
+writes (`RecoveryInterrupted`), preserving classification records for the next open. Database
+disposal cancels and joins its worker work before closing storage.
+
+Tightening now has an executable DDL path: a full `ALTER COLUMN` definition may change nullability,
+length or precision while retaining storage type, scale, collation, domain and DEFAULT. Existing
+values must already satisfy the new definition; changes that need value conversion remain refused.
+Code-first type spellings resolve before comparing storage, domain identity and scale;
+`VARCHAR(20)` to `VARCHAR(10)` and `DECIMAL(18,2)` to `DECIMAL(10,2)` therefore reach that
+validation-only path. Build classifies tightening from resolved length and precision bounds,
+including declarations whose compiled raw modifier fields are null.
+PostgreSQL's table-rewrite validation separates not-null/constraint checks from rewritten tuples
+(`src/backend/commands/tablecmds.c:6186,6511,6594`, `ATRewriteTable`); Neo4j's background population exposes
+`POPULATING` and `FAILED` (`community/kernel-api/src/main/java/org/neo4j/internal/kernel/api/InternalIndexState.java:29,43`).
+These are behavioral precedents, not copied implementations.
 
 ### Declared databases: the engine builder's build phases
 
@@ -1084,9 +1271,10 @@ stateDiagram-v2
    Each declared column type resolves to the frozen type catalog too. A schema that does not
    compile, declares a principal (decision 58), declares a domain that conflicts with a registered
    type, declares a column of a type the catalog does not know or does not store as its member's,
+   declares a DEFAULT that cannot convert to that effective type or fit its bounds,
    or declares a CHECK that does not bind (not exactly one predicate, an unknown column or function, a call no
    overload accepts, a function that is not `Immutable`) is refused here with `COHSQLP001`, naming
-   the table and the constraint, before any file is touched: the engine, whose creation makes the
+   the table and its column or constraint, before any file is touched: the engine, whose creation makes the
    root directory, does not exist yet.
 4. **Engine.** Created; its built-in workers attach and start.
 5. **Composition.** The `AddWorker` products attach, then the `AddServer` products (a server is
@@ -1095,8 +1283,8 @@ stateDiagram-v2
 6. **Provisioning**, in declaration order. Open, or create (`DefaultCollation ?? Collation.Binary`)
    when the database does not exist; an existing database whose collation is not the declared one
    (an unset declaration meaning `Binary`) is refused with `COHSQLP002`, because a key's collation id
-   cannot change (decision 56). Then `Apply` skips a schema whose recorded hash, recorded document
-   and live catalog all match, and otherwise plans and applies it with compensation; `Verify` runs
+   cannot change (decision 56). Then `Apply` skips a schema whose cached hash and catalog DDL generation match its marker,
+   and otherwise plans and applies it with compensation; `Verify` runs
    no DDL and creates nothing, and refuses a missing database or any difference with `COHSQLP003`.
    A declaration without a schema only ensures the database exists. Last, every stored
    definition must bind to the catalog (decision 65): a CHECK, declared or ad hoc, that calls a
@@ -1132,14 +1320,72 @@ those identifier forms. The mapper uses the same retained names, so its quoted
 DML binds the objects deployed by this renderer without another naming convention.
 
 Each DDL request remains self-committing under the catalog's established rule.
+Apply and Verify first attempt the provisioner's semaphore with a zero timeout. Contention throws
+the existing `DatabaseObjectLockedException`, with the database/schema name and `APPLY SCHEMA`
+or `VERIFY SCHEMA` operation, before any catalog work or wait. The same reservation covers a
+deferred migration: Build transfers it to the worker, which releases it only after lock cleanup.
+Even an equal-schema imperative apply is refused while another apply or its worker is active.
+The internal deferred-open path may return the already scheduled target without waiting.
+
+An inline apply holds the database's internal DDL admission interlock from its initial catalog check
+through its final marker, compensation and lock cleanup. Ordinary session DDL is refused with
+`DatabaseObjectLockedException` while it is held; an apply likewise refuses before changing
+anything if ordinary DDL is already running. This fail-fast admission avoids a second waiting
+graph outside the lock manager. It excludes unrelated DDL too, an intentional cost of protecting
+names that do not have an object id yet and keeping the planning snapshot stable.
+
+The apply also owns a read-only coordinator context solely for table locks. Each DDL statement
+uses that context's sequence for Exclusive table locks (including referenced parents), while
+its data and catalog work keep their original per-statement commits. A new table is locked
+after id reservation and before catalog publication. Those locks stay held through every step,
+the final marker, and reverse compensation, then the read-only context rolls back to release
+them. PostgreSQL likewise takes `AccessExclusiveLock` on a new relation and retains it to
+transaction end (`src/backend/commands/tablecmds.c:1112-1118,1390-1394` in the reference clone).
+This engine's simple MVCC readers remain lock-free; writers to an affected table wait on its
+existing table-lock protocol. Readers and writers on unrelated tables continue, and no coordinator
+apply gate is held between statements. The lifetime protects compensation: no other session can
+commit a row or a dependent index on a newly created table before compensation can drop it.
+
+Provisioning refuses a table or index that appears after planning, even when its
+generated CREATE uses `IF NOT EXISTS`: an operation that created nothing must not
+enter the compensation list and later delete an independently created object.
+Ordinary ad-hoc `IF NOT EXISTS` keeps its no-op behavior.
 On a later failure, completed reversible steps run their compensating requests
 in reverse order and the applied-schema marker remains unchanged. The marker is
 written only after all steps succeed, and a repeated apply is a no-op only when
-the stored canonical document/hash and live catalog all agree. Full atomicity
+the stored hash and DDL generation match the declaration and current catalog. Full atomicity
 for a destructive multi-statement migration is deliberately not claimed: the
 current catalog has no transaction spanning DDL statements, and irreversible
 data loss cannot be compensated. That kernel seam is recorded as the remaining
 gap rather than hidden behind the content hash.
+
+### Provisioning wait inventory (B2 second review, #1355)
+
+The provisioner's semaphore and the coordinator's physical statement gate have different
+lifetimes. Serializing whole migrations with a waiting semaphore hid a cycle: apply A held
+`a_first` and waited for transaction T's `z_existing`, while T's owner awaited apply B, which
+waited for A's semaphore. Zero-timeout admission removes that edge, including after transfer to
+the worker and throughout compensation. `SqlProvisioningAdmissionTests` observes A's actual
+lock-wait event before B, proves the worker holds its reserved table, and repeatedly checks
+immediate refusal for at least 150 ms and ten attempts, with a ten-second ceiling. T commits
+before A or the paused worker finishes; both migrations then converge and T's row survives.
+
+Every synchronization wait reached by these paths has the following owner and termination rule:
+
+| Wait or retry | Apply, worker and compensation rule |
+|---|---|
+| Provisioner semaphore | Apply and Verify use `WaitAsync(0, token)` and refuse contention. The worker inherits ownership and never reacquires it. Compensation stays inside its owner's reservation. |
+| DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately; nobody waits for a DDL lease. Inline apply keeps the lease through compensation and cleanup; the worker never requests it. |
+| Table, referenced-parent, row and index-key locks | Real waits use `LockManager.AcquireAsync` with a live transaction sequence, so the wait-for graph and cycle detector see them. Apply keeps a read-only owner across its self-committing DDL. Handoff reserves pending tables and FK parents in object-id order before publication; the worker reuses that owner. Caller/worker cancellation and database-offline abandonment also end waits. |
+| Coordinator statement gate | Acquired after transaction-lock pre-acquisition, with cancellation. Its holder performs one physical bracket; the lock manager rejects a request that would wait while that gate is held. Worker index population releases it after each batch of at most 64 versions. Inline work, including the existing DROP TABLE reclamation, can scale with table size; the gate is not a wall-clock deadline. |
+| Catalog, index and storage metadata/page monitors; journal durability | Internal critical sections perform finite local work and do not await SQL transaction locks. Physical page ownership conflicts fail immediately. Group commit waits at most its configured batching window before flushing itself; journal durability failures take the database offline. Synchronous filesystem I/O has no hard completion deadline, so cancellation does not promise an OS-I/O timeout. |
+| Final worker marker retry | An unrelated DDL generation change retries the optimistic comparison/save, checking worker cancellation each iteration. It never waits for the DDL interlock while holding table reservations. Sustained unrelated DDL can delay convergence until cancellation. |
+| Compensation and reservation rollback | Compensation traverses the finite completed-step list in reverse, with `CancellationToken.None` so caller cancellation cannot interrupt cleanup. It retains the live lock owner, or creates a fresh one if handoff already ended that owner. Any reacquisition is still a lock-manager wait, detectable and offline-abandonable, with no extra semaphore/DDL lease wait. The read-only reservation has no row versions to undo; statement cleanup drains its admitted physical work before rollback. |
+| Worker build/queue triggers and stop join | `_ready` and `_signal` observe engine cancellation; build completion needs no lock held by the worker. Database disposal cancels the migration, executes an unclaimed queued migration's cleanup or joins the claimed migration's completion before closing storage. The join inherits the cleanup/I/O limits above. |
+
+PostgreSQL makes the same distinction between internal lightweight locks without deadlock
+detection and transaction locks with detection (`src/backend/storage/lmgr/README:20-35` in the
+reference clone). This is a behavioral reference; no implementation was copied.
 
 ### Object ownership and the schema package
 
@@ -1434,7 +1680,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 6).**
+  chains (since record-space format version 3; the current format is 9).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
@@ -2114,11 +2360,12 @@ description + exported registrations), the engine binds them.
   (`Database.Storage` DESIGN, "No reader sees a rollback's restore half done"). The
   executor's apply and rollback path is unchanged, and a reclaimed-row skip in the seek
   (`TryReadRecord` returning false for page 0) would only have hidden the torn read.
-- **Registrations re-export at persistence points**: index DDL itself, each
-  checkpoint pass, and instance disposal — each compares against the stored set
-  first, so an idle checkpoint writes nothing. Root splits no longer move a
-  tree's root page (#1159, `Database.Indexing` DESIGN), so outside DDL the
-  comparison is a backstop rather than the way a split reaches the catalog.
+- **Registrations publish only with index DDL.** The catalog requires exactly one
+  matching B-tree registration per new index description in the same publication.
+  Root splits never move a tree's root page (#1159, `Database.Indexing` DESIGN), so
+  checkpoint and instance disposal have no registration export or save backstop.
+  They persist the directory already committed by DDL. Removing separate publication
+  prevents a dropped index's stale registration from attaching to its replacement.
 - **Seeks over duplicated keys** (#1159): an index over a low-cardinality column,
   and every UNIQUE index whose rows are updated (each UPDATE retires one entry
   and adds another under the same key), holds runs of equal keys that span leaf
@@ -2142,13 +2389,13 @@ description + exported registrations), the engine binds them.
 ## Engine-owned background workers
 
 The engine is a **data machine**: `Create(name, options)` returns it operational, with
-the five-worker inventory already pumping — one dedicated background thread per
+the six-worker inventory already pumping — one dedicated background thread per
 worker, spawned by the constructor and joined on dispose. Nothing outside the
 engine schedules, claims, or configures these loops (the 2026-07-13 redesign
 deleted the #902 claim handshake — see the root DESIGN.md); the root base's
 `DatabaseEngine.Workers` view of them is observational (name, kind, cadence). Since phase 4 of
 the concrete-types plan the engine is a leaf of the root `DatabaseEngine`: its constructor
-attaches the five built-in workers through the base's `AttachWorker`, which starts each pump on a
+attaches the six built-in workers through the base's `AttachWorker`, which starts each pump on a
 thread named for the worker, and the base stops the pumps and releases the workers on disposal
 (the checkpointer's lanes end in its release hook, `DisposeAsyncCore`).
 Each worker iterates a lock-free snapshot of every open storage file set (data +
@@ -2382,6 +2629,11 @@ writes the operating system already dropped. The engine stops the database, not 
   2026-10-06, #1272: `SqlDatabase.CreateUnconfirmedCommit`, through the root's
   `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)`); before #1272
   these paths carried the kernel's message alone.
+- Every failure after a commit record was appended fences storage, including an exception from
+  the grouped durability callback or a handle losing durable-flush support. Catalog commits and
+  schema-state saves use this same storage fail-stop path; cached catalog reads also refuse once
+  offline, so stale counter or chunk locations cannot be reused before recovery. A failure before
+  the commit record rolls the bracket back and leaves its counters unchanged and online.
 - A DDL statement that meets the offline storage is classified exactly (#1272). DDL commits
   durable brackets in the catalog and data file sets as it goes (catalog writes, and
   `ApplyStatementAsync(..., durable: true)` for index builds), so a prefix of it may survive the
@@ -3762,6 +4014,11 @@ cancelled collation create whose first-chance exception callback creates a defau
 The callback regression failed with one match for `'a'` after inserting `'A'` under the former
 thread-local handoff, and now finds zero.
 
+Batch D (#1349) should add provisioning start, bounded progress, end and failure events, with
+engine/database identity, operation kind, table/object, original position/total, processed/total
+rows when countable, elapsed time, and the coded failure. Decision 49a adds no events; the root
+health observation is available while D is pending.
+
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Sql` (`src/Internal/EventSource/SqlDatabaseEventSource.cs`;
 database event-sources plan, batches B5 and D part 1). It reports the wire server and its sessions,
@@ -3790,7 +4047,7 @@ bounded peer-sent names) are in the area's
 | 11 | `StatementTooComplex` | Warning | — | `database`, `depth` (-1 when an execution stack backstop has no measured depth) |
 | 12 | `DdlSelfCommitted` | Verbose | `Statements` | `database`, `commandType` |
 | 16 | `ExtensionRegistered` | Verbose | — | `kind` (`Scalar`, `Aggregate`, `Type`, `Cast`), `name` (cut to 256 characters per identifier; a cast is `source -> target`) |
-| 17 | `IndexRegistrationsSaved` | Verbose | — | `database`, `count` |
+| 17 | *(retired)* | — | — | `IndexRegistrationsSaved` reported a separate registration save; B2 publishes an index's registration atomically with its description (#1355), so the id is retired, never reused |
 
 Batch D part 1 (#1349) adds statement detail and typed extension registration. Ids **13-15**
 remain reserved for `ProvisioningStart`, `ProvisioningStop` and `ProvisioningFailed` after
@@ -3829,7 +4086,8 @@ for an execution stack failure. `ExtensionRegistered` follows a successful regis
 including built-in scalar and aggregate overloads, types and casts and schema-declared domains.
 A rejected duplicate or a schema domain already present writes nothing. The shared standard
 catalogs register once when first initialized; a builder's collections register their own entries.
-`IndexRegistrationsSaved` follows persistence of a changed set; an unchanged set writes nothing.
+Index registrations are no longer saved on their own: they publish with the index DDL that event 12
+reports, so event 17 is retired.
 No new counters.
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the

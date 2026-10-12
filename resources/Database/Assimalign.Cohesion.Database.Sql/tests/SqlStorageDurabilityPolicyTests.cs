@@ -1,3 +1,4 @@
+using System.Threading;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -139,7 +140,7 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
             return SqlStorage.Create(data, journal, backup, GetLabel(databaseName, catalog));
         }
 
-        public override SqlStorage OpenStorage(string databaseName, bool catalog) => CreateStorage(databaseName, catalog);
+        public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default) => CreateStorage(databaseName, catalog);
 
         public override bool StorageExists(string databaseName, bool catalog) => true;
 

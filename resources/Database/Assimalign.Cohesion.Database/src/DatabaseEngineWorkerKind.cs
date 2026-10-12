@@ -39,4 +39,7 @@ public enum DatabaseEngineWorkerKind : byte
     /// foreground writes.
     /// </summary>
     IndexMaintenance,
+
+    /// <summary>Executes durable provisioning work that scales with a database's data.</summary>
+    Provisioning,
 }

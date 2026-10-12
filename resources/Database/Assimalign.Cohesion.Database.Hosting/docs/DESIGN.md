@@ -83,11 +83,34 @@ Additional services start in registration order, then servers; shutdown drains s
 
 ## Provisioning (B1 of the engine extensibility design)
 
-The module holds no schema knowledge and provisions nothing. A model's engine builder declares the databases its engine owns, and the engine's own build opens or creates and provisions each of them before it returns (`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` §5.2 and §5.3). The model verb's factory runs that build inside the application's `Build()`, and servers start only when the application starts, so provisioning still precedes accept (area DESIGN, R4) without a hosting service.
+Decision 49a defers populated-table work to SQL's engine-owned worker. Hosting reads the root
+`DatabaseInstance.Provisioning` observation without referencing SQL: operation/object,
+one-based position and total, pending/running, rows processed/total when known, and failure code.
+A pending/running database makes aggregate health Degraded. Offline databases retain their
+existing Unhealthy precedence. Completion removes the observation and restores Healthy when no
+other condition prevents it. Health data uses `engine.N.provisioning.M.*` entries.
+SQL inventory enumeration reads its existing published instance snapshot without entering the
+engine's recovery monitor. During automatic reopen, the reopen service's pending entry represents
+the recovering database until its replacement is published; health can still report that state
+and other databases' provisioning progress. Enumeration observes cancellation even for an empty snapshot.
+
+The concrete `DatabaseApplicationBuilder.Build(CancellationToken cancellationToken = default)` passes
+its caller's token through the root application context and the concrete build context to engine
+factories; AddSql passes it into SQL Build. The host's
+shutdown wait and service lifecycle start after Build, so no runtime shutdown token exists here.
+Callers that need shutdown during Build provide their process-lifetime token. There is no new
+timeout or Hosting dependency on a model. Cancellation disposes owned products already built.
+The root `IDatabaseApplicationBuilder.Build()` stays parameterless, matching all 18 areas (O34;
+owner decision 2026-10-11). Its explicit implementation forwards to the concrete Build without a
+token. `Program.cs` retains the concrete builder returned by `DatabaseApplication.CreateBuilder` when
+it needs cancellable construction; model factories still read `IDatabaseApplicationContext.BuildCancellationToken`.
+
+The module holds no schema knowledge and provisions nothing. A model's engine builder declares the databases its engine owns, and the engine's own build opens or creates each of them and completes inline provisioning before it returns (`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` §5.2 and §5.3). The model verb's factory runs that build inside the application's `Build()`. Servers start when the application starts, after inline work and reservation of deferred tables. Deferred provisioning can continue while the server accepts work: affected-table admission waits for completion, while other tables and the admin endpoint remain available.
 
 - **What was deleted** (owner decisions 49 to 54 of 2026-10-09): `Provision(engine, schema)` and `Provision(engineName, schema)`, `AddDatabase(engine, name, schema)` and `AddDatabase(engineName, name, schema)`, `Schemas`, their validators, and the internal `DefaultDatabaseProvisioner` host service that opened or created a database and applied a compiled schema in `StartAsync`, under `StartupTimeout`.
-- **The cost, accepted by decision 49:** open, recovery and migration run synchronously in application `Build()`, outside `StartupTimeout`, with no cancellation in the hosted path; the admin endpoint and readiness start later, as they did. A schema step whose cost grows with a table's data would run there too; the proposal that defers such steps to an engine-owned worker (49a) is not accepted and is B2's if it is.
-- **A failed provisioning fails Build.** The model's build disposes its engine before it throws, and the application's Build rollback disposes every product built before it.
+- **The cost, revised by decision 49a:** open, recovery and cheap migration steps run in application Build, outside StartupTimeout. Build accepts a caller cancellation token. Populated-table data-scaling steps run on the engine-owned worker after Build has reserved their tables; the admin endpoint can then listen and report Degraded progress.
+- **Failed inline provisioning fails Build.** The model's build disposes its engine before it throws, and the application's Build rollback disposes every product built before it.
+- **Failed deferred provisioning takes only that database offline.** Build may already have returned. Invalid existing rows or another deferred-step failure retain the durable target for recovery, report `COHSQLP004`, and change that database's health from Degraded to Unhealthy. The application's other databases continue serving; the existing reopen policy governs retry.
 
 `DatabaseApplication` remains `Host<DatabaseApplicationContext>` and its context remains `HostContext` / `IHealthContributor`. `Run`, `RunAsync`, and `AsService` use the Hosting extensions. Embedded applications can use engines immediately after Build, or Run to wait for host shutdown without a listener.
 

@@ -23,7 +23,7 @@ The extractor recognizes the declaration DSL by metadata name: the two anchors, 
 sealed `SqlSchemaBuilder`, `SqlTableBuilder<TRow>` (``SqlTableBuilder`1``), `SqlTypeBuilder` and
 `SqlPrincipalBuilder` (`CSharpSchemaExtractor.cs`). Those strings change in the same commit as the
 types they name: a stale one compiles and then rejects every schema at build time. The task
-project references only `Database.Sql.Schema`, so `SqlDatabaseBuilder` and
+project references `Database.Sql.Schema` and `Database.Sql.Language`, so `SqlDatabaseBuilder` and
 `SqlDatabaseEngineBuilder` are names it matches in the consumer's compilation, never symbols it
 links against. The test project compiles its consumer sources against the real `Database.Sql`
 assembly, so renaming either builder fails the SDK tests in the same change.
@@ -35,8 +35,9 @@ builder, and SQL-defined functions arrive through DDL.
 
 The SDK is a build-time layer. Its tasks may run under the JIT-based MSBuild host and reference
 the AOT-compatible `Database.Sql.Schema` package, but the task and Roslyn assemblies never enter the
-consumer's runtime closure. The task references only `Database.Sql.Schema` (the `COHLIB001`
-same-area precedent); it does not pull the SQL engine, its storage implementation, or
+consumer's runtime closure. The task references `Database.Sql.Schema` and `Database.Sql.Language`
+(per the `COHLIB001` same-area rule). Migration DEFAULT validation uses the public SQL parser and
+expression renderer, avoiding a second literal grammar; it does not pull the SQL engine, its storage implementation, or
 `Connections.Tcp` into MSBuild.
 
 ## Orchestration commands
@@ -97,10 +98,18 @@ each own a database of one name at run time. A schema principal fails the build
 decision 58), so an artifact for it would only move the failure to the first start. Every
 declaration is compiled before any artifact is written, so a failure replaces none.
 
+Every table selector strips parentheses, casts, and `checked`/`unchecked` expression contexts in
+any nesting order before resolving the direct row member. This applies uniformly to columns,
+primary keys (`Key` and `PrimaryKey`), indexes, foreign keys, `Default`, and `DefaultSql`, matching
+the runtime's `Convert`/`ConvertChecked` expression-tree handling. The selected member's declared
+type remains the storage type: `Default<short>(row => checked((short)row.Number), (short)7)` on an
+`int` member stores literal `7` on an Int32 column. Runtime/SDK canonical document and hash parity
+cover these wrappers across every selector operation.
+
 `table.Check(name, sql)` (E2, design §5.7) extracts as two compile-time string constants into
 a CHECK constraint with the text as written and no columns, the record the runtime compiler
 writes, so the artifact's document and hash equal the runtime's (`CompileDatabaseSchemaTaskTests`).
-The task does not parse the SQL: it references only `Database.Sql.Schema`, never a SQL parser, and
+The schema extraction task does not parse CHECK SQL, and
 **native functions are invisible to it**. A CHECK that calls a function the application registers
 on its engine builder compiles into the artifact like any other; the engine's build binds it to its
 function catalog before it touches a file (`COHSQLP001` when it does not bind). A CHECK's name
@@ -115,6 +124,36 @@ invisible to the task** as functions are: a column of a domain the application r
 engine builder compiles into the artifact, and the engine's build resolves the name before it
 touches a file. `schema.Type<T>(t => t.Decimal(p, s))` is a domain named for `T`'s simple name, as
 the runtime compiler names it; a generic or array `T`, which has no such name, is `COHDBSDK106`.
+`table.Default<TValue>(selector, value)` accepts C# compile-time constants: strings, characters,
+Boolean values, numeric values, `null`, and enum members (including constant expressions and
+casts). Roslyn evaluates the expression and the extractor applies its contextual numeric
+conversion, so `Default(row => row.Amount, 7)` on a decimal member produces exactly the literal
+the runtime builder receives. Both paths compile the same stateless internal literal renderer
+from `Database.Sql.Schema/shared` through `CohesionSharedSource`; no public helper or
+shipped-to-shipped internal grant widens that boundary. The renderer quotes strings and doubles
+apostrophes, preserves decimal scale using invariant culture, writes uppercase Boolean and NULL
+literals, and validates the value against the member's mapped storage type. Characters use string
+storage; enums use their underlying integer's storage, widening unsigned enum storage where
+necessary. Explicit SQL type names still resolve and validate at engine build.
+
+A value Roslyn cannot evaluate fails with `COHDBSDK109`, at its source location, naming
+`DefaultSql` as the escape hatch. The extractor does not invoke constructors, read mutable fields,
+or execute helper methods. Date/time, Guid, and binary CLR values are supported by the runtime
+builder; their nonconstant C# constructions use `DefaultSql` in SDK-analyzed declarations.
+`table.DefaultSql(selector, sqlLiteral)` retains the existing requirement for a non-empty
+compile-time string constant (`COHDBSDK104`) and preserves its SQL text for engine validation as
+exactly one supported literal before any file is touched. Typed mismatches are `COHDBSDK106`.
+
+Either verb selects a column on its own, before or after `Column`, including an explicit SQL
+type or inferred domain. Repeating the same rendered literal is idempotent; a different literal
+for that column is `COHDBSDK105`. Only `DefaultLiteral` reaches the document: a typed default and
+`DefaultSql` containing its exact rendered literal produce identical documents and hashes. The
+shape remains v4. The SDK/runtime parity tests cover every constant kind, all enum backing widths,
+nullable values, implicit numeric conversions, constant concatenation, named arguments, domains,
+and exact document/hash equality. Foreign-key compatibility compares the compiled storage and
+SQL type metadata, so an enum and its integer storage, or char and string, match when their
+domain/type declarations do too.
+
 The diagnostics:
 
 | Code | Meaning |
@@ -123,10 +162,11 @@ The diagnostics:
 | `COHDBSDK101` | No schema declaration was found, or a database name (compared ignoring case, across every engine of the project) has more than one. |
 | `COHDBSDK102` | A name is not a non-empty constant (a CHECK's included); a `database.Schema(...)` call has no constant enclosing `AddDatabase` name; or a database name cannot name a file. |
 | `COHDBSDK103` | A schema, table, type or principal callback is not an inline lambda. |
-| `COHDBSDK104` | An operation the DSL does not support, or a CHECK whose SQL text is not a non-empty constant. |
-| `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
+| `COHDBSDK104` | An operation the DSL does not support, or a CHECK's SQL text, column's SQL type, or DefaultSql literal that is not a non-empty constant. |
+| `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, a conflicting column type or DEFAULT literal, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
 | `COHDBSDK106` | A semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
 | `COHDBSDK108` | `SqlSchemaBuilder.Principal`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal and grant DDL exists. (`SqlSchemaBuilder.Type<T>` was refused here too until E3 made it a domain.) |
+| `COHDBSDK109` | A typed Default value is not a C# compile-time constant; use DefaultSql with a constant SQL literal. |
 
 The outputs are:
 
@@ -137,7 +177,9 @@ The outputs are:
 | `CohesionDatabaseSchema` items | Set by `CohesionDatabaseCompileSchema` | One per database the manifest lists (its schema document, full path), with `DatabaseName` and `HashPath` metadata, for downstream targets. |
 | `Schemas` task output | `CompileDatabaseSchemaTask` | One item per database, named for it, with `Hash`, `SchemaPath` and `HashPath` metadata. |
 
-The document contains semantic data only, never source paths or timestamps. The task writes with
+The document format is `cohesion/database-schema/v4`, shared with the runtime compiler and the
+migration baseline writer. B2's `defaultLiteral` member changes the strict document contract;
+earlier formats are refused, including v3. The document contains semantic data only, never source paths or timestamps. The task writes with
 LF line endings and avoids replacing unchanged outputs. The manifest is the only record of which
 files in the directory are the SDK's: the task deletes the `.schema.json` and `.schema.sha256`
 files of a database its previous manifest listed and that is no longer declared, and leaves every
@@ -168,7 +210,15 @@ timestamps. Missing names, invalid schemas, unsupported/destructive operations, 
 collisions fail without partial outputs. `KeyValuePair` fails explicitly because a SQL script is
 not a valid migration artifact for that model. SQL text uses the same guarded, `dbo`-qualified
 dialect as the runtime renderer; the current dialect explicitly rejects constraints,
-ALTER metadata, and required column additions that have no default or backfill.
+ALTER metadata, and required column additions that have no non-null literal default or backfill.
+Every emitted column retains its DEFAULT. The migration writer validates it as exactly one SQL
+literal through `Sql.Language`, then renders the parsed value, accepting a minus sign on a numeric literal and no other expressions, so signs, Boolean spelling and
+escaped strings match the runtime's DDL. Required additions retain the shared planner's
+conservative destructive-change opt-in; after that opt-in, a non-null default makes the DDL valid;
+`DEFAULT NULL` has the same effect as absence and cannot supply that addition. Nonliteral text is
+`COHDBSDK206` before either the SQL script or the new baseline is written. Engine-specific domain
+resolution and default value conversion remain runtime validation, as the SDK does not build an
+engine. SDK tests compare scripts for the same plans directly with `SqlMigrationScriptGenerator`.
 
 ## Verification
 

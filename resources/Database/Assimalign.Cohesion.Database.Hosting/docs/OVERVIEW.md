@@ -18,12 +18,25 @@ builder.AddSql("orders-sql", sql =>                        // the engine name, w
     sql.AddServer(server => server.Listen(new Uri("cohesion-db://localhost:5740")));
 });
 
-await using var app = builder.Build();                     // engines built, declared databases provisioned
+await using var app = builder.Build();                     // engines built; cheap DDL done, pending tables reserved
 SqlDatabaseEngine orders = app.Context.GetEngine<SqlDatabaseEngine>("orders-sql");
 await app.RunAsync();                                      // services start, then servers accept
 ```
 
-Model verbs are `AddSql`, `AddDocuments`, `AddGraph`, `AddKeyValue`, and `AddBlob`; each takes the engine name and a callback over its model's engine builder, returns the application builder and ships with its model package. The name is reserved when the verb is called, so a duplicate fails there, before any engine is built. Servers, workers and the databases the engine owns are declared on the model engine builder; every engine opens or creates its declared databases while it is built, inside application Build, before any server accepts, and a SQL engine provisions their schemas there too. Build runs each engine factory synchronously, so open, recovery and schema migration run there with no timeout (`StartupTimeout` bounds service start only) and no cancellation (owner decision 49), and a provisioning failure (a `SqlSchemaMigrationException` led by `COHSQLP001` to `COHSQLP005`) propagates out of Build after the engines built before it are disposed. There is no application-level AddServer, AddDatabase or Use composition method. Direct model `XDatabaseEngine.Create(name, options)` remains available for standalone use; no options type carries an engine name (B3).
+Model verbs (`AddSql`, `AddDocuments`, `AddGraph`, `AddKeyValue`, `AddBlob`) take an engine name
+and a callback over its engine builder. Names are reserved before factories run. Model builders
+declare servers, workers and databases; Build opens or creates the databases before servers accept.
+SQL runs cheap schema steps there and defers populated-table work to its own provisioning worker
+(49a), reserving affected tables before returning. Health remains responsive during recovery and reports Degraded with the current step
+and row progress through the root instance's model-neutral observation. A deferred failure takes
+that database offline; an inline failure disposes the already-built owned products.
+
+The concrete builder's `Build(CancellationToken)` passes its caller's shutdown token into SQL
+construction and recovery. The root `IDatabaseApplicationBuilder.Build()` remains parameterless
+and forwards with no token, matching the cross-area composition seam.
+There is no construction timeout (`StartupTimeout` bounds service start only), and the host's
+runtime shutdown lifecycle begins after Build. There is no application-level AddServer, AddDatabase
+or Use composition method. Direct model `Create(name, options)` remains available for standalone use.
 
 The concrete hosting builder supplies the host-level pieces `WebApplicationBuilder` does, as concrete types: `Environment` (`HostEnvironment`), `Configuration` (`ConfigurationManager`), `Logging` (`LoggerFactoryBuilder`) and `Services` (`ServiceProviderBuilder`); a build-aware `AddEngine(name, factory)` whose `DatabaseApplicationBuildContext` carries their built counterparts (the environment, the configuration, the `ServiceProvider` and the `LoggerFactory`); additional lifecycle services and health contributions. The application's own health contribution is unhealthy while any engine reports an offline database (`DatabaseEngine.OfflineDatabases`: a failed durable flush, #1243, drain of a journal's append buffer, #1252, or file header write, #1268, or an engine that gave up on a database after a background worker kept failing on it, owner decision 25), naming each with its `StorageOfflineCause` and its reopen attempts, until it is open again, degraded while an engine reports a worker that keeps failing (the description names each failing worker and the type of its last failure, never its message, since the health endpoint is unauthenticated and a message can carry file paths; the data carries `engine.N.worker.M.fault`, `.consecutiveFailures` and `.failureCount`, #1268), and unhealthy for a disposed engine. Services start before servers; servers drain first. The root's kept seams (`IDatabaseApplicationBuilder`, `IDatabaseApplicationContext`, `IDatabaseApplication`) name the root bases (`DatabaseEngine`, `DatabaseServer`) and expose no configuration or DI types. Runtime context includes all engines, their nested servers, configuration and services.
 

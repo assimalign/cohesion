@@ -22,6 +22,12 @@ not author. The internal `SqlSchemaCompiler` lowers that retained C# declaration
 opt-in, and the SQL tables, columns, keys, indexes, constraints, types, principals and
 grants.
 
+Since B2, a retained `SqlSchema` also caches its compiled result. Every builder snapshots its
+collections when its callback ends, including a principal's caller-supplied grant names; later
+builder calls cannot change the declaration. Reusing that declaration in a later engine Build
+therefore reuses the immutable compiled shape, its canonical document and its hash. Concurrent
+first compiles may duplicate the same deterministic work, as concurrent first identity reads may.
+
 **Standalone since B1** (owner decisions 50, 57 and 59 of 2026-10-09,
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). `SqlCompiledSchema` used to derive the
 area root's model-agnostic `CompiledSchema`, which carried an engine `Model` and recomputed the
@@ -57,6 +63,8 @@ snapshot inputs and sort semantic sets; column order remains significant.
 `CanonicalDocument` and `Hash` are excluded from their own serialization.
 Validation rejects malformed input, unknown JSON members, an unsupported format,
 duplicate declarations, missing references, and unsupported value types.
+The owning test assembly reads internal computation counters to prove that repeated identity
+reads do not serialize or hash again. These hooks add no public or protected surface.
 
 `SqlSchemaMigrationPlanner` produces deterministic dependency-ordered operations
 and requires the declaration's destructive-change opt-in for data-losing steps.
@@ -77,7 +85,7 @@ the engine's types, so it checks only the name's shape (an identifier, optionall
 unsigned integer arguments; `CompiledSchemaTypeNames`), which also keeps the name safe to write
 into DDL; the SQL engine's build resolves it, built-in names first, and refuses an unknown name or
 a type not stored as the member is, before it touches any file. Because a declared type's name and
-a column's type changed meaning, the document format is `cohesion/database-schema/v3`; a `v2`
+a column's type changed meaning, E3 moved the document format to `cohesion/database-schema/v3`; a `v2`
 document no longer deserializes, so a recorded `v2` state is replanned once from the catalog. The
 validator accepts a column `CustomType` the schema does not declare when it has the shape (the
 engine's domain or a built-in name), and checks the storage type of one it declares. The planner
@@ -86,6 +94,65 @@ after them, both safe and carrying the `CompiledSchemaType` (`SqlSchemaMigration
 a redefined domain is a drop and an add, and the columns declared with it change through their own
 `AlterColumn` steps. A domain is registered on the engine, not stored in the database, so a SQL
 engine renders no statement for either step.
+
+**Column defaults (B2 round 2, owner decision 2026-10-11).**
+`table.Default<TValue>(selector, value)` declares a column's default from a CLR value, including
+the column if no earlier verb mentioned it. `Default(row => row.Status, "pending")` renders
+`'pending'`, `Default(row => row.Quantity, 7)` renders `7`, and Boolean and null values render
+`TRUE` / `FALSE` and `NULL`. The generic method belongs to the sealed table builder, as
+`database-area.md` rule 5 permits. Nullable members infer their nullable value type without
+another overload. A string passed to `Default` is always a value, never SQL text.
+
+The stateless internal `SqlDefaultLiteralRenderer` in this package's `shared/` folder owns the
+rendering. Both this package and the SDK task compile that source through `CohesionSharedSource`;
+no helper becomes public and no shipped assembly grants internals to another. Strings and chars
+use single quotes and double embedded quotes; backslashes stay literal. Numeric values use the
+invariant culture, decimals keep their scale, finite floating-point values use round-trip text,
+and numeric values outside the column's storage range are refused with `ArgumentException`.
+The builder uses the selected member's actual CLR type even when generic inference inserts a
+conversion. Unsupported CLR values and nonfinite numbers are refused before the column is added.
+
+The renderer and `Column` compiler share the CLR storage mapping. In addition to the existing
+types, chars map to String and enums map by underlying numeric range: sbyte to Int8, byte/short
+to Int16, ushort/int to Int32, uint/long to Int64, and ulong to Decimal. This preserves every
+enum value exactly without adding unsigned scalar column types. Temporal defaults are quoted
+invariant text: DateOnly `yyyy-MM-dd`, TimeOnly `HH:mm:ss.fffffff`, DateTime
+`yyyy-MM-ddTHH:mm:ss.fffffff`, DateTimeOffset the same with `zzz`, and TimeSpan the `c` format.
+DateTime keeps wall-clock ticks without its CLR kind, matching SQL TIMESTAMP semantics;
+DateTimeOffset keeps its written offset. Guid uses the lowercase `D` form. Binary values use
+quoted `\x` followed by uppercase hexadecimal bytes, which the SQL DEFAULT binder decodes.
+These formats do not depend on the current culture or local time zone.
+
+`table.DefaultSql(selector, sqlLiteral)` is the explicit raw-SQL escape hatch; the old raw
+`Default(selector, string)` overload is removed with no shim. The raw text is kept as written
+in `CompiledSchemaColumn.DefaultLiteral`. This package requires nonblank text; the SQL engine
+validates exactly one supported literal and its column bounds before touching any file.
+Expressions and function calls remain unsupported. Custom CLR domain structs have no implicit
+value conversion; declare their defaults through `DefaultSql`. Both verbs compose with
+`Column(selector, sqlType)`, a domain, a key and an index without changing column order.
+Repeating the same rendered literal is harmless; two different literals fail at the second call.
+The SDK extracts compile-time constants for `Default` and invokes the same renderer. A value it
+cannot evaluate produces a coded diagnostic naming `DefaultSql`; raw SQL must still be a
+constant string. Runtime values such as constructed dates, GUIDs and binary arrays are valid
+for retained declarations, while source-extracted schemas express those values with `DefaultSql`.
+
+Typed defaults and raw defaults with the same rendered literal produce identical canonical
+documents and hashes. Arbitrarily different raw spellings are not normalized in the document.
+Only the authoring API and rendering change in round 2: the document's shape and format stay v4.
+
+The optional `defaultLiteral` member is omitted when null. Adding it changes the strict document
+contract, so B2 uses `cohesion/database-schema/v4` for every schema, with or without defaults.
+Earlier documents are refused; no v3 compatibility reader or upgrade is provided. Provisioning
+reconstructs the live catalog before recording the v4 document and its new hash. The SDK compiler
+and migration baseline writer use this same format. `NULL` text remains part of a declaration's identity even
+though SQL gives it the same database behavior as an absent default. Adding or removing a
+default changes column equivalence, so the planner carries both definitions in `AlterColumn`
+instead of reporting false convergence; the current dialect still refuses that operation.
+New tables and columns carry the default into their creation steps. The SQL provisioner can
+therefore reconstruct columns with defaults after a crash, preserving the declaration's spelling
+when it denotes the persisted literal, and plan only the remaining steps. Schema snapshots also
+retain domains and their bounds, keys, unique and ordinary indexes, references and checks; SQL
+owns their catalog reconstruction. Principals and grants remain explicitly unsupported.
 
 Foreign keys and checks are executable schema metadata. The planner first creates
 all tables and their indexes, then emits `AddConstraint` operations rendered as

@@ -68,7 +68,9 @@ internal sealed record SqlSchemaCheck(string Name, string Sql);
 /// The SQL type the column is declared with (<c>table.Column(selector, sqlType)</c>): a domain's name,
 /// or a built-in type name with its arguments; null when the type follows from the CLR type.
 /// </param>
-internal sealed record SqlSchemaColumn(string Name, Type ClrType, bool IsNullable, string? SqlType = null);
+/// <param name="DefaultLiteral">The rendered typed default or raw DefaultSql literal, or null when no default is declared.</param>
+internal sealed record SqlSchemaColumn(string Name, Type ClrType, bool IsNullable, string? SqlType = null,
+    string? DefaultLiteral = null);
 
 /// <summary>A database principal declaration.</summary>
 /// <param name="Name">The principal name.</param>

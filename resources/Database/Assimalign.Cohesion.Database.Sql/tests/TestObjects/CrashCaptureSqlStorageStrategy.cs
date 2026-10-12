@@ -1,3 +1,4 @@
+using System.Threading;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -89,8 +90,11 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         return images;
     }
 
+    internal Action? DurableChanged { get; set; }
+
     private void OnDurableChange()
     {
+        DurableChanged?.Invoke();
         lock (_sync)
         {
             _recorder?.Add(CaptureImagesLocked());
@@ -212,7 +216,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public override SqlStorage OpenStorage(string databaseName, bool catalog)
+    public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default)
     {
         string key = Key(databaseName, catalog);
         lock (_sync)
@@ -231,7 +235,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
             // the recovered journal before truncation.
             return SqlStorage.Open(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
-                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), checkpointOnOpen: false);
+                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), checkpointOnOpen: false, durability: null, cancellationToken);
         }
     }
 

@@ -858,9 +858,9 @@ internal sealed partial class SqlPlanner
     private static string? ResolveDefaultLiteral(SqlColumnDefinition definition, string table) => definition.DefaultValue switch
     {
         null => null,
-        SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null
-            ? null
-            : SqlPersistedExpression.Canonicalize(literal, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'"),
+        SqlLiteralExpression { LiteralType: SqlLiteralType.Null } => null,
+        var expression when SqlPersistedExpression.IsDefaultLiteral(expression)
+            => SqlPersistedExpression.Canonicalize(expression, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'"),
         _ => throw new DatabaseException(
             $"Column '{definition.ColumnName}': only literal DEFAULT values are supported."),
     };
@@ -934,8 +934,22 @@ internal sealed partial class SqlPlanner
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
+            SqlAlterColumnAction change => PlanAlterColumn(alter.Table, change),
             _ => throw new DatabaseException("This ALTER TABLE action is not supported by the executor yet."),
         };
+    }
+
+    private SqlAlterColumnPlan PlanAlterColumn(SqlTableReference reference, SqlAlterColumnAction change)
+    {
+        var table = ResolveTable(reference);
+        if (change.Column.Constraints.Count != 0 || change.Column.IsPrimaryKey)
+        {
+            throw new DatabaseException("ALTER COLUMN does not change constraints or primary keys.");
+        }
+        var type = ResolveTypeName(change.Column.DataType, change.Column.ColumnName);
+        return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
+            change.Column.IsNullable, ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}"),
+            ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null));
     }
 
     private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)

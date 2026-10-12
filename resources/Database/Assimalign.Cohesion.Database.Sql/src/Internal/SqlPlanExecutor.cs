@@ -111,6 +111,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
                 return await ExecuteAddColumnAsync(addColumn, statement, cancellationToken).ConfigureAwait(false);
+            case SqlAlterColumnPlan alterColumn:
+                return await ExecuteAlterColumnAsync(alterColumn, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddConstraintPlan addConstraint:
                 return await ExecuteAddConstraintAsync(addConstraint, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropConstraintPlan dropConstraint:
@@ -832,6 +834,13 @@ internal sealed partial class SqlPlanExecutor
     {
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
         {
+            // A provisioner compensates every successful step. An object created
+            // after it planned is not its work and must never enter that list.
+            if (statement.ProvisioningSchema is not null)
+            {
+                throw new DatabaseException($"Table '{plan.Schema}.{plan.Name}' already exists; schema provisioning cannot adopt it.");
+            }
+
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
 
@@ -877,7 +886,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            statement.DdlLockOwner, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         SqlCatalogTable current = ReadCurrentTable(before);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
@@ -908,7 +917,7 @@ internal sealed partial class SqlPlanExecutor
         // in-flight row writer (IntentExclusive holders) to finish before the
         // table is dropped — and blocks new ones until this transaction ends.
         await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         SqlCatalogTable current = ReadCurrentTable(table);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP TABLE", statement);
@@ -963,7 +972,7 @@ internal sealed partial class SqlPlanExecutor
         if (_catalog.TryGetTable(schema, name, out var table))
         {
             await statement.Coordinator.LockManager.AcquireAsync(
-                statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+                statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
             SqlCatalogTable current = ReadCurrentTable(table);
             EnsureCanChange(current.Owner, current.Name, current.OwningSchema, operation, statement);
@@ -990,6 +999,11 @@ internal sealed partial class SqlPlanExecutor
     {
         if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.IndexName, out _))
         {
+            if (statement.ProvisioningSchema is not null)
+            {
+                throw new DatabaseException($"Index '{plan.IndexName}' already exists on '{plan.Table.Schema}.{plan.Table.Name}'; schema provisioning cannot adopt it.");
+            }
+
             if (plan.IfNotExists)
             {
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
@@ -999,7 +1013,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            statement.DdlLockOwner, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         var ordinals = new int[plan.ColumnNames.Count];
         for (int i = 0; i < ordinals.Length; i++)
@@ -1012,31 +1026,39 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
-            // Durable, but not a self-commit the session counts (#1272): the tree is orphaned pages
-            // until the catalog commit below describes it, so a failure here leaves no index.
-            await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+            if (statement.ProvisioningProgress is not null)
             {
-                var index = await _indexManager.CreateIndexAsync(statement.Transaction, plan.Table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
-                registered = true;
-
-                var liveKeys = plan.IsUnique ? new HashSet<string>(StringComparer.Ordinal) : null;
-
-                foreach (var (location, values, writer, deleter) in ScanVersions(plan.Table, cancellationToken))
+                await BuildDeferredIndexAsync(plan.Table, definition, ordinals, statement,
+                    () => registered = true, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                // Durable, but not a self-commit the session counts (#1272): the tree is orphaned pages
+                // until the catalog commit below describes it, so a failure here leaves no index.
+                await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
                 {
-                    var key = BuildIndexKey(plan.Table, ordinals, values);
+                    var index = await _indexManager.CreateIndexAsync(statement.Transaction, plan.Table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
+                    registered = true;
 
-                    if (liveKeys is not null && deleter == TransactionSequence.None && !liveKeys.Add(Convert.ToHexString(key.Encoded.Span)))
+                    var liveKeys = plan.IsUnique ? new HashSet<string>(StringComparer.Ordinal) : null;
+
+                    foreach (var (location, values, writer, deleter) in ScanVersions(plan.Table, cancellationToken))
                     {
-                        throw new SqlConstraintViolationException(plan.IndexName, $"{plan.Table.Schema}.{plan.Table.Name}", "UNIQUE",
-                            SafeValue(ordinals.Select(ordinal => values[ordinal]).ToArray()));
+                        var key = BuildIndexKey(plan.Table, ordinals, values);
+
+                        if (liveKeys is not null && deleter == TransactionSequence.None && !liveKeys.Add(Convert.ToHexString(key.Encoded.Span)))
+                        {
+                            throw new SqlConstraintViolationException(plan.IndexName, $"{plan.Table.Schema}.{plan.Table.Name}", "UNIQUE",
+                                SafeValue(ordinals.Select(ordinal => values[ordinal]).ToArray()));
+                        }
+
+                        await index.InsertVersionAsync(
+                            bracket, key, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), writer, deleter, cancellationToken).ConfigureAwait(false);
                     }
 
-                    await index.InsertVersionAsync(
-                        bracket, key, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), writer, deleter, cancellationToken).ConfigureAwait(false);
-                }
-
-                return true;
-            }, durable: true, cancellationToken).ConfigureAwait(false);
+                    return true;
+                }, durable: true, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch
         {
@@ -1055,7 +1077,7 @@ internal sealed partial class SqlPlanExecutor
         // cannot leave a described index without a tree registration (or the
         // reverse). A crash before this write leaves only orphaned tree pages —
         // a safe leak, never a re-attached index.
-        var registrations = _indexManager.ExportRegistrations();
+        var registrations = PublishedRegistrations([new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique)]);
         await SelfCommitAsync(statement, _catalog.CreateIndexAsync(
             new SqlCatalogIndex(
                 plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
@@ -1087,7 +1109,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            statement.DdlLockOwner, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         SqlCatalogTable currentTable = ReadCurrentTable(plan.Table);
         if (!_catalog.TryGetIndex(currentTable.ObjectId, plan.IndexName, out metadata))
@@ -1109,7 +1131,7 @@ internal sealed partial class SqlPlanExecutor
         // manager lookup: catalog names are case-insensitive, directory names
         // are exact.
         var remaining = new List<BTreeIndexRegistration>();
-        foreach (var registration in _indexManager.ExportRegistrations())
+        foreach (var registration in PublishedRegistrations([]))
         {
             if (!(registration.ObjectId == plan.Table.ObjectId &&
                   string.Equals(registration.Definition.Name, metadata.Name, StringComparison.Ordinal)))

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
@@ -28,6 +29,12 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// once, as it did for <c>v1</c>.
 /// </para>
 /// <para>
+/// <b>Format <c>v4</c> (phase B2).</b> Columns may declare
+/// <see cref="CompiledSchemaColumn.DefaultLiteral"/>. Strict earlier readers cannot read that
+/// member, so every document uses <c>cohesion/database-schema/v4</c>, including schemas without
+/// defaults. Earlier formats are refused; provisioning reconstructs their state from the catalog.
+/// </para>
+/// <para>
 /// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
 /// is read, and kept: the schema is immutable, so they never change.
 /// </para>
@@ -35,12 +42,14 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v3";
+    public const string CurrentFormat = "cohesion/database-schema/v4";
 
     // Computed once, on first read: the schema is immutable. Two threads that race the first read
     // compute the same strings, so the race costs only the duplicate work.
     private string? _canonicalDocument;
     private string? _hash;
+    private int _serializationComputationCount;
+    private int _hashComputationCount;
 
     /// <summary>Initializes an immutable compiled schema.</summary>
     /// <param name="format">The document format.</param>
@@ -93,14 +102,30 @@ public sealed class SqlCompiledSchema
     /// what the catalog records for drift detection. Computed once, on first read.
     /// </summary>
     [JsonIgnore]
-    public string CanonicalDocument => _canonicalDocument ??= SqlCompiledSchemaSerializer.Serialize(this);
+    public string CanonicalDocument => _canonicalDocument ??= ComputeCanonicalDocument();
 
     /// <summary>
     /// Gets the lowercase hexadecimal SHA-256 of the UTF-8 <see cref="CanonicalDocument"/>.
     /// Computed once, on first read.
     /// </summary>
     [JsonIgnore]
-    public string Hash => _hash ??= Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(CanonicalDocument)));
+    public string Hash => _hash ??= ComputeHash();
+
+    // Owning-assembly test hooks: reading a warmed identity must do neither operation again.
+    internal int SerializationComputationCount => Volatile.Read(ref _serializationComputationCount);
+    internal int HashComputationCount => Volatile.Read(ref _hashComputationCount);
+
+    private string ComputeCanonicalDocument()
+    {
+        Interlocked.Increment(ref _serializationComputationCount);
+        return SqlCompiledSchemaSerializer.Serialize(this);
+    }
+
+    private string ComputeHash()
+    {
+        Interlocked.Increment(ref _hashComputationCount);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(CanonicalDocument)));
+    }
 
     private static IReadOnlyList<T> Snapshot<T>(
         IReadOnlyList<T>? values,
@@ -226,6 +251,11 @@ public sealed class CompiledSchemaTable
 /// domain the schema declares, a domain the SQL engine registers, or a built-in type name with its
 /// arguments, as written (phase E3). The engine resolves it as its DDL does.
 /// </param>
+/// <param name="DefaultLiteral">
+/// The rendered typed default or raw <c>DefaultSql</c> literal as written, including SQL quotes
+/// for a string, or null when no default is declared. The SQL engine validates and canonicalizes
+/// the literal before applying it.
+/// </param>
 public sealed record CompiledSchemaColumn(
     string Name,
     DatabaseType Type,
@@ -233,7 +263,9 @@ public sealed record CompiledSchemaColumn(
     int? MaxLength = null,
     int? Precision = null,
     int? Scale = null,
-    string? CustomType = null);
+    string? CustomType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? DefaultLiteral = null);
 
 /// <summary>Describes a compiled key.</summary>
 /// <param name="Name">The stable key name.</param>

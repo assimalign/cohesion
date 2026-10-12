@@ -478,7 +478,7 @@ service-stop failure during rollback remains a shared Hosting follow-up (its DES
 | 12 | DdlSelfCommitted | Verbose / Statements | database, commandType | `SqlDatabaseSession.cs:254`, once if the existing metrics record at least one durable catalog self-commit, including a later failure |
 | 13-15 | ProvisioningStart / ProvisioningStop / ProvisioningFailed | reserved | — | Part 2 after 49a; see current paths below |
 | 16 | ExtensionRegistered | Verbose | kind, name | `Functions/SqlFunctionCollection.cs:103` (Scalar/Aggregate); `Functions/SqlTypeCollection.cs:56`, `:92`, `:130`, `:167` (Type/Cast, including declared domains); every accepted registry insertion, built-ins included |
-| 17 | IndexRegistrationsSaved | Verbose | database, count | `SqlDatabase.cs:321`, after changed registrations are persisted; no event for an unchanged set |
+| 17 | IndexRegistrationsSaved *(retired at the B2 merge)* | Verbose | database, count | Landed in part 1 at the registration backstop; B2 (#1355) then made index registration publish atomically with its description and removed the backstop, so the id is retired and never reused |
 
 Depth is the parser's deepest reached nesting level, or the typed AST's recorded depth; **-1**
 means a runtime stack guard failed without a usable depth. Access paths and extension names are

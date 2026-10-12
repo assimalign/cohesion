@@ -5,6 +5,18 @@ The SQL model's schema authority (area architecture:
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 
+## Durable pending migrations (49a)
+
+Catalog kind 9 is a chunked UTF-8, source-generated JSON `SqlCatalogPendingMigration` envelope.
+It carries the complete target document/hash, ordered immutable step identities and their
+one-based positions after inline steps. It uses the same strict chunk assembly and one storage
+transaction as applied-schema records (kind 6). The SQL engine gates this addition with data
+format 9; no legacy reader or upgrade path is added. Persisting intent does not advance DDL
+generation or replace the old applied marker. Saving the completed applied marker deletes every
+pending chunk in the same transaction. Open validates the envelope and ordering, and the engine
+checks the target document's hash before resuming. Catalog persistence knows no SQL executor,
+worker, or hosting lifecycle.
+
 ## Collation metadata (#1025)
 
 `SqlCatalogColumn.Collation` is an optional string-column override. Null inherits
@@ -121,8 +133,8 @@ codec, the key encoding and every comparison read, so they do not consult the do
   transaction and is durable (WAL commit record) when the call returns. DDL inside
   a user DML transaction is deliberately unsupported in the MVP: the in-memory
   cache updates on commit, and half-visible schema changes are a correctness trap
-  (historically mishandled by real engines). The engine serializes DDL per
-  database.
+  (historically mishandled by real engines). The engine locks affected tables and
+  the catalog serializes their metadata publications.
 - **The shared tuple codec as the record format.** Catalog records are encoded
   with `DatabaseKeyWriter`/`DatabaseKeyReader` (#854): self-describing, exact
   round-trips, one codec maintained in one place. Ordering (the codec's other
@@ -145,8 +157,8 @@ codec, the key encoding and every comparison read, so they do not consult the do
   component (`Database.Indexing`'s documented split): the catalog stores the
   exported `BTreeIndexRegistration` set and hands it back for re-attachment on
   open. A tree's root page stays fixed through splits (#1159), so registrations
-  change through index DDL; the engine still re-saves at its persistence points
-  (checkpoint/shutdown) as a backstop.
+  change only through index DDL. Checkpoint and shutdown persist the already
+  committed catalog; they never export or save another registration snapshot.
 - **Index descriptions are schema metadata, one record per index (kind 5)** —
   `SqlCatalogIndex`: name (unique per table, case-insensitive), owning table
   object id, ordered key columns, uniqueness. The description is deliberately
@@ -160,6 +172,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   removes the table's descriptions and registrations the same way. Guards:
   dropping an indexed column is rejected (entries key on its values); index
   columns must exist at creation.
+
 - **The record-space format version lives here** (kind-4 record, kind 8 from
   version 4 as below; `RecordSpaceFormatVersion`): data rows are not self-describing across layout
   changes — a stamped (MVCC, version ≥ 2) record and an unstamped (version 1)
@@ -172,10 +185,10 @@ codec, the key encoding and every comparison read, so they do not consult the do
   the table records' physical layout, #1241) is a property of these records
   themselves — so the database-grain marker is catalog
   metadata. (`Database.Indexing` also stamps and checks its own page format on
-  each tree, behind this marker.) The engine writes its version (6) when it
+  each tree, behind this marker.) The engine writes its version (9) when it
   creates a database and refuses to open one whose marker reads anything else; it
   has no upgrade path (owner decisions of 2026-10-01 and 2026-10-02; upgrades are
-  #1152). Versions 5 and 6 are stored as a kind-8 record like version 4. Absent marker
+  #1152). Versions 5 through 9 are stored as a kind-8 record like version 4. Absent marker
   reads as version 1 (pre-marker databases, or a creation interrupted before the
   engine stamped the marker).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**
@@ -190,12 +203,107 @@ codec, the key encoding and every comparison read, so they do not consult the do
   with "Malformed catalog record of kind 8" instead of corrupting the indexes;
   downgrade is unsupported.
 - **The applied compiled-schema state lives here** (kind-6 records). The catalog
-  stores the lowercase content hash together with the complete canonical schema
-  document. Documents are strict UTF-8 and chunked into bounded records; replacing
+  stores the lowercase content hash and DDL generation together with the complete
+  canonical schema document. Documents are strict UTF-8 and chunked into bounded records; replacing
   all old chunks with all new chunks is one self-committing storage transaction,
-  so reopen observes either complete state. The SQL provisioner verifies both the
-  document/hash pair and the live table/index catalog before treating a repeated
-  apply as a no-op; the marker is never an authority over detected drift.
+  so reopen observes either complete state. Equal declared hash and unchanged DDL
+  generation let the SQL provisioner skip in constant time. Any later DDL invalidates
+  that proof and the provisioner reconciles from live schema-owned metadata.
+
+## Concurrent index publication (49a review)
+
+Tree builds on different tables can finish before either publishes. Their exported
+registration snapshots are therefore not authoritative replacements for the directory.
+Under the catalog metadata lock, `CreateIndexAsync` and `PublishTableAsync` merge only
+the registrations for the new descriptions they publish into the current directory.
+`DropIndexAsync` removes only the named index from that current directory. Table drops
+already remove only that table's registrations. Each merged directory is committed with
+its descriptions, so an unrelated publication cannot erase a completed tree's durable
+registration. PostgreSQL likewise inserts the affected `pg_index` tuple rather than
+replacing an independently captured directory (`src/backend/catalog/index.c:669`).
+
+Every new index description requires exactly one physical registration in that same
+publication, matching the table identity, case-insensitive index name, and uniqueness,
+with B-tree kind and a positive root page id. Missing, duplicate or inconsistent
+registrations fail before any metadata or DDL generation changes. Both standalone
+index creation and table publication use this validation. Unrelated registrations
+in the snapshot are ignored, preserving the current directory.
+
+Description-first publication and the separate registration-save API are removed.
+There is no production caller needing separate publication. A delayed snapshot cannot
+identify an index incarnation from its table, name and uniqueness: after DROP W on
+OldValue and CREATE W on NewValue, those fields still match the abandoned tree.
+Accepting that tree into a missing registration slot would make the replacement seek
+old keys and stop enforcing its own unique values. Requiring atomic publication closes
+that gap without a new incarnation field or an on-disk format change. Roots stay fixed
+through splits, so checkpoint and shutdown need no registration-save backstop and
+cannot overwrite a newer tree or resurrect a dropped one.
+
+`SqlIndexPublicationTests` builds real trees, captures disjoint snapshots before
+publication, commits them in the conflicting order, and opens durable crash images.
+It also rejects description-first same-name recreation, checks that rejection survives
+reopen without advancing DDL generation, and proves the atomically published replacement
+seeks its new key and rejects duplicates after checkpoint and reopen. An unrelated
+publication carrying the dropped tree's stale registration cannot change that result.
+Catalog tests reject missing, ambiguous and invalid registrations through both APIs,
+including new and replacement tables, with unchanged live and reopened metadata.
+These are ordered interleavings, with no scheduler-dependent race window.
+
+## DDL generation and crash convergence (B2)
+
+The kind-2 identity counter also persists `SqlCatalog.DdlGeneration`, a monotonically
+increasing `ulong`. Every committed metadata change writes the next generation in the
+same storage transaction: table identity reservation and publication, direct table
+creation and drop, column and constraint changes, index creation and drop,
+default-collation initialization and format-marker changes.
+Schema-owned and ad-hoc objects follow the same path. `CommitCatalogChange` stages the
+counter with the change and publishes the generation, identity and record locations
+only after commit succeeds. A failure before the commit record leaves the transaction
+active; disposal rolls it back, preserving the committed generation and allowing a retry.
+A failure after that record takes the storage offline through the kernel's existing
+fail-stop latch and reports an unconfirmed commit. SQL's paired-storage hooks take the
+whole database offline and end lock waits. Cached catalog reads and mutations are refused:
+the identity, generation and record locations may be stale. Reopen recovers the actual
+outcome before another mutation can allocate an identity or generation. This is the same
+rule PostgreSQL applies in `RecordTransactionCommit`'s critical section
+(`src/backend/access/transam/xact.c:1470-1583`) and on WAL fsync failure
+(`src/backend/access/transam/xlog.c:9877-9937`). Exhaustion refuses the mutation rather
+than wrapping.
+
+Saving an unchanged format marker is a no-op. Checkpoint and shutdown never change
+index registrations or DDL generation, so neither invalidates a fully applied schema. Recording
+`SqlCatalogSchemaState` is bookkeeping, not DDL: its `{hash, generation}` describes the
+catalog after every provisioning step succeeded and does not advance the counter.
+`SaveSchemaStateAsync` requires that supplied generation to equal the live generation
+under the metadata lock, so intervening DDL cannot be acknowledged accidentally. Every
+state chunk carries the same hash and generation; load refuses mixed generations.
+An unconfirmed state save follows the same fail-stop path, so another save cannot
+reuse the previous chunk locations after a replacement may already have committed.
+
+This changes the on-disk catalog shape and advances the SQL database's existing
+record-space format gate from 7 to 8. Counter and schema-state records require the
+generation suffix; older records fail with an explicit unsupported-format error before
+they can be trusted. There is no upgrade or compatibility reader. After such a load
+failure, the SQL engine reads only the unchanged format-marker tuple and sends a
+different recorded version through its existing format gate, preserving its actionable
+refusal over the wire. A missing marker together with exactly one valid old counter
+tuple identifies the pre-marker format 1 and reaches that same refusal. This only
+recognizes the old shape to refuse it; it does not load an older catalog. A current,
+malformed or ambiguous marker, duplicate counter or unknown record kind preserves
+the original catalog error; successful opens require no additional traversal.
+
+There is no transaction across provisioning statements. A crash after a committed step
+leaves the previous recorded generation behind the live counter. The SQL provisioner
+then takes a complete snapshot of owned objects and plans only the remaining work;
+the state is recorded last. The catalog keeps types and their bounds, domain names,
+nullability, canonical defaults, primary keys, unique and foreign-key constraints,
+checks and indexes so that reconciliation can represent each provisionable kind.
+Engine-registered domains remain code and are represented by their column references.
+
+Owner decision 49a's pending-step record attaches between planning and step execution
+in the SQL provisioner. Successful deferred DDL uses the same catalog commit path, and
+the applied state is recorded only after all steps complete. The pending envelope lives
+here; worker execution and progress remain SQL engine responsibilities.
 
 ## Object ownership
 
@@ -215,9 +323,9 @@ suffix load as `Adhoc`, preserving their existing mutability rather than guessin
 an owner from a database-wide schema marker. Invalid owner/name combinations are
 rejected. The tuple encoding is positional and never persisted CLR property
 identifiers; renaming the ownership property to `OwningSchema` therefore does not
-change the on-disk format, and catalogs written by the contract-freeze build load
-without a compatibility alias. The schema hash/document record remains unchanged
-and continues to support drift detection independently of per-object ownership.
+change the on-disk format and needed no compatibility alias. B2's format gate now
+refuses those older files. The schema hash/document record now also carries the
+B2 generation and continues to support drift detection independently of per-object ownership.
 
 The engine enforces the live-session DDL lock; the catalog remains the durable
 metadata component used by sanctioned schema application as well. Ownership

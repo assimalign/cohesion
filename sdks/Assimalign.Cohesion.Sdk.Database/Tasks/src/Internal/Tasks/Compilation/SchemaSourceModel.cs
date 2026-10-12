@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Sdk.Database.Tasks.Internal;
 
 /// <summary>One database's schema declaration, as the extractor read it from consumer C#.</summary>
@@ -36,7 +38,9 @@ internal sealed record SchemaTableSource(
 /// <param name="TypeName">The member's CLR type identity.</param>
 /// <param name="IsNullable">Whether the member can hold null.</param>
 /// <param name="SqlType">The SQL type <c>table.Column(selector, sqlType)</c> declares, as written; null when none does.</param>
-internal sealed record SchemaColumnSource(string Name, string TypeName, bool IsNullable, string? SqlType = null);
+/// <param name="DefaultLiteral">The rendered typed value or the raw <c>DefaultSql</c> literal; null when none is declared.</param>
+/// <param name="StorageType">The underlying storage type for an enum member; otherwise null.</param>
+internal sealed record SchemaColumnSource(string Name, string TypeName, bool IsNullable, string? SqlType = null, string? DefaultLiteral = null, DatabaseType? StorageType = null);
 
 internal sealed record SchemaReferenceSource(string Member, string TargetType);
 

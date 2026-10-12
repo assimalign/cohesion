@@ -239,7 +239,11 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Act
         var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
-            await CreateBuilder("steps").AddDatabase(Referenced).BuildAsync());
+            await CreateBuilder("steps").AddDatabase("shop", database =>
+            {
+                database.Schema(Referenced);
+                database.RunMigrationsInline = true;
+            }).BuildAsync());
 
         // Assert
         failure.Message.ShouldStartWith(

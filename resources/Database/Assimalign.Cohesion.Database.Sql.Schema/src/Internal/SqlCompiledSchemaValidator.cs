@@ -363,6 +363,12 @@ internal static class SqlCompiledSchemaValidator
 
             ValidateTypeReference(column.Type, column.CustomType, types, $"{columnPath}.type", errors);
             ValidateStorageType(column.Type, column.Precision, column.Scale, columnPath, errors);
+            if (column.DefaultLiteral is not null && string.IsNullOrWhiteSpace(column.DefaultLiteral))
+            {
+                Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{columnPath}.defaultLiteral",
+                    "A declared DEFAULT literal cannot be empty or white space.");
+            }
+
             if (column.MaxLength is <= 0)
             {
                 Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{columnPath}.maxLength",

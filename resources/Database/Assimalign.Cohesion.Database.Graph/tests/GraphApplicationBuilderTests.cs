@@ -264,6 +264,7 @@ public sealed class GraphApplicationBuilderTests
 
     private sealed class RecordingContext : IDatabaseApplicationContext
     {
+        public CancellationToken BuildCancellationToken => default;
         public IReadOnlyList<DatabaseEngine> Engines => [];
         public IReadOnlyList<DatabaseServer> Servers => [];
         public DatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);

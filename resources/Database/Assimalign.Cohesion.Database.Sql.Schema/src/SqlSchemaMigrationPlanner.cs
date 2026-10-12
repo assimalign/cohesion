@@ -292,7 +292,8 @@ public static class SqlSchemaMigrationPlanner
         && left.MaxLength == right.MaxLength
         && left.Precision == right.Precision
         && left.Scale == right.Scale
-        && string.Equals(left.CustomType, right.CustomType, StringComparison.OrdinalIgnoreCase);
+        && string.Equals(left.CustomType, right.CustomType, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(left.DefaultLiteral, right.DefaultLiteral, StringComparison.Ordinal);
 
     private static bool KeyEquals(
         CompiledSchemaKey? left,

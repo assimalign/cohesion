@@ -8,5 +8,6 @@
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Database" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+    <CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Schema" />
   </ItemGroup>
 </Project>

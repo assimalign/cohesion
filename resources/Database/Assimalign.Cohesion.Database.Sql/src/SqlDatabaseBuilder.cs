@@ -29,6 +29,7 @@ public sealed class SqlDatabaseBuilder
     private Collation? _defaultCollation;
     private SqlProvisioningMode _provisioning = SqlProvisioningMode.Apply;
     private SqlSchema? _schema;
+    private bool _runMigrationsInline;
 
     /// <summary>Initializes the declaration of one database of an engine builder.</summary>
     /// <param name="engine">The engine builder the database belongs to.</param>
@@ -41,6 +42,19 @@ public sealed class SqlDatabaseBuilder
 
     /// <summary>Gets the database name, written once as the first argument of <c>AddDatabase</c>.</summary>
     public DatabaseName Name => _name;
+
+    /// <summary>Gets or sets whether every migration step runs inside Build. The default is false.</summary>
+    /// <remarks>By default, data-scaling steps on populated tables run in the engine's provisioning worker.</remarks>
+    /// <exception cref="InvalidOperationException">The engine builder's build has begun.</exception>
+    public bool RunMigrationsInline
+    {
+        get => _runMigrationsInline;
+        set
+        {
+            _engine.EnsureMutable();
+            _runMigrationsInline = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the collation the database's string columns inherit when they name none;

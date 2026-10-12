@@ -73,11 +73,6 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
             return true;
         }
 
-        // Re-export the index registrations first when they changed — a backstop: root pages stay
-        // fixed through splits (#1159), and the checkpoint is the engine's persistence point for
-        // re-attachment metadata.
-        database.SaveIndexRegistrationsIfChanged();
-
         // The data storage checkpoints through the transaction coordinator: the truncating
         // checkpoint record carries every in-flight logical transaction's sequence, so recovery
         // classification survives the truncation. A statement holding the apply gate takes the

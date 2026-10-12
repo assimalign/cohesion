@@ -39,6 +39,12 @@ internal sealed partial class SqlPlanExecutor
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
             statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
 
+        // Lock before publication, and retain the apply's owner through its final marker
+        // or compensation. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
+        // AccessExclusiveLock on the newly created relation through transaction end.
+        await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+            LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
         // Bind the persisted definitions of the version about to be published, from their
         // stored text, so no write to the new table ever parses them.
         _definitions.Get(table);
@@ -58,7 +64,7 @@ internal sealed partial class SqlPlanExecutor
 
         foreach (ulong parent in parents)
         {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(parent),
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(parent),
                 LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -115,33 +121,45 @@ internal sealed partial class SqlPlanExecutor
         {
             if (indexes.Count > 0)
             {
-                // Durable, but not a self-commit the session counts (#1272): the trees are orphaned
-                // pages until the publish below describes them.
-                await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+                if (statement.ProvisioningProgress is not null)
                 {
                     foreach (var metadata in indexes)
                     {
-                        var index = await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId,
-                            new IndexDefinition(metadata.Name, IndexKind.BTree, true), cancellationToken).ConfigureAwait(false);
-                        created.Add(metadata.Name);
-                        var ordinals = metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray();
-                        var keys = new HashSet<string>(StringComparer.Ordinal);
-                        foreach (var version in ScanVersions(table, cancellationToken))
-                        {
-                            var key = BuildIndexKey(table, ordinals, version.Values);
-                            if (version.Deleter == TransactionSequence.None && !keys.Add(Convert.ToHexString(key.Encoded.Span)))
-                            {
-                                throw new SqlConstraintViolationException(metadata.Name, $"{table.Schema}.{table.Name}", "UNIQUE");
-                            }
-
-                            await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
-                                version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
-                        }
+                        await BuildDeferredIndexAsync(table, new IndexDefinition(metadata.Name, IndexKind.BTree, true),
+                            metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray(), statement,
+                            () => created.Add(metadata.Name), cancellationToken).ConfigureAwait(false);
                     }
-                    return true;
-                }, durable: true, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    // Durable, but not a self-commit the session counts (#1272): the trees are orphaned
+                    // pages until the publish below describes them.
+                    await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+                    {
+                        foreach (var metadata in indexes)
+                        {
+                            var index = await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId,
+                                new IndexDefinition(metadata.Name, IndexKind.BTree, true), cancellationToken).ConfigureAwait(false);
+                            created.Add(metadata.Name);
+                            var ordinals = metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray();
+                            var keys = new HashSet<string>(StringComparer.Ordinal);
+                            foreach (var version in ScanVersions(table, cancellationToken))
+                            {
+                                var key = BuildIndexKey(table, ordinals, version.Values);
+                                if (version.Deleter == TransactionSequence.None && !keys.Add(Convert.ToHexString(key.Encoded.Span)))
+                                {
+                                    throw new SqlConstraintViolationException(metadata.Name, $"{table.Schema}.{table.Name}", "UNIQUE");
+                                }
+
+                                await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
+                                    version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+                        return true;
+                    }, durable: true, cancellationToken).ConfigureAwait(false);
+                }
             }
-            await SelfCommitAsync(statement, _catalog.PublishTableAsync(table, indexes, _indexManager.ExportRegistrations(),
+            await SelfCommitAsync(statement, _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),
                 replaceExisting, cancellationToken)).ConfigureAwait(false);
         }
         catch
@@ -179,16 +197,21 @@ internal sealed partial class SqlPlanExecutor
             primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
             plan.Table.DroppedColumnOrdinals);
         var rows = Scan(plan.Table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
+        _definitions.Get(replacement);
+        long processed = 0;
+        statement.ProvisioningProgress?.Invoke(0, rows.Count);
         foreach (var row in rows)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             for (int i = 0; i < columns.Length; i++)
             {
                 CoerceForColumn(row[i], columns[i]);
             }
+            ValidateRows(replacement, [row], statement, cancellationToken, current: true);
+            statement.ProvisioningProgress?.Invoke(++processed, rows.Count);
         }
 
         // The backfill binds the replacement version, which is the instance published below.
-        ValidateRows(replacement, rows, statement, cancellationToken, current: true);
         await PublishConstrainedTableAsync(replacement, [plan.Constraint], statement, cancellationToken, replaceExisting: true).ConfigureAwait(false);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -229,6 +252,30 @@ internal sealed partial class SqlPlanExecutor
         constraints = BindConstraints(provisional, plan.Constraints);
         var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
             table.Constraints.Concat(constraints).ToArray(), table.DroppedColumnOrdinals);
+        if (plan.Column.IsNullable && plan.Constraints.Count == 0)
+        {
+            // Existing columns and constraints are unchanged. A nullable field's missing
+            // value is one immutable literal, so validate it once instead of scanning rows.
+            var definition = _definitions.Get(replacement);
+            var row = new object?[columns.Length];
+            row[^1] = definition.DefaultValues[^1] is { } literal ? DefaultValue(literal) : null;
+            try
+            {
+                CheckDomains(definition, row, ExecutionEvaluator(null, cancellationToken), [columns.Length - 1]);
+            }
+            catch (SqlConstraintViolationException)
+            {
+                // An empty table assigns no missing value. Keep that DDL legal even
+                // when all retained versions are tombstoned. Valid defaults never scan.
+                if (Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
+                {
+                    throw;
+                }
+            }
+            _definitions.Adopt(await SelfCommitAsync(statement,
+                _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken)).ConfigureAwait(false), replacement);
+            return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        }
         // Backfill is logical: missing trailing fields resolve from the immutable
         // replacement metadata. Existing row bytes and MVCC stamps never change;
         // one durable catalog publication makes the complete addition visible.
@@ -238,13 +285,17 @@ internal sealed partial class SqlPlanExecutor
 
         // Each existing row is assigned the new column's default, or NULL, of its domain (phase E3).
         int[]? added = bound is null ? null : [columns.Length - 1];
+        long processed = 0;
+        statement.ProvisioningProgress?.Invoke(0, rows.Count);
         foreach (var row in rows)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             row[^1] = CoerceForColumn(row[^1], plan.Column);
             if (added is not null)
             {
                 CheckDomains(bound!, row, evaluator!, added);
             }
+            statement.ProvisioningProgress?.Invoke(++processed, rows.Count);
         }
 
         ValidateRows(replacement, rows, statement, cancellationToken, current: true);

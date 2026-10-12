@@ -16,7 +16,7 @@ public class CompiledSchemaTests
     {
         SqlCompiledSchema schema = CompileOrders();
 
-        schema.Format.ShouldBe("cohesion/database-schema/v3");
+        schema.Format.ShouldBe("cohesion/database-schema/v4");
         schema.Name.ShouldBe("orders-db");
         schema.Tables.Select(table => table.Name).ShouldBe(["order_lines", "orders"]);
         schema.Tables[1].RowType.ShouldStartWith("Assimalign.Cohesion.Database.Sql.Schema.Tests:");
@@ -45,16 +45,26 @@ public class CompiledSchemaTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: the canonical document and its hash are computed once")]
-    public void CanonicalDocumentAndHash_ShouldBeComputedOnce()
+    public void CanonicalDocumentAndHash_RepeatedReads_ShouldBeComputedOnce()
     {
+        // Arrange
         SqlCompiledSchema schema = CompileOrders();
+        schema.SerializationComputationCount.ShouldBe(0);
+        schema.HashComputationCount.ShouldBe(0);
 
+        // Act
         string document = schema.CanonicalDocument;
         string hash = schema.Hash;
 
-        schema.CanonicalDocument.ShouldBeSameAs(document);
-        schema.Hash.ShouldBeSameAs(hash);
-        SqlCompiledSchemaSerializer.ComputeHash(schema).ShouldBeSameAs(hash);
+        // Assert
+        for (int iteration = 0; iteration < 10; iteration++)
+        {
+            schema.CanonicalDocument.ShouldBeSameAs(document);
+            schema.Hash.ShouldBeSameAs(hash);
+            SqlCompiledSchemaSerializer.ComputeHash(schema).ShouldBeSameAs(hash);
+        }
+        schema.SerializationComputationCount.ShouldBe(1);
+        schema.HashComputationCount.ShouldBe(1);
         hash.ShouldBe(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(document))));
     }
 
@@ -70,9 +80,10 @@ public class CompiledSchemaTests
     [Theory(DisplayName = "Cohesion Test [Database] - Schema compiler: a document of an earlier format version no longer reads")]
     [InlineData("cohesion/database-schema/v1")]
     [InlineData("cohesion/database-schema/v2")]
+    [InlineData("cohesion/database-schema/v3")]
     public void Deserialize_EarlierFormatVersion_ShouldBeRefused(string format)
     {
-        // v1 carried the engine model; v2 had no domains or named column types (phase E3 made v3).
+        // v1 carried the engine model; v2 had no domains or named column types; v3 had no defaults.
         string earlier = CompileOrders().CanonicalDocument.Replace(SqlCompiledSchema.CurrentFormat, format, StringComparison.Ordinal);
 
         earlier.ShouldContain(format, Case.Sensitive);

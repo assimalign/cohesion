@@ -96,7 +96,7 @@ public class SqlCatalogTests
             [Column("id", DatabaseType.Int64), Column("legacy", DatabaseType.String)],
             null, DatabaseObjectOwner.Schema, "AppSchema", default);
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_customers_id", ["id"], false,
-            DatabaseObjectOwner.Schema, "AppSchema"), []);
+            DatabaseObjectOwner.Schema, "AppSchema"), [new(table.ObjectId, new IndexDefinition("ix_customers_id"), 7)]);
         await catalog.AddColumnAsync("dbo", "customers", Column("note", DatabaseType.String));
         await catalog.DropColumnAsync("dbo", "customers", "legacy");
         await catalog.CreateTableAsync("dbo", "scratch", [Column("id", DatabaseType.Int64)]);
@@ -175,7 +175,7 @@ public class SqlCatalogTests
         // Arrange
         var (catalog, harness) = OpenFresh();
         string largeDocument = "{\"schema\":\"" + new string('x', 20_000) + "\"}";
-        var first = new SqlCatalogSchemaState("sha256:first", largeDocument);
+        var first = new SqlCatalogSchemaState("sha256:first", largeDocument, catalog.DdlGeneration);
 
         // Act / Assert: the canonical document spans catalog records and reassembles on open.
         await catalog.SaveSchemaStateAsync(first);
@@ -186,19 +186,47 @@ public class SqlCatalogTests
 
         // Act / Assert: replacement removes every old chunk and persists hash + document together.
         const string replacementDocument = "{\"schema\":\"replacement\"}";
-        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("sha256:replacement", replacementDocument));
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("sha256:replacement", replacementDocument, catalog.DdlGeneration));
         var replacementReopen = Reopen(harness);
         replacementReopen.SchemaState.ShouldNotBeNull();
         replacementReopen.SchemaState.ContentHash.ShouldBe("sha256:replacement");
         replacementReopen.SchemaState.CanonicalDocument.ShouldBe(replacementDocument);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - 49a: pending intent spans records, survives reopen, and clears atomically with its applied marker")]
+    public async Task SavePendingMigration_AcrossReopen_ShouldRetainOrderedIntentUntilCompletion()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        string document = "{\"schema\":\"" + new string('x', 20_000) + "\"}";
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("old", "{}", catalog.DdlGeneration));
+        var steps = new[] { new SqlCatalogMigrationStep("AddIndex", "items", "ix_value", 2) };
+        var pending = new SqlCatalogPendingMigration("new", document, steps, 2);
+        steps[0] = new SqlCatalogMigrationStep("AddConstraint", "items", "ck_value", 1);
+
+        // Act
+        await catalog.SavePendingMigrationAsync(pending);
+        var reopened = Reopen(harness);
+
+        // Assert: intent is immutable and distinct from the old trusted marker.
+        reopened.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe("old");
+        var intent = reopened.PendingMigration.ShouldNotBeNull();
+        intent.ContentHash.ShouldBe("new");
+        intent.CanonicalDocument.ShouldBe(document);
+        intent.Steps.ShouldHaveSingleItem().Position.ShouldBe(2);
+        intent.Steps[0].Kind.ShouldBe("AddIndex");
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("new", document, catalog.DdlGeneration));
+        var completed = Reopen(harness);
+        completed.PendingMigration.ShouldBeNull();
+        completed.SchemaState.ShouldNotBeNull().CanonicalDocument.ShouldBe(document);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: invalid values are rejected")]
     public void CreateSchemaState_InvalidValues_ShouldThrow()
     {
         // Act / Assert
-        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("", "{}"));
-        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("sha256:value", ""));
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("", "{}", 0));
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("sha256:value", "", 0));
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - CreateTable: assigns object ids and exposes the table")]
@@ -308,10 +336,12 @@ public class SqlCatalogTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Indexes: registrations round-trip across reopen")]
-    public async Task SaveIndexRegistrations_ShouldRoundTripAcrossReopen()
+    public async Task CreateIndex_WithRegistrationSnapshots_ShouldRoundTripAcrossReopen()
     {
         // Arrange
         var (catalog, harness) = OpenFresh();
+        var users = await catalog.CreateTableAsync("dbo", "users", [Column("id", DatabaseType.Int32)]);
+        var orders = await catalog.CreateTableAsync("dbo", "orders", [Column("date", DatabaseType.Int64)]);
         var registrations = new List<BTreeIndexRegistration>
         {
             new(1, new IndexDefinition("pk_users", IndexKind.BTree, IsUnique: true), 7),
@@ -319,8 +349,8 @@ public class SqlCatalogTests
         };
 
         // Act
-        await catalog.SaveIndexRegistrationsAsync(registrations);
-        await catalog.SaveIndexRegistrationsAsync(registrations); // idempotent rewrite path
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(users.ObjectId, "pk_users", ["id"], true), registrations);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(orders.ObjectId, "ix_orders_date", ["date"], false), registrations);
 
         var reopened = Reopen(harness);
 

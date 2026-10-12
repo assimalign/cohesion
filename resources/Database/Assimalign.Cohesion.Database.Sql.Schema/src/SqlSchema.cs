@@ -29,6 +29,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlSchema
 {
     private readonly SqlSchemaDeclaration _declaration;
+    private SqlCompiledSchema? _compiled;
 
     /// <summary>
     /// Initializes a schema over a completed declaration.
@@ -51,10 +52,11 @@ public sealed class SqlSchema
 
     /// <summary>
     /// Validates the declaration and lowers it into the SQL engine's stable compiled schema.
+    /// The immutable result is retained for subsequent calls.
     /// </summary>
     /// <returns>The validated, immutable compiled schema, with a deterministic content hash.</returns>
     /// <exception cref="SqlSchemaValidationException">The declaration is not valid.</exception>
-    public SqlCompiledSchema Compile() => SqlSchemaCompiler.Compile(this);
+    public SqlCompiledSchema Compile() => _compiled ??= SqlSchemaCompiler.Compile(this);
 
     /// <summary>
     /// Declares and compiles a SQL schema in one step. Equivalent to calling

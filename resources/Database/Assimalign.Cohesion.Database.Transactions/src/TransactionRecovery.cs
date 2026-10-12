@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Transactions;
 
@@ -21,8 +22,11 @@ public static class TransactionRecovery
     /// Reads the journal and classifies every transaction sequence it mentions.
     /// </summary>
     /// <param name="journal">The storage journal to analyze.</param>
+    /// <param name="cancellationToken">Observed between journal records.</param>
     /// <returns>The committed and aborted sequences, and the highest sequence observed.</returns>
-    public static TransactionRecoveryPlan Analyze(StorageJournal journal) => Analyze(journal, []);
+    /// <exception cref="OperationCanceledException">Classification was canceled; the journal was not changed.</exception>
+    public static TransactionRecoveryPlan Analyze(StorageJournal journal, CancellationToken cancellationToken = default)
+        => Analyze(journal, [], cancellationToken);
 
     /// <summary>
     /// Reads the journal and classifies every transaction sequence it mentions, and every
@@ -47,10 +51,14 @@ public static class TransactionRecovery
     /// is no floor for new sequences; the storage's own sequence floor
     /// (<see cref="Storage.ReserveTransactionSequence"/> resumes above it) is.
     /// </remarks>
-    public static TransactionRecoveryPlan Analyze(StorageJournal journal, IEnumerable<long> checkpointActiveTransactions)
+    /// <param name="cancellationToken">Observed between anchor entries and journal records.</param>
+    /// <exception cref="OperationCanceledException">Classification was canceled; the journal was not changed.</exception>
+    public static TransactionRecoveryPlan Analyze(StorageJournal journal, IEnumerable<long> checkpointActiveTransactions,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(journal);
         ArgumentNullException.ThrowIfNull(checkpointActiveTransactions);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var committed = new HashSet<TransactionSequence>();
         var seen = new HashSet<TransactionSequence>();
@@ -58,6 +66,7 @@ public static class TransactionRecovery
 
         foreach (long anchored in checkpointActiveTransactions)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (anchored <= 0)
             {
                 continue;
@@ -74,6 +83,7 @@ public static class TransactionRecovery
 
         foreach (var record in journal.ReadSequential())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // A checkpoint record's payload lists the writers that were still in
             // flight when the journal was truncated — their begin records were
             // dropped by the truncation, so the checkpoint is their classification

@@ -55,6 +55,7 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     // later Dispose or DisposeAsync, and an engine open that found the database closing, wait on it.
     private readonly TaskCompletionSource _closure = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _disposed;
+    private DatabaseProvisioningProgress? _provisioning;
 
     /// <summary>
     /// Initializes a new database with its name and its owning engine.
@@ -84,6 +85,14 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     /// Gets the engine that owns this database.
     /// </summary>
     public DatabaseEngine Engine => _engine;
+
+    /// <summary>Gets current provisioning progress, or null when no provisioning is pending.</summary>
+    public DatabaseProvisioningProgress? Provisioning => Volatile.Read(ref _provisioning);
+
+    /// <summary>Publishes the model's provisioning observation atomically.</summary>
+    /// <param name="progress">The current step, or null after provisioning ends.</param>
+    protected void SetProvisioningProgress(DatabaseProvisioningProgress? progress)
+        => Volatile.Write(ref _provisioning, progress);
 
     /// <summary>
     /// Gets whether the database has been disposed: true from the moment its close starts.

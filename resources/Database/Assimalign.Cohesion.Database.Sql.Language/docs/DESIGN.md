@@ -6,6 +6,12 @@ and structured to be extended without churning what exists (open/closed).
 
 ## Design intent
 
+Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:
+`ALTER TABLE t ALTER COLUMN c INT NOT NULL`. It reuses column parsing, including bounds,
+DEFAULT and collation, and the executor checks which changes preserve storage representation.
+The PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain explicitly refused. Lookahead
+copies the token lexer without changing parser bookkeeping. The action changes no clause count.
+
 Parse the declared dialect into a stable, fully-typed AST that planners, catalogs,
 tooling, and the SDK schema compiler can rely on. "Declared" is the operative word:
 [DIALECT.md](DIALECT.md) is a contract, not aspiration — the parser, the matrix,
@@ -333,6 +339,12 @@ ISO unary plus is `SqlUnaryOperator.Plus`, parsed on the unary rung beside `-`.
 Directly before a numeric literal the sign stays part of the literal, so `+1` and
 `1` are the same tree and `ORDER BY +1` keeps its ordinal meaning; `+a`, `+(1 + 2)`
 and `+@p` build a unary-plus node. Typing and evaluation belong to the engine.
+
+Column DEFAULT parses through the unary rung too, so negative numeric defaults retain the same
+unary-minus node as a scalar expression. The engine's DEFAULT admission remains narrower than
+the expression grammar: one literal, or one minus over a numeric literal. Arithmetic, nested
+signs and function calls do not become expression defaults. This supports the schema builder's
+invariant rendering of negative C# numeric values without rewriting them as text literals.
 
 ## AOT posture
 

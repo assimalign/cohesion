@@ -851,40 +851,47 @@ public sealed class StorageRedoTests
     }
 
     /// <summary>
-    /// A durable wait that fails after the commit record is appended, with something other than
-    /// the storage going offline, ends the bracket committed: recovery redoes it whenever the record
-    /// reaches the media, so rolling it back in memory would put the page on a base the journal has
-    /// moved past.
+    /// Every failure after the commit record fences the storage, including a handle that lost
+    /// its durable-flush capability. Recovery decides the outcome before another writer runs;
+    /// rolling it back in memory would put the page on a base the journal has moved past.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Storage] - Redo: a durable wait that fails after the commit record ends the bracket committed, and its page's chain recovers")]
-    public void Commit_DurableWaitFailsAfterTheCommitRecord_ShouldEndCommittedAndRecover()
+    [Theory(DisplayName = "Cohesion Test [Storage] - Redo: a durable wait failure after the commit record fences the storage and its page chain recovers")]
+    [InlineData(StorageCommitDurability.Synchronous)]
+    [InlineData(StorageCommitDurability.Grouped)]
+    public void Commit_DurableWaitFailsAfterTheCommitRecord_ShouldEndCommittedAndRecover(StorageCommitDurability durability)
     {
         // Arrange: the journal's handle stops supporting a durable flush after the commit checked it.
         var storage = TornStorage.Create(consistencyChecks: true); // abandoned: a crash
         var (pageId, slot) = storage.Insert("v1");
+        storage.CommitDurability = durability;
+        storage.GroupCommitWindow = TimeSpan.Zero;
         storage.JournalFaults.NextDurableFlushFailure = new NotSupportedException("Injected: the handle stopped supporting a durable flush.");
         var failed = storage.BeginTransaction();
         storage.Update(failed, pageId, slot, "v2");
 
         // Act
-        Should.Throw<NotSupportedException>(() => failed.Commit());
+        var failure = Should.Throw<StorageOfflineException>(() => failed.Commit());
         bool activeAfterFailure = failed.IsActive;
         failed.Dispose();
-        string inMemory = storage.Read(pageId, slot);
-        using (var transaction = storage.BeginTransaction())
+        Should.Throw<StorageOfflineException>(() => storage.BeginTransaction());
+        using var firstRecovery = TornStorage.Open(storage.CaptureDurable());
+        firstRecovery.Read(pageId, slot).ShouldBe("v2");
+        using (var transaction = firstRecovery.BeginTransaction())
         {
-            storage.Update(transaction, pageId, slot, "v3");
+            firstRecovery.Update(transaction, pageId, slot, "v3");
             transaction.Commit();
         }
 
-        var images = storage.CaptureDurable();
+        var images = firstRecovery.CaptureDurable();
         using var recovered = TornStorage.Open(images);
         var deltas = JournalImage.PageRecords(images.Journal, (long)pageId).Where(record => record.Type == JournalRecordType.PageDelta).ToArray();
 
-        // Assert: the bracket ended committed and unlocked its page; the next delta chains onto its delta.
+        // Assert: the bracket ended committed and unlocked its page; only recovery permits the next delta.
+        failure.CommitRecordWritten.ShouldBeTrue();
+        failure.InnerException.ShouldBeOfType<NotSupportedException>();
+        storage.IsOffline.ShouldBeTrue();
         activeAfterFailure.ShouldBeFalse();
         storage.ActiveTransactions.ShouldBe(0);
-        inMemory.ShouldBe("v2");
         BaseLsn(deltas[^1]).ShouldBe(deltas[^2].Lsn);
         recovered.Read(pageId, slot).ShouldBe("v3");
     }

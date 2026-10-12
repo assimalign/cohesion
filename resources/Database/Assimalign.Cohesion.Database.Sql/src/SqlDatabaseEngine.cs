@@ -72,6 +72,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class SqlDatabaseEngine : DatabaseEngine
 {
+    // Instance-local barrier used by this assembly's real-engine crash/race tests.
+    internal Action<SqlDatabase>? BeforeProvisioning { get; set; }
     private readonly SqlDatabaseEngineOptions _options;
     private readonly Dictionary<string, SqlDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
@@ -82,6 +84,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     // deferred an undo, so the checkpoint and version-purge workers act at once (#1254, #1226).
     private readonly ManualResetEventSlim _checkpointNeededSignal = new();
     private readonly ManualResetEventSlim _undoDeferredSignal = new();
+    private readonly SqlProvisioningWorker _provisioningWorker;
     private readonly int _bufferPoolPages;
     private readonly SqlStorageStrategy _strategy;
     private readonly SqlQueryParserOptions _parserOptions;
@@ -137,6 +140,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         AttachWorker(new SqlCheckpointWorker(this));
         AttachWorker(new SqlVersionPurgeWorker(this));
         AttachWorker(new SqlIndexMaintenanceWorker(this));
+        _provisioningWorker = new SqlProvisioningWorker(this);
+        AttachWorker(_provisioningWorker);
     }
 
     /// <inheritdoc />
@@ -203,8 +208,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     internal SqlStorage[] GetStorageSnapshot() => Volatile.Read(ref _storageSnapshot);
 
     /// <summary>
-    /// Gets a point-in-time snapshot of every open database, for workers that operate
-    /// through the per-database transaction coordinator (checkpointing, version purge).
+    /// Gets a point-in-time snapshot of every published database, for inventory and workers
+    /// that operate through the per-database transaction coordinator (checkpointing, version purge).
     /// Same racing-a-drop tolerance as <see cref="GetStorageSnapshot"/>.
     /// </summary>
     internal SqlDatabase[] GetInstanceSnapshot() => Volatile.Read(ref _instanceSnapshot);
@@ -220,6 +225,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// worker waits on it so the first retry runs about 100 ms later, not a maintenance interval.
     /// </summary>
     internal ManualResetEventSlim UndoDeferredSignal => _undoDeferredSignal;
+
+    internal void ScheduleProvisioning(SqlDeferredMigration migration) => _provisioningWorker.Enqueue(migration);
+
+    internal void CompleteProvisioningBuild() => _provisioningWorker.CompleteBuild();
 
     /// <summary>
     /// Reports whether <paramref name="database"/> is still one of the engine's open databases:
@@ -282,6 +291,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         // reads the batch size on every pass, so a caller's later change used to reach it.
         var engine = CreateUncomposed(name, options.Snapshot());
         engine.CompleteComposition();
+        engine.CompleteProvisioningBuild();
         return engine;
     }
 
@@ -500,8 +510,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         => (SqlDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Enumerates the SQL databases the engine manages. The engine state and the token are checked
-    /// when the call is made, not when the enumeration starts.
+    /// Enumerates a snapshot of the SQL databases already published by the engine, without waiting
+    /// for another database to finish opening or recovery. The engine state and token are checked
+    /// when the call is made; cancellation is also observed during enumeration.
     /// </summary>
     /// <param name="cancellationToken">Cancels the enumeration.</param>
     /// <returns>An async sequence of the databases.</returns>
@@ -651,7 +662,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             SqlStorage catalogStorage;
             try
             {
-                catalogStorage = _strategy.OpenStorage(name, catalog: true);
+                catalogStorage = _strategy.OpenStorage(name, catalog: true, cancellationToken);
             }
             catch (StorageFormatException exception)
             {
@@ -667,12 +678,28 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             try
             {
                 ConfigureStorage(catalogStorage, catalogLabel, catalog: true);
-                var catalog = SqlCatalog.Open(catalogStorage);
-                SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog);
+                SqlCatalog catalog;
+                try
+                {
+                    catalog = SqlCatalog.Open(catalogStorage);
+                }
+                catch (SqlCatalogException)
+                {
+                    // Older catalog shapes can fail decoding before Load reaches their
+                    // format marker. Preserve the existing actionable format refusal,
+                    // without decoding old objects or mistaking current-format damage
+                    // for a database written by another engine.
+                    if (ReadFormatVersionAfterCatalogFailure(catalogStorage) is { } version)
+                    {
+                        SqlDatabase.ThrowIfFormatIsNotCurrent(name, version);
+                    }
+                    throw;
+                }
+                SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
 
                 try
                 {
-                    storage = _strategy.OpenStorage(name, catalog: false);
+                    storage = _strategy.OpenStorage(name, catalog: false, cancellationToken);
                 }
                 catch (StorageFormatException exception)
                 {
@@ -684,7 +711,16 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
                 // The spelling the database was created with, which its data set's header kept,
                 // whatever spelling opened it (#1392).
-                var database = new SqlDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, catalog, recover: true);
+                var database = new SqlDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, catalog, recover: true, cancellationToken);
+                try
+                {
+                    database.ResumeProvisioningAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    database.Dispose();
+                    throw;
+                }
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
             }
@@ -704,6 +740,58 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             {
                 RebuildStorageSnapshotLocked();
             }
+        }
+    }
+
+    // The format marker's tuple has remained (kind, version), using kind 4 before
+    // format 4 and the downgrade-fenced kind 8 thereafter. Read that stable metadata
+    // and recognize a marker-free old counter on a failed open: no compatibility decoder and no extra successful-open
+    // catalog traversal. An ambiguous or damaged marker leaves the original error intact.
+    private static int? ReadFormatVersionAfterCatalogFailure(SqlStorage storage)
+    {
+        try
+        {
+            int? version = null;
+            bool counterFound = false;
+            bool legacyCounter = false;
+            using var iterator = storage.GetUnitIterator();
+            while (iterator.MoveNext())
+            {
+                var reader = new DatabaseKeyReader(iterator.Current.Data.Span);
+                int kind = reader.ReadInt32();
+                if (kind == 2)
+                {
+                    // The pre-marker format-1 counter is exactly (kind, next identity).
+                    // Recognize its shape only to refuse it, never to load old metadata.
+                    if (counterFound || reader.ReadInt64() == 0)
+                    {
+                        return null;
+                    }
+                    counterFound = true;
+                    legacyCounter = reader.IsAtEnd;
+                    continue;
+                }
+                if (kind is < 1 or > 8)
+                {
+                    return null;
+                }
+                if (kind is not (4 or 8))
+                {
+                    continue;
+                }
+
+                int found = reader.ReadInt32();
+                if (version is not null || found < 1 || !reader.IsAtEnd)
+                {
+                    return null;
+                }
+                version = found;
+            }
+            return version ?? (legacyCounter ? 1 : null);
+        }
+        catch (DatabaseTypeException)
+        {
+            return null;
         }
     }
 
@@ -936,13 +1024,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     // cast: the sequence is covariant, so it is the base's sequence too.
     private async IAsyncEnumerable<SqlDatabase> EnumerateDatabasesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        SqlDatabase[] snapshot;
-        lock (_syncRoot)
-        {
-            snapshot = [.. _databases.Values];
-        }
-
-        foreach (var database in snapshot)
+        // Recovery holds the registry monitor until the new instance is ready. Health must
+        // observe the already-published instances without joining that potentially long wait.
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var database in GetInstanceSnapshot())
         {
             cancellationToken.ThrowIfCancellationRequested();
 

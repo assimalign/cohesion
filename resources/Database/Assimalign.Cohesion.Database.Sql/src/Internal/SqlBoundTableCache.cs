@@ -36,6 +36,12 @@ internal sealed class SqlBoundTableCache
     private readonly ConditionalWeakTable<SqlCatalogTable, SqlBoundTable> _bound = new();
     private readonly object _sync = new();
     private long _bindCount;
+    private ulong? _validatedGeneration;
+    private SqlUnresolvedDefinition? _unresolvedDefinition;
+    private SqlUnresolvedDomain? _unresolvedDomain;
+
+    // The required open-time binding pass is separate from repeat Build validation.
+    internal int ValidationWalkCount { get; private set; }
 
     /// <summary>Initializes an empty cache over a catalog.</summary>
     /// <param name="catalog">The catalog whose table versions are bound.</param>
@@ -157,18 +163,49 @@ internal sealed class SqlBoundTableCache
     /// </exception>
     internal void BindCatalog()
     {
-        foreach (var table in _catalog.Tables)
+        try
         {
-            try
+            ValidateCatalog();
+        }
+        catch (InsufficientExecutionStackException exception)
+        {
+            // Only the open knows that a larger stack is the remedy (#1151).
+            throw new DatabaseException($"{exception.Message} Open the database on a thread with a larger stack.", exception);
+        }
+    }
+
+    private void ValidateCatalog()
+    {
+        lock (_sync)
+        {
+            ulong generation = _catalog.DdlGeneration;
+            SqlUnresolvedDefinition? definition = null;
+            SqlUnresolvedDomain? unresolvedDomain = null;
+            foreach (var table in _catalog.Tables)
             {
-                Get(table);
+                var bound = Get(table);
+                foreach (var check in bound.Checks)
+                {
+                    definition ??= check.Unresolved;
+                }
+                foreach (var domain in bound.Domains)
+                {
+                    unresolvedDomain ??= domain.Unresolved;
+                }
             }
-            catch (InsufficientExecutionStackException exception)
-            {
-                // Only the open knows that a larger stack is the remedy (#1151); the message
-                // already names the definition and says the catalog is not damaged.
-                throw new DatabaseException($"{exception.Message} Open the database on a thread with a larger stack.", exception);
-            }
+
+            _unresolvedDefinition = definition;
+            _unresolvedDomain = unresolvedDomain;
+            _validatedGeneration = generation;
+        }
+    }
+
+    private void EnsureValidated()
+    {
+        if (_validatedGeneration != _catalog.DdlGeneration)
+        {
+            ValidationWalkCount++;
+            ValidateCatalog();
         }
     }
 
@@ -266,18 +303,11 @@ internal sealed class SqlBoundTableCache
     /// <exception cref="DatabaseException">A persisted definition of a table does not load.</exception>
     internal SqlUnresolvedDomain? FindUnresolvedDomain()
     {
-        foreach (var table in _catalog.Tables)
+        lock (_sync)
         {
-            foreach (var domain in Get(table).Domains)
-            {
-                if (domain.Unresolved is { } unresolved)
-                {
-                    return unresolved;
-                }
-            }
+            EnsureValidated();
+            return _unresolvedDomain;
         }
-
-        return null;
     }
 
     /// <summary>
@@ -434,18 +464,11 @@ internal sealed class SqlBoundTableCache
     /// <exception cref="DatabaseException">A persisted definition of a table does not load.</exception>
     internal SqlUnresolvedDefinition? FindUnresolved()
     {
-        foreach (var table in _catalog.Tables)
+        lock (_sync)
         {
-            foreach (var check in Get(table).Checks)
-            {
-                if (check.Unresolved is { } unresolved)
-                {
-                    return unresolved;
-                }
-            }
+            EnsureValidated();
+            return _unresolvedDefinition;
         }
-
-        return null;
     }
 
     private static int[] ColumnOrdinals(SqlCatalogTable table, SqlExpression predicate)

@@ -52,7 +52,8 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 7 = format 6's rows, index trees and physical column layout, with
+    /// the catalog: 9 adds durable pending migration intents (49a) to generation-stamped format 8, with
+    /// format 7's row and index layout unchanged. Format 7 = format 6's rows, index trees and physical column layout, with
     /// each column's domain name in its table's catalog record (table-record extension
     /// version 4, phase E3): a column of a domain stores its base type, and the name lets
     /// an opening engine bind the domain again. Earlier versions — 6 (each table's
@@ -69,7 +70,7 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 7;
+    internal const int RecordSpaceFormatVersion = 9;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

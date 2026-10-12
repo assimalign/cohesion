@@ -61,6 +61,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
     private readonly SqlQueryExecutor _executor;
     private readonly SqlQueryParserOptions _parserOptions;
     private readonly string? _provisioningSchema;
+    private readonly TransactionSequence? _ddlLockOwner;
 
     // The isolation level of an auto-commit statement and of a BEGIN statement. The SQL
     // isolation syntax (SET TRANSACTION ISOLATION LEVEL) that would change it is not implemented.
@@ -76,12 +77,14 @@ public sealed class SqlDatabaseSession : DatabaseSession
     /// a typed request nested deeper is refused (#1151).
     /// </param>
     /// <param name="provisioningSchema">The schema the provisioner's session owns, if any.</param>
+    /// <param name="ddlLockOwner">The apply's retained DDL lock owner, if any.</param>
     internal SqlDatabaseSession(
         SqlDatabase database,
         TransactionCoordinator coordinator,
         SqlQueryExecutor executor,
         SqlQueryParserOptions parserOptions,
-        string? provisioningSchema = null)
+        string? provisioningSchema = null,
+        TransactionSequence? ddlLockOwner = null)
         : base(database)
     {
         _database = database;
@@ -89,6 +92,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         _executor = executor;
         _parserOptions = parserOptions;
         _provisioningSchema = provisioningSchema;
+        _ddlLockOwner = ddlLockOwner;
     }
 
     /// <summary>
@@ -108,6 +112,8 @@ public sealed class SqlDatabaseSession : DatabaseSession
     /// records examined) — the behavioral proof surface access-path tests read.
     /// </summary>
     internal SqlStatementMetrics? LastStatementMetrics => _lastStatementMetrics;
+
+    internal Action<long, long?>? ProvisioningProgress { get; set; }
 
     /// <summary>
     /// Begins an explicit transaction at the default isolation level, <see cref="IsolationLevel.Snapshot"/>.
@@ -195,12 +201,18 @@ public sealed class SqlDatabaseSession : DatabaseSession
     private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
     {
         _database.ThrowIfOffline();
-
         // The statement's own metrics are the ones set after this point; a statement that fails
         // before it runs leaves the previous statement's, which never classify this one.
         var previousMetrics = _lastStatementMetrics;
         try
         {
+            if (_provisioningSchema is null && _database.SchemaProvisioner.Deferred is not null)
+            {
+                await _database.SchemaProvisioner.WaitForTablesAsync(request, cancellationToken).ConfigureAwait(false);
+                _database.ThrowIfOffline();
+            }
+            using var ddl = _provisioningSchema is null && IsSelfCommitting(request)
+                ? _database.DdlInterlock.EnterStatement(_database.Name.ToString()) : null;
             return await ExecuteStatementAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (_database.TranslateOffline(exception, selfCommitted: SelfCommitted(request, previousMetrics)) is var translated
@@ -406,7 +418,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), CaptureSystemViewSnapshot(request));
+                _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress);
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);

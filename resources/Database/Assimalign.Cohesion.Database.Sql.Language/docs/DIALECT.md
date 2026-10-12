@@ -44,7 +44,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `UPDATE` | Supported | multi-column `SET`, `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, without an aggregate |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening checks existing live values and refuses changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS` |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
@@ -67,6 +67,16 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## Admission during deferred provisioning (49a)
+
+While a code-first migration runs on populated tables, statements referencing its reserved
+tables wait before binding. This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
+ALTER ADD CONSTRAINT, so a pending unique index is available when the FK is checked.
+After admission, writes enforce the completed column nullability and bounds. Unrelated
+tables remain available. Code-first changes to built-in `VARCHAR` length and `DECIMAL`
+precision use the validation-only ALTER path described above; a storage, domain, scale or
+DEFAULT rewrite remains unsupported.
 
 ## Statement completeness (#1068)
 
@@ -175,9 +185,9 @@ code when the row is evaluated. `+a` and `+(1 + 2)` reported
 `SQL0003` before unary plus existed. `~` is not a sign of the dialect; see
 [Expressions](#expressions).
 
-**ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]` and
-`DROP CONSTRAINT` parse. Any other action, such as `RENAME TO`, `RENAME COLUMN`,
-`ALTER COLUMN` or `MODIFY`, reports `SQL0003` naming the action at parse time.
+**ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]`,
+`DROP CONSTRAINT` and full-definition `ALTER COLUMN` parse. Any other action, such as
+`RENAME TO`, `RENAME COLUMN` or `MODIFY`, reports `SQL0003` naming the action at parse time.
 The statement then carries no action node. It used to carry a placeholder
 `DROP COLUMN ?` that failed later, in the catalog. A missing action, table name,
 column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
@@ -1643,3 +1653,25 @@ under Explicit conversion when `COHSQLE010` and `COHSQLE011` are, and Declared b
 on writes when `COHSQLE012` is. The engine's transaction-state codes,
 `COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
 code, `COHSQLT005`, are documented in the SQL engine design.
+
+## Code-first literal defaults (B2)
+
+The typed schema's `table.Default(selector, value)` renders C# values into SQL literals: strings
+and characters are quoted with apostrophes doubled, numbers use invariant culture, Boolean
+values use `TRUE`/`FALSE`, and null uses `NULL`. Temporal values and GUIDs use invariant quoted
+text converted to the column type. Enums use their numeric storage values.
+`table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
+for example `DefaultSql(row => row.Placed, "'2026-01-01'")`; the SQL typed prefix
+`DATE '2026-01-01'` remains unsupported. Both declarations store the rendered literal text in the
+unchanged `cohesion/database-schema/v4` document, so equal text gives the same hash.
+
+`DEFAULT -7` and `DEFAULT -1.2500` accept a single numeric minus. Arithmetic, nested unary expressions,
+functions and other computed expressions remain unsupported. `DEFAULT NULL` has the same
+stored meaning as no default. A binary default is a quoted `\x` prefix followed by even-count
+hexadecimal digits, for example `DEFAULT '\x007FFF'`; no whitespace or octal escapes are accepted,
+and the column's length bounds still apply. The typed `byte[]` renderer emits uppercase digits.
+Hex decoding is specific to DEFAULT and does not add a general string-to-binary cast.
+
+While a compiled-schema apply runs, ordinary session DDL is refused with
+`DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the
+apply, including any compensation, finishes; unrelated table reads and writes continue.

@@ -17,12 +17,15 @@ physical index registrations exported by `Database.Indexing`.
   `GetPhysicalOrdinal`): drop marks a column's ordinal dropped and never renumbers
   the others, and add appends a new ordinal, so stored rows are never rewritten
   (#1241).
-- **Index registration persistence** — `SaveIndexRegistrationsAsync` /
-  `GetIndexRegistrations` store the `BTreeIndexRegistration` set so indexes
-  re-attach when the database reopens.
+- **Atomic index publication** — `CreateIndexAsync` and `PublishTableAsync` require
+  each new index description and its matching physical registration together.
+  `GetIndexRegistrations` returns the committed directory for re-attachment on reopen;
+  checkpoint and shutdown cannot replace it with an independently captured snapshot.
 - **Applied-schema state** — `SchemaState` / `SaveSchemaStateAsync` atomically
-  retain the canonical `SqlCompiledSchema` document and deterministic hash used for
-  idempotent provisioning and live-catalog reconciliation.
+  retain the canonical `SqlCompiledSchema` document, deterministic hash and DDL
+  generation used for constant-time already-applied checks. Every committed catalog
+  change advances `DdlGeneration` in its own transaction, so interrupted provisioning
+  and later DDL trigger live-catalog reconciliation.
 
 ## Dependencies
 

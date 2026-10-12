@@ -9,6 +9,31 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlTransactionAndConstraintParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - DEFAULT: a negative numeric value parses through the unary expression rule")]
+    [InlineData("CREATE TABLE t (amount DECIMAL(5, 2) DEFAULT -1.25);", "-1.25")]
+    [InlineData("CREATE TABLE t (amount BIGINT DEFAULT -9223372036854775808);", "-9223372036854775808")]
+    [InlineData("ALTER TABLE t ADD COLUMN amount DOUBLE DEFAULT -1.5e30;", "-1.5e30")]
+    public void Default_WithNegativeNumericLiteral_ShouldRetainSign(string sql, string expected)
+    {
+        // Arrange
+        var parser = new SqlQueryParser();
+
+        // Act
+        var statement = parser.Parse(sql).ShouldBeOfType<SqlQueryStatement>();
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty(string.Join("; ", statement.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        SqlExpression? expression = statement.SqlExpression switch
+        {
+            SqlCreateTableExpression create => create.Columns.Single().DefaultValue,
+            SqlAlterTableExpression alter => alter.Action.ShouldBeOfType<SqlAlterAddColumnAction>().Column.DefaultValue,
+            _ => null,
+        };
+        expression.ShouldNotBeNull();
+        expression.ShouldBeOfType<SqlUnaryExpression>().Operator.ShouldBe(SqlUnaryOperator.Negate);
+        SqlExpressionRenderer.Render(expression).ShouldBe(expected);
+    }
+
     [Theory]
     [InlineData("BEGIN;", SqlQueryCommandType.Begin)]
     [InlineData("begin transaction;", SqlQueryCommandType.Begin)]

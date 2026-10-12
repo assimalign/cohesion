@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Sql.Storage;
 
@@ -114,19 +115,22 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="checkpointOnOpen">Whether to checkpoint the recovered journal.</param>
     /// <param name="durability">The explicit policy, or null to derive it from the backing.</param>
     /// <returns>The opened storage.</returns>
-    public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability)
+    /// <param name="cancellationToken">Cancels physical recovery between journal records and pages.</param>
+    /// <exception cref="OperationCanceledException">Recovery was canceled; streams were disposed and the journal retained.</exception>
+    public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability,
+        CancellationToken cancellationToken = default)
     {
         var storage = new SqlStorage(data, journal, backup);
         try
         {
             storage.ConfigureCommitDurability(durability, nameof(SqlStorage));
+            storage.OpenExisting(checkpointOnOpen, cancellationToken);
         }
         catch
         {
             storage.Dispose();
             throw;
         }
-        storage.OpenExisting(checkpointOnOpen);
         return storage;
     }
 

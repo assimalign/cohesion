@@ -70,6 +70,13 @@ internal static class SqlSchemaStatementRenderer
     internal static string DropColumn(string tableName, string columnName)
         => $"ALTER TABLE {QualifiedTable(tableName)} DROP COLUMN {Identifier(columnName)};";
 
+    internal static string AlterColumn(string tableName, CompiledSchemaColumn column)
+    {
+        var builder = new StringBuilder($"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN ");
+        AppendColumn(builder, column, isPrimaryKey: false);
+        return builder.Append(';').ToString();
+    }
+
     internal static string AddConstraint(string tableName, CompiledSchemaConstraint constraint)
     {
         var builder = new StringBuilder($"ALTER TABLE {QualifiedTable(tableName)} ADD ");
@@ -163,6 +170,10 @@ internal static class SqlSchemaStatementRenderer
         }
 
         builder.Append(column.IsNullable && !isPrimaryKey ? " NULL" : " NOT NULL");
+        if (column.DefaultLiteral is not null)
+        {
+            builder.Append(" DEFAULT ").Append(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral) ?? "NULL");
+        }
     }
 
     private static bool IsPrimaryKeyColumn(CompiledSchemaKey? key, string columnName)

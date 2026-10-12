@@ -1,3 +1,5 @@
+using System.Threading;
+
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
@@ -20,16 +22,21 @@ namespace Assimalign.Cohesion.Database.Hosting;
 /// </remarks>
 public sealed class DatabaseApplicationBuildContext
 {
-    internal DatabaseApplicationBuildContext(HostEnvironment environment, ConfigurationManager configuration, ServiceProvider services, LoggerFactory loggerFactory)
+    internal DatabaseApplicationBuildContext(HostEnvironment environment, ConfigurationManager configuration, ServiceProvider services, LoggerFactory loggerFactory,
+        CancellationToken cancellationToken = default)
     {
         Environment = environment;
         Configuration = configuration;
         Services = services;
         LoggerFactory = loggerFactory;
+        CancellationToken = cancellationToken;
     }
 
     /// <summary>Gets the application's host environment, the builder's <see cref="DatabaseApplicationBuilder.Environment"/>.</summary>
     public HostEnvironment Environment { get; }
+
+    /// <summary>Gets the caller's token for construction, recovery and inline provisioning.</summary>
+    public CancellationToken CancellationToken { get; }
 
     /// <summary>
     /// Gets the application's loaded configuration, the builder's

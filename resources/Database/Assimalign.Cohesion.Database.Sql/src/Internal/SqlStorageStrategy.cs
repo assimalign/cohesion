@@ -1,3 +1,4 @@
+using System.Threading;
 using Assimalign.Cohesion.Database.Sql.Storage;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -79,7 +80,8 @@ internal abstract class SqlStorageStrategy
     /// records an eager truncation would destroy) and checkpoints the storage itself once analysis
     /// completes.
     /// </remarks>
-    public abstract SqlStorage OpenStorage(string databaseName, bool catalog);
+    /// <param name="cancellationToken">Cancels physical recovery between records and pages.</param>
+    public abstract SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Drops every file set of a database: on disk, its directory.

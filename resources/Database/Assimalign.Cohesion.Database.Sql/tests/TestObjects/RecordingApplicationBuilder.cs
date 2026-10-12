@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -33,6 +34,7 @@ internal sealed class RecordingApplicationBuilder : IDatabaseApplicationBuilder
 
     private sealed class EmptyContext : IDatabaseApplicationContext
     {
+        public CancellationToken BuildCancellationToken => default;
         public IReadOnlyList<DatabaseEngine> Engines => [];
         public IReadOnlyList<DatabaseServer> Servers => [];
         public DatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);

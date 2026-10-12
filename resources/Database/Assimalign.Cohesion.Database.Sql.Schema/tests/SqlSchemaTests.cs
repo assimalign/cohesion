@@ -10,6 +10,38 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public class SqlSchemaTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: repeated compilation retains the immutable result and its computed identity")]
+    public void Compile_ReusedDeclaration_ShouldRetainCompiledSchemaAndIdentity()
+    {
+        // Arrange
+        SqlSchemaBuilder? retainedSchema = null;
+        SqlTableBuilder<Order>? retainedTable = null;
+        SqlSchema declaration = SqlSchema.Create("orders", database =>
+        {
+            retainedSchema = database;
+            database.Table<Order>("orders", table =>
+            {
+                retainedTable = table;
+                table.Key(order => order.Id);
+            });
+        });
+        SqlCompiledSchema compiled = declaration.Compile();
+        string hash = compiled.Hash;
+
+        // Act: even retained builders cannot change a completed declaration.
+        retainedSchema!.AllowDestructiveChanges();
+        retainedTable!.Default(order => order.Id, 7);
+        SqlCompiledSchema repeated = declaration.Compile();
+
+        // Assert
+        repeated.ShouldBeSameAs(compiled);
+        repeated.Hash.ShouldBeSameAs(hash);
+        repeated.AllowsDestructiveChanges.ShouldBeFalse();
+        repeated.Tables[0].Columns[0].DefaultLiteral.ShouldBeNull();
+        repeated.SerializationComputationCount.ShouldBe(1);
+        repeated.HashComputationCount.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: one-step compilation matches the explicit compiler")]
     public void Compile_WithValidDeclaration_ShouldMatchTwoStepCompilation()
     {
@@ -195,9 +227,9 @@ public class SqlSchemaTests
 
     /// <summary>
     /// <c>table.Check(name, sql)</c> compiles to a CHECK constraint whose text is the author's, in the
-    /// v3 document and its hash, with no advisory columns; the package never parses the SQL.
+    /// v4 document and its hash, with no advisory columns; the package never parses the SQL.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declared CHECK compiles its SQL text as written into the v3 document")]
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declared CHECK compiles its SQL text as written into the v4 document")]
     public void Compile_WithTableCheck_ShouldRecordTheSqlTextAsAConstraint()
     {
         // Arrange
@@ -215,7 +247,7 @@ public class SqlSchemaTests
         SqlCompiledSchema reread = SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument);
 
         // Assert
-        schema.Format.ShouldBe("cohesion/database-schema/v3");
+        schema.Format.ShouldBe("cohesion/database-schema/v4");
         CompiledSchemaTable lines = schema.Tables.ShouldHaveSingleItem();
         lines.Constraints.Select(constraint => (constraint.Name, constraint.Kind, constraint.Expression?.CanonicalText, constraint.Columns.Count))
             .ShouldBe([

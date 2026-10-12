@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
-public class CompileDatabaseSchemaTaskTests
+public partial class CompileDatabaseSchemaTaskTests
 {
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: C# SQL declaration writes canonical document and hash")]
     public void Execute_WithSqlCSharpSchema_ShouldWriteCanonicalDocumentAndHash()
@@ -30,7 +30,7 @@ public class CompileDatabaseSchemaTaskTests
 
         string schemaPath = SchemaPath(task, "orders");
         SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(schemaPath);
-        schema.Format.ShouldBe(SqlCompiledSchema.CurrentFormat);
+        schema.Format.ShouldBe("cohesion/database-schema/v4");
         schema.Name.ShouldBe("orders");
         schema.Tables.Select(static table => table.Name).ShouldBe(["OrderLines", "Orders"]);
         ITaskItem item = task.Schemas.ShouldHaveSingleItem();
@@ -388,6 +388,120 @@ public class CompileDatabaseSchemaTaskTests
         written.Types.ShouldHaveSingleItem().ShouldBe(new CompiledSchemaType("Price", Assimalign.Cohesion.Database.Types.DatabaseType.Decimal, 18, 2));
         written.Tables.ShouldHaveSingleItem().Columns.Select(static column => (column.Name, column.CustomType))
             .ShouldBe([("Code", "VARCHAR(16)"), ("Email", "email"), ("Balance", "Price")]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: DEFAULT literals retain exact runtime document and hash parity")]
+    public void Execute_WithColumnDefaults_ShouldMatchRuntimeCompilerDocumentAndHash()
+    {
+        // Arrange
+        SqlCompiledSchema runtimeSchema = SqlSchema.Compile("crm", schema =>
+        {
+            schema.Type<Price>(type => type.Decimal(18, 2));
+            schema.Table<CrmCustomer>("customers", table =>
+            {
+                table.DefaultSql(customer => customer.Code, "'guest'");
+                table.Column(customer => customer.Code, "VARCHAR(16)");
+                table.Key(customer => customer.Code);
+                table.Column(customer => customer.Email, "email");
+                table.DefaultSql(customer => customer.Email, "'a@b.test'");
+                table.DefaultSql(customer => customer.Balance, "0");
+                table.DefaultSql(customer => customer.Balance, "0");
+            });
+        });
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, """
+            using Assimalign.Cohesion.Database.Sql;
+            using Assimalign.Cohesion.Database.Sql.Schema;
+
+            namespace Assimalign.Cohesion.Sdk.Database.Tests
+            {
+                public readonly record struct Price(decimal Amount);
+                public sealed record CrmCustomer(string Code, string Email, Price Balance);
+
+                public static class CrmProgram
+                {
+                    private const string EmailDefault = "'a@" + "b.test'";
+
+                    public static SqlDatabaseEngineBuilder Configure()
+                    {
+                        SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("crm-sql");
+                        sql.Types.Add(SqlType.CreateDomain("email", SqlType.VarChar(320)));
+                        sql.AddDatabase("crm", database => database.Schema(schema =>
+                        {
+                            schema.Type<Price>(type => type.Decimal(18, 2));
+                            schema.Table<CrmCustomer>("customers", table =>
+                            {
+                                table.DefaultSql(customer => customer.Code, "'guest'");
+                                table.Column(customer => customer.Code, "VARCHAR(16)");
+                                table.Key(customer => customer.Code);
+                                table.Column(customer => customer.Email, "email");
+                                table.DefaultSql(sqlLiteral: EmailDefault, selector: customer => customer.Email);
+                                table.DefaultSql(customer => customer.Balance, "0");
+                                table.DefaultSql(customer => customer.Balance, "0");
+                            });
+                        }));
+                        return sql;
+                    }
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        // Act
+        bool success = task.Execute();
+
+        // Assert
+        success.ShouldBeTrue(Errors(engine));
+        File.ReadAllText(SchemaPath(task, "crm")).ShouldBe(runtimeSchema.CanonicalDocument);
+        task.Schemas.ShouldHaveSingleItem().GetMetadata("Hash").ShouldBe(runtimeSchema.Hash);
+        File.ReadAllText(HashPath(task, "crm")).ShouldBe(runtimeSchema.Hash + "\n");
+        SqlCompiledSchemaSerializer.Read(SchemaPath(task, "crm")).Tables.ShouldHaveSingleItem().Columns
+            .Select(static column => (column.Name, column.DefaultLiteral))
+            .ShouldBe([("Code", "'guest'"), ("Email", "'a@b.test'"), ("Balance", "0")]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: DEFAULT needs constant text and one value per column")]
+    [InlineData("Environment.MachineName", "", "COHDBSDK104", "needs its DEFAULT literal as a non-empty compile-time string constant")]
+    [InlineData("\" \"", "", "COHDBSDK104", "needs its DEFAULT literal as a non-empty compile-time string constant")]
+    [InlineData("null!", "", "COHDBSDK104", "needs its DEFAULT literal as a non-empty compile-time string constant")]
+    [InlineData("\"1\"", "table.DefaultSql(order => order.Id, \"2\");", "COHDBSDK105", "already declared with DEFAULT literal '1'")]
+    public void Execute_WithUnreadableOrDuplicateDefault_ShouldFail(string literal, string repeated, string code, string message)
+    {
+        // Arrange
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, $$"""
+            using System;
+            using Assimalign.Cohesion.Database.Sql.Schema;
+
+            public sealed record SalesOrder(long Id, string Item);
+
+            public static class Program
+            {
+                public static void Configure()
+                {
+                    SqlSchema.Create("sales", schema => schema.Table<SalesOrder>("orders", table =>
+                    {
+                        table.DefaultSql(order => order.Id, {{literal}});
+                        {{repeated}}
+                    }));
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        // Act
+        bool success = task.Execute();
+
+        // Assert
+        success.ShouldBeFalse();
+        engine.Errors.ShouldContain(error => error.Code == code && error.Message != null && error.Message.Contains(message, StringComparison.Ordinal),
+            Errors(engine));
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
+        task.Schemas.ShouldBeEmpty();
     }
 
     /// <summary>A type the runtime cannot name as a domain, or a column type the build cannot read or that is not a type name, fails the build.</summary>

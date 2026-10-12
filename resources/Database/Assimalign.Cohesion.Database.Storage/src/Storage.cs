@@ -1114,8 +1114,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// newest slot's checkpoint anchor chain does not verify.
     /// </exception>
     /// <exception cref="StorageIOException">The file is not a Cohesion storage file.</exception>
-    protected unsafe void OpenExisting(bool checkpointOnOpen = true)
+    /// <param name="cancellationToken">Cancels journal replay and page reconstruction between records.</param>
+    /// <exception cref="OperationCanceledException">Recovery was canceled; the journal remains available for retry.</exception>
+    protected unsafe void OpenExisting(bool checkpointOnOpen = true, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var header = ReadHeader(out long[] anchor, out List<long> anchorChain);
         NameComponents();
         _checkpointActives = anchor;
@@ -1126,6 +1129,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // committed changes after it, which also overwrites the stolen writes of transactions that
         // never committed (#1253).
         AttachJournal();
+        _journal!.EnsureInitialized(cancellationToken);
         bool journalHadRecords = _journal!.LastLsn > 0;
 
         // LSNs resume above both the journal's last record and the floor the newest header
@@ -1140,7 +1144,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         long recoveryStarted = StorageEventSource.Log.RecoveryStart(this);
         try
         {
-            var recovery = StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity);
+            var recovery = StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity, cancellationToken);
 
             // Sequence assignment resumes above both the journal's highest observed
             // sequence and the header floor persisted at the last checkpoint — the
@@ -1172,6 +1176,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             for (long i = 1; i < pageCount; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 Data.ReadPageHeader((PageId)i, pageHeader);
 
                 PageType type;
@@ -2056,6 +2061,24 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Reports whether the specified owner has allocated data pages without loading pages
+    /// or allocating a page-directory snapshot. The query takes constant time.
+    /// </summary>
+    /// <param name="ownerId">The owner whose record chain to inspect.</param>
+    /// <returns>True when the owner has data pages; otherwise false.</returns>
+    /// <remarks>
+    /// This describes physical allocation, including retained versions. Releasing an owner's
+    /// final page becomes visible here when its transaction commits, as with <see cref="GetOwnerPages"/>.
+    /// </remarks>
+    public bool HasOwnerPages(ulong ownerId)
+    {
+        lock (_ownerLock)
+        {
+            return _ownerPages.TryGetValue(ownerId, out var pages) && pages.Count != 0;
+        }
+    }
+
+    /// <summary>
     /// Gets a point-in-time snapshot of the data pages currently belonging to the
     /// specified owner's record chain, in ascending page order.
     /// </summary>
@@ -2323,11 +2346,16 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // Any other failure of the wait (the storage disposed under it, a durable flush the
             // handle stopped supporting after the check above): the commit record is in the journal
             // all the same, so recovery redoes the bracket whenever the record reaches the media.
-            // The bracket must not roll back in memory — its pages would return to bases the journal
-            // has moved past — so it ends committed, unconfirmed, and the failure propagates.
+            // Its caller has not published cached metadata or record locations, so allowing another
+            // mutation would reuse stale state (B2 catalog review). Fence through the same journal
+            // latch and engine hook as an fsync failure; only reopen can reconcile the outcome.
+            // PostgreSQL stops on every error in its commit critical section too
+            // (src/backend/access/transam/xact.c:1470-1583).
+            var offline = GoOffline(StorageOfflineException.Create(StorageOfflineCause.JournalFlush,
+                "confirmation of an appended commit record", failure));
             CompleteCommitted(transaction);
-            StorageEventSource.Log.StorageCommitUnconfirmed(this, transaction.Sequence, commitLsn, failure);
-            throw;
+            StorageEventSource.Log.StorageCommitUnconfirmed(this, transaction.Sequence, commitLsn, offline);
+            throw StorageOfflineException.CommitUnconfirmed(offline);
         }
 
         CompleteCommitted(transaction);

@@ -1304,7 +1304,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         _scannedLength = verifiedLength;
     }
 
-    private void EnsureInitialized()
+    internal void EnsureInitialized(CancellationToken cancellationToken = default)
     {
         if (_initialized)
         {
@@ -1323,6 +1323,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             long lastLsn = 0;
             foreach (var record in ReadRecordsCore())
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 lastLsn = record.Lsn;
             }
 

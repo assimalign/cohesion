@@ -114,8 +114,9 @@ flowchart LR
 ```
 
 `Sql.Schema` keeps its root reference for `DatabaseException` and `DatabaseObjectOwner` only
-(`CompiledSchemaTable.Owner`, `Sql.Schema/src/SqlCompiledSchema.cs:149`). The SDK task still
-references only `Sql.Schema` (the COHLIB001 precedent).
+(`CompiledSchemaTable.Owner`, `Sql.Schema/src/SqlCompiledSchema.cs:149`). The SDK task references
+`Sql.Schema` and, for validated migration DEFAULT literals, `Sql.Language` (the same-area
+COHLIB001 exception); it takes no engine or storage dependency.
 
 ## 3. Developer-facing API
 
@@ -1057,7 +1058,8 @@ The catalog is the single meeting point, and one DDL executor writes it.
   One anchor is added by metadata name:
   `Assimalign.Cohesion.Database.Sql.SqlDatabaseBuilder.Schema(System.Action<SqlSchemaBuilder>)`.
   Its database name is the constant first argument of the enclosing
-  `SqlDatabaseEngineBuilder.AddDatabase(string, …)`. The SDK still references only `Sql.Schema`.
+  `SqlDatabaseEngineBuilder.AddDatabase(string, …)`. The SDK references `Sql.Schema` and
+  `Sql.Language` for migration DEFAULT validation, with no engine or storage dependency.
 - **One artifact per declared database.** The "exactly one declaration" error `COHDBSDK101`
   (`CSharpSchemaExtractor.cs:123`) becomes "one declaration per database name".
   `$(IntermediateOutputPath)cohesion/database.schema.json`
@@ -1218,6 +1220,46 @@ consumers change once.
 fault injection through Sql's own storage-strategy test doubles (a crash after step k converges on
 the next Build); the skip does not walk the catalog (an internal hook counter); the §10
 provisioning case.
+
+*Landed in B2* (#1355). Catalog format **8** persists a DDL generation in the counter transaction
+and records `{hash, generation}` with the applied document. Equal identity and generation skip
+reconciliation without a catalog walk or identity recomputation; retained immutable declarations
+reuse their compiled schema. The open-time definition binding pass also caches its validation at
+that generation. A moved generation reconstructs all provisionable catalog metadata, including
+literal DEFAULTs, unique indexes, composite primary keys, CHECKs, foreign keys and bounded domain
+columns. `table.Default(selector, value)` renders a typed C# value; `table.DefaultSql(selector,
+sqlLiteral)` retains the raw literal escape hatch (owner decision, 2026-10-11, B2 round 2). Runtime
+and SDK compilation use one internal renderer owned by `Database.Sql.Schema`; the SDK accepts
+compile-time constants and reports a coded diagnostic for a value it cannot evaluate, naming
+`DefaultSql`. The document still records only `DefaultLiteral`, so a typed value and the same
+literal supplied through `DefaultSql` have identical documents and hashes. The format stays
+`cohesion/database-schema/v4`: this changes declaration syntax, not the document shape.
+Crash-storage tests recover every committed prefix of all eight executable
+add/drop operation kinds and assert the exact remaining plan and final marker. Provisioning name
+collisions refuse before compensation can claim another session's object. Format-7 counters reach
+the existing actionable format refusal; there is no compatibility reader or upgrade.
+Release NativeAOT `win-arm64`, best-of-five medians in alternating runs of the base
+`2bf42d94b3a200662fb7e22c54f55607d9af4b94` and B2: timers inside Q8 Build measure the apply call
+**0.3881 → 0.0065 ms** and all reconciliation after open **0.4004 → 0.0079 ms**, below **1 ms**.
+The complete phase 6, including database open and recovery, measures **7.6384 → 6.4633 ms**:
+B2's Q8 gate is provisioning reconciliation and is **met**; opening and recovery have a separate
+budget (owner decision 2026-10-11). Benchmark-only source copies add the timers without a
+production API or assembly-access change. The separate, uninstrumented full Q8 Build measures
+**10.2314 → 9.7064 ms**; the already-warmed apply proxy Q8P measures **0.1063 → 0.0027 ms**.
+The [benchmark README](../../resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/README.md)
+retains every campaign, all medians, exact commands, and the reproducible timing helper. Both
+NativeAOT harnesses publish without IL2xxx/IL3xxx warnings. **49a was accepted on 2026-10-11 and
+landed below**: its classification/scheduling attaches between plan rendering and statement execution,
+with the applied marker still withheld until all required steps finish.
+
+The review-fix campaign at `da23b378fbaf346ad02234299cf1e2d2fff5d906` repeated five alternating
+Release NativeAOT runs against the same base, with other verification work on the host. Its best
+medians are **0.4077 → 0.0085 ms** for reconciliation inside Build (gate still met),
+**10.2540 → 10.9840 ms** for complete phase 6 including opening and recovery (separate budget),
+and **13.8179 → 12.0604 ms** for uninstrumented full Build. The
+[review campaign](../../resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/README.md#review-fix-verification-2026-10-11)
+retains all medians, shared-host conditions, commands and the interlock's constant allocation cost;
+both NativeAOT harnesses again publish without IL2xxx/IL3xxx diagnostics.
 
 **B3: the other four models' seams.** `Options`, `AddDatabase(name)` through the shared builder
 state, `AddServer(Action<XServerOptions>)` for KeyValue, Graph and Blob; `EngineName` leaves all five
@@ -1455,7 +1497,7 @@ Numbering continues the plan of record's table. Each line is the question, then 
     >My Decision: I'm fine with at `Build`/`BuildAsync`. However, this may be due to my ignorance, but I am concerned that when we start implementing the ability to run schema migrations. A database that could have a terabyte of data could take a while and I am wondering if the engine build could hang up the host at all.
 
     *Landed in B1 part 1:* the SQL engine's `Build`/`BuildAsync` provisions its declared databases;
-    49a below is not implemented.
+    49a below supersedes the inline execution of data-scaling steps; see its landed note.
 
     **49a (proposed 2026-10-09, accepted 2026-10-11; lands in B2 after its core).** The concern
     holds. [Certain]
@@ -1494,6 +1536,78 @@ Numbering continues the plan of record's table. Each line is the question, then 
     table it migrates before the engine accepts work, so the rest of the database serves. Its
     provisioning events (start, progress, end) are catalogued with batch D (#1349), which lands
     after it.
+
+    *Landed in B2 (49a)* (#1355 part 2). Format **9** persists an ordered pending target separately
+    from the applied marker. Build durably records the target before any cheap step commits,
+    completes cheap steps and reserves pending tables with the
+    existing lock manager; the sixth SQL worker executes populated-table index/constraint work
+    and validation-only tightening, with bounded index batches so other tables can commit.
+    Completion atomically clears intent with the final marker. Failure takes only that database
+    offline with `COHSQLP004`; restart reconciles completed steps and rebuilds unpublished trees.
+    `SqlDatabaseBuilder.RunMigrationsInline` opts out per database. Nullable columns with domain
+    checks are conservatively treated as constraint work, preserving empty-table assignment rules.
+    General root `DatabaseInstance.Provisioning` observations let Hosting report Degraded with
+    kind/table, original step position and counted rows, then Healthy after completion. No new
+    EventSource events were added; batch D owns start/progress/end/failure instrumentation.
+    The concrete `DatabaseApplicationBuilder.Build(CancellationToken)` passes its caller's shutdown
+    token through the root factory context. The root interface keeps parameterless `Build()` and
+    forwards with no token (O34; owner decision 2026-10-11);
+    the host runtime has no shutdown lifecycle yet at Build. Physical recovery and logical scrub
+    observe cancellation and retain the classification journal after interruption.
+
+    *49a review corrections* (after `682f7946a`). Index and table publications merge only their
+    affected registrations under the catalog lock; delayed checkpoint snapshots preserve newer
+    roots and cannot erase or resurrect publications. Same-table additions keep declaration order
+    across the inline/worker partition. Early durable intent closes the cheap-DDL crash gap and
+    survives compensation until convergence. FK admission includes parents from CREATE TABLE and
+    ALTER ADD COLUMN/CONSTRAINT before binding. Code-first VARCHAR length and DECIMAL precision
+    changes compare resolved types and bounds, retaining the validation-only rewrite boundary.
+    Health reads SQL's published instance snapshot during recovery. Inline failures still fail
+    Build; deferred failures take only their database offline after Build can return.
+
+    Deterministic regressions first reproduced the six runtime findings, including real trees,
+    catalog commits, durable crash images, a paused parent index and actual Hosting health during
+    automatic reopen. The waiting-statement regression now requires the final NOT NULL rejection;
+    temporarily bypassing admission made both storage variants fail with the stale-table retry
+    error. The bypass was removed. No shipped public member or interface was added. SQL tests
+    reference Hosting only to drive the actual health path through the existing SQL recovery hook.
+
+    Review verification at `8156ad0fa`: five fresh Release NativeAOT Q8 processes measured
+    reconciliation medians **0.0061, 0.0101, 0.0092, 0.0099, 0.0092 ms** and post-open provisioning
+    medians **0.0069, 0.0113, 0.0108, 0.0109, 0.0101 ms**. Every round remains below the 1 ms gate;
+    open/recovery remains outside it. Publication emitted no IL2xxx/IL3xxx diagnostics. The archive,
+    source instrumentation, binary identity, logs and results are under `_out/49a-review/q8`.
+    The review gates passed **4,396 tests in each of Debug and Release**, with zero failures or
+    skips across 14 suites: Sql, Sql.Catalog, Sql.Schema, Storage, Indexing, Hosting, Database,
+    Client, Sql.Client, Sql.Language, Sql.Storage, Embedded, Sdk.Database and Database.Testing.
+    The Release local feed was rebuilt with `Install-Local.ps1 -Configuration Release -SkipLibraries`
+    after the last source change, and Database.Testing then passed in both configurations.
+    Release inventory passed; the dependency graph regenerated without a content change.
+
+    The original landing's Release NativeAOT Q8 best-of-five invocation medians were **0.0051 ms** for reconciliation
+    and **0.0061 ms** for post-open provisioning; all five reconciliation medians were below 0.009 ms.
+    Original landing verification passed **6,002 tests in each of Debug and Release**, with zero failures or
+    skips across 30 suites. The Release local packages were refreshed after the last source edit,
+    then Database.Testing passed in both configurations. The lifecycle diagram was rendered and checked.
+
+    **Escalations recorded with the implementation:** the root adds only the model-neutral
+    observation and construction cancellation vocabulary, rather than restoring schema capability
+    APIs or adding a Hosting-to-SQL dependency. Pending targets (and FK parents required by DDL)
+    are reserved as a set until the migration completes. ALTER COLUMN previously had no executable
+    path; this change implements validation-only nullability/bounds changes, retaining the refusal
+    of storage-type/default/domain/collation/scale rewrites. Abandoned index pages use existing
+    DROP INDEX's future-vacuum policy. The caller must supply its process shutdown token at Build.
+
+    Storage adds the native `HasOwnerPages` allocation query: reusing its existing owner iterator
+    would copy every page id before probing a row, leaving data-scaling work in Build. The bounded
+    query exposes less information than `GetOwnerPages`, without a model reference, copied SQL
+    allocation state, reflection or assembly-access grants. Recommend keeping this native operation.
+
+    **Existing drop-cost discrepancy:** all drops remain inline as requested, but `DROP TABLE`
+    still calls `Storage.FreeOwnerPages` (`Database.Storage/src/Storage.cs:2111`), clearing and
+    WAL-logging each owned page. It therefore retains data-scaling physical cleanup in Build.
+    Recommend a separate decision to move page reclamation out of Build; neither silently
+    removing reclamation nor changing the accepted drop classification was included here.
 
 50. **The `DatabaseInstance` capability.** Delete `SupportsSchemaProvisioning`, `ApplySchemaAsync`,
     `ApplySchemaCoreAsync` and the constructor flag, and change `database-area.md` rule 4's sentence

@@ -90,15 +90,15 @@ public sealed class SqlEngineWorkerTests : IDisposable
         GetFileLength(catalogJournal).ShouldBeLessThan(512);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Workers: The engine exposes the five-worker inventory from creation")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Workers: The engine exposes the six-worker inventory from creation")]
     public async Task Workers_OnCreation_ShouldExposeTheFullInventory()
     {
         // Arrange / Act
         await using var engine = SqlDatabaseEngine.Create("inventory", new SqlDatabaseEngineOptions());
 
         // Assert: one worker per kind, observable (name/kind/cadence) from creation.
-        engine.Workers.Count.ShouldBe(5);
-        engine.Workers.Select(worker => worker.Kind).Distinct().Count().ShouldBe(5);
+        engine.Workers.Count.ShouldBe(6);
+        engine.Workers.Select(worker => worker.Kind).Distinct().Count().ShouldBe(6);
 
         foreach (var worker in engine.Workers)
         {

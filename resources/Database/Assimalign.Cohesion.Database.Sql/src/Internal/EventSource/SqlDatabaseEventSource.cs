@@ -330,15 +330,6 @@ internal sealed class SqlDatabaseEventSource : EventSource
         }
     }
 
-    [NonEvent]
-    public void IndexRegistrationsSaved(DatabaseName database, int count)
-    {
-        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
-        {
-            IndexRegistrationsSaved(database.ToString(), count);
-        }
-    }
-
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
         => WriteEvent(1, engineName, sessionId, activeSessions);
@@ -393,9 +384,9 @@ internal sealed class SqlDatabaseEventSource : EventSource
     private void ExtensionRegistered(string kind, string name)
         => WriteEvent(16, kind, name);
 
-    [Event(17, Level = EventLevel.Verbose, Message = "Database '{0}' saved {1} index registration(s).")]
-    private void IndexRegistrationsSaved(string database, int count)
-        => WriteEvent(17, database, count);
+    // Id 17 (IndexRegistrationsSaved) is retired and never reused: B2 publishes an index's
+    // registration atomically with its description (#1355), so no separate save remains to report;
+    // the index DDL itself is event 12.
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

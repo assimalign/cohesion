@@ -1,0 +1,77 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Transactions;
+
+namespace Assimalign.Cohesion.Database.Sql.Internal;
+
+internal sealed class SqlDeferredMigration
+{
+    private readonly SqlSchemaProvisioner _owner;
+    private readonly CancellationTokenSource _stopping = new();
+    private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _claimed;
+    private bool _finished;
+
+    internal SqlDeferredMigration(SqlSchemaProvisioner owner, SqlCompiledSchema schema,
+        IReadOnlyList<SqlMigrationScriptStep> steps, SqlCatalogPendingMigration intent,
+        TransactionContext locks, IReadOnlySet<ulong> tables)
+    {
+        _owner = owner;
+        Schema = schema;
+        Steps = steps;
+        Intent = intent;
+        Locks = locks;
+        Tables = tables;
+    }
+
+    internal SqlCompiledSchema Schema { get; }
+    internal IReadOnlyList<SqlMigrationScriptStep> Steps { get; }
+    internal SqlCatalogPendingMigration Intent { get; }
+    internal TransactionContext Locks { get; }
+    internal IReadOnlySet<ulong> Tables { get; }
+
+    internal void Run(CancellationToken cancellationToken)
+    {
+        if (Interlocked.CompareExchange(ref _claimed, 1, 0) != 0)
+        {
+            return;
+        }
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
+            _owner.RunDeferredAsync(this, linked.Token).GetAwaiter().GetResult();
+        }
+        finally
+        {
+            lock (_stopping)
+            {
+                _finished = true;
+                _stopping.Dispose();
+            }
+            _completion.TrySetResult();
+        }
+    }
+
+    internal async ValueTask StopAsync()
+    {
+        CancellationToken stopped;
+        lock (_stopping)
+        {
+            if (_finished)
+            {
+                return;
+            }
+            _stopping.Cancel();
+            stopped = _stopping.Token;
+        }
+        // A queued migration must release its reservation even if the engine's pump
+        // has already stopped. A claimed one is joined before storage can close.
+        Run(stopped);
+        await _completion.Task.ConfigureAwait(false);
+    }
+}

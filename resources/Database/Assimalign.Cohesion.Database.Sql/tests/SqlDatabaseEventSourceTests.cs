@@ -159,27 +159,6 @@ public sealed class SqlDatabaseEventSourceTests
         recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - IndexRegistrationsSaved: Should report a changed registration set once")]
-    public async Task IndexRegistrationsSaved_ChangedSet_ShouldReportOnceAndSkipUnchanged()
-    {
-        // Arrange
-        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
-        var database = await engine.CreateDatabaseAsync("registrations", CancellationToken.None);
-        await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
-        // Reproduce the mismatch a root-page change leaves until the persistence pass.
-        await database.Catalog.SaveIndexRegistrationsAsync([], CancellationToken.None);
-        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
-
-        // Act
-        database.SaveIndexRegistrationsIfChanged();
-        database.SaveIndexRegistrationsIfChanged();
-
-        // Assert
-        NewEvent(recorder, 17, "IndexRegistrationsSaved", "database", "count").Payload
-            .ShouldBe(["registrations", database.IndexManager.ExportRegistrations().Count]);
-    }
-
     private static EventWrittenEventArgs NewEvent(EventSourceRecorder recorder, int id, string name, params string[] payloadNames)
     {
         recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
@@ -267,7 +246,6 @@ public sealed class SqlDatabaseEventSourceTests
                 SqlDatabaseEventSource.Log.ExtensionRegistered(function);
                 SqlDatabaseEventSource.Log.ExtensionRegistered(type);
                 SqlDatabaseEventSource.Log.ExtensionRegistered(cast);
-                SqlDatabaseEventSource.Log.IndexRegistrationsSaved(database, 1);
             }
         }
     }

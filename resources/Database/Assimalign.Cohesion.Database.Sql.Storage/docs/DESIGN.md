@@ -36,6 +36,12 @@ by — `Assimalign.Cohesion.Database.Storage`.
 
 ## Error model
 
+The durability-aware `SqlStorage.Open` accepts a cancellation token (49a), passed to physical
+recovery. Journal initialization and all replay passes, plus the page-header scan, observe it.
+A canceled open disposes its streams and keeps its journal, so replay is repeatable. Logical
+scrub cancellation belongs to the SQL engine and transaction coordinator; SQL fences an
+interrupted scrub before closing so shutdown cannot truncate unanalyzed lifecycle records.
+
 No exception types of its own: everything is the substrate's `StorageException`
 family. The SQL engine translates at its model boundary per the area error policy.
 

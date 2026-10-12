@@ -1,3 +1,4 @@
+using System.Threading;
 using System.IO;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -67,7 +68,7 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public override SqlStorage OpenStorage(string databaseName, bool catalog)
+    public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default)
     {
         var files = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog));
 
@@ -87,7 +88,7 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 
             // Defer the open-time checkpoint: the engine's transaction coordinator
             // analyzes the recovered journal before checkpoint truncates its records.
-            return SqlStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false, _durability);
+            return SqlStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false, _durability, cancellationToken);
         }
         catch
         {

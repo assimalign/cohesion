@@ -22,20 +22,20 @@ shared storage, with DDL flowing through the relational catalog
   catalog; SQL cannot switch databases or manage the server. Conformance tests
   keep identically named tables in two databases isolated and reject attempts
   to select another database or create/drop databases through a session.
-- **Declared databases and provisioning** — `SqlDatabaseEngine.CreateBuilder(name)` (or the
-  `AddSql(name, sql => ...)` verb) declares the databases the engine owns
-  (`sql.AddDatabase("sales", database => database.Schema(...))`, `sql.AddDatabase(schema)`), each
-  with its default collation and `SqlProvisioningMode` (`Apply` or `Verify`). `BuildAsync` (and
-  `Build`, which bridges it) compiles every declaration before any file is touched, creates and
-  composes the engine, then opens or creates and provisions each declared database before it
-  returns; a failure disposes the engine, and a canceled build throws `OperationCanceledException`.
-  The engine refuses to drop a declared database. `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema)`
-  applies a schema imperatively, except another schema than its declaration's to a declared
-  database. Both diff the validated `SqlCompiledSchema`, render deterministic table/column/index DDL
-  into parsed `SqlQueryRequest`s, compensate completed reversible steps on failure, and record the
-  canonical document/hash only after live-catalog convergence. Failures lead with `COHSQLP001` to
-  `005`, and a `Verify` drift names the first object that differs. A server keeps a copy of its
-  options, as the engine does.
+- **Declared databases and provisioning** — the engine builder compiles declarations before I/O,
+  then opens/creates their databases and runs data-independent steps. On populated tables, indexes,
+  constraints and validation-only column tightening are persisted as pending before any cheap DDL commits and run by the engine's
+  provisioning worker. Pending tables are locked before Build returns; independent tables serve
+  throughout, and health reports the step and row progress. Same-table column additions retain
+  declaration order across the inline/worker split. `RunMigrationsInline = true` keeps all
+  steps in Build per database. Build/BuildAsync accept cancellation, including recovery.
+  `ApplySchemaAsync(SqlCompiledSchema)` remains inline. Both paths use the same DDL planner and
+  B2's complete catalog snapshot, typed defaults and crash convergence. Format 9 adds ordered
+  pending intent to the generation-stamped applied document. An unchanged applied hash/generation
+  with no pending intent still skips in constant time. Deferred failure takes only that database
+  offline with `COHSQLP004`, retaining intent for the next open. Inline failures retain compensation;
+  Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
+  database or apply a different schema than its declaration.
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned rule-based and executed against table scans: `SELECT` with `WHERE`,
   projection, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, lone `COUNT(*)`;

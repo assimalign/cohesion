@@ -174,7 +174,7 @@ public sealed class StorageOfflineException : StorageException
     /// <param name="offlineCause">The cause.</param>
     /// <returns>True for the worker failure causes and the journal size limit.</returns>
     internal static bool IsEngineCause(StorageOfflineCause offlineCause)
-        => offlineCause is >= StorageOfflineCause.CheckpointFailures and <= StorageOfflineCause.JournalSizeLimit;
+        => offlineCause is >= StorageOfflineCause.CheckpointFailures and <= StorageOfflineCause.RecoveryInterrupted;
 
     /// <summary>
     /// Creates the exception that takes a storage offline because its engine gave up on it (owner
