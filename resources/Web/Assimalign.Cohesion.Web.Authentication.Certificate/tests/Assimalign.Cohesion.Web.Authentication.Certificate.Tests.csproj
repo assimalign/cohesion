@@ -11,6 +11,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Certificate" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />

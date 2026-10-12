@@ -7,8 +7,9 @@ serial number. Applications can map it to an account or reject it through an asy
 ## Scope and dependencies
 
 This package supplies an `IAuthenticationHandler` and the C# 14 `AddCertificate` extensions on
-`AuthenticationBuilder`. It depends on `Web.Authentication` for scheme dispatch and `Http.Tls` for
-the connection certificate. It has no hosting or dependency-injection reference. `App.Web` delivers
+`AuthenticationBuilder`. It depends on `Web.Authentication` for scheme dispatch, `Http.Tls` for
+the connection certificate, and contracts-only `Web.Server` for diagnostic request ids. It has no
+hosting or dependency-injection reference. `App.Web` delivers
 it to `Sdk.Web` applications; standalone consumers reference the package directly.
 
 The listener owns certificate requests, chain validation and trust. Configure its
@@ -51,6 +52,12 @@ with `401` and `WWW-Authenticate: Certificate`; an authenticated caller failing 
 `403`. Other schemes' existing challenges and parameters are preserved. The challenge cannot
 acquire a certificate after the handshake. An untrusted certificate fails the TLS handshake before
 an HTTP response can be sent.
+
+Enable the `Assimalign.Cohesion.Web.Authentication.Certificate` event provider at Verbose to see
+application validation rejections and requests challenged for a missing certificate. Events carry
+the scheme, bounded reason and request id; `rejected-certificates` counts once per request and
+scheme. Certificate contents, identifiers and callback failure messages are omitted. TLS trust and
+validity failures occur before the handler and are outside this provider's scope.
 
 See [DESIGN.md](DESIGN.md) for the trust boundary, claim names, callback lifecycle and endpoint-mode
 semantics, and the [Web area map](../../README.md) for pipeline composition.

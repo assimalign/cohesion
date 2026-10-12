@@ -14,6 +14,7 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
     private AuthenticationScheme _scheme = null!;
     private IHttpContext _context = null!;
     private Task<AuthenticateResult>? _authentication;
+    private int _rejectionReported;
 
     public CertificateAuthenticationHandler(Func<CertificateValidatedContext, CancellationToken, ValueTask>? onCertificateValidated)
     {
@@ -28,6 +29,7 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
         _scheme = scheme;
         _context = context;
         _authentication = null;
+        _rejectionReported = 0;
         return Task.CompletedTask;
     }
 
@@ -67,11 +69,13 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
         cancellationToken.ThrowIfCancellationRequested();
         if (validation.FailureMessage is { } failure)
         {
+            ReportRejection("ValidationFailed");
             return AuthenticateResult.Fail(failure);
         }
 
         if (validation.Principal?.Identity?.IsAuthenticated != true)
         {
+            ReportRejection("ValidationFailed");
             return AuthenticateResult.Fail("The certificate mapping did not produce an authenticated principal.");
         }
 
@@ -82,6 +86,13 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
     public Task ChallengeAsync(AuthenticationProperties? properties, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (_context.TlsConnection?.ClientCertificate is null)
+        {
+            // Absence is NoResult during optional authentication. A challenge is the handler's
+            // decision that this request needs a certificate, so only this path counts absence.
+            ReportRejection("NoCertificate");
+        }
+
         // This application-specific challenge cannot renegotiate TLS or acquire a certificate.
         _context.Response.Headers.AppendValue(HttpHeaderKey.WWWAuthenticate, CertificateAuthenticationDefaults.AuthenticationScheme);
         _context.Response.StatusCode = HttpStatusCode.Unauthorized;
@@ -93,5 +104,15 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
         cancellationToken.ThrowIfCancellationRequested();
         _context.Response.StatusCode = HttpStatusCode.Forbidden;
         return Task.CompletedTask;
+    }
+
+    private void ReportRejection(string reason)
+    {
+        // Authentication and a later challenge share one request/scheme rejection, including
+        // repeated challenges and an application replacing the TLS feature between those calls.
+        if (Interlocked.Exchange(ref _rejectionReported, 1) == 0)
+        {
+            CertificateAuthenticationEventSource.Log.CertificateRejected(_context, _scheme.Name, reason);
+        }
     }
 }

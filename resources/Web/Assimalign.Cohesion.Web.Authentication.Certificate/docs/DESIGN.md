@@ -7,13 +7,15 @@ authorization. Owner decision 31 places the scheme in its own package, alongside
 `IAuthenticationHandler` remains the public contract; `CertificateAuthenticationHandler` is internal
 and `CertificateAuthentication.CreateHandler` provides the container-free factory.
 
-The package references the scheme model and TLS feature; neither the transport nor Web.Hosting
+The package references the scheme model, TLS feature and contracts-only Web.Server request id;
+neither the transport nor Web.Hosting
 references this package. The following arrows mean project references:
 
 ```mermaid
 flowchart LR
     Cert["Web.Authentication.Certificate"] --> Auth["Web.Authentication"]
     Cert --> Tls["Http.Tls"]
+    Cert --> Server["Web.Server"]
     Auth --> Web["Web"]
     Tls --> Http["Http"]
     Tls --> Conn["Connections"]
@@ -24,6 +26,7 @@ flowchart LR
 | `Web.Authentication.Certificate` | Certificate claims, application mapping/validation, challenges and forbids |
 | `Web.Authentication` | Scheme registry, per-request dispatch, principal and result features |
 | `Http.Tls` | Lazy `context.TlsConnection` view over the transport's handshake facts |
+| `Web.Server` | Request-id contract used to correlate rejection events |
 | `Connections.Security` / `Connections.Quic` | TLS handshake and certificate trust policy, below HTTP |
 
 `AddCertificate()` and `AddCertificate(name, configure)` are `extension(AuthenticationBuilder)`
@@ -111,17 +114,57 @@ Authorization policies can name any registered certificate scheme through
 of the default identity, then challenges anonymous/rejected callers or forbids authenticated callers
 missing a policy requirement. The tests use an authenticated alternate default to verify isolation.
 
-## Validation and diagnostics
+## Validation
 
 Unit tests cover claims, absence, callback mapping/rejection, cancellation, per-request caching and
 option snapshots. Loopback TLS tests generate certificates in-process and exercise the real host,
 the generated AddAuthentication verb, optional and required modes, trust rejection, and named-policy
 authorization. No certificate or private key is committed.
 
-Lane G's #1403 owns event-source delivery. Rejections from application validation warrant a source
-following Bearer's template, as `WEB_EVENT_SOURCES_SCOPE.md` anticipates. Missing credentials should
-not count as rejections; TLS failures belong to transport diagnostics. Use bounded reason codes and
-omit certificate identifiers and callback failure text. This package currently emits no events.
+## Diagnostics
+
+The internal `CertificateAuthenticationEventSource` reports the handler's failure decisions under
+the provider name `Assimalign.Cohesion.Web.Authentication.Certificate`. The dispatcher in
+`Web.Authentication` owns no source. The provider has no keywords and reports no authentication
+successes.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `CertificateRejected` | Verbose | `scheme`, `reason` (`NoCertificate` or `ValidationFailed`), `requestId` |
+
+`ValidationFailed` covers a callback's `Fail` result and a null or unauthenticated mapped principal.
+`NoCertificate` is emitted only when the handler challenges a request without a certificate: at
+that point application policy requires one. Optional authentication without a certificate remains
+`NoResult` and emits nothing. A forbid is an authorization decision, so this source does not count
+it as a rejected certificate. Callback exceptions and cancellation retain their existing propagation
+and do not count as credential rejection.
+
+The `rejected-certificates` total is a lazily created `PollingCounter`, backed by an always-maintained
+atomic count. One atomic guard per handler counts once per request and scheme across authentication
+and repeated challenges. Authentication's task cache ensures a named Authorization policy
+reauthenticating the default scheme reuses the callback result. Reinitializing a handler starts a
+new request and resets the guard.
+
+The request id comes from `IWebRequestIdFeature`, read and formatted only when Verbose is enabled;
+it is empty when a custom server supplies no feature. No certificate contents, subject, issuer,
+thumbprint, serial, principal, claim or callback failure text is emitted. This implementation omits
+the optional bounded thumbprint entirely. The contracts-only Web.Server reference adds no hosting
+dependency or framework member.
+
+**Scope deviation: TLS rejection reasons are not observable here.** The requested `UntrustedChain`,
+`Expired` and `NotYetValid` categories belong to handshake validation. A TLS-required missing
+certificate also fails before there is an HTTP request. The existing `IHttpTlsConnectionFeature`
+exposes neither chain errors nor endpoint mode, and `CertificateValidatedContext.Fail(string)`
+provides no typed failure reason for optional application checks. Consequently the source reports
+the two local reasons above, and does not invent transport events or parse callback text. A second
+chain build or new request-time date check would overrule endpoint policy and change authentication
+behavior. Richer attribution requires a separately designed validation contract; no public seam,
+cross-assembly internal grant or reflection was added for diagnostics.
+
+Source tests validate the provider name, strict manifest, event shape, guarded request-id access,
+exact counters and publication. Integration tests show one rejection when Authorization
+reauthenticates, and no handler event or counter change when certificate absence or trust failure
+prevents the HTTP exchange.
 
 ## Compatibility and NativeAOT
 
