@@ -49,10 +49,21 @@ internal sealed class HostingResourceEventSource : EventSource
             _suppressedContributorFailures = 0;
         }
 
+        string exceptionMessage;
+        try
+        {
+            exceptionMessage = exception.Message;
+        }
+        catch (Exception)
+        {
+            // Message is virtual: application diagnostics must not replace the health result.
+            exceptionMessage = "The exception message could not be read.";
+        }
+
         ContributorFailed(
             contributorName,
             exception.GetType().FullName ?? exception.GetType().Name,
-            exception.Message,
+            exceptionMessage,
             suppressedCount);
     }
 

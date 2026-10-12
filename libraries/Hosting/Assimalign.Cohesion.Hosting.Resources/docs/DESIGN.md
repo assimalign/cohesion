@@ -123,7 +123,9 @@ counter. An unrelated contributor cancellation is a failure. There is no gauge.
 
 Contributor names come from registered application contributors. Health-check exceptions follow
 the event-source rule's application-exception policy: the type and `Message` are written, never
-`ToString()`, stack traces, inner exceptions, or contribution data. A dependency's message may
+`ToString()`, stack traces, inner exceptions, or contribution data. If an exception overrides
+`Message` with a throwing getter, the event writes `The exception message could not be read.`
+instead, preserving the fixed health report. A dependency's message may
 contain host, database, or user names, so configured sinks must be treated accordingly. The HTTP
 report continues to contain only the fixed failure description introduced by #1409. This is an
 additive diagnostic change from 10.0.0-preview.1; report and command behavior are unchanged.

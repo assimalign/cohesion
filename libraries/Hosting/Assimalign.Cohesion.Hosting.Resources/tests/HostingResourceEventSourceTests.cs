@@ -71,6 +71,30 @@ public sealed class HostingResourceEventSourceTests
         recorder.Events.ShouldNotContain(item => item.EventId == 0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Hosting.Resources] - Event source: a throwing exception message cannot replace the fixed health report")]
+    public async Task CheckHealthAsync_ThrowingExceptionMessage_ShouldRetainFixedReportAndSafeDiagnostic()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Task.Delay(TimeSpan.FromMilliseconds(1100), cancellation.Token);
+        const string contributorName = "event-source-throwing-message";
+        IResourceControlPlane plane = CreateFailingPlane(contributorName, new ThrowingMessageException());
+        using var recorder = new EventSourceRecorder(HostingResourceEventSource.Log, EventLevel.Verbose);
+        long before = HostingResourceEventSource.Log.ContributorFailures;
+
+        // Act
+        ResourceHealthReport report = await plane.CheckHealthAsync(cancellation.Token);
+
+        // Assert
+        HostingResourceEventSource.Log.ContributorFailures.ShouldBe(before + 1);
+        report.Contributions[contributorName].Description.ShouldBe(DefaultResourceControlPlane.ContributorThrewDescription);
+        report.Contributions[contributorName].Data.ShouldBeNull();
+        EventWrittenEventArgs failed = recorder.Events.Where(item => IsContributorFailure(item, contributorName)).ShouldHaveSingleItem();
+        failed.Payload![1].ShouldBe(typeof(ThrowingMessageException).FullName);
+        failed.Payload[2].ShouldBe("The exception message could not be read.");
+        recorder.Events.ShouldNotContain(item => item.EventId == 0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Hosting.Resources] - Event source: failures count without a listener and the counter publishes when enabled")]
     public async Task Counters_FailuresBeforeListener_ShouldRemainExactAndPublish()
     {
@@ -151,6 +175,11 @@ public sealed class HostingResourceEventSourceTests
 
     private static bool IsContributorFailure(EventWrittenEventArgs item, string contributorName)
         => item.EventName == "ContributorFailed" && Equals(item.Payload![0], contributorName);
+
+    private sealed class ThrowingMessageException : Exception
+    {
+        public override string Message => throw new InvalidOperationException("exception-message-secret");
+    }
 
     private sealed class CallbackContributor : IHealthContributor
     {
