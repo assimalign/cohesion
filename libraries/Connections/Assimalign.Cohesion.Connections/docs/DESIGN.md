@@ -242,6 +242,20 @@ keeps `IConnection` unchanged and lets decorators preserve the fact explicitly. 
 or protocol interpretation enter Connections. The public addition is optional and source compatible
 with 10.0.0-preview.1.
 
+### Cumulative stream allowance: `IMultiplexedConnectionStreamLimits` (#1425)
+
+The optional `InboundBidirectionalStreamLimit` facet reports a conservative upper bound on how
+many peer-initiated bidirectional streams the transport may have allowed over the connection's
+lifetime. It is cumulative, not the number that may be open concurrently, and never decreases.
+Protocols can reject a referenced stream ordinal at or beyond that bound; they still own the
+mapping between their identifiers and stream ordinals. No application-protocol types enter the
+Connections contracts.
+
+A conservative bound may include credit whose release has started but is not advertised yet.
+Consumers must retain their own state limits; this facet is not a replacement for flow control.
+Drivers without the facet remain valid, and a decorator must explicitly forward it. The interface
+is an additive, optional API relative to 10.0.0-preview.1; `IMultiplexedConnection` is unchanged.
+
 ### Application error codes: `IMultiplexedStreamAbort` and `IMultiplexedConnectionAbort` (#1080)
 
 `Abort(Exception?)` ends a whole stream or connection and says nothing on the wire about why. A

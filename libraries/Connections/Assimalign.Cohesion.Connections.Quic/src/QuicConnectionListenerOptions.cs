@@ -61,6 +61,10 @@ public sealed class QuicConnectionListenerOptions
     /// <summary>
     /// Gets or sets the maximum number of concurrent inbound bidirectional streams per connection.
     /// </summary>
+    /// <remarks>
+    /// Captured when the listener binds. Later changes do not alter the bound listener's handshake
+    /// allowance or the stream-limit facet on the connections it accepts.
+    /// </remarks>
     public int MaxBidirectionalStreamCount { get; set; } = 100;
 
     /// <summary>

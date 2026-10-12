@@ -15,11 +15,12 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections.Quic.Internal;
+using Assimalign.Cohesion.Connections.Quic.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Connections.Quic.Tests;
 
-// Every test gates on QuicListener.IsSupported and no-ops where the platform lacks a QUIC
-// implementation (for example, a missing libmsquic); xunit 2.x has no runtime skip.
+// Existing facts gate on QuicListener.IsSupported; QuicTheory cases report a discovery-time skip
+// where the platform lacks a QUIC implementation (for example, a missing libmsquic).
 [Collection(nameof(EventSourceCollection))]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
@@ -27,6 +28,102 @@ namespace Assimalign.Cohesion.Connections.Quic.Tests;
 public class QuicMultiplexedConnectionTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
+
+    [QuicTheory(DisplayName = "Cohesion Test [Connections.Quic] - Stream limits: Releasing inbound bidirectional streams should advance the cumulative allowance once")]
+    [InlineData(1)]
+    public async Task InboundBidirectionalStreamLimit_OnSuccessiveDisposals_ShouldReplenishOnce(int initialLimit)
+    {
+        // Arrange — one concurrent stream still permits many sequential streams on a live connection.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(
+            certificate,
+            cancellation.Token,
+            configureListener: options => options.MaxBidirectionalStreamCount = initialLimit);
+        IMultiplexedConnectionStreamLimits limits = pair.Server.ShouldBeAssignableTo<IMultiplexedConnectionStreamLimits>();
+        limits.InboundBidirectionalStreamLimit.ShouldBe(initialLimit);
+
+        for (int index = 0; index < 3; index++)
+        {
+            (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+            await using (clientStream)
+            await using (serverStream)
+            {
+                // Act — Abort starts native release; repeated disposal must not release credit twice.
+                serverStream.Abort();
+                limits.InboundBidirectionalStreamLimit.ShouldBe(initialLimit + index + 1L);
+                await serverStream.DisposeAsync();
+                await serverStream.DisposeAsync();
+
+                // Assert — the next loop's stream crosses the previous limit without closing the connection.
+                limits.InboundBidirectionalStreamLimit.ShouldBe(initialLimit + index + 1L);
+                pair.Server.State.ShouldBe(ConnectionState.Open);
+            }
+        }
+    }
+
+    [QuicTheory(DisplayName = "Cohesion Test [Connections.Quic] - Stream limits: Only inbound bidirectional disposal should replenish the bound")]
+    [InlineData(ConnectionDirection.Bidirectional)]
+    [InlineData(ConnectionDirection.WriteOnly)]
+    public async Task InboundBidirectionalStreamLimit_OnStreamDisposal_ShouldExcludeOutboundAndUnidirectionalStreams(ConnectionDirection direction)
+    {
+        // Arrange — the factory currently advertises zero inbound bidirectional streams.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(
+            certificate,
+            cancellation.Token,
+            configureListener: options => options.MaxBidirectionalStreamCount = 1);
+        IMultiplexedConnectionStreamLimits clientLimits = pair.Client.ShouldBeAssignableTo<IMultiplexedConnectionStreamLimits>();
+        IMultiplexedConnectionStreamLimits serverLimits = pair.Server.ShouldBeAssignableTo<IMultiplexedConnectionStreamLimits>();
+        clientLimits.InboundBidirectionalStreamLimit.ShouldBe(0);
+        serverLimits.InboundBidirectionalStreamLimit.ShouldBe(1);
+        await using Connection clientStream = await pair.Client.OpenStreamAsync(direction, cancellation.Token);
+        await clientStream.Output.WriteAsync(new byte[] { 1 }, cancellation.Token);
+        await using Connection serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await ReadBytesAsync(serverStream.Input, 1, cancellation.Token);
+
+        // Act
+        clientStream.Abort();
+        serverStream.Abort();
+        await clientStream.DisposeAsync();
+        await serverStream.DisposeAsync();
+
+        // Assert — outbound streams never replenish this peer's inbound allowance, nor do inbound uni streams.
+        clientLimits.InboundBidirectionalStreamLimit.ShouldBe(0);
+        serverLimits.InboundBidirectionalStreamLimit.ShouldBe(direction == ConnectionDirection.Bidirectional ? 2L : 1L);
+    }
+
+    [QuicTheory(DisplayName = "Cohesion Test [Connections.Quic] - Stream limits: Binding should freeze the same allowance for handshakes and accepted wrappers")]
+    [InlineData(1)]
+    public async Task InboundBidirectionalStreamLimit_WhenOptionsChangeAfterBind_ShouldKeepTheNegotiatedSnapshot(int initialLimit)
+    {
+        // Arrange — changing the original options after binding must change neither the wire allowance
+        // nor the facet. A live read in either place would change the allowance to zero.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        QuicConnectionListenerOptions? listenerOptions = null;
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(
+            certificate,
+            cancellation.Token,
+            configureListener: options =>
+            {
+                options.MaxBidirectionalStreamCount = initialLimit;
+                listenerOptions = options;
+            },
+            afterBind: () => listenerOptions!.MaxBidirectionalStreamCount = 0);
+
+        // Act — opening a request also proves the handshake advertised the frozen nonzero allowance.
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Assert
+            pair.Server.ShouldBeAssignableTo<IMultiplexedConnectionStreamLimits>().InboundBidirectionalStreamLimit.ShouldBe(initialLimit);
+            clientStream.Abort();
+            serverStream.Abort();
+        }
+    }
 
     [Fact]
     public async Task ConnectAsync_WithAcceptingListener_ShouldEstablishConnectedPair()
@@ -1343,7 +1440,8 @@ public class QuicMultiplexedConnectionTests
             X509Certificate2 certificate,
             CancellationToken cancellationToken,
             Action<QuicConnectionListenerOptions>? configureListener = null,
-            Action<QuicConnectionFactoryOptions>? configureClient = null)
+            Action<QuicConnectionFactoryOptions>? configureClient = null,
+            Action? afterBind = null)
         {
             SslApplicationProtocol applicationProtocol = new("cohesion-test");
 
@@ -1362,6 +1460,7 @@ public class QuicMultiplexedConnectionTests
 
             try
             {
+                afterBind?.Invoke();
                 ValueTask<MultiplexedConnection> acceptTask = listener.AcceptAsync(cancellationToken);
 
                 QuicConnectionFactory factory = QuicConnectionFactory.Create(options =>

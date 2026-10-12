@@ -34,6 +34,13 @@ unidirectional streams.
 Streams optionally expose `IConnectionInputCompletion`: a clean transport end already observed,
 without another read. Check the input pipe for buffered bytes as well before treating it as empty.
 
+The connection exposes `IMultiplexedConnectionStreamLimits.InboundBidirectionalStreamLimit`, a
+conservative cumulative upper bound on the peer's bidirectional stream allowance. It grows as
+inbound bidirectional streams begin disposal, unlike the fixed concurrent limit configured by
+`MaxBidirectionalStreamCount`. Set that option before binding the listener; the bound listener
+uses its captured value for both native handshakes and the facet. Retain a local storage cap when
+using the facet to validate references, because pending disposals may include unadvertised credit.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Connections` — the contracts this driver

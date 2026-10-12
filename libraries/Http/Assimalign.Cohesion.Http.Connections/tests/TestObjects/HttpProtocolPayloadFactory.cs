@@ -815,6 +815,9 @@ internal static class HttpProtocolPayloadFactory
 
     private static void WriteQuicInteger(Stream stream, long value)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(value);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, (1L << 62) - 1);
+
         if (value < 64)
         {
             stream.WriteByte((byte)value);
@@ -841,7 +844,12 @@ internal static class HttpProtocolPayloadFactory
             return;
         }
 
-        throw new InvalidOperationException("The test payload factory only supports QUIC integers below 2^30.");
+        // 8-byte form — priority element IDs can name any client-initiated stream below 2^62.
+        ulong encoded64 = (ulong)value | 0xC000000000000000;
+        for (int shift = 56; shift >= 0; shift -= 8)
+        {
+            stream.WriteByte((byte)(encoded64 >> shift));
+        }
     }
 
     /// <summary>

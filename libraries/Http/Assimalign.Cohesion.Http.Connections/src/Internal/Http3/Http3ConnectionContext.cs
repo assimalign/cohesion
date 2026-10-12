@@ -1485,19 +1485,16 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// Reads a request <c>PRIORITY_UPDATE</c> payload (RFC 9218 §7.2) and records the referenced
     /// stream's effective priority (<see cref="RecordRequestStreamPriority"/>, which bounds what it keeps).
     /// Returns the connection error when the Prioritized Element ID is
-    /// truncated (<c>H3_FRAME_ERROR</c>) or names no client-initiated bidirectional stream
-    /// (<c>H3_ID_ERROR</c>); otherwise <see langword="null"/>. A payload beyond the 16 KiB bound is
-    /// skipped unread, and one whose Priority Field Value does not parse is ignored: neither has effect.
+    /// truncated (<c>H3_FRAME_ERROR</c>), names no client-initiated bidirectional stream or exceeds
+    /// the transport's published allowance (<c>H3_ID_ERROR</c>); otherwise <see langword="null"/>.
+    /// A payload beyond the 16 KiB bound is skipped after validating its element ID, and one whose
+    /// Priority Field Value does not parse is ignored: neither has effect.
     /// </summary>
     private async Task<Http3ConnectionException?> ApplyPriorityUpdateAsync(PipeReader reader, long length, CancellationToken cancellationToken)
     {
-        if (length > maxControlFramePayloadSize)
-        {
-            await SkipAsync(reader, length, cancellationToken).ConfigureAwait(false);
-            return null;
-        }
-
-        byte[] payload = await ReadExactAsync(reader, (int)length, cancellationToken).ConfigureAwait(false);
+        bool oversized = length > maxControlFramePayloadSize;
+        // Eight bytes cover every QUIC varint. Even an ignored field value must not hide an invalid ID.
+        byte[] payload = await ReadExactAsync(reader, oversized ? QuicVariableLengthInteger.MaxLength : (int)length, cancellationToken).ConfigureAwait(false);
 
         if (!Http3PriorityUpdate.TryReadPrioritizedElementId(payload, out long prioritizedStreamId, out int consumed))
         {
@@ -1512,6 +1509,22 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return new Http3ConnectionException(
                 Http3ErrorCode.IdError,
                 $"The peer's PRIORITY_UPDATE names stream {prioritizedStreamId}, which is not a request stream (RFC 9218 §7.2).");
+        }
+
+        // RFC 9218 §7.2 — IDs at or beyond four times the cumulative stream allowance are invalid.
+        // Divide the nonnegative ID instead of multiplying the limit, which could overflow.
+        if (_connection is IMultiplexedConnectionStreamLimits limits
+            && prioritizedStreamId / 4 >= limits.InboundBidirectionalStreamLimit)
+        {
+            return new Http3ConnectionException(
+                Http3ErrorCode.IdError,
+                $"The peer's PRIORITY_UPDATE names stream {prioritizedStreamId}, beyond the inbound stream allowance (RFC 9218 §7.2).");
+        }
+
+        if (oversized)
+        {
+            await SkipAsync(reader, length - payload.Length, cancellationToken).ConfigureAwait(false);
+            return null;
         }
 
         if (HttpPriorityFieldValue.TryParse(payload.AsSpan(consumed), out HttpPriority priority))

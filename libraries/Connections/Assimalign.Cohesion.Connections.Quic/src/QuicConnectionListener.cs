@@ -27,6 +27,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
 
     private QuicListener? _listener;
+    private int _boundMaxInboundBidirectionalStreams;
     private bool _isDisposed;
 
     /// <summary>
@@ -82,6 +83,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
             }
 
             ValidateServerAuthenticationOptions(_options);
+            int maxInboundBidirectionalStreams = _options.MaxBidirectionalStreamCount;
 
             _listener = await QuicListener.ListenAsync(new QuicListenerOptions
             {
@@ -91,12 +93,13 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
                 ConnectionOptionsCallback = (connection, sslClientHelloInfo, token) => ValueTask.FromResult(new QuicServerConnectionOptions
                 {
                     ServerAuthenticationOptions = _options.ServerAuthenticationOptions,
-                    MaxInboundBidirectionalStreams = _options.MaxBidirectionalStreamCount,
+                    MaxInboundBidirectionalStreams = maxInboundBidirectionalStreams,
                     MaxInboundUnidirectionalStreams = _options.MaxUnidirectionalStreamCount,
                     DefaultCloseErrorCode = _options.DefaultCloseErrorCode,
                     DefaultStreamErrorCode = _options.DefaultStreamErrorCode
                 })
             }, cancellationToken).ConfigureAwait(false);
+            _boundMaxInboundBidirectionalStreams = maxInboundBidirectionalStreams;
 
             QuicConnectionEventSource.Log.ListenerBound(_listenerId, _listener.LocalEndPoint);
         }
@@ -186,7 +189,8 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
                 _options.DefaultStreamErrorCode,
                 _options.DefaultCloseErrorCode,
                 _options.CloseDeliveryTimeout,
-                streamOptions);
+                streamOptions,
+                _boundMaxInboundBidirectionalStreams);
         }
         catch
         {

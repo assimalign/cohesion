@@ -1,5 +1,8 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
@@ -141,11 +144,94 @@ public class Http3PriorityTests
         connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode.ShouldBe(Http3ErrorCode.IdError);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3: PRIORITY_UPDATE below the transport stream limit should be accepted without overflow")]
+    [InlineData(1L, 0L)]
+    [InlineData(2L, 4L)]
+    [InlineData(1L << 60, (1L << 62) - 4)]
+    [InlineData(long.MaxValue, (1L << 62) - 4)]
+    public async Task ReceiveAsync_OnPriorityUpdateBelowStreamLimit_ShouldRecordPriority(long limit, long streamId)
+    {
+        // Arrange — a generic transport facet reports cumulative inbound stream credit. Large credit
+        // must not overflow a multiplication by four while checking the largest legal request ID.
+        LimitedMultiplexedConnection? limited = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            decorate: connection => limited = new LimitedMultiplexedConnection(connection, limit));
+        await using IAsyncEnumerator<IHttpContext> requests = peer.ConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        Task<bool> receive = requests.MoveNextAsync().AsTask();
+
+        try
+        {
+            Connection control = await peer.OpenUnidirectionalStreamAsync();
+
+            // Act
+            await control.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
+                [], ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(streamId, "u=1"))));
+            Http3ConnectionContext context = peer.ConnectionContext.ShouldBeOfType<Http3ConnectionContext>();
+            await WaitForUrgencyAsync(context, streamId, urgency: 1);
+
+            // Assert — a normal request remains serviceable after the accepted priority update.
+            limited.ShouldNotBeNull().AbortReason.ShouldBeNull();
+            Connection request = await peer.OpenRequestStreamAsync();
+            request.Output.Write(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/accepted", "https", "a"));
+            await request.Output.CompleteAsync();
+            (await receive.WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeTrue();
+            requests.Current.Request.Path.Value.ShouldBe("/accepted");
+            await peer.ConnectionContext.SendAsync(requests.Current);
+        }
+        finally
+        {
+            // A failing assertion must settle the pending move before enumerator disposal, preserving
+            // its original failure instead of replacing it with DisposeAsync's concurrent-move error.
+            limited?.Abort();
+            await ((Task)receive).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3: PRIORITY_UPDATE at or beyond the transport stream limit should close with H3_ID_ERROR")]
+    [InlineData(0L, 0L, false)]
+    [InlineData(1L, 4L, false)]
+    [InlineData(2L, 8L, false)]
+    [InlineData(2L, 12L, false)]
+    [InlineData(2L, (1L << 62) - 4, false)]
+    [InlineData((1L << 60) - 1, (1L << 62) - 4, false)]
+    [InlineData(2L, 8L, true)]
+    [InlineData(0L, 0L, true)]
+    public async Task ReceiveAsync_OnPriorityUpdateBeyondStreamLimit_ShouldAbortWithIdError(long limit, long streamId, bool oversized)
+    {
+        // Arrange — oversized field values must not bypass validation of the leading element ID.
+        LimitedMultiplexedConnection? limited = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            decorate: connection => limited = new LimitedMultiplexedConnection(connection, limit));
+        await using IAsyncEnumerator<IHttpContext> requests = peer.ConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        Task<bool> receive = requests.MoveNextAsync().AsTask();
+
+        try
+        {
+            Connection control = await peer.OpenUnidirectionalStreamAsync();
+            string priority = oversized ? "u=1, " + new string('x', 17 * 1024) : "u=1";
+
+            // Act
+            await control.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
+                [], ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(streamId, priority))));
+
+            // Assert — no request was dispatched, and the whole connection carries the RFC error.
+            (await receive.WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeFalse();
+            limited.ShouldNotBeNull().AbortReason
+                .ShouldBeOfType<Http3ConnectionException>().ErrorCode.ShouldBe(Http3ErrorCode.IdError);
+        }
+        finally
+        {
+            limited?.Abort();
+            await ((Task)receive).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: PRIORITY_UPDATE frames for unopened streams should be buffered for a bounded number of streams")]
     public async Task Http3_OnPriorityUpdateFlood_ShouldBoundTheBufferedUpdates()
     {
         // Arrange — RFC 9218 §7: an update for a stream not yet opened is buffered, which costs the server
-        // memory, so how many streams it buffers for is local policy. The client names 1,000 distinct future
+        // memory, so how many streams it buffers for is local policy. This driver exposes no stream-limit
+        // facet, so the 128-entry backstop remains necessary. The client names 1,000 distinct future
         // streams in roughly 9-octet frames, then updates stream 0 again, which marks the end of the flood.
         List<(long FrameType, byte[] Payload)> frames = new();
         for (long index = 0; index < 1000; index++)
@@ -232,5 +318,46 @@ public class Http3PriorityTests
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return enumerator.Current;
+    }
+
+    private sealed class LimitedMultiplexedConnection : MultiplexedConnection, IMultiplexedConnectionStreamLimits
+    {
+        private readonly MultiplexedConnection _inner;
+
+        public LimitedMultiplexedConnection(MultiplexedConnection inner, long limit)
+        {
+            _inner = inner;
+            InboundBidirectionalStreamLimit = limit;
+        }
+
+        public long InboundBidirectionalStreamLimit { get; }
+
+        public Exception? AbortReason { get; private set; }
+
+        public override ConnectionId Id => _inner.Id;
+
+        public override EndPoint? LocalEndPoint => _inner.LocalEndPoint;
+
+        public override EndPoint? RemoteEndPoint => _inner.RemoteEndPoint;
+
+        public override ConnectionCapabilities Capabilities => _inner.Capabilities;
+
+        public override ConnectionState State => _inner.State;
+
+        public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+
+        public override ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+            => _inner.AcceptStreamAsync(cancellationToken);
+
+        public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+            => _inner.OpenStreamAsync(direction, cancellationToken);
+
+        public override void Abort(Exception? reason = null)
+        {
+            AbortReason = reason;
+            _inner.Abort(reason);
+        }
+
+        public override ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 }

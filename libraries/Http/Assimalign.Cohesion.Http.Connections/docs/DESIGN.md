@@ -4245,7 +4245,7 @@ the connection — so it ends only when the connection closes, or with one of:
 | Ends inside a frame | `H3_FRAME_ERROR` | §7.1 |
 | Carries `DATA`, `HEADERS`, `PUSH_PROMISE`, a second `SETTINGS`, or a reserved HTTP/2 type | `H3_FRAME_UNEXPECTED` | §7.2.1, §7.2.2, §7.2.4, §7.2.5, §7.2.8 |
 | Carries a push `PRIORITY_UPDATE` (`0xF0701`) or a `CANCEL_PUSH` | `H3_ID_ERROR` | RFC 9218 §7.2, RFC 9114 §7.2.3: the server promises no pushes, so every push ID is one it never sent |
-| Carries a request `PRIORITY_UPDATE` that names no client-initiated bidirectional stream | `H3_ID_ERROR` | RFC 9218 §7.2 |
+| Carries a request `PRIORITY_UPDATE` that names no client-initiated bidirectional stream, or an ID at or beyond the transport's published stream allowance | `H3_ID_ERROR` | RFC 9218 §7.2 (#1425) |
 | Carries a request `PRIORITY_UPDATE` cut short inside its element ID | `H3_FRAME_ERROR` | §7.1 |
 | Carries a `GOAWAY` or `MAX_PUSH_ID` whose payload is not exactly one variable-length integer | `H3_FRAME_ERROR` | §7.1, §7.2.6, §7.2.7 |
 | Carries a `GOAWAY` with a larger identifier than an earlier one | `H3_ID_ERROR` | §5.2 |
@@ -4255,7 +4255,8 @@ A request `PRIORITY_UPDATE` otherwise sets the referenced stream's effective
 priority, or is buffered for a stream not yet opened, within a bound (see "RFC
 9218 extensible priorities"); one whose Priority Field Value does not parse,
 whose payload is over the 16 KiB the drain buffers, or that names a stream that
-has ended, is skipped and has no effect. A valid peer `GOAWAY` (§7.2.6) is
+has ended, is skipped and has no effect. The element ID is still validated before
+skipping an oversized field value. A valid peer `GOAWAY` (§7.2.6) is
 otherwise not acted on (the server does not implement the *client* role of
 graceful shutdown — reacting to a peer's `GOAWAY` — only the server role of
 *emitting* one, see "Graceful GOAWAY on the control stream"), and a valid
@@ -5577,7 +5578,11 @@ state**:
   server issues no pushes — see the server-push scope decision below), so it closes
   the connection with `H3_ID_ERROR` (RFC 9218 §7.2, #1083). So does a request
   `PRIORITY_UPDATE` whose Prioritized Element ID is not a client-initiated
-  bidirectional stream. Until #1083 the push frame was only recorded and the drain
+  bidirectional stream, or whose stream ordinal (`ID / 4`) is at or beyond the
+  generic `IMultiplexedConnectionStreamLimits.InboundBidirectionalStreamLimit`
+  published by its transport (#1425). Division avoids overflow at the maximum QUIC
+  ID. The ID is checked even when an oversized Priority Field Value will be skipped.
+  Until #1083 the push frame was only recorded and the drain
   stopped, leaving the rest of the control stream unread (see "The peer control
   stream and SETTINGS").
 - **The priority map is bounded.** It holds an entry for each live request
@@ -5588,10 +5593,21 @@ state**:
   naming a stream that has ended is discarded: it has nothing left to prioritize.
   Before, every update naming a fresh ID added an entry for the connection's
   lifetime, so a client could grow the map without limit with frames of about
-  nine octets. RFC 9218 §7.2 also says an ID beyond the stream limits SHOULD be
-  `H3_ID_ERROR`; the HTTP/3 layer does not see QUIC's concurrent-stream limit,
-  which the RFC names as the reason that error is not mandatory, so it relies on
-  the bound instead.
+  nine octets. The 128-stream buffered cap from #1083 remains a backstop even when
+  the transport publishes a limit, and is the only limit for drivers without the facet.
+- **The stream allowance is cumulative.** The QUIC driver starts with the listener's
+  bound-time inbound bidirectional limit and accounts for credit released by disposing
+  inbound bidirectional streams. A fixed initial concurrent limit would reject legal
+  later stream IDs. System.Net.Quic does not expose its current native MAX_STREAMS;
+  the generic facet conservatively includes credit whose native disposal has started
+  but may not yet have been advertised (see the QUIC DESIGN). HTTP/3 rejects IDs at
+  or beyond that bound without treating it as permission to open a stream. This keeps
+  transport facts in Connections and HTTP validation here (decision 20).
+
+**Breaking behavior against 10.0.0-preview.1 (#1425).** A request PRIORITY_UPDATE
+whose ID exceeds the transport's published allowance now closes the connection with
+`H3_ID_ERROR` (RFC 9218 §7.2); that release accepted such IDs. The optional facet is
+additive and requires no change to existing multiplexed connection implementations.
 
 ### AOT posture
 

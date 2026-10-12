@@ -68,6 +68,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     private readonly Task _readsClosed;
     private readonly long _defaultStreamErrorCode;
     private readonly Action<QuicStreamConnection> _onDisposed;
+    private readonly Action? _onReleaseStarted;
     private readonly CancellationTokenSource _connectionClosedSource = new();
     private readonly Lock _stateLock = new();
     // Completed once the QuicStream is disposed, whoever started it (see ReleaseStream).
@@ -98,6 +99,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     /// <param name="streamOptions">The parent-owned shared stream pipe options.</param>
     /// <param name="defaultStreamErrorCode">The error code used when the stream is aborted without a caller's code.</param>
     /// <param name="onDisposed">A callback invoked when the stream connection is disposed.</param>
+    /// <param name="onReleaseStarted">An optional callback invoked once before native stream disposal starts.</param>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="stream"/>, <paramref name="streamOptions"/>, or
     /// <paramref name="onDisposed"/> is <see langword="null"/>.
@@ -110,7 +112,8 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         EndPoint? remoteEndPoint,
         StreamPipeOptionsContext streamOptions,
         long defaultStreamErrorCode,
-        Action<QuicStreamConnection> onDisposed)
+        Action<QuicStreamConnection> onDisposed,
+        Action? onReleaseStarted)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(streamOptions);
@@ -128,6 +131,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         _readsClosed = stream.CanRead ? stream.ReadsClosed : Task.CompletedTask;
         _defaultStreamErrorCode = defaultStreamErrorCode;
         _onDisposed = onDisposed;
+        _onReleaseStarted = onReleaseStarted;
         LocalEndPoint = localEndPoint;
         RemoteEndPoint = remoteEndPoint;
         Input = stream.CanRead
@@ -401,6 +405,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     {
         if (Interlocked.Exchange(ref _releaseStarted, 1) == 0)
         {
+            _onReleaseStarted?.Invoke();
             _ = ReleaseStreamCoreAsync();
         }
 

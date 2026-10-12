@@ -97,6 +97,33 @@ late FINs remain conservative until the runtime observes them. This optional gen
 no HTTP dependency and no change to existing connection interfaces. Relative to 10.0.0-preview.1,
 the API is additive; the incremental HTTP/3 body signal it improves was introduced afterward.
 
+## Inbound stream allowance (#1425)
+
+`QuicMultiplexedConnection` implements the generic `IMultiplexedConnectionStreamLimits` facet.
+Its `InboundBidirectionalStreamLimit` starts at the inbound bidirectional concurrency configured
+for the connection and increases once per inbound bidirectional stream whose disposal starts,
+saturating at QUIC's maximum of 2^60 streams. Outbound streams and unidirectional streams do not
+change it. The listener freezes its bidirectional limit at bind time and uses that same snapshot
+in every handshake and accepted wrapper; mutations of the original option after binding cannot
+make those two disagree. Factory-created wrappers take the actual client options' inbound limit
+(currently the BCL client default of zero).
+
+The value is a **conservative cumulative upper bound**, not an exact snapshot of the current
+native MAX_STREAMS value. .NET 10 requests
+[`DELAY_ID_FC_UPDATES`](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Quic/src/System/Net/Quic/QuicConnection.cs#L644-L663),
+which defers replenishment until the native stream handle closes. The driver increments before
+starting native disposal, including cleanup after a wrapper-construction failure, so a concurrent
+consumer never rejects a stream against already-replenished but unrecorded credit. The callback
+is cached per connection and guarded by the stream's existing one-shot release latch.
+
+During pending disposal the bound can include credit not advertised yet. This permits some
+references beyond the exact native limit, rather than falsely rejecting legitimate references
+on a long-lived connection after stream credit is replenished. `System.Net.Quic` offers no public
+getter for the local cumulative allowance; its stream-capacity callback reports the opposite
+direction. Protocols retain their own bounded storage as a backstop. No reflection, native calls,
+or HTTP-specific semantics are added. The facet is an additive API relative to
+10.0.0-preview.1; changing the bound listener's bidirectional option is now explicitly ineffective.
+
 ## Handshake facts
 
 QUIC runs a TLS 1.3 handshake inside its own (RFC 9001), so a QUIC connection is a TLS-terminating
@@ -376,6 +403,10 @@ break is accepted during the previews and recorded here.
    `QuicStream` already disposed and returned at once. The connection's
    wait is bounded by `CloseDeliveryTimeout` (five seconds by default);
    a single stream's is not.
+5. **The inbound bidirectional limit is fixed when the listener binds (#1425).**
+   Changing the original `MaxBidirectionalStreamCount` option after binding used to
+   change the value used by subsequent handshakes. It now leaves the bound listener's
+   allowance unchanged, keeping its handshake and generic limit facet consistent.
 
 Completing a half also no longer blocks the completing thread until the
 peer acknowledges the FIN; that is not expected to break a consumer.

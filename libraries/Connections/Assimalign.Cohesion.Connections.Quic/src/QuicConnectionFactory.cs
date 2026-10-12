@@ -83,7 +83,8 @@ public sealed class QuicConnectionFactory : MultiplexedConnectionFactory
                 _options.DefaultStreamErrorCode,
                 _options.DefaultCloseErrorCode,
                 _options.CloseDeliveryTimeout,
-                streamOptions);
+                streamOptions,
+                connectionOptions.MaxInboundBidirectionalStreams);
         }
         catch
         {

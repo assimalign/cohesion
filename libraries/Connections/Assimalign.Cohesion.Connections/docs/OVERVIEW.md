@@ -21,6 +21,8 @@ transformations (such as TLS) compose over it.
 - `IMultiplexedConnection` / `MultiplexedConnection` — carries multiple `IConnection` streams;
   `OpenStreamAsync(ConnectionDirection, ...)` for bidirectional or unidirectional streams.
 - `IMultiplexedConnectionListener` / `IMultiplexedConnectionFactory` (+ bases).
+- `IMultiplexedConnectionStreamLimits` — optional cumulative inbound bidirectional stream allowance;
+  a conservative upper bound for validating stream references, distinct from concurrent capacity.
 - `IDatagramConnection` / `DatagramConnection` — message-oriented send/receive (e.g., UDP).
 - `IConnectionLayer` — connection-to-connection transformation; composed via
   `listener.Use(layer)` / `factory.Use(layer)`. A layered listener upgrades each accepted connection

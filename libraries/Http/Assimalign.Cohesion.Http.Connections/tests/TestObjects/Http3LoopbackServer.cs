@@ -85,12 +85,14 @@ internal sealed class Http3LoopbackServer : IAsyncDisposable
     /// <param name="configure">Configures the HTTP/3 registration, or <see langword="null"/> for the defaults.</param>
     /// <param name="configureListener">Configures the listener options (interceptors), or <see langword="null"/> for none.</param>
     /// <param name="cancellationToken">A token that cancels the initial QUIC bind.</param>
+    /// <param name="configureTransport">Configures the QUIC transport, or <see langword="null"/> for the defaults.</param>
     /// <returns>The started server harness.</returns>
     public static async Task<Http3LoopbackServer> StartAsync(
         Func<IHttpContext, Task> handler,
         Action<Http3ConnectionListenerOptions>? configure,
         Action<HttpConnectionListenerOptions>? configureListener,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<QuicConnectionListenerOptions>? configureTransport = null)
     {
         int port = AllocateUdpPort();
         X509Certificate2 certificate = CreateCertificate();
@@ -100,6 +102,7 @@ internal sealed class Http3LoopbackServer : IAsyncDisposable
             transport.EndPoint = new IPEndPoint(IPAddress.Loopback, port);
             transport.ServerAuthenticationOptions.ServerCertificate = certificate;
             transport.ServerAuthenticationOptions.ApplicationProtocols = new List<SslApplicationProtocol> { SslApplicationProtocol.Http3 };
+            configureTransport?.Invoke(transport);
         }, cancellationToken).ConfigureAwait(false);
 
         HttpConnectionListener listener = HttpConnectionListener.Create(options =>

@@ -40,16 +40,18 @@ namespace Assimalign.Cohesion.Connections.Quic;
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConnectionInfo, IMultiplexedConnectionAbort
+public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConnectionInfo, IMultiplexedConnectionAbort, IMultiplexedConnectionStreamLimits
 {
     // RFC 9000 §16 — an application error code is a variable-length integer.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
+    private const long maxStreamCount = 1L << 60;
 
     private readonly QuicConnection _connection;
     private readonly long _defaultStreamErrorCode;
     private readonly long _defaultCloseErrorCode;
     private readonly TimeSpan _closeDeliveryTimeout;
     private readonly StreamPipeOptionsContext _streamOptions;
+    private readonly Action _onInboundBidirectionalStreamReleaseStarted;
     private readonly ConcurrentDictionary<ConnectionId, QuicStreamConnection> _streams = new();
     private readonly CancellationTokenSource _connectionClosedSource = new();
     private readonly Lock _stateLock = new();
@@ -57,6 +59,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     private volatile ConnectionState _state;
     private bool _isDisposed;
     private int _closeReported;
+    private long _inboundBidirectionalStreamLimit;
 
     internal QuicMultiplexedConnection(
         QuicConnection connection,
@@ -64,7 +67,8 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         long defaultStreamErrorCode,
         long defaultCloseErrorCode,
         TimeSpan closeDeliveryTimeout,
-        StreamPipeOptionsContext streamOptions)
+        StreamPipeOptionsContext streamOptions,
+        int maxInboundBidirectionalStreams)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(streamOptions);
@@ -74,6 +78,8 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         _defaultCloseErrorCode = defaultCloseErrorCode;
         _closeDeliveryTimeout = closeDeliveryTimeout;
         _streamOptions = streamOptions;
+        _inboundBidirectionalStreamLimit = maxInboundBidirectionalStreams;
+        _onInboundBidirectionalStreamReleaseStarted = OnInboundBidirectionalStreamReleaseStarted;
         LocalEndPoint = connection.LocalEndPoint;
         RemoteEndPoint = connection.RemoteEndPoint;
         ApplicationProtocol = connection.NegotiatedApplicationProtocol;
@@ -126,6 +132,9 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     /// <inheritdoc />
     public override CancellationToken ConnectionClosed => _connectionClosedSource.Token;
 
+    /// <inheritdoc />
+    public long InboundBidirectionalStreamLimit => Volatile.Read(ref _inboundBidirectionalStreamLimit);
+
     internal int TrackedStreamCount => _streams.Count;
 
     /// <inheritdoc />
@@ -136,7 +145,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
 
         QuicStream stream = await _connection.AcceptInboundStreamAsync(cancellationToken).ConfigureAwait(false);
 
-        return await WrapStreamAsync(stream).ConfigureAwait(false);
+        return await WrapStreamAsync(stream, isInbound: true).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -159,7 +168,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
 
         QuicStream stream = await _connection.OpenOutboundStreamAsync(streamType, cancellationToken).ConfigureAwait(false);
 
-        return await WrapStreamAsync(stream).ConfigureAwait(false);
+        return await WrapStreamAsync(stream, isInbound: false).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -279,9 +288,12 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         }
     }
 
-    private async ValueTask<Connection> WrapStreamAsync(QuicStream stream)
+    private async ValueTask<Connection> WrapStreamAsync(QuicStream stream, bool isInbound)
     {
         QuicStreamConnection connection;
+        Action? onReleaseStarted = isInbound && stream.Type == QuicStreamType.Bidirectional
+            ? _onInboundBidirectionalStreamReleaseStarted
+            : null;
 
         try
         {
@@ -292,12 +304,14 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
                 RemoteEndPoint,
                 _streamOptions,
                 _defaultStreamErrorCode,
-                OnStreamDisposed);
+                OnStreamDisposed,
+                onReleaseStarted);
         }
         catch
         {
             // The stream options are connection-owned and shared by every stream, so a wrap
-            // failure only releases the stream itself.
+            // failure only releases the stream itself. It can release inbound stream credit too.
+            onReleaseStarted?.Invoke();
             await stream.DisposeAsync().ConfigureAwait(false);
             throw;
         }
@@ -310,6 +324,24 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     private void OnStreamDisposed(QuicStreamConnection stream)
     {
         _streams.TryRemove(stream.Id, out _);
+    }
+
+    private void OnInboundBidirectionalStreamReleaseStarted()
+    {
+        // .NET requests DELAY_ID_FC_UPDATES: native stream credit is released when its handle closes.
+        // Account before disposal can close it, so a concurrently received stream identifier is never
+        // rejected against stale credit. Until disposal finishes, the bound can overstate that credit.
+        long observed = Volatile.Read(ref _inboundBidirectionalStreamLimit);
+        while (observed < maxStreamCount)
+        {
+            long previous = Interlocked.CompareExchange(ref _inboundBidirectionalStreamLimit, observed + 1, observed);
+            if (previous == observed)
+            {
+                return;
+            }
+
+            observed = previous;
+        }
     }
 
     // Starts stream disposals without waiting for any, so their waits share one timeout. Before the
