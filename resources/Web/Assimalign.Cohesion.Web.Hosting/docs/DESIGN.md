@@ -949,8 +949,8 @@ exchange (a `500`, or a reset), and reporting it belongs to the application's er
 (`Web.ErrorHandling`'s `Assimalign.Cohesion.Web.ErrorHandling` event source and optional
 `OnException` hook) and to request telemetry, so the server does not add a second report of the
 same failure. The source excludes client-caused and cancelled exchanges: a peer-abandoned response
-raises Verbose only, and a boundary abort after the response starts increments only its
-`aborted-responses` counter. See [ErrorHandling diagnostics](../../Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics).
+raises Verbose only. A boundary abort after the response starts counts the originating application
+fault and independently increments `aborted-responses`. See [ErrorHandling diagnostics](../../Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics).
 
 ## AOT posture
 

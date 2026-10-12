@@ -2,7 +2,6 @@ name: Web
 on:
   push:
     paths:
-      - 'build/TestSupport/**'
       # Covers Web.Testing/fixtures/Assimalign.Cohesion.Web.TestHost. The HttpsHost fixture is
       # listed separately because it belongs to the Gateway's tests, not to this area
       # (.claude/rules/resource-areas.md) — the Web runtime it composes is still this area's.
