@@ -48,8 +48,9 @@ receives a cancellation token. The certificate is borrowed from the connection: 
 
 A connection without a certificate is unauthenticated (`NoResult`). A protected endpoint challenges
 with `401` and `WWW-Authenticate: Certificate`; an authenticated caller failing its policy gets
-`403`. The challenge cannot acquire a certificate after the handshake. An untrusted certificate
-fails the TLS handshake before an HTTP response can be sent.
+`403`. Other schemes' existing challenges and parameters are preserved. The challenge cannot
+acquire a certificate after the handshake. An untrusted certificate fails the TLS handshake before
+an HTTP response can be sent.
 
 See [DESIGN.md](DESIGN.md) for the trust boundary, claim names, callback lifecycle and endpoint-mode
 semantics, and the [Web area map](../../README.md) for pipeline composition.

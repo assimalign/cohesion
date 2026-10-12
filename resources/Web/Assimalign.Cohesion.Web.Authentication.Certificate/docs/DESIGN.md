@@ -99,7 +99,8 @@ The handler creates no key material, holds no session, and does not implement si
 
 ## Challenge and forbid
 
-`ChallengeAsync` sends `401 Unauthorized` with `WWW-Authenticate: Certificate`.
+`ChallengeAsync` sends `401 Unauthorized` and appends `Certificate` to `WWW-Authenticate`,
+preserving existing challenges and their parameters when a policy challenges multiple schemes.
 `Certificate` is an application-specific challenge token, not a standardized HTTP credential
 exchange. It stays constant even for a differently named registration. The listener must already
 have requested the certificate: the challenge never initiates TLS renegotiation or post-handshake

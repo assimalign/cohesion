@@ -281,6 +281,27 @@ public class CertificateAuthenticationHandlerTests
         context.Response.Headers.GetValue(HttpHeaderKey.WWWAuthenticate).ShouldBe("Certificate");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Authentication.Certificate] - Challenge: Should preserve existing challenges and their parameters")]
+    [InlineData("Bearer realm=\"api\"")]
+    [InlineData("Bearer realm=\"api\", error=\"invalid_token\"")]
+    public async Task Challenge_WithExistingChallenge_ShouldPreserveChallengeAndParameters(string existingChallenge)
+    {
+        // Arrange
+        TestHttpContext context = TestHttpContext.Create();
+        context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = existingChallenge;
+        IAuthenticationHandler handler = await InitializeAsync(new(), context);
+
+        // Act
+        await handler.ChallengeAsync(null, CancellationToken.None);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        HttpHeaderValue challenges = context.Response.Headers[HttpHeaderKey.WWWAuthenticate];
+        challenges.Count.ShouldBe(2);
+        challenges[0].ShouldBe(existingChallenge);
+        challenges[1].ShouldBe("Certificate");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Certificate] - Forbid: Should issue a bare forbidden response")]
     public async Task Forbid_WithAuthenticatedClient_ShouldRespondForbidden()
     {

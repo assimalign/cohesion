@@ -83,7 +83,7 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
     {
         cancellationToken.ThrowIfCancellationRequested();
         // This application-specific challenge cannot renegotiate TLS or acquire a certificate.
-        _context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = CertificateAuthenticationDefaults.AuthenticationScheme;
+        _context.Response.Headers.AppendValue(HttpHeaderKey.WWWAuthenticate, CertificateAuthenticationDefaults.AuthenticationScheme);
         _context.Response.StatusCode = HttpStatusCode.Unauthorized;
         return Task.CompletedTask;
     }
