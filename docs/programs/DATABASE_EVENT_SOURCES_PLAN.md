@@ -544,6 +544,64 @@ the native sample passed 18/18 checks. The broader managed builds still report e
 DependencyInjection/Configuration trim/AOT warnings, also reproduced from the archived base.
 Logs, allocation probes and TRX results are under `_out/provisioning-tracing`.
 
+**Part 2 review fixes (2026-10-12).** All six findings were reproduced before their fixes.
+The health regression run had five expected failures: tracing-only disposal, empty-inventory
+cancellation, cancellation after the core's last read, reentrant batch ordering and same-name
+replacement deduplication. Five parity controls passed, including original exception identity.
+The SQL run had three expected failures: attachment before execution lost progress, attachment
+after the final callback lost completion, and a forced 1.1-second scheduling gap produced two
+legitimate progress events that the lifecycle assertion rejected. Its two controls passed.
+A further overlapping-check regression first reproduced stale degradation after restoration;
+completed observations now honor the ordering policy above without serializing health cores.
+Late deferred attachment is covered for Applied, Error and Cancelled, with zero duration when
+Bound was missed. No public API, project reference or shipped friend-assembly boundary changed.
+
+The disabled-path comparison was repeated against an archive verified file-for-file (normalizing CRLF) against
+`95d3a7d5667397b4f80074fa23f78bc2240f26c4`, using identical probes on both trees, SDK 10.0.401,
+runtime 10.0.12 and tiered compilation off. Values below are bytes per complete operation:
+
+| Path | Debug base / fixed | Release base / fixed |
+|---|---|---|
+| Empty application health | 1808 / 1792 | 1304 / 1304 |
+| Healthy SQL application health | 7144 / 7128 | 6632 / 6632 |
+| Offline SQL application health | 11464 / 11448 | 10952 / 10952 |
+| O(1) apply skip | 560 / 560 | 32 / 32 |
+| Verify | 120 / 120 | 0 / 0 |
+| Inline CHECK add/drop, 130 rows | 181464 / 181464 | 173192 / 173192 |
+| Deferred CHECK plus removal, 130 rows | 216568 / 216568 | 206976 / 206976 |
+
+Every measured disabled path adds zero allocation; health saves 16 bytes in Debug by returning
+the contribution directly instead of retaining a result local in its async state machine.
+All eight probe runs passed: health 3/0/0 and SQL 1/0/0 (passed/failed/skipped), each on the
+baseline and fixed trees in Debug and Release. Probe files were removed from the current test
+projects afterward. Provenance, probe copies, logs and TRX results are under
+`_out/provisioning-review`; `allocations.json` records the paired measurements.
+
+The final review-fix suites passed with the following passed/failed/skipped counts. Temporary
+allocation probes are excluded from these totals:
+
+| Suite | Debug | Release |
+|---|---|---|
+| Database | 186 / 0 / 0 | 186 / 0 / 0 |
+| Database.Hosting | 115 / 0 / 0 | 115 / 0 / 0 |
+| Database.Sql | 1999 / 0 / 0 | 1999 / 0 / 0 |
+| Database.Sql.Catalog | 68 / 0 / 0 | 68 / 0 / 0 |
+| Database.Client | 69 / 0 / 0 | 69 / 0 / 0 |
+| Database.Sql.Client | 349 / 0 / 0 | 349 / 0 / 0 |
+| Database.KeyValuePair.Client | 20 / 0 / 0 | 20 / 0 / 0 |
+| Database.Embedded | 4 / 0 / 0 | 4 / 0 / 0 |
+| Database.Testing | 5 / 0 / 0 | 5 / 0 / 0 |
+
+Build.Tasks passed in Debug and Release. After the last source change,
+`pwsh installer/scripts/Install-Local.ps1 -Configuration Release -SkipLibraries` completed,
+then Database.Testing passed against those fresh packages in both configurations. Both SQL
+NativeAOT harnesses (AotSample and Benchmarks) published for `win-arm64` in Release with no
+IL2xxx/IL3xxx warnings; the native sample passed all 18 checks in process and over the wire.
+The pre-existing DependencyInjection/Configuration warnings in broader managed builds also appear in the
+verified base and remain outside this tracing change. All commands used
+`MSBUILDDISABLENODEREUSE=1`, SQL ran with tiered compilation off, and no test host or native
+sample process was left running.
+
 No counters were added. Project Diagnostics sections record exact payloads, lock contexts,
 late-listener behavior and tests; they are the durable catalog.
 
