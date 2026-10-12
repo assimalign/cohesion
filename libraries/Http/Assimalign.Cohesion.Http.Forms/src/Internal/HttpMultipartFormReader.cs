@@ -150,7 +150,7 @@ internal sealed class HttpMultipartFormReader
                 // Defensive: a peer that just emits non-boundary lines forever
                 // should not be allowed to drain the buffer indefinitely.
                 const string message = "Multipart preamble exceeded the headers-length limit.";
-                throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersLength, message));
             }
 
             if (line.Length == 0)
@@ -218,7 +218,7 @@ internal sealed class HttpMultipartFormReader
             if (headers.Count >= HeadersCountLimit)
             {
                 string message = $"Multipart section header count exceeded the {HeadersCountLimit} limit.";
-                throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersCount, message));
             }
 
             string name = line[..colon].Trim();

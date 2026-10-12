@@ -360,6 +360,7 @@ public class HttpFormFeatureTests
         HttpFormLimitExceededException limit = exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>();
         limit.Message.ShouldBe(exception.Message);
         limit.Code.ShouldBe(HttpErrorCode.ReadingError);
+        limit.Limit.ShouldBe(HttpFormLimit.MultipartBodyLength);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Forms] - Limits: too many urlencoded entries names the limit as the cause")]
@@ -377,7 +378,7 @@ public class HttpFormFeatureTests
         InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync());
 
         // Assert
-        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>();
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>().Limit.ShouldBe(HttpFormLimit.ValueCount);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Forms] - Limits: an overlong boundary names the limit as the cause")]
@@ -396,7 +397,7 @@ public class HttpFormFeatureTests
         InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync());
 
         // Assert
-        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>();
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>().Limit.ShouldBe(HttpFormLimit.MultipartBoundaryLength);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Forms] - Limits: a malformed multipart header is not a limit")]
@@ -446,7 +447,7 @@ public class HttpFormFeatureTests
 
         // Assert
         form["k"].Value.ShouldBe("v");
-        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>();
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>().Limit.ShouldBe(HttpFormLimit.MultipartHeadersLength);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Forms] - Files: every part of a multiple-file field is kept, in order")]
@@ -521,6 +522,146 @@ public class HttpFormFeatureTests
         form["title"].Value.ShouldBe("holiday");
         form.TryGetValue("avatar", out HttpQueryValue avatar).ShouldBeTrue();
         avatar.Value.ShouldBe(string.Empty);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Forms] - ReadFormAsync: equal key and value caps still identify the exceeded limit")]
+    [InlineData("abcd=v", HttpFormLimit.KeyLength)]
+    [InlineData("a=bcde", HttpFormLimit.ValueLength)]
+    public async Task ReadFormAsync_UrlEncodedLengthOverLimit_ShouldNameParserLimit(string content, HttpFormLimit expected)
+    {
+        // Arrange
+        using MemoryStream body = BodyOf(content);
+        var request = new BareHttpRequest { ContentType = "application/x-www-form-urlencoded", Body = body };
+        var feature = new HttpFormFeature(request, new HttpFormOptions { KeyLengthLimit = 3, ValueLengthLimit = 3 });
+
+        // Act
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync(CancellationToken.None));
+
+        // Assert — neither the numeric cap nor the shared message identifies the parser state.
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>().Limit.ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - ReadFormAsync: too many multipart headers identify the header count limit")]
+    public async Task ReadFormAsync_MultipartHeadersOverCountLimit_ShouldNameHeaderCount()
+    {
+        // Arrange
+        using MemoryStream body = BodyOf("--B\r\nContent-Disposition: form-data; name=\"k\"\r\nX-Test: value\r\n\r\nv\r\n--B--\r\n");
+        var request = new BareHttpRequest { ContentType = "multipart/form-data; boundary=B", Body = body };
+        var feature = new HttpFormFeature(request, new HttpFormOptions { MultipartHeadersCountLimit = 1 });
+
+        // Act
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync(CancellationToken.None));
+
+        // Assert
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>().Limit.ShouldBe(HttpFormLimit.MultipartHeadersCount);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Forms] - ReadFormAsync: overlong preamble lines and totals identify the headers length limit")]
+    [InlineData("123456789\r\n--B--\r\n")]
+    [InlineData("123456\r\n123456\r\n123456\r\n--B--\r\n")]
+    public async Task ReadFormAsync_MultipartPreambleOverLimit_ShouldNameHeadersLength(string content)
+    {
+        // Arrange
+        using MemoryStream body = BodyOf(content);
+        var request = new BareHttpRequest { ContentType = "multipart/form-data; boundary=B", Body = body };
+        var feature = new HttpFormFeature(request, new HttpFormOptions { MultipartHeadersLengthLimit = 8 });
+
+        // Act
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync(CancellationToken.None));
+
+        // Assert
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>().Limit.ShouldBe(HttpFormLimit.MultipartHeadersLength);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Forms] - ReadFormAsync: every multipart section counts toward ValueCountLimit")]
+    [InlineData("values")]
+    [InlineData("files")]
+    [InlineData("unnamed")]
+    [InlineData("repeated")]
+    public async Task ReadFormAsync_MultipartSectionCountOverLimit_ShouldNameSectionCount(string kind)
+    {
+        // Arrange
+        using MemoryStream body = BodyOf(MultipartSections(kind, 3));
+        var request = new BareHttpRequest { ContentType = "multipart/form-data; boundary=B", Body = body };
+        var feature = new HttpFormFeature(request, new HttpFormOptions { ValueCountLimit = 2 });
+
+        // Act
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync(CancellationToken.None));
+
+        // Assert
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>().Limit.ShouldBe(HttpFormLimit.MultipartSectionCount);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Forms] - ReadFormAsync: multipart sections exactly at ValueCountLimit still parse")]
+    [InlineData("values", 2, 0)]
+    [InlineData("files", 0, 2)]
+    [InlineData("unnamed", 0, 0)]
+    [InlineData("repeated", 1, 0)]
+    public async Task ReadFormAsync_MultipartSectionCountAtLimit_ShouldParse(string kind, int valueCount, int fileCount)
+    {
+        // Arrange
+        using MemoryStream body = BodyOf(MultipartSections(kind, 2));
+        var request = new BareHttpRequest { ContentType = "multipart/form-data; boundary=B", Body = body };
+        var feature = new HttpFormFeature(request, new HttpFormOptions { ValueCountLimit = 2 });
+
+        // Act
+        IHttpFormCollection form = await feature.ReadFormAsync(CancellationToken.None);
+
+        // Assert
+        form.Count.ShouldBe(valueCount);
+        form.Files.Count.ShouldBe(fileCount);
+        if (kind == "repeated")
+        {
+            form["same"].Count.ShouldBe(2);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Constructor: a legacy message-only exception has an unspecified limit")]
+    public void Constructor_MessageOnly_ShouldKeepLegacyContract()
+    {
+        // Arrange
+        const string message = "caller-provided diagnostic text";
+
+        // Act
+        var exception = new HttpFormLimitExceededException(message);
+
+        // Assert
+        exception.Limit.ShouldBe(HttpFormLimit.Unspecified);
+        exception.Message.ShouldBe(message);
+        exception.Code.ShouldBe(HttpErrorCode.ReadingError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Constructor: a typed limit is independent of message text")]
+    public void Constructor_TypedLimit_ShouldPreserveLimitWithoutParsingMessage()
+    {
+        // Arrange
+        const string message = "untrusted field text";
+
+        // Act
+        var exception = new HttpFormLimitExceededException(HttpFormLimit.KeyLength, message);
+
+        // Assert
+        exception.Limit.ShouldBe(HttpFormLimit.KeyLength);
+        exception.Message.ShouldBe(message);
+        exception.Code.ShouldBe(HttpErrorCode.ReadingError);
+    }
+
+    private static string MultipartSections(string kind, int count)
+    {
+        var body = new StringBuilder();
+        for (int i = 0; i < count; i++)
+        {
+            string disposition = kind switch
+            {
+                "files" => $"form-data; name=\"file{i}\"; filename=\"file.txt\"",
+                "unnamed" => "form-data",
+                "repeated" => "form-data; name=\"same\"",
+                _ => $"form-data; name=\"value{i}\"",
+            };
+            body.Append($"--B\r\nContent-Disposition: {disposition}\r\n\r\nv\r\n");
+        }
+        body.Append("--B--\r\n");
+        return body.ToString();
     }
 
     private static MemoryStream BodyOf(string content) => new(Encoding.UTF8.GetBytes(content));

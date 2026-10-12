@@ -77,6 +77,10 @@ never buffered in memory just to parse it.
   content, and that part is read as an empty value. Before the #1210 review it
   reached the `HttpFormFile` constructor, whose `ArgumentException` no caller
   catches, so the ordinary submission failed as a `500`.
+  `ValueCountLimit` also bounds the total number of multipart sections (#1435).
+  Every section counts before its body is consumed: scalar and file sections,
+  repeated field names, and unnamed sections that the feature would otherwise
+  drain and skip.
 
 ### Multiple files under one name
 
@@ -177,14 +181,56 @@ be a subtype of it; the inner exception keeps the established contract — exist
 `catch (InvalidDataException)` sites, such as IdentityHub's token endpoint, are unaffected — while
 making the cause explicit.
 
-| Limit (`HttpFormOptions`) | Guards against | Thrown by |
-|---------------------------|----------------|-----------|
-| `ValueCountLimit` | Too many form entries | `HttpFormReader` |
-| `KeyLengthLimit` / `ValueLengthLimit` | Oversized urlencoded key/value | `HttpFormReader` |
-| `MultipartBoundaryLengthLimit` | Unbounded boundary look-ahead | `HttpFormFeature` (pre-flight) |
-| `MultipartHeadersCountLimit` / `MultipartHeadersLengthLimit` | Header floods per section (and an overlong preamble) | `HttpMultipartFormReader`, `BufferedReadStream` |
-| `MultipartBodyLengthLimit` | Oversized section body | `HttpMultipartFormReaderStream` |
-| `MemoryBufferThreshold` | Peak memory on large uploads (spills, does not throw) | `HttpFormFeature` |
+`HttpFormLimitExceededException.Limit` identifies the exceeded limit as a fixed
+`HttpFormLimit` enum value (#1435). Every limit throw supplies its category
+directly; the urlencoded reader passes distinct key/value categories from its
+parsing state even when both configured lengths are equal. Diagnostics and
+response mapping can use `Limit` without parsing or logging message text.
+Malformed-header messages can contain request input; the enum contains none.
+This supplies the planned Web.Forms event source's limit payload.
+
+The existing `HttpFormLimitExceededException(string message)` constructor stays
+available and reports `HttpFormLimit.Unspecified`; its arbitrary message cannot
+reliably identify a category. Callers that construct an exception with known
+limit metadata use `(HttpFormLimit limit, string message)`. The framework never
+throws `Unspecified`. Neither the outer `InvalidDataException`, its inner
+exception type, nor `HttpErrorCode.ReadingError` changes.
+
+| `HttpFormLimit` | Limit (`HttpFormOptions`) | Guards against | Thrown by |
+|----------------|---------------------------|----------------|-----------|
+| `ValueCount` | `ValueCountLimit` | Too many urlencoded values | `HttpFormReader` |
+| `KeyLength` | `KeyLengthLimit` | Oversized urlencoded key | `HttpFormReader` |
+| `ValueLength` | `ValueLengthLimit` | Oversized urlencoded value | `HttpFormReader` |
+| `MultipartSectionCount` | `ValueCountLimit` | Too many multipart sections of any kind | `HttpFormFeature` |
+| `MultipartBoundaryLength` | `MultipartBoundaryLengthLimit` | Unbounded boundary look-ahead | `HttpFormFeature` (pre-flight) |
+| `MultipartHeadersCount` | `MultipartHeadersCountLimit` | Header floods per section | `HttpMultipartFormReader` |
+| `MultipartHeadersLength` | `MultipartHeadersLengthLimit` | Oversized header blocks or preambles | `HttpMultipartFormReader`, `BufferedReadStream` |
+| `MultipartBodyLength` | `MultipartBodyLengthLimit` | Oversized section body | `HttpMultipartFormReaderStream` |
+| No exception | `MemoryBufferThreshold` | Peak memory on large uploads (spills, does not throw) | `HttpFormFeature` |
+
+The preamble uses the headers-length budget for each line and twice that budget
+for the total preamble. Both overflows report `MultipartHeadersLength`, as does
+an overlong section header block.
+
+**Multipart section count and compatibility.** `ValueCountLimit` defaults to
+1024 and counts occurrences, not distinct names. The multipart loop checks the
+current count against the limit before incrementing, so the count cannot wrap.
+The first section beyond the limit fails before its body is consumed, even if
+it has no name and would otherwise be discarded. Exactly the configured number
+of sections is accepted when all other limits are satisfied.
+
+**Breaking behavior against 10.0.0-preview.1 (decision 15):** multipart parsing
+now enforces `ValueCountLimit`. That release enforced it only for urlencoded
+forms; a multipart request could contain any number of sections. Applications
+that intentionally accept more than 1024 multipart sections must raise the
+option. The enum and exception property are additive; they do not change the
+established exception handling contract.
+
+The section cap bounds parsing work and the number of retained values and files.
+Per-section body and header limits and the file spill threshold do not bound
+the number of sections, so they did not provide this protection. Total request
+body limits and upstream limits remain separate controls; the section cap does
+not replace them.
 
 The headers-length budget counts each line's CRLF, so a header block can end two bytes past the limit;
 the reader then still accepts the blank line that closes the block and rejects any further header

@@ -52,7 +52,12 @@ answers it and the rest of the pipeline does not run:
 - **The limits are the feature's.** The defaults apply to the feature this
   middleware installs. An application that installs
   `new HttpFormFeature(context.Request, options)` ahead of `UseForms()` gets
-  its own limits answered `413` the same way.
+  its own limits answered `413` the same way. `ValueCountLimit` also bounds every
+  multipart section (#1435), including files, repeated fields and unnamed parts
+  that the parser skips. Exceeding the default 1,024 sections now answers `413`;
+  this is a behavior break from 10.0.0-preview.1, which did not enforce a section
+  count. Diagnostics can read the cause's `HttpFormLimitExceededException.Limit`
+  enum instead of parsing or logging an exception message that may echo input.
 - **A committed head aborts instead.** The parse runs before `next`, so the head
   is normally still writable. When a middleware ahead of this one has already
   committed it (`IHttpResponseStreamingFeature.HasStarted`), the status can no

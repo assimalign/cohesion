@@ -162,7 +162,7 @@ public sealed class HttpFormFeature : IHttpFormFeature
                 // wildly long boundary is either malformed or an attempt to
                 // grow the look-ahead buffer unboundedly. Reject it up front.
                 string message = $"Multipart boundary length limit {_options.MultipartBoundaryLengthLimit} exceeded.";
-                throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartBoundaryLength, message));
             }
 
             await ReadMultipartAsync(request.Body, boundary, form, cancellationToken).ConfigureAwait(false);
@@ -203,8 +203,18 @@ public sealed class HttpFormFeature : IHttpFormFeature
             BodyLengthLimit = _options.MultipartBodyLengthLimit,
         };
 
+        int sectionCount = 0;
         while (await reader.ReadNextSectionAsync(cancellationToken).ConfigureAwait(false) is { } section)
         {
+            // Count every section before reading its body, including files and unnamed sections
+            // that will be discarded. Checking before incrementing also avoids counter overflow.
+            if (sectionCount >= _options.ValueCountLimit)
+            {
+                string message = $"Multipart section count limit {_options.ValueCountLimit} exceeded.";
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartSectionCount, message));
+            }
+            sectionCount++;
+
             ParseContentDisposition(section.ContentDisposition, out string? name, out string? fileName);
 
             if (string.IsNullOrEmpty(name))

@@ -211,6 +211,39 @@ public class UseFormsMiddlewareTests
         context.ResponseBody.Length.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Forms] - UseForms: multipart section overflow answers 413 and short-circuits")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UseForms_MultipartSectionCountOverLimit_ShouldAnswer413AndShortCircuit(bool useInstalledFeature)
+    {
+        // Arrange — repeated names must count as sections, not as distinct collection keys.
+        int limit = useInstalledFeature ? 2 : new HttpFormOptions().ValueCountLimit;
+        var content = new StringBuilder();
+        for (int i = 0; i <= limit; i++)
+        {
+            content.Append("--B\r\nContent-Disposition: form-data; name=\"same\"\r\n\r\nv\r\n");
+        }
+        content.Append("--B--\r\n");
+        using MemoryStream body = BodyOf(content.ToString());
+        var context = new TestHttpContext("multipart/form-data; boundary=B", body);
+        if (useInstalledFeature)
+        {
+            context.Features.Set<IHttpFormFeature>(new HttpFormFeature(context.Request, new HttpFormOptions { ValueCountLimit = limit }));
+        }
+        int downstream = 0;
+        IWebApplicationPipeline pipeline = BuildPipeline(() => downstream++);
+
+        // Act
+        await pipeline.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.RequestEntityTooLarge);
+        downstream.ShouldBe(0);
+        using JsonDocument problem = context.ReadProblem();
+        problem.RootElement.GetProperty("status").GetInt32().ShouldBe(413);
+        problem.RootElement.GetProperty("detail").GetString().ShouldBe("The request form exceeds a configured size limit.");
+    }
+
     private static IWebApplicationPipeline BuildPipeline(Action onDownstream)
     {
         TestPipelineBuilder builder = new();
