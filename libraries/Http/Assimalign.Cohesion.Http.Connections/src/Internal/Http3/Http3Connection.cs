@@ -50,6 +50,7 @@ internal sealed class Http3Connection : HttpConnection
 
     public override void Abort(Exception? reason = null)
     {
+        _openContext?.MarkLocalConnectionClose();
         _connection.Abort(reason);
     }
 
@@ -88,6 +89,7 @@ internal sealed class Http3Connection : HttpConnection
             await _openContext.CompleteGracefulCloseAsync().ConfigureAwait(false);
         }
 
+        _openContext?.MarkLocalConnectionClose();
         await _connection.DisposeAsync().ConfigureAwait(false);
     }
 

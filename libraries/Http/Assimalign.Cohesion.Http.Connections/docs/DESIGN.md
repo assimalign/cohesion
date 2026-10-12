@@ -2569,15 +2569,18 @@ failed response operation latches before surfacing the failure to the handler.
 | Version | Where the outcome is latched |
 |---|---|
 | HTTP/1.1 | A minimum-rate failure latches before aborting the connection. Buffered and streamed raw response writes classify connection I/O failures and closure-backed cancellation, fire the exchange token, and fail as cancellation. |
-| HTTP/2 | A slow response latches before its `RST_STREAM`; a connection-wide output or credit stall marks every application response still in flight before teardown. Inbound `RST_STREAM` marks the active application response before cancelling the stream. The control reads both the exchange and stream latches. |
-| HTTP/3 | A minimum-rate failure latches before `H3_REQUEST_CANCELLED`. Final frame writes and flushes observe exchange cancellation even with no caller token. Active interims preserve caller cancellation and also observe peer-stream closure; peer `RESET_STREAM` or `STOP_SENDING` is latched before the operation throws with the exchange token. Native stream-abort exceptions are recognized even before the driver signals closure. |
+| HTTP/2 | A slow response latches before its `RST_STREAM`; a connection-wide output or credit stall marks every application response still in flight before teardown. Inbound `RST_STREAM` marks the active application response before cancelling the stream. Peer connection loss marks active responses and cancels exchanges before output failures escape or credit waiters resume. Raw output observes connection closure even without a caller token. The control reads both the exchange and stream latches. |
+| HTTP/3 | A minimum-rate failure latches before `H3_REQUEST_CANCELLED`. Final frame writes and flushes observe exchange cancellation even with no caller token. Active interims preserve caller cancellation and also observe stream and parent closure; peer `RESET_STREAM`, `STOP_SENDING`, or parent connection loss is latched before the operation throws with the exchange token. Native peer failures are recognized even before the driver signals closure, using the driver's exclusion of local `OperationAborted`. |
 
 HTTP/2 preserves its existing response-write behavior on peer reset: a writer awaiting flow-control
 credit may return after discarding the unwritten remainder, while `RequestCancelled` and the latch
 report why the response ended. A thrown failure is not needed to retain the transport's fact.
 Application cancellation, application header or callback failures, and server resets caused by
 request-body rejection do not alone set the response latch. HTTP/3 excludes its local request reset
-and connection teardown from the peer-stream classifier. Request framing and limit failures continue
+and explicitly initiated local connection closure from the peer classifier. Ending stream acceptance
+does not imply local connection closure: peer loss remains reportable after a graceful GOAWAY or
+receive-enumeration teardown. HTTP/2 keeps a plain input FIN distinct from loss of the whole connection,
+so a fully received request can still be answered when output remains usable. Request framing and limit failures continue
 to use `ClientFaultStatusCode`; losing a request connection mid-body remains the cancellation behavior
 of #1430 and #1439.
 
@@ -2592,15 +2595,18 @@ projection before its application-fault boundary, including when middleware wrap
 exception, and ends the exchange as `request_canceled` without an Error log or `OnException`.
 
 Against 10.0.0-preview.1 this is an observable classification change on decision 15's terms: a peer
-reset during response writing, or a configured HTTP/1.1 slow streamed response, no longer invokes the
+reset or connection loss during response writing, or a configured HTTP/1.1 slow streamed response, no longer invokes the
 application fault observer. HTTP/2 and HTTP/3 minimum-rate reclamation arrived later in #1384. The
 latch changes no rate default or wire reset code and keeps existing control implementations source
 compatible through its default `false`.
 
 The implementation remains AOT compatible: interface dispatch, static delegates and value tuples,
-with no reflection. Final response writes reuse the exchange token when the caller passes it or no
-token; active interims use the stream-closure token. A distinct cancellable caller token requires a
-temporary linked source so either cancellation ends the operation. The rate gate's reusable deadline still avoids a timer for synchronous writes.
+with no reflection. HTTP/1.1 and HTTP/3 final writes reuse the exchange token when the caller passes
+it or no token. HTTP/2 output combines caller, connection and response cancellation, so a read failure
+can release a pending response flush before the driver's closure callback. HTTP/3 active interims
+combine caller, stream and parent closure without observing local exchange cancellation. Temporary
+linked sources are disposed with each write. The rate gate's reusable deadline still avoids a timer
+for synchronous writes.
 
 ## HTTP/2 request heads (RFC 9113 §8.3)
 

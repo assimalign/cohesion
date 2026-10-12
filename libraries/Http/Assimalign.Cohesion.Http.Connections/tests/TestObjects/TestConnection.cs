@@ -125,6 +125,9 @@ internal sealed class TestConnection : Connection
         _peer.Output.Complete();
     }
 
+    /// <summary>Aborts the remote end, exposing a peer loss to the server transport.</summary>
+    public void AbortPeer(Exception? reason = null) => _peer.Abort(reason);
+
     public override void Abort(Exception? reason = null)
     {
         _isAborted = true;

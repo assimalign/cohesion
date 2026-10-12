@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -6,6 +7,7 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
@@ -174,6 +176,143 @@ public class Http2ResponseClientFaultTests
         // Assert
         control.ResponseAbortedByClient.ShouldBeFalse();
         control.ClientFaultStatusCode.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response Client Fault: Peer connection loss while awaiting credit should latch every active response before cancellation")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task WriteAsync_OnPeerConnectionLossWhileAwaitingCredit_ShouldLatchBeforeCancellation(bool gated, bool connectionReset)
+    {
+        // Arrange
+        CaptureControlInterceptor capture = new();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(
+            CreateOptions(capture),
+            http2 => http2.Limits.MinResponseDataRate = gated ? new HttpMinDataRate(1, TimeSpan.FromMinutes(1)) : null,
+            initialWindowSize: 0);
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/waiting"));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+        IHttpExchangeControl control = capture.Control.ShouldNotBeNull();
+        await exchange.Response.Streaming.FlushAsync(CancellationToken.None);
+        await peer.SendHeadersAsync(3, endStream: true, Http2TestPeer.Get("/other"));
+        IHttpContext other = await peer.ReceiveContextAsync();
+        IHttpExchangeControl otherControl = capture.Control.ShouldNotBeNull();
+        await other.Response.Streaming.FlushAsync(CancellationToken.None);
+        TaskCompletionSource<bool> cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = exchange.RequestCancelled.Register(
+            () => cancelled.TrySetResult(control.ResponseAbortedByClient));
+        TaskCompletionSource<bool> otherCancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration otherRegistration = other.RequestCancelled.Register(
+            () => otherCancelled.TrySetResult(otherControl.ResponseAbortedByClient));
+        Task pending = exchange.Response.Streaming.WriteAsync(new byte[1], CancellationToken.None).AsTask();
+        await peer.SyncAsync();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        peer.Transport.AbortPeer(connectionReset
+            ? new ConnectionResetException("The peer connection was reset before its closure callback.")
+            : new IOException("The peer connection was reset."));
+        try
+        {
+            await pending.WaitAsync(_timeout);
+        }
+        catch (Exception failure) when (failure is IOException or OperationCanceledException)
+        {
+            // A credit wait may fail or discard the unwritten remainder; either must publish the fact first.
+            control.ResponseAbortedByClient.ShouldBeTrue();
+            exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        }
+
+        // Assert
+        (await cancelled.Task.WaitAsync(_timeout)).ShouldBeTrue();
+        (await otherCancelled.Task.WaitAsync(_timeout)).ShouldBeTrue();
+        control.ResponseAbortedByClient.ShouldBeTrue();
+        otherControl.ResponseAbortedByClient.ShouldBeTrue();
+        control.ClientFaultStatusCode.ShouldBeNull();
+        otherControl.ClientFaultStatusCode.ShouldBeNull();
+        await peer.WaitForReceiveEndAsync();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response Client Fault: Peer connection loss during an output flush should latch before the failure escapes")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WriteAsync_OnPeerConnectionLossDuringFlush_ShouldLatchAndCancel(bool gated)
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_timeout);
+        CaptureControlInterceptor capture = new();
+        StallingConnection? transport = null;
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(
+            CreateOptions(capture),
+            http2 => http2.Limits.MinResponseDataRate = gated ? new HttpMinDataRate(1, TimeSpan.FromMinutes(1)) : null,
+            decorate: inner => transport = new StallingConnection(inner));
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/flush"));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+        IHttpExchangeControl control = capture.Control.ShouldNotBeNull();
+        await exchange.Response.Streaming.WriteAsync(new byte[1], CancellationToken.None);
+        await peer.SyncAsync();
+        StallingPipeWriter writer = transport.ShouldNotBeNull().Writer;
+        writer.Stall();
+        Task pending = exchange.Response.Streaming.WriteAsync(new byte[1], CancellationToken.None).AsTask();
+        while (!writer.IsFlushWaiting)
+        {
+            await Task.Delay(1, timeout.Token);
+        }
+
+        // Act
+        peer.Transport.AbortPeer(new IOException("The peer connection was reset."));
+        OperationCanceledException failure;
+        try
+        {
+            failure = await Should.ThrowAsync<OperationCanceledException>(() => pending.WaitAsync(timeout.Token));
+        }
+        finally
+        {
+            writer.Grant(1024 * 1024);
+        }
+
+        // Assert
+        control.ResponseAbortedByClient.ShouldBeTrue();
+        control.ClientFaultStatusCode.ShouldBeNull();
+        exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        failure.CancellationToken.ShouldBe(exchange.RequestCancelled);
+        await peer.WaitForReceiveEndAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response Client Fault: Local connection shutdown while awaiting credit should leave the response latch clear")]
+    public async Task WriteAsync_OnLocalConnectionShutdownWhileAwaitingCredit_ShouldLeaveLatchClear()
+    {
+        // Arrange — this already-held behavior guards the peer-loss classifier.
+        using CancellationTokenSource shutdown = new();
+        CaptureControlInterceptor capture = new();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(
+            CreateOptions(capture), http2 => http2.Limits.MinResponseDataRate = null,
+            initialWindowSize: 0, receiveToken: shutdown.Token);
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/shutdown"));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+        IHttpExchangeControl control = capture.Control.ShouldNotBeNull();
+        await exchange.Response.Streaming.FlushAsync(CancellationToken.None);
+        Task pending = exchange.Response.Streaming.WriteAsync(new byte[1], CancellationToken.None).AsTask();
+        await peer.SyncAsync();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        shutdown.Cancel();
+        try
+        {
+            await pending.WaitAsync(_timeout);
+        }
+        catch (Exception failure) when (failure is IOException or OperationCanceledException)
+        {
+            control.ResponseAbortedByClient.ShouldBeFalse();
+        }
+
+        // Assert
+        exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        control.ResponseAbortedByClient.ShouldBeFalse();
+        control.ClientFaultStatusCode.ShouldBeNull();
+        await peer.WaitForReceiveEndAsync();
     }
 
     private static HttpConnectionListenerOptions CreateOptions(CaptureControlInterceptor capture)

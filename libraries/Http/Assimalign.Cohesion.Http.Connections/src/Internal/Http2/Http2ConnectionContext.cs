@@ -52,6 +52,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // writer is woken and fails with a wire-level IOException instead of hanging
     // forever on a signal nothing will complete.
     private bool _sendCreditClosed;
+    private volatile bool _localConnectionClose;
     // RFC 9113 §6.5 — local settings are what we (the server) advertised
     // to the peer; remote settings are what the peer advertised to us.
     // Inbound frame parsing is bounded by the local cap; outbound frame
@@ -412,6 +413,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         }
         finally
         {
+            if (Connection.ConnectionClosed.IsCancellationRequested && CanReportPeerConnectionLoss)
+            {
+                AbortResponsesOnPeerConnectionLoss();
+            }
+
+            // Cancellation and its reason must be visible before a credit waiter can resume.
+            AbortPendingRequests(cancelled: cancellationToken.IsCancellationRequested);
+
             // No further WINDOW_UPDATE can arrive once the pump stops, so send credit
             // is permanently unobtainable: mark it closed and wake any streaming
             // writer parked in AcquireSendWindowAsync so it fails fast instead of
@@ -425,7 +434,6 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // Abort in-flight body readers BEFORE signalling the consumer that no
             // more requests are coming, so a handler observes the abort rather than
             // racing a clean end-of-enumerable.
-            AbortPendingRequests(cancelled: cancellationToken.IsCancellationRequested);
             _readyContexts.Writer.TryComplete();
 
             // Nothing reads frames any more; the streams' later removals find it disposed and leave it.
@@ -537,6 +545,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         }
         catch (Exception ex) when (IsWireLevelFailure(ex))
         {
+            if (CanReportPeerConnectionLoss)
+            {
+                AbortResponsesOnPeerConnectionLoss();
+            }
             return new FrameReadOutcome(frame: null, terminate: true);
         }
     }
@@ -653,6 +665,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     {
         return exception is EndOfStreamException
             or IOException
+            or ConnectionResetException
             or System.Net.Sockets.SocketException;
     }
 
@@ -1493,6 +1506,33 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             {
                 stream.LatchResponseAbortedByClient();
             }
+        }
+    }
+
+    internal void MarkLocalConnectionClose() => _localConnectionClose = true;
+
+    private bool CanReportPeerConnectionLoss =>
+        !_localConnectionClose && _pumpCts?.IsCancellationRequested != true;
+
+    // Unlike an input FIN, a lost connection cannot carry a fully received request's response.
+    // Publish every active response's reason before cancelling any exchange or releasing credit waits.
+    private void AbortResponsesOnPeerConnectionLoss()
+    {
+        Http2Stream[] streams;
+        lock (_syncRoot)
+        {
+            streams = new Http2Stream[_streams.Count];
+            _streams.Values.CopyTo(streams, 0);
+            foreach (Http2Stream stream in streams)
+            {
+                stream.LatchResponseAbortedByClient();
+            }
+        }
+
+        foreach (Http2Stream stream in streams)
+        {
+            stream.AbortOnCancellation();
+            AccountExchangeComplete(stream);
         }
     }
 
@@ -3761,6 +3801,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
     private async ValueTask StopPumpAsync()
     {
+        MarkLocalConnectionClose();
         _pumpCts?.Cancel();
 
         if (_pumpTask is not null)

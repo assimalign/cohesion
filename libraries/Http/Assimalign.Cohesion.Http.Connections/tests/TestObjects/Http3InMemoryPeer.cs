@@ -79,6 +79,15 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
         return new Http3InMemoryPeer(client, server, listener, connectionContext);
     }
 
+    /// <summary>Ends the peer connection and signals that loss to the server's driver boundary.</summary>
+    public void AbortPeer(Exception? reason = null)
+    {
+        _client.Abort(reason);
+        // The in-memory multiplexed driver does not propagate parent closure to its opposite end.
+        // Supply the peer-loss notification without invoking the HTTP server's local shutdown path.
+        _server.Abort(reason);
+    }
+
     /// <summary>
     /// Opens a client-initiated bidirectional stream — a request stream, as the server sees it.
     /// </summary>

@@ -39,6 +39,7 @@ internal sealed class Http2Connection : HttpConnection
 
     public override void Abort(Exception? reason = null)
     {
+        _context?.MarkLocalConnectionClose();
         _connection.Abort(reason);
     }
 

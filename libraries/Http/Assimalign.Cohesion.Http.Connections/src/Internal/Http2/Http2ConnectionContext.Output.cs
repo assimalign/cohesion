@@ -3,6 +3,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
+
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 // The connection's output (#1384): every frame the connection writes — the pump's control frames, the
@@ -147,11 +149,11 @@ internal sealed partial class Http2ConnectionContext
     /// <see cref="IOException"/>.
     /// </param>
     /// <returns>A task that completes once the transport accepted the write.</returns>
-    private ValueTask WriteOutputAsync<TState>(int octets, TState state, Func<TState, CancellationToken, ValueTask> write, CancellationToken cancellationToken, Http2Context? response)
+    private async ValueTask WriteOutputAsync<TState>(int octets, TState state, Func<TState, CancellationToken, ValueTask> write, CancellationToken cancellationToken, Http2Context? response)
     {
         if (_outputStalled)
         {
-            return ValueTask.FromException(CreateOutputStalledException(response));
+            throw CreateOutputStalledException(response);
         }
 
         MinDataRateGate? gate = _outputDataRate;
@@ -168,9 +170,46 @@ internal sealed partial class Http2ConnectionContext
             }
         }
 
-        return gate is null
-            ? write(state, cancellationToken)
-            : WriteOutputWithinRateAsync(gate, octets, state, write, cancellationToken, response);
+        CancellationToken closed = Connection.ConnectionClosed;
+        using CancellationTokenSource? linked = response is not null
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, closed, response.RequestCancelled)
+            : cancellationToken.CanBeCanceled && cancellationToken != closed
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, closed)
+                : null;
+        CancellationToken writeToken = linked?.Token ?? closed;
+        try
+        {
+            closed.ThrowIfCancellationRequested();
+            if (gate is null)
+            {
+                await write(state, writeToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await WriteOutputWithinRateAsync(gate, octets, state, write, writeToken, response).ConfigureAwait(false);
+            }
+            closed.ThrowIfCancellationRequested();
+        }
+        catch (Exception exception) when (CanReportPeerConnectionLoss
+            && (IsWireLevelFailure(exception)
+                || (closed.IsCancellationRequested && exception is OperationCanceledException or InvalidOperationException or ConnectionException)))
+        {
+            AbortResponsesOnPeerConnectionLoss();
+            if (response is not null)
+            {
+                throw new OperationCanceledException("The peer closed the HTTP/2 connection during the response.", exception, response.RequestCancelled);
+            }
+            throw;
+        }
+        catch (OperationCanceledException exception) when (response?.RequestCancelled.IsCancellationRequested == true)
+        {
+            throw new OperationCanceledException(exception.Message, exception, response.RequestCancelled);
+        }
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested
+            && exception.CancellationToken != cancellationToken)
+        {
+            throw new OperationCanceledException(exception.Message, exception, cancellationToken);
+        }
     }
 
     private async ValueTask WriteOutputWithinRateAsync<TState>(MinDataRateGate gate, int octets, TState state, Func<TState, CancellationToken, ValueTask> write, CancellationToken cancellationToken, Http2Context? response)

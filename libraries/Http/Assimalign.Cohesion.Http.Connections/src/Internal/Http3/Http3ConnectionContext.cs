@@ -56,6 +56,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     private readonly TaskCompletionSource _streamWorkDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     // The first connection error raised on this connection (Interlocked one-shot).
     private Http3ConnectionException? _connectionError;
+    private volatile bool _localConnectionClose;
+    private CancellationToken _receiveCancellation;
     private IConnection? _controlStream;
     private IConnection? _decoderStream;
     private Task? _acceptLoopTask;
@@ -299,6 +301,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        _receiveCancellation = cancellationToken;
         try
         {
             // #1085 — the connection is idle until its first request stream arrives.
@@ -663,6 +666,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     internal CancellationToken ConnectionClosed => _connection.ConnectionClosed;
 
+    // Intake teardown also follows remote closure; only an actual locally initiated connection close
+    // excludes peer-fault classification. A graceful GOAWAY still lets existing responses run.
+    internal void MarkLocalConnectionClose() => _localConnectionClose = true;
+
     /// <summary>
     /// Emits the server's <c>GOAWAY</c> frame on the outbound control stream
     /// (RFC 9114 §5.2 / §7.2.6) to announce graceful shutdown before the QUIC
@@ -949,6 +956,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
+        MarkLocalConnectionClose();
         _teardownSource.Cancel();
 
         if (_connection is IMultiplexedConnectionAbort coded)
@@ -3276,7 +3284,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// The raw write alone is guarded: application response encoding and lifecycle hooks keep their
     /// own failures, and local resets and request-body rejections never become response client faults.
     /// </summary>
-    private async ValueTask RunResponseWriteAsync<TState>(
+    internal async ValueTask RunResponseWriteAsync<TState>(
         Http3Context context,
         TState state,
         Func<Http3ConnectionContext, Http3Context, TState, CancellationToken, ValueTask> operation,
@@ -3286,14 +3294,16 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         ThrowIfResponsePeerAborted(context);
         CancellationToken requestCancelled = context.RequestCancelled;
         // An active interim retains its caller-token contract when the application cancels the
-        // exchange (#1428). Peer closure must still release it; final writes also observe local cancel.
+        // exchange (#1428). Stream or parent closure must still release it; final writes also observe local cancel.
         CancellationToken transportCancellation = linkExchangeCancellation
             ? requestCancelled
             : context.StreamConnection.ConnectionClosed;
         transportCancellation.ThrowIfCancellationRequested();
-        using CancellationTokenSource? linked = cancellationToken.CanBeCanceled && cancellationToken != transportCancellation
-            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, transportCancellation)
-            : null;
+        using CancellationTokenSource? linked = !linkExchangeCancellation
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, transportCancellation, ConnectionClosed)
+            : cancellationToken.CanBeCanceled && cancellationToken != transportCancellation
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, transportCancellation)
+                : null;
         CancellationToken writeToken = linked?.Token ?? transportCancellation;
 
         try
@@ -3320,7 +3330,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     private void ThrowIfResponsePeerAborted(Http3Context context)
     {
-        if (context.StreamConnection.ConnectionClosed.IsCancellationRequested
+        if ((context.StreamConnection.ConnectionClosed.IsCancellationRequested || ConnectionClosed.IsCancellationRequested)
             && CanReportResponsePeerAbort(context))
         {
             throw context.AbortResponseForPeer(new OperationCanceledException(context.StreamConnection.ConnectionClosed));
@@ -3337,9 +3347,17 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // Native QUIC can throw before its closure callback; the in-memory driver carries the code in
         // ConnectionResetException. Other pipe failures need the stream's closure as supporting evidence.
         return exception is ConnectionResetException
-            || (exception is QuicException quic && IsQuicStreamAborted(quic))
-            || (context.StreamConnection.ConnectionClosed.IsCancellationRequested
+            || (exception is QuicException quic && IsQuicResponseAborted(quic))
+            || ((context.StreamConnection.ConnectionClosed.IsCancellationRequested || ConnectionClosed.IsCancellationRequested)
                 && exception is IOException or ConnectionException or InvalidOperationException or OperationCanceledException);
+    }
+
+    private static bool IsQuicResponseAborted(QuicException exception)
+    {
+        // Match the driver's peer-closure notification, which runs after the write may have failed:
+        // local aborts report OperationAborted; other stream failures include connection loss/timeouts.
+        return (OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            && exception.QuicError != QuicError.OperationAborted;
     }
 
     private bool CanReportResponsePeerAbort(Http3Context context)
@@ -3347,7 +3365,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         return !context.CancelRequested
             && !context.RequestBody.IsReset
             && context.RequestBody.ClientFaultStatusCode is null
-            && !ConnectionClosed.IsCancellationRequested;
+            && !_localConnectionClose
+            && !_receiveCancellation.IsCancellationRequested;
     }
 
     private static async Task WriteFrameAsync(Stream stream, Http3FrameType frameType, byte[] payload, CancellationToken cancellationToken)

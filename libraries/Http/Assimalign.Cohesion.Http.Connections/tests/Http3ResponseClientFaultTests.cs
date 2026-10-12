@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -142,6 +143,138 @@ public class Http3ResponseClientFaultTests
         // Assert — this already-held behavior guards the new response latch's classification.
         control.ResponseAbortedByClient.ShouldBeFalse();
         context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Response Client Fault: Peer parent-connection loss should latch before a pending response failure escapes")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResponseAbortedByClient_OnPeerParentConnectionLossDuringWrite_ShouldLatchAndCancel(bool gated)
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        StallingMultiplexedConnection? server = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            http3 => http3.Limits.MinResponseDataRate = gated ? new HttpMinDataRate(1, TimeSpan.FromMinutes(1)) : null,
+            ConfigureInterceptors,
+            inner => server = new StallingMultiplexedConnection(inner));
+        await using Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/parent-loss", "https", "a"), timeout.Token);
+        await request.Output.CompleteAsync();
+        await using IHttpContext context = await peer.NextContextAsync();
+        IHttpExchangeControl control = GetControl(context);
+        await context.Response.Streaming.WriteAsync(new byte[1], timeout.Token);
+        StallingPipeWriter writer = server.ShouldNotBeNull().RequestStreams[0].Writer;
+        writer.Stall();
+        Task pending = context.Response.Streaming.WriteAsync(new byte[1024], CancellationToken.None).AsTask();
+        while (!writer.IsFlushWaiting)
+        {
+            await Task.Delay(1, timeout.Token);
+        }
+
+        // Act
+        peer.AbortPeer(new IOException("The peer parent connection was reset."));
+        OperationCanceledException failure;
+        try
+        {
+            failure = await Should.ThrowAsync<OperationCanceledException>(() => pending.WaitAsync(timeout.Token));
+        }
+        finally
+        {
+            writer.Grant(1024 * 1024);
+        }
+
+        // Assert
+        control.ResponseAbortedByClient.ShouldBeTrue();
+        control.ClientFaultStatusCode.ShouldBeNull();
+        context.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        failure.CancellationToken.ShouldBe(context.RequestCancelled);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Response Client Fault: Peer parent-connection loss should release an active interim and latch before failure")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WriteInterimResponseAsync_OnPeerParentConnectionLossDuringFlush_ShouldLatchAndCancel(bool callerToken)
+    {
+        // Arrange — the interim remains governed by its caller token as well as peer lifetime.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        StallingMultiplexedConnection? server = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            http3 => http3.Limits.MinResponseDataRate = null,
+            ConfigureInterceptors,
+            inner => server = new StallingMultiplexedConnection(inner));
+        await using Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/interim-parent-loss", "https", "a"), timeout.Token);
+        await using IHttpContext context = await peer.NextContextAsync();
+        IHttpExchangeControl control = GetControl(context);
+        StallingPipeWriter writer = server.ShouldNotBeNull().RequestStreams[0].Writer;
+        writer.Stall();
+        Task pending = control.WriteInterimResponseAsync(
+            HttpStatusCode.EarlyHints, cancellationToken: callerToken ? timeout.Token : CancellationToken.None).AsTask();
+        while (!writer.IsFlushWaiting)
+        {
+            await Task.Delay(1, timeout.Token);
+        }
+
+        // Act
+        peer.AbortPeer(new IOException("The peer parent connection was reset."));
+        OperationCanceledException failure;
+        try
+        {
+            failure = await Should.ThrowAsync<OperationCanceledException>(() => pending.WaitAsync(timeout.Token));
+        }
+        finally
+        {
+            writer.Grant(1024 * 1024);
+        }
+
+        // Assert
+        timeout.IsCancellationRequested.ShouldBeFalse("peer loss should release the interim before the test deadline");
+        control.ResponseAbortedByClient.ShouldBeTrue();
+        control.ClientFaultStatusCode.ShouldBeNull();
+        context.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        failure.CancellationToken.ShouldBe(context.RequestCancelled);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Response Client Fault: Local parent-connection shutdown should leave the response latch clear")]
+    public async Task ResponseAbortedByClient_OnLocalParentConnectionShutdownDuringWrite_ShouldRemainFalse()
+    {
+        // Arrange — this already-held behavior guards the peer-loss classifier.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        StallingMultiplexedConnection? server = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            http3 => http3.Limits.MinResponseDataRate = null,
+            ConfigureInterceptors,
+            inner => server = new StallingMultiplexedConnection(inner));
+        await using Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/shutdown", "https", "a"), timeout.Token);
+        await request.Output.CompleteAsync();
+        await using IHttpContext context = await peer.NextContextAsync();
+        IHttpExchangeControl control = GetControl(context);
+        await context.Response.Streaming.WriteAsync(new byte[1], timeout.Token);
+        StallingPipeWriter writer = server.ShouldNotBeNull().RequestStreams[0].Writer;
+        writer.Stall();
+        Task pending = context.Response.Streaming.WriteAsync(new byte[1024], CancellationToken.None).AsTask();
+        while (!writer.IsFlushWaiting)
+        {
+            await Task.Delay(1, timeout.Token);
+        }
+
+        // Act
+        ((Http3ConnectionContext)peer.ConnectionContext).AbortConnection(
+            new Http3ConnectionException(Http3ErrorCode.InternalError, "The server closed the connection."));
+        try
+        {
+            await Should.ThrowAsync<OperationCanceledException>(() => pending.WaitAsync(timeout.Token));
+        }
+        finally
+        {
+            writer.Grant(1024 * 1024);
+        }
+
+        // Assert
+        context.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        control.ResponseAbortedByClient.ShouldBeFalse();
+        control.ClientFaultStatusCode.ShouldBeNull();
     }
 
     private static void ConfigureInterceptors(HttpConnectionListenerOptions options)
