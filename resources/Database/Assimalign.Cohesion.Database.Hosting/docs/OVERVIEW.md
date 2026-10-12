@@ -27,7 +27,7 @@ Model verbs (`AddSql`, `AddDocuments`, `AddGraph`, `AddKeyValue`, `AddBlob`) tak
 and a callback over its engine builder. Names are reserved before factories run. Model builders
 declare servers, workers and databases; Build opens or creates the databases before servers accept.
 SQL runs cheap schema steps there and defers populated-table work to its own provisioning worker
-(49a), reserving affected tables before returning. Health reports Degraded with the current step
+(49a), reserving affected tables before returning. Health remains responsive during recovery and reports Degraded with the current step
 and row progress through the root instance's model-neutral observation. A deferred failure takes
 that database offline; an inline failure disposes the already-built owned products.
 

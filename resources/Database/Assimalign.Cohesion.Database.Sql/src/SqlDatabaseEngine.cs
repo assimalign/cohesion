@@ -208,8 +208,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     internal SqlStorage[] GetStorageSnapshot() => Volatile.Read(ref _storageSnapshot);
 
     /// <summary>
-    /// Gets a point-in-time snapshot of every open database, for workers that operate
-    /// through the per-database transaction coordinator (checkpointing, version purge).
+    /// Gets a point-in-time snapshot of every published database, for inventory and workers
+    /// that operate through the per-database transaction coordinator (checkpointing, version purge).
     /// Same racing-a-drop tolerance as <see cref="GetStorageSnapshot"/>.
     /// </summary>
     internal SqlDatabase[] GetInstanceSnapshot() => Volatile.Read(ref _instanceSnapshot);
@@ -513,8 +513,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         => (SqlDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Enumerates the SQL databases the engine manages. The engine state and the token are checked
-    /// when the call is made, not when the enumeration starts.
+    /// Enumerates a snapshot of the SQL databases already published by the engine, without waiting
+    /// for another database to finish opening or recovery. The engine state and token are checked
+    /// when the call is made; cancellation is also observed during enumeration.
     /// </summary>
     /// <param name="cancellationToken">Cancels the enumeration.</param>
     /// <returns>An async sequence of the databases.</returns>
@@ -1023,13 +1024,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     // cast: the sequence is covariant, so it is the base's sequence too.
     private async IAsyncEnumerable<SqlDatabase> EnumerateDatabasesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        SqlDatabase[] snapshot;
-        lock (_syncRoot)
-        {
-            snapshot = [.. _databases.Values];
-        }
-
-        foreach (var database in snapshot)
+        // Recovery holds the registry monitor until the new instance is ready. Health must
+        // observe the already-published instances without joining that potentially long wait.
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var database in GetInstanceSnapshot())
         {
             cancellationToken.ThrowIfCancellationRequested();
 
