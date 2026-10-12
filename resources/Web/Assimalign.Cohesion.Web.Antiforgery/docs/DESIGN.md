@@ -111,7 +111,9 @@ flowchart TD
   header (`HttpAntiforgeryOptions.HeaderName`) and has a `application/x-www-form-urlencoded` or
   `multipart/form-data` body. A client that sends the token in the header therefore keeps its body
   unread, which an endpoint streaming a large upload depends on. This is the order ASP.NET Core's token
-  store uses for the same reason.
+  store uses for the same reason. If an earlier middleware such as `UseForms` already parsed the
+  body, the validator prefers a nonempty configured form token over the header. Reading the cached
+  `request.Form` does not consume the body.
 - **The form is parsed once.** `context.ReadFormAsync` caches the parse on the exchange's
   `IHttpFormFeature`, so a form-bound typed endpoint binds from the same parse instead of a consumed
   body. A malformed body the form reader rejects (`InvalidDataException`) carries no token the server
@@ -335,6 +337,13 @@ tokens; Warning reports that an already committed response forced the middleware
 | 2 | `RejectionAborted` | Warning | `reason`, `routeTemplate`, `suppressedCount:int`, `requestId` |
 | 3 | `TokenUnprotectFailed` | Verbose | `exceptionType`, `exceptionMessage`, `innerExceptionType` |
 
+`RequestRejected.tokenLocation` follows the validator's parsed-form-first precedence: a nonempty
+configured token field already in `request.Form` is `Form`, even when a token header is also present.
+An empty or missing field falls back to the header. The middleware still reads the body only when no
+token header is present and the content type is a form; a failed form read is also classified as `Form`.
+The #1403 review correction changes only diagnostic attribution, preserves validation and streaming
+behavior, and introduces no break against `10.0.0-preview.1`, which did not contain this package.
+
 `rejected-requests` is a lazily published `PollingCounter` backed by an exact total maintained without
 listeners. An internal exchange feature marks a request after its first rejection, so re-entering the
 middleware counts it once. The counter includes every rejected exchange, including those whose abort
@@ -358,7 +367,8 @@ from disclosing tokens or repository paths while retaining the built-in diagnosi
 These diagnostics add no public API or request-processing behavior change. This package did not
 exist in `10.0.0-preview.1`. `AntiforgeryEventSourceTests` validates the strict manifest, all event
 payloads, counter publication and exact deltas, malformed-form hygiene, custom-provider hygiene,
-disabled-listener feature reads, and abort throttling.
+disabled-listener feature reads, abort throttling, and parsed-form precedence with both tokens present
+for default and custom form-field names without additional body reads.
 
 ## AOT posture
 

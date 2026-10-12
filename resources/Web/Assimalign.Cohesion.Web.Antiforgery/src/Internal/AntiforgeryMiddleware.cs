@@ -80,7 +80,8 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
 
         bool hasHeaderToken = HasHeaderToken(request);
         bool readForm = !hasHeaderToken && HasFormContentType(request);
-        string tokenLocation = hasHeaderToken ? "Header" : readForm ? "Form" : "None";
+        // Match the validator's parsed-form-first precedence without reading the body for a header.
+        string tokenLocation = HasFormToken(request) ? "Form" : hasHeaderToken ? "Header" : readForm ? "Form" : "None";
 
         if (readForm)
         {
@@ -108,6 +109,14 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
         return await antiforgery.IsRequestValidAsync(context).ConfigureAwait(false)
             ? null
             : (HttpStatusCode.BadRequest, "TokenInvalid", tokenLocation);
+    }
+
+    private bool HasFormToken(IHttpRequest request)
+    {
+        IHttpFormCollection form = request.Form;
+        return form.Count > 0
+            && form.TryGetValue(_registration.Options.FormFieldName, out HttpQueryValue token)
+            && !string.IsNullOrEmpty(token.Value);
     }
 
     private bool HasHeaderToken(IHttpRequest request)

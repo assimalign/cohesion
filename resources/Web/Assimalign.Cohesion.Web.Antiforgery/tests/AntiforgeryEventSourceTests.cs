@@ -118,6 +118,49 @@ public sealed class AntiforgeryEventSourceTests
         recorder.Events.SelectMany(item => item.Payload!).OfType<string>().ShouldNotContain(item => item.Contains(secret, StringComparison.Ordinal));
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Antiforgery] - InvokeAsync: A parsed form token takes precedence over a valid header in rejection events")]
+    [InlineData("__RequestVerificationToken")]
+    [InlineData("custom-csrf-field")]
+    public async Task InvokeAsync_ParsedFormTokenWithValidHeader_ShouldReportFormTokenLocation(string formFieldName)
+    {
+        // Arrange
+        const string invalidFormToken = "invalid-form-token";
+        AntiforgeryBuilder builder = new();
+        builder.Options.FormFieldName = formFieldName;
+        AntiforgeryFeature registration = (AntiforgeryFeature)builder.Build();
+        AntiforgeryMiddleware middleware = new(registration);
+        await using AntiforgeryTestContext issuingContext = new(HttpMethod.Get);
+        HttpAntiforgeryTokenSet tokens = registration.Antiforgery.GetTokens(issuingContext);
+        await using AntiforgeryTestContext context = AntiforgeryTestContext
+            .ForUrlEncodedForm(HttpMethod.Post, formFieldName + "=" + invalidFormToken)
+            .WithCookie(registration.Options.CookieName, tokens.CookieToken!)
+            .WithHeader(registration.Options.HeaderName, tokens.RequestToken!);
+        (await registration.Antiforgery.IsRequestValidAsync(context)).ShouldBeTrue();
+        // UseForms ahead of antiforgery publishes this same cached form.
+        IHttpFormCollection form = await context.ReadFormAsync(context.RequestCancelled);
+        context.RequestBody.Position = 0;
+        RequestIdFeature requestId = Publish(context);
+        using EventSourceRecorder recorder = new(AntiforgeryEventSource.Log, EventLevel.Verbose);
+        int endpointInvocations = 0;
+
+        // Act
+        await middleware.InvokeAsync(context, _ =>
+        {
+            endpointInvocations++;
+            return Task.CompletedTask;
+        });
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        endpointInvocations.ShouldBe(0);
+        context.Request.Form.ShouldBeSameAs(form);
+        context.RequestBody.Position.ShouldBe(0);
+        EventWrittenEventArgs rejected = recorder.Events.Single(item => item.EventId == 1 && Payload(item, "requestId").Equals(requestId.Id.ToHexString()));
+        Payload(rejected, "reason").ShouldBe("TokenInvalid");
+        Payload(rejected, "tokenLocation").ShouldBe("Form");
+        recorder.Events.ShouldNotContain(item => item.EventId == 0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - InvokeAsync: Malformed multipart header text never reaches events")]
     public async Task InvokeAsync_MalformedForm_ShouldOmitExceptionText()
     {
