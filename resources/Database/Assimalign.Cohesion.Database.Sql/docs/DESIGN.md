@@ -1012,8 +1012,8 @@ binary values. Stored row bytes and canonical DEFAULT text retain their existing
 
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). It has two entry points over one internal
-`SqlSchemaProvisioner` per database: the engine builder provisions every database it declares
-before its build returns (next section), and the typed `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema,
+`SqlSchemaProvisioner` per database: the engine builder completes inline work and reserves deferred
+work for every database it declares before its build returns (next section), and the typed `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema,
 CancellationToken)` applies a schema imperatively, for tools, Studio and tests (decision 53). The
 public member checks disposal, a null schema and the token first, then refuses an offline database
 (`COHSQLT004`). Until B1 the root `DatabaseInstance` carried the capability
@@ -1024,8 +1024,8 @@ database name, and a shape the shipped SQL DDL surface can represent. It then
 reconstructs or reads the last canonical catalog state, uses
 `SqlSchemaMigrationPlanner` from `Database.Sql.Schema` for deterministic ordering/destructive gating, and
 `SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
-steps are table, column, and secondary-index add/drop; alter/rebuild operations
-and advanced objects (principals/grants) fail before execution rather than
+steps are table, column, and secondary-index add/drop, plus validation-only column changes;
+operations requiring a rewrite and advanced objects (principals/grants) fail before execution rather than
 recording a false applied hash. Foreign keys and checks now render into provisioning
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
 the engine and the database. A plan the planner refuses (a destructive step the schema does not
@@ -1082,7 +1082,7 @@ the desired spelling so the planner does not invent changes. The desired CLR row
 primary-key name are retained when the catalog's corresponding structure matches; neither is SQL
 catalog metadata. E3 domains are engine registrations made before provisioning, so registered
 declared domains are included in the snapshot even when no table exists; their planner operations
-emit no DDL. Principals/grants and ALTER metadata remain explicitly refused, as before B2.
+emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain explicitly refused.
 
 `table.Default(selector, value)` renders a typed C# value through the schema package's shared
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values

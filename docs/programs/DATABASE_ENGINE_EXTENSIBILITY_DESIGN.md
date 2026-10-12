@@ -1538,7 +1538,8 @@ Numbering continues the plan of record's table. Each line is the question, then 
     after it.
 
     *Landed in B2 (49a)* (#1355 part 2). Format **9** persists an ordered pending target separately
-    from the applied marker. Build completes cheap steps and reserves pending tables with the
+    from the applied marker. Build durably records the target before any cheap step commits,
+    completes cheap steps and reserves pending tables with the
     existing lock manager; the sixth SQL worker executes populated-table index/constraint work
     and validation-only tightening, with bounded index batches so other tables can commit.
     Completion atomically clears intent with the final marker. Failure takes only that database
@@ -1554,9 +1555,38 @@ Numbering continues the plan of record's table. Each line is the question, then 
     the host runtime has no shutdown lifecycle yet at Build. Physical recovery and logical scrub
     observe cancellation and retain the classification journal after interruption.
 
-    The final Release NativeAOT Q8 best-of-five invocation medians are **0.0051 ms** for reconciliation
+    *49a review corrections* (after `682f7946a`). Index and table publications merge only their
+    affected registrations under the catalog lock; delayed checkpoint snapshots preserve newer
+    roots and cannot erase or resurrect publications. Same-table additions keep declaration order
+    across the inline/worker partition. Early durable intent closes the cheap-DDL crash gap and
+    survives compensation until convergence. FK admission includes parents from CREATE TABLE and
+    ALTER ADD COLUMN/CONSTRAINT before binding. Code-first VARCHAR length and DECIMAL precision
+    changes compare resolved types and bounds, retaining the validation-only rewrite boundary.
+    Health reads SQL's published instance snapshot during recovery. Inline failures still fail
+    Build; deferred failures take only their database offline after Build can return.
+
+    Deterministic regressions first reproduced the six runtime findings, including real trees,
+    catalog commits, durable crash images, a paused parent index and actual Hosting health during
+    automatic reopen. The waiting-statement regression now requires the final NOT NULL rejection;
+    temporarily bypassing admission made both storage variants fail with the stale-table retry
+    error. The bypass was removed. No shipped public member or interface was added. SQL tests
+    reference Hosting only to drive the actual health path through the existing SQL recovery hook.
+
+    Review verification at `8156ad0fa`: five fresh Release NativeAOT Q8 processes measured
+    reconciliation medians **0.0061, 0.0101, 0.0092, 0.0099, 0.0092 ms** and post-open provisioning
+    medians **0.0069, 0.0113, 0.0108, 0.0109, 0.0101 ms**. Every round remains below the 1 ms gate;
+    open/recovery remains outside it. Publication emitted no IL2xxx/IL3xxx diagnostics. The archive,
+    source instrumentation, binary identity, logs and results are under `_out/49a-review/q8`.
+    The review gates passed **4,396 tests in each of Debug and Release**, with zero failures or
+    skips across 14 suites: Sql, Sql.Catalog, Sql.Schema, Storage, Indexing, Hosting, Database,
+    Client, Sql.Client, Sql.Language, Sql.Storage, Embedded, Sdk.Database and Database.Testing.
+    The Release local feed was rebuilt with `Install-Local.ps1 -Configuration Release -SkipLibraries`
+    after the last source change, and Database.Testing then passed in both configurations.
+    Release inventory passed; the dependency graph regenerated without a content change.
+
+    The original landing's Release NativeAOT Q8 best-of-five invocation medians were **0.0051 ms** for reconciliation
     and **0.0061 ms** for post-open provisioning; all five reconciliation medians were below 0.009 ms.
-    Final verification passed **6,002 tests in each of Debug and Release**, with zero failures or
+    Original landing verification passed **6,002 tests in each of Debug and Release**, with zero failures or
     skips across 30 suites. The Release local packages were refreshed after the last source edit,
     then Database.Testing passed in both configurations. The lifecycle diagram was rendered and checked.
 
