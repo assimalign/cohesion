@@ -149,6 +149,11 @@ tested over this driver puts its codes where the QUIC driver puts them:
 
 **The multiplexed roots (#1453).** Streams expose `Abort(code, reason)`, which resets both
 available directions before ending the lifecycle. A direction already ended retains its first code.
+Exceptions thrown by local or peer `ConnectionClosed` registrations are isolated, as in the QUIC
+driver, so abort still notifies the peer and removes the ended stream from its parent's live set.
+This also applies to no-code abort, directional abort and disposal through the shared cancellation
+path. Compared with 10.0.0-preview.1, callback exceptions no longer escape teardown; this behavior
+break is accepted under decision 15. The coded stream root itself postdates preview.1.
 `IsInputCompleted` is true when the peer completed output cleanly and this end has not aborted
 reading; buffered bytes may still remain. The parent root accepts coded aborts in the same 62-bit
 range as streams; the first abort or disposal decides the pair close and notifies both ends as

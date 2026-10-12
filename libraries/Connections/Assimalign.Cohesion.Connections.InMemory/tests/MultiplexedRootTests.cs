@@ -5,10 +5,53 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections.InMemory.Internal;
+
 namespace Assimalign.Cohesion.Connections.InMemory.Tests;
 
 public class MultiplexedRootTests
 {
+    [Theory(DisplayName = "Cohesion Test [Connections.InMemory] - Root stream abort: Throwing callbacks cannot prevent peer notification or stream removal")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Abort_WithThrowingStreamCallback_ShouldNotifyPeerAndRemoveStream(bool throwsOnPeer)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(5));
+        int localClosed = 0;
+        int peerClosed = 0;
+        var (local, peer) = InMemoryConnection.CreateStreamPair(
+            InMemoryConnectionPair.DefaultCapabilities,
+            endPointA: null,
+            endPointB: null,
+            ConnectionDirection.Bidirectional,
+            onClosedA: _ => localClosed++,
+            onClosedB: _ => peerClosed++);
+        await using (local)
+        await using (peer)
+        {
+            using CancellationTokenRegistration registration = (throwsOnPeer ? peer : local).ConnectionClosed.Register(
+                () => throw new InvalidOperationException("A consumer callback failed"));
+
+            // Act
+            Should.NotThrow(() => local.Abort(42));
+
+            // Assert
+            local.State.ShouldBe(ConnectionState.Aborted);
+            local.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+            peer.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+            localClosed.ShouldBe(1);
+            peerClosed.ShouldBe(0);
+            (await Should.ThrowAsync<ConnectionResetException>(
+                async () => await peer.Input.ReadAsync(cancellation.Token))).ApplicationErrorCode.ShouldBe(42);
+            (await Should.ThrowAsync<ConnectionResetException>(
+                async () => await peer.Output.WriteAsync(new byte[] { 1 }, cancellation.Token))).ApplicationErrorCode.ShouldBe(42);
+            local.Abort(43);
+            await local.DisposeAsync();
+            localClosed.ShouldBe(1);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Connections.InMemory] - Root stream abort: Both directions retain their first code and the lifecycle ends")]
     [InlineData(false, false)]
     [InlineData(true, false)]

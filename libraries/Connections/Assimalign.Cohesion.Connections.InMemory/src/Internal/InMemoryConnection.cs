@@ -359,9 +359,9 @@ internal sealed class InMemoryConnection : Connection
         {
             // The token source was disposed concurrently with tear-down.
         }
-        catch (AggregateException) when (_connectionLoss is not null)
+        catch (AggregateException)
         {
-            // A registration cannot prevent the remaining stream and parent teardown.
+            // A registration cannot prevent peer notification or the remaining stream teardown.
         }
     }
 
