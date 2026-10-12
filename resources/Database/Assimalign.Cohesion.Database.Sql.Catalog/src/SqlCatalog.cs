@@ -1380,22 +1380,59 @@ public sealed partial class SqlCatalog
         }
         foreach (var column in table.Columns)
         {
-            AppendFunctionCalls(ref writer, column.DefaultFunctionCalls);
+            AppendFunctionCalls(ref writer, column.DefaultFunctionCalls, column.DefaultLiteral?.Length ?? 0);
         }
         foreach (var constraint in table.Constraints)
         {
-            AppendFunctionCalls(ref writer, constraint.CheckFunctionCalls);
+            AppendFunctionCalls(ref writer, constraint.CheckFunctionCalls, constraint.CheckExpression?.Length ?? 0);
         }
         return writer.ToArray();
     }
 
-    private static void AppendFunctionCalls(ref DatabaseKeyWriter writer, IReadOnlyList<string> calls)
+    // Consecutive repeated identities share one tuple while the decoded vector still records every call.
+    // A nested expression such as ABS(ABS(...)) must not repeat a full signature at every level on disk.
+    private static void AppendFunctionCalls(ref DatabaseKeyWriter writer, IReadOnlyList<string> calls, int expressionLength)
     {
-        writer.AppendInt32(calls.Count);
-        foreach (string call in calls)
+        if (calls.Count > expressionLength)
         {
-            writer.AppendString(call, Collation.Binary);
+            throw new SqlCatalogException("The function-call count exceeds its canonical expression length.");
         }
+        int runs = 0;
+        for (int index = 0; index < calls.Count; index++)
+        {
+            if (index == 0 || !string.Equals(calls[index - 1], calls[index], StringComparison.Ordinal)) { runs++; }
+        }
+        writer.AppendInt32(runs);
+        for (int start = 0; start < calls.Count;)
+        {
+            int end = start + 1;
+            while (end < calls.Count && string.Equals(calls[start], calls[end], StringComparison.Ordinal)) { end++; }
+            writer.AppendString(calls[start], Collation.Binary).AppendInt32(end - start);
+            start = end;
+        }
+    }
+
+    private static IReadOnlyList<string> ReadFunctionCalls(ref DatabaseKeyReader reader, int expressionLength)
+    {
+        int runs = reader.ReadInt32();
+        if (runs < 0 || runs > expressionLength)
+        {
+            throw new SqlCatalogException("The persisted function-call run count is invalid.");
+        }
+        var calls = new List<string>();
+        for (int index = 0; index < runs; index++)
+        {
+            string identity = reader.ReadString(out _);
+            int count = reader.ReadInt32();
+            // Every call requires at least one character in its expression. This parser-independent
+            // bound rejects damaged expansion counts before allocating, without summation overflow.
+            if (string.IsNullOrWhiteSpace(identity) || count <= 0 || count > expressionLength - calls.Count)
+            {
+                throw new SqlCatalogException("The persisted function-call identity or repetition count is invalid.");
+            }
+            for (int repeat = 0; repeat < count; repeat++) { calls.Add(identity); }
+        }
+        return calls;
     }
 
     private static SqlCatalogTable DecodeTable(ref DatabaseKeyReader reader)
@@ -1533,7 +1570,7 @@ public sealed partial class SqlCatalog
             }
             var column = columns[index];
             columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
-                column.DefaultLiteral, column.Collation, column.DomainName, ReadColumnNames(ref reader));
+                column.DefaultLiteral, column.Collation, column.DomainName, ReadFunctionCalls(ref reader, column.DefaultLiteral?.Length ?? 0));
         }
         for (int index = 0; index < constraints.Count; index++)
         {
@@ -1544,7 +1581,7 @@ public sealed partial class SqlCatalog
             var constraint = constraints[index];
             constraints[index] = new SqlCatalogConstraint(constraint.Name, constraint.Kind, constraint.Columns,
                 constraint.ReferencedSchema, constraint.ReferencedTable, constraint.ReferencedColumns,
-                constraint.CheckExpression, constraint.OnDelete, ReadColumnNames(ref reader));
+                constraint.CheckExpression, constraint.OnDelete, ReadFunctionCalls(ref reader, constraint.CheckExpression?.Length ?? 0));
         }
         if (!reader.IsAtEnd)
         {

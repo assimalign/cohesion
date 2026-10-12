@@ -313,8 +313,9 @@ the engine's functions and the table's declared columns, applying the same rules
 `CREATE TABLE` applies (only `IMMUTABLE` functions among them), and refuses the
 declaration with `COHSQLP001` when it does not bind.
 
-**Size.** A table's whole definition, the canonical text of its CHECKs and DEFAULTs
-included, is one catalog record of at most 8,092 bytes. That bounds a stored CHECK
+**Size.** A table's whole definition, including canonical CHECK/DEFAULT text and the
+resolved function identities (consecutive repeats are compacted), is one catalog record
+of at most 8,092 bytes. That bounds a stored CHECK
 at a few hundred comparisons however the nesting limit is configured; a larger
 definition fails its DDL with `The definition of table '<name>' encodes to <n>
 bytes, more than the 8092 bytes a catalog record can hold.` and stores nothing.

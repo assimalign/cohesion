@@ -1344,7 +1344,8 @@ name is COHSQLD001. Format
 ownership. Table/domain CHECKs, column/domain DEFAULTs and SQL bodies reload each call by its
 original normalized signature; native or SQL overload additions cannot rebind them. DROP reads
 the same call records. Literal-only defaults carry empty lists. Format 10 remains unchanged;
-the gate refuses 9 and older without a reader or upgrade path. Missing recorded calls remain unresolved
+table call vectors compact consecutive identical signatures while preserving every call on reload.
+The gate refuses 9 and older without a reader or upgrade path. Missing recorded calls remain unresolved
 on open and fail use/declared Build. CREATE TABLE accepts function-call defaults, evaluated once
 per omitted INSERT value; ADD COLUMN remains literal-only because missing historical row tails
 are not materialized. The FUNCTIONS view adds IS_SQL_DEFINED; TYPES and DOMAINS expose the merged

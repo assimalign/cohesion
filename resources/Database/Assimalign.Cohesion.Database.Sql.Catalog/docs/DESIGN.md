@@ -388,6 +388,10 @@ Repeated calls retain repeated entries; special forms have none. The column and 
 vectors are required trailing table fields in format 10; SQL function/domain records carry
 their body/check/default vectors. Literal-only defaults have empty vectors. These are format-10
 record changes, with no second format bump or compatibility fallback.
+Table tuples encode consecutive equal identities as runs and reconstruct the exact ordered
+vector on load. This keeps a deeply nested CHECK within the one-page bound without repeating
+the same signature text for every call. Invalid run lengths and excessive expanded counts are
+refused before allocation.
 
 The catalog itself stays SQL-agnostic: it has no reference to the language package,
 stores the text and identities as opaque strings, and validates

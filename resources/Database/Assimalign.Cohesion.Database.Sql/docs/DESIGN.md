@@ -3383,7 +3383,9 @@ and add it again" as the only remedy.
   and SQL bodies. Repeated calls retain repeated entries; special forms are excluded.
   Each identity contains the normalized name and parameter signature, distinguishing
   pseudo-types and a variadic tail while normalizing aliases, bounds and domains to the
-  registration signature. Literal-only defaults have empty vectors. On reload,
+  registration signature. Literal-only defaults have empty vectors. Table tuples compact
+  consecutive equal signatures into runs, then restore the complete vector on read; expansion
+  is bounded by the canonical expression's length. On reload,
   `SqlDefinitionBinder.PinCalls` binds exactly those identities, never a newly preferred
   overload. DROP reads the same vectors. PostgreSQL stores `FuncExpr.funcid` and records
   its dependency (`src/backend/catalog/dependency.c:2008-2013`); parsed SQL body persistence
