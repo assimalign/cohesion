@@ -49,10 +49,10 @@ internal sealed partial class SqlSchemaProvisioner
             if (scales && operation.ParentName is { } tableName &&
                 _catalog.TryGetTable(SqlPlanner.DefaultSchema, tableName, out var table))
             {
-                // One physical record suffices. Index builds visit retained MVCC versions,
-                // so a tombstone-only table still has data-dependent work to do.
-                using var rows = _database.DataStorage.GetUnitIterator(table.ObjectId);
-                if (rows.MoveNext())
+                // A scoped iterator snapshots every owned page before its first MoveNext.
+                // Probe allocation metadata instead: retained versions still mean work,
+                // and the final physical slot's deletion releases its page at commit.
+                if (_database.DataStorage.HasOwnerPages(table.ObjectId))
                 {
                     deferred.Add(step);
                 }

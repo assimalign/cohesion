@@ -1563,8 +1563,13 @@ Numbering continues the plan of record's table. Each line is the question, then 
     of storage-type/default/domain/collation/scale rewrites. Abandoned index pages use existing
     DROP INDEX's future-vacuum policy. The caller must supply its process shutdown token at Build.
 
+    Storage adds the native `HasOwnerPages` allocation query: reusing its existing owner iterator
+    would copy every page id before probing a row, leaving data-scaling work in Build. The bounded
+    query exposes less information than `GetOwnerPages`, without a model reference, copied SQL
+    allocation state, reflection or assembly-access grants. Recommend keeping this native operation.
+
     **Existing drop-cost discrepancy:** all drops remain inline as requested, but `DROP TABLE`
-    still calls `Storage.FreeOwnerPages` (`Database.Storage/src/Storage.cs:2093`), clearing and
+    still calls `Storage.FreeOwnerPages` (`Database.Storage/src/Storage.cs:2111`), clearing and
     WAL-logging each owned page. It therefore retains data-scaling physical cleanup in Build.
     Recommend a separate decision to move page reclamation out of Build; neither silently
     removing reclamation nor changing the accepted drop classification was included here.

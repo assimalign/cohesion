@@ -2061,6 +2061,24 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Reports whether the specified owner has allocated data pages without loading pages
+    /// or allocating a page-directory snapshot. The query takes constant time.
+    /// </summary>
+    /// <param name="ownerId">The owner whose record chain to inspect.</param>
+    /// <returns>True when the owner has data pages; otherwise false.</returns>
+    /// <remarks>
+    /// This describes physical allocation, including retained versions. Releasing an owner's
+    /// final page becomes visible here when its transaction commits, as with <see cref="GetOwnerPages"/>.
+    /// </remarks>
+    public bool HasOwnerPages(ulong ownerId)
+    {
+        lock (_ownerLock)
+        {
+            return _ownerPages.TryGetValue(ownerId, out var pages) && pages.Count != 0;
+        }
+    }
+
+    /// <summary>
     /// Gets a point-in-time snapshot of the data pages currently belonging to the
     /// specified owner's record chain, in ascending page order.
     /// </summary>

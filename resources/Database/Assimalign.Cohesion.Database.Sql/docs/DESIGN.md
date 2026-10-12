@@ -1133,7 +1133,8 @@ fresh transaction. An ended reservation is never reused to acquire compensation 
 Hosting's existing offline-reopen policy still applies, including its backoff when the same
 database fails again. The provisioning worker itself makes one attempt per scheduled migration.
 
-Build probes each affected table for one stored record. It runs creation, nullable column
+Build probes each affected table's physical allocation through `Storage.HasOwnerPages`, a
+constant-time query that does not copy the owner page directory. It runs creation, nullable column
 addition, drops, and work on empty tables inline. Populated-table index creation, constraint
 validation, required-column addition, additions of columns whose domains carry checks, and validation-only column tightening run on the engine's
 `SqlProvisioningWorker`. `SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
@@ -1142,7 +1143,7 @@ value once; existing rows continue to resolve that value from the catalog withou
 
 An existing implementation contradicts 49a's catalog-only premise for every drop: `DROP TABLE`
 calls `Storage.FreeOwnerPages`, which clears and WAL-logs each owned data page
-(`Database.Storage/src/Storage.cs:2093`). Drops remain inline as the accepted classification
+(`Database.Storage/src/Storage.cs:2111`). Drops remain inline as the accepted classification
 requires. Moving that physical reclamation out of Build needs a separate decision: deferring the
 drop would contradict that classification, while silently removing reclamation would change its
 existing storage contract.

@@ -108,6 +108,36 @@ public sealed class SqlDeferredProvisioningTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: existing empty tables complete indexes, constraints and tightening during Build")]
+    public async Task BuildAsync_ExistingEmptyTable_ShouldCompleteEveryStepInline()
+    {
+        // Arrange: the table has an empty primary-key tree but no data pages.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        SqlSchema desired = Desired();
+        var storage = await SeedAsync(new CrashCaptureSqlStorageStrategy(), null, desired, timeout.Token, populate: false);
+        int applied = 0;
+        var builder = Builder(storage);
+        builder.AddWorker(engine =>
+        {
+            engine.BeforeProvisioning = database =>
+            {
+                database.SchemaProvisioner.StepApplied = _ => Interlocked.Increment(ref applied);
+                database.SchemaProvisioner.BeforeDeferredStep = (_, _) => throw new InvalidOperationException("An empty table was deferred.");
+            };
+            return new RecordingWorker(engine);
+        });
+
+        // Act
+        await using var engine = await builder.AddDatabase(desired).BuildAsync(timeout.Token);
+        var database = await engine.OpenDatabaseAsync("pending", timeout.Token);
+
+        // Assert
+        applied.ShouldBe(4);
+        database.Provisioning.ShouldBeNull();
+        database.Catalog.PendingMigration.ShouldBeNull();
+        database.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: a crash during an index batch retains pending work and rebuilds on restart")]
     public async Task BuildAsync_CrashDuringIndex_ShouldResumePendingAndConverge()
     {
@@ -376,7 +406,7 @@ public sealed class SqlDeferredProvisioningTests
     });
 
     private static async Task<CrashCaptureSqlStorageStrategy> SeedAsync(CrashCaptureSqlStorageStrategy storage,
-        string? path, SqlSchema desired, CancellationToken cancellationToken)
+        string? path, SqlSchema desired, CancellationToken cancellationToken, bool populate = true)
     {
         await using var engine = await Builder(storage, path).BuildAsync(cancellationToken);
         var database = await engine.CreateDatabaseAsync("pending", cancellationToken);
@@ -386,7 +416,7 @@ public sealed class SqlDeferredProvisioningTests
             table.PrimaryKey, [], [])).ToArray();
         await database.ApplySchemaAsync(new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, target.Name, true, target.Types, tables, []), cancellationToken);
         await using var session = await database.CreateSessionAsync(cancellationToken);
-        for (int row = 1; row <= 130; row++)
+        for (int row = 1; populate && row <= 130; row++)
         {
             await session.ExecuteAsync($"INSERT INTO items (Id, Value) VALUES ({row}, {row})", cancellationToken: cancellationToken);
         }

@@ -16,6 +16,32 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </summary>
 public sealed class StorageOwnerChainTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Owner presence queries do not allocate page-directory snapshots")]
+    public void HasOwnerPages_RepeatedProbe_ShouldAvoidDirectoryAllocations()
+    {
+        // Arrange: a multi-page chain makes an accidental directory copy observable.
+        using var storage = ChainStorage.Create(new CrashSimulationStream(), new CrashSimulationStream(), poolCapacity: 64);
+        FillOwner(storage, ownerId: 7, "record", count: 250, recordSize: 400);
+        storage.GetOwnerPages(7).Count.ShouldBeGreaterThan(10);
+        storage.HasOwnerPages(7).ShouldBeTrue();
+        int hits = 0;
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int attempt = 0; attempt < 1000; attempt++)
+        {
+            if (storage.HasOwnerPages(7))
+            {
+                hits++;
+            }
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        hits.ShouldBe(1000);
+        allocated.ShouldBe(0);
+    }
+
     /// <summary>
     /// A concrete storage exposing owner-scoped record operations for the tests.
     /// </summary>
@@ -63,10 +89,12 @@ public sealed class StorageOwnerChainTests
 
     private static byte[] Text(string value) => Encoding.UTF8.GetBytes(value);
 
-    [Fact]
-    public void DeleteFinalSlot_ReleasesPageOnlyAtCommitAndRollbackRestoresOwner()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Owner page presence follows commit, rollback and page reuse")]
+    public void DeleteFinalSlot_CommitOrRollback_ShouldMaintainOwnerPagePresence()
     {
+        // Arrange
         using var storage = ChainStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
+        storage.HasOwnerPages(7).ShouldBeFalse();
         (PageId PageId, int SlotIndex) location;
         using (var transaction = storage.BeginTransaction())
         {
@@ -74,14 +102,18 @@ public sealed class StorageOwnerChainTests
             transaction.Commit();
         }
 
+        // Act: an uncommitted deletion still owns its page, and rollback restores its record.
         using (var rollback = storage.BeginTransaction())
         {
             storage.Delete(rollback, location.PageId, location.SlotIndex);
             storage.FreeSpaceMap.IsAllocated(location.PageId).ShouldBeTrue();
+            storage.HasOwnerPages(7).ShouldBeTrue();
             rollback.Rollback();
         }
+        // Assert
         storage.ScanText(7).ShouldBe(new[] { "retained" });
         storage.GetOwnerPages(7).ShouldContain(location.PageId);
+        storage.HasOwnerPages(7).ShouldBeTrue();
 
         using (var deleting = storage.BeginTransaction())
         {
@@ -91,6 +123,7 @@ public sealed class StorageOwnerChainTests
         }
         storage.FreeSpaceMap.IsAllocated(location.PageId).ShouldBeFalse();
         storage.GetOwnerPages(7).ShouldBeEmpty();
+        storage.HasOwnerPages(7).ShouldBeFalse();
 
         using (var inserting = storage.BeginTransaction())
         {
@@ -100,6 +133,8 @@ public sealed class StorageOwnerChainTests
         }
         storage.ScanText(7).ShouldBeEmpty();
         storage.ScanText(9).ShouldBe(new[] { "replacement" });
+        storage.HasOwnerPages(7).ShouldBeFalse();
+        storage.HasOwnerPages(9).ShouldBeTrue();
     }
 
     /// <summary>
@@ -253,6 +288,8 @@ public sealed class StorageOwnerChainTests
         // Assert: the directory is rebuilt from headers and scoped scans work; new
         // inserts continue the rebuilt chain rather than starting a new one.
         reopened.GetOwnerPages(11).Count.ShouldBe(pagesOf11);
+        reopened.HasOwnerPages(11).ShouldBeTrue();
+        reopened.HasOwnerPages(99).ShouldBeFalse();
         reopened.ScanText(11).Length.ShouldBe(25);
         reopened.ScanText(12).Length.ShouldBe(25);
 
@@ -289,6 +326,7 @@ public sealed class StorageOwnerChainTests
 
         // Assert: recovery replays the release; the chain is gone and its pages are free.
         recovered.GetOwnerPages(4).ShouldBeEmpty();
+        recovered.HasOwnerPages(4).ShouldBeFalse();
         recovered.ScanText(4).ShouldBeEmpty();
         recovered.FreeSpaceMap.FreePageCount.ShouldBeGreaterThan(0);
     }
@@ -314,5 +352,6 @@ public sealed class StorageOwnerChainTests
         // Assert: the before-images restore the chain — records and directory intact.
         recovered.ScanText(8).Length.ShouldBe(30);
         recovered.GetOwnerPages(8).ShouldNotBeEmpty();
+        recovered.HasOwnerPages(8).ShouldBeTrue();
     }
 }

@@ -13,6 +13,13 @@ or recovery error still reaches the caller. `ProvisioningFailure` is the other n
 a deferred migration failed and its database must remain offline until reopened. Both reuse the
 existing offline write fence and add no new events or on-disk storage format.
 
+`HasOwnerPages(ownerId)` is a constant-time physical-allocation query beside `GetOwnerPages`.
+It reads the native owner directory without loading a page or copying its ids. The existing
+owner-scoped iterator snapshots the entire directory before its first `MoveNext`, so it is not
+a bounded presence probe. Final-slot deletion, commit, rollback and recovery maintain the same
+directory; retained versions keep a chain populated. SQL uses this query to classify deferred
+work without adding table-size work to Build. No model metadata or new interface enters Storage.
+
 The physical layer of the Data Platform kernel (area architecture:
 [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). This document records the design
 decisions that shape the storage model; the program-level requirements it satisfies are
