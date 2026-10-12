@@ -6,10 +6,13 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -132,6 +135,72 @@ public sealed class SqlIndexPublicationTests
             await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
                 await writer.ExecuteAsync("INSERT INTO a VALUES (1)", cancellationToken: timeout.Token));
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Index publication: a replacement cannot attach its predecessor's tree")]
+    public async Task CreateIndex_ReplacementDescriptionFirst_ShouldKeepReplacementTreeAfterCrash()
+    {
+        // Arrange: the dropped and replacement indexes share table, name and uniqueness,
+        // but index different values in different real trees.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using var engine = await Builder(storage).BuildAsync(timeout.Token);
+        var database = await engine.CreateDatabaseAsync("publication", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE a (OldValue INT, NewValue INT)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO a VALUES (10, 20)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("CREATE UNIQUE INDEX W ON a (OldValue)", cancellationToken: timeout.Token);
+        var stale = database.IndexManager.ExportRegistrations();
+        await session.ExecuteAsync("DROP INDEX W ON a", cancellationToken: timeout.Token);
+        database.Catalog.TryGetTable("dbo", "a", out var table).ShouldBeTrue();
+        var replacement = new SqlCatalogIndex(table.ObjectId, "W", ["NewValue"], true);
+        var transaction = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        await database.Coordinator.ApplyStatementAsync(transaction, async bracket =>
+        {
+            var tree = await database.IndexManager.CreateIndexAsync(transaction, table.ObjectId,
+                new IndexDefinition("W", IndexKind.BTree, IsUnique: true), timeout.Token);
+            using var rows = database.DataStorage.GetUnitIterator(table.ObjectId);
+            rows.MoveNext().ShouldBeTrue();
+            var row = rows.Current;
+            var stamps = SqlRowCodec.ReadStamps(row.Data.Span);
+            await tree.InsertVersionAsync(bracket, IndexKey.From(new DatabaseKeyWriter().AppendInt32(20)),
+                SqlRecordLocation.Pack(row.PageId, row.SlotIndex), stamps.Writer, stamps.Deleter, timeout.Token);
+            rows.MoveNext().ShouldBeFalse();
+            return true;
+        }, durable: true, timeout.Token);
+        await database.Coordinator.CommitAsync(transaction, timeout.Token);
+        var current = database.IndexManager.ExportRegistrations();
+        stale.Single().RootPageId.ShouldBe(2);
+        current.Single().RootPageId.ShouldBe(3);
+
+        // Act: description-first publication admits a checkpoint captured before DROP.
+        await database.Catalog.CreateIndexAsync(replacement, [], timeout.Token);
+        await database.Catalog.SaveIndexRegistrationsAsync(stale, timeout.Token);
+        await database.Catalog.SaveIndexRegistrationsAsync(current, timeout.Token);
+        var crash = storage.CaptureDurableImages();
+
+        // Assert: recovery must seek and enforce the replacement's key, never the old key.
+        await using var restarted = await Builder(crash).BuildAsync(timeout.Token);
+        var recovered = await restarted.OpenDatabaseAsync("publication", timeout.Token);
+        await using var writer = await recovered.CreateSessionAsync(timeout.Token);
+        int newMatches = await CountRowsAsync(writer, "SELECT NewValue FROM a WHERE NewValue = 20", timeout.Token);
+        int oldMatches = await CountRowsAsync(writer, "SELECT NewValue FROM a WHERE NewValue = 10", timeout.Token);
+        newMatches.ShouldBe(1);
+        oldMatches.ShouldBe(0);
+        recovered.Catalog.GetIndexRegistrations().ShouldBe(current);
+        await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await writer.ExecuteAsync("INSERT INTO a VALUES (30, 20)", cancellationToken: timeout.Token));
+    }
+
+    private static async Task<int> CountRowsAsync(SqlDatabaseSession session, string sql, CancellationToken cancellationToken)
+    {
+        await using var result = (QueryResultSet)await session.ExecuteAsync(sql, cancellationToken: cancellationToken);
+        int count = 0;
+        await foreach (var row in result.GetRowsAsync(cancellationToken))
+        {
+            count++;
+        }
+        return count;
     }
 
     private static BTreeIndexRegistration[] Snapshot(SqlDatabase database, SqlCatalogIndex added)
