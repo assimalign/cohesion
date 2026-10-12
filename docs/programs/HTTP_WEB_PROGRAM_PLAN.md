@@ -403,7 +403,7 @@ The issue list:
 - Sessions run in the Codex CLI on Astra 6 at ultra effort, as in Stage 13. A pipeline script drives each session's implement, review, verify and fix runs in its own worktree.
 - Sessions in one row edit the same files, so each runs as one serial session; the rows of a wave run in parallel.
 - Wave 2 needs wave 1 integrated:
-  - #1300 builds on the transport changes;
+  - #1300 builds on the transport changes, and on sessions 17 and 18, which change the Connections contracts it instruments (decision 56);
   - #1401 on #1432;
   - #1404 on #1435;
   - every source on #1448's recorder.
@@ -427,6 +427,8 @@ The issue list:
 | 14 | #1436 → #1405: session store failures and `IsModified` (decision 55), then the content group (Caching, StaticFiles, Sessions, WebSockets) | 2 |
 | 15 | #1406 → #1407: Health, then Diagnostics | 2 |
 | 16 | #1398 → #1399 → #1408: `WebServerEventSource` replaces #147's `ILogger` diagnostics, then default forwarding and NativeAOT delivery in the same integration, then conformance and the docs roll-up | 3 |
+| 17 | #1452: connection features and the `Tls`, `StreamAbort` and `StreamLimits` packages (decision 56) | 2, ahead of session 7 |
+| 18 | #1453 → #1451: the multiplexed roots, then the in-memory peer close (decision 56) | 2, after 17, ahead of session 7 |
 
 Not scheduled in this stage:
 - #1433 belongs to the Security program.
@@ -1351,6 +1353,18 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
 53. **StaticFiles falls back to the clock when `Date` is off (owner, 2026-10-12; #1449).** `AddDateHeader = false` removes only the header; `Last-Modified` and the date validators keep working.
 54. **Database's namespaced health routes stay unauthenticated in gateway-managed mode (owner, 2026-10-12).** They publish no exception text since #1409.
 55. **`IHttpStoredSession.IsModified` is a default interface member (owner, 2026-10-12; #1436).** It returns `true` by default, so existing custom stores keep compiling and keep committing every time. The built-in stores override it to skip the commit for an unchanged session. #1436 joins Stage 14's session 14, ahead of the Sessions source that reads it.
+56. **Connection features first, then the multiplexed roots (owner, 2026-10-12; #1452, #1453; scope in [`CONNECTIONS_MULTIPLEXED_CONTRACT_SCOPE.md`](CONNECTIONS_MULTIPLEXED_CONTRACT_SCOPE.md)).**
+    - **Features (#1452).** Optional per-connection capabilities move from type tests to a per-connection `IConnectionFeatureCollection` (`Features`), modeled on `IHttpFeatureCollection`. Features have a `Name`, the collection has a public `Set<TFeature>`, and a layer's collection shows the wrapped connection's features through.
+      - `ITlsConnectionInfo`, `IMultiplexedStreamAbort` and `IMultiplexedConnectionStreamLimits` move into three flat packages: `Assimalign.Cohesion.Connections.Tls`, `.StreamAbort` and `.StreamLimits`, in the `Assimalign.Cohesion.Connections` namespace.
+      - The public `Set` reverses the Connections DESIGN's "no `Items` bag" non-goal.
+      - `ConnectionCapabilities` is unchanged: it describes a transport class before any connection exists.
+    - **Multiplexed roots (#1453, with #1451).** The members every multiplexed transport can honor go on the roots, after a survey of QUIC, WebTransport, HTTP/2, SSH, yamux and mplex:
+      - a coded connection close;
+      - `IMultiplexedStream`, with its guided base, a whole-stream reset with a code, and `IsInputCompleted`;
+      - documented `WriteOnly` behavior for bidirectional-only transports.
+      
+      Per-direction aborts and the cumulative stream allowance stay features.
+    - **Order:** #1452, then #1453, then #1300 (session 7), which instruments the code both change.
 
 ### 7.5 Lineup
 
