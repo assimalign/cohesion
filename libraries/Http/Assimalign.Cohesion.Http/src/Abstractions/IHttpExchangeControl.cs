@@ -103,6 +103,24 @@ public interface IHttpExchangeControl
     HttpStatusCode? ClientFaultStatusCode => null;
 
     /// <summary>
+    /// Gets whether the transport ended this response because the client stopped accepting it,
+    /// either by abandoning the connection or stream, or by falling below the minimum response
+    /// data rate. The default implementation reports <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    /// The transport latches this before exposing the response failure. A slow-client abort latches
+    /// before cancelling <see cref="IHttpContext.RequestCancelled"/>; a peer's driver-level closure
+    /// notification can fire that token before the response write observes and reports the abort.
+    /// Once true, it remains true for this exchange.
+    /// A boundary can classify the outcome as cancellation without inspecting the exception type,
+    /// including when an application wrapper changes that type. Application exceptions and local
+    /// cancellation alone do not set this report. No HTTP status is implied.
+    /// </remarks>
+    // Deviates from the no-existing-interface-addition convention per #1432's explicit sanction:
+    // this default member publishes a generic transport fact, following ClientFaultStatusCode.
+    bool ResponseAbortedByClient => false;
+
+    /// <summary>
     /// Gets whether an interim (<c>1xx</c>) response can still be emitted for this exchange — the
     /// transport supports interim responses, the final response has not started, and the exchange
     /// has not been aborted.

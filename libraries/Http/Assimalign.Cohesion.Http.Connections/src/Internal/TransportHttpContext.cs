@@ -21,6 +21,21 @@ internal abstract class TransportHttpContext : HttpContext
     // exchange is aborted when the connection/stream is torn down, and can also
     // be tripped locally by Cancel().
     private readonly CancellationTokenSource _abortedSource;
+    private int _responseAbortedByClient;
+
+    /// <summary>Whether the transport ended the response on the client's account (#1432).</summary>
+    internal bool ResponseAbortedByClient => Volatile.Read(ref _responseAbortedByClient) != 0;
+
+    /// <summary>Publishes the response outcome before cancellation can release a pending writer.</summary>
+    internal void LatchResponseAbortedByClient() => Interlocked.Exchange(ref _responseAbortedByClient, 1);
+
+    /// <summary>Cancels a response abandoned by its peer and reports its transport origin.</summary>
+    internal OperationCanceledException AbortResponseForPeer(Exception reason)
+    {
+        LatchResponseAbortedByClient();
+        return new OperationCanceledException(
+            "The client stopped accepting the response.", reason, TripRequestCancelled());
+    }
 
     /// <summary>
     /// Initializes the exchange: its request, its response, and the source behind
@@ -221,6 +236,7 @@ internal abstract class TransportHttpContext : HttpContext
     /// </returns>
     internal OperationCanceledException AbortSlowResponse()
     {
+        LatchResponseAbortedByClient();
         return new OperationCanceledException(
             "The peer did not accept the response at the configured minimum data rate, so the exchange was aborted.",
             TripRequestCancelled());

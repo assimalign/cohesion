@@ -117,6 +117,10 @@ internal sealed class Http2Stream
     // Set once the END_STREAM completing the application's final response is on the wire.
     private volatile bool _responseCompleted;
 
+    // Published before the abort token when the peer resets an in-flight response or stalls the
+    // connection's output. A server reset and a request-body rejection never set this latch (#1432).
+    private volatile bool _responseAbortedByClient;
+
     // The exchange* constants. The pump begins the exchange at dispatch, the send path, a removal and
     // the end of the exchange race for the later transitions, so they are taken with Interlocked; the
     // connection changes its retired-slot count under its synchronization root.
@@ -351,6 +355,21 @@ internal sealed class Http2Stream
     /// response writer that observes this abandons whatever it has not yet written.
     /// </summary>
     public bool IsReset => _reset;
+
+    /// <summary>Whether the peer ended this stream's in-flight response (#1432).</summary>
+    public bool ResponseAbortedByClient => _responseAbortedByClient;
+
+    /// <summary>
+    /// Records a client-caused connection stall for an application response still in flight. Called
+    /// before the stream's abort fires, so cancellation observers can classify the response.
+    /// </summary>
+    public void LatchResponseAbortedByClient()
+    {
+        if (Volatile.Read(ref _responseOwner) == responseOwnerApplication && !_responseCompleted && !_reset)
+        {
+            _responseAbortedByClient = true;
+        }
+    }
 
     /// <summary>
     /// Whether the request head declared a <c>content-length</c> larger than the stream's frozen
@@ -895,6 +914,7 @@ internal sealed class Http2Stream
                     $"HTTP/2 RST_STREAM received on idle stream {StreamId}.");
             }
 
+            LatchResponseAbortedByClient();
             State = Http2StreamState.Closed;
             InputCompleted = true;
             _reset = true;

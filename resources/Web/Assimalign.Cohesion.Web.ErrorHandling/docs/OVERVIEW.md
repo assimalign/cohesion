@@ -28,6 +28,9 @@ decides what the client sees, with an overridable default that renders the RFC 9
   for it and stages the transport's `400`/`413`/`408`/`431` instead of a `500` (#1340, #1378). On
   HTTP/2 and HTTP/3 a malformed body resets the stream, and the `400` is what the server records.
   A connection lost mid-body cancels the exchange without a client-fault status (#1439).
+  A response abandoned by the client or reclaimed for a slow reader is reported through
+  `IWebResponseClientFaultFeature`; it cancels without `OnException`, `OnError` or a replacement
+  response, even when another writer wraps the transport failure (#1432).
 - **Status-code pages** — `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal response
   (such as the pipeline's bodyless 404) into problem+json, or a custom responder body.
 

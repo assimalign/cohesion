@@ -3020,7 +3020,22 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     // Application interims and automatic 100 use the same rate rules. Each gets its own allowance so
     // a final head waiting on its claim does not double-charge the response gate (#1384, #1428).
-    private async Task WriteInterimResponseWithinRateAsync(
+    private Task WriteInterimResponseWithinRateAsync(
+        Http3Context? context,
+        IConnection streamConnection,
+        HttpStatusCode statusCode,
+        IHttpHeaderCollection? headers,
+        CancellationToken cancellationToken)
+    {
+        return context is null
+            ? WriteInterimResponseCoreAsync(null, streamConnection, statusCode, headers, cancellationToken)
+            : RunResponseWriteAsync(context, (streamConnection, statusCode, headers),
+                static (connection, exchange, state, token) => new ValueTask(connection.WriteInterimResponseCoreAsync(
+                    exchange, state.streamConnection, state.statusCode, state.headers, token)), cancellationToken,
+                linkExchangeCancellation: false).AsTask();
+    }
+
+    private async Task WriteInterimResponseCoreAsync(
         Http3Context? context,
         IConnection streamConnection,
         HttpStatusCode statusCode,
@@ -3089,6 +3104,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <exception cref="OperationCanceledException">The caller or exchange was cancelled, including an interim that exceeded its rate allowance.</exception>
     internal async ValueTask ClaimFinalResponseHeadAsync(Http3Context context, CancellationToken cancellationToken)
     {
+        ThrowIfResponsePeerAborted(context);
         ValueTask claimed = context.ClaimFinalResponseHeadAsync();
 
         if (claimed.IsCompletedSuccessfully)
@@ -3104,11 +3120,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         catch (OperationCanceledException)
         {
             // Preserve the originating token instead of exposing the temporary linked token.
+            ThrowIfResponsePeerAborted(context);
             context.RequestCancelled.ThrowIfCancellationRequested();
             cancellationToken.ThrowIfCancellationRequested();
             throw;
         }
 
+        ThrowIfResponsePeerAborted(context);
         context.RequestCancelled.ThrowIfCancellationRequested();
         if (context.RequestBody.IsReset)
         {
@@ -3135,7 +3153,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="cancellationToken">The caller's token.</param>
     /// <returns>A task that completes once the request stream accepted the frame.</returns>
     /// <exception cref="OperationCanceledException">The peer did not accept the frame at the rate; the exchange was aborted.</exception>
-    internal async ValueTask WriteResponseFrameAsync(Http3Context context, Stream stream, Http3FrameType frameType, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    internal ValueTask WriteResponseFrameAsync(Http3Context context, Stream stream, Http3FrameType frameType, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        return RunResponseWriteAsync(context, (stream, frameType, payload),
+            static (connection, exchange, state, token) => connection.WriteResponseFrameCoreAsync(
+                exchange, state.stream, state.frameType, state.payload, token), cancellationToken);
+    }
+
+    private async ValueTask WriteResponseFrameCoreAsync(Http3Context context, Stream stream, Http3FrameType frameType, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         MinDataRateGate? gate = context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
 
@@ -3181,6 +3206,12 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <exception cref="OperationCanceledException">The peer did not accept the response at the rate; the exchange was aborted.</exception>
     internal ValueTask FlushResponseAsync(Http3Context context, Stream stream, CancellationToken cancellationToken)
     {
+        return RunResponseWriteAsync(context, stream,
+            static (connection, exchange, output, token) => connection.FlushResponseCoreAsync(exchange, output, token), cancellationToken);
+    }
+
+    private ValueTask FlushResponseCoreAsync(Http3Context context, Stream stream, CancellationToken cancellationToken)
+    {
         MinDataRateGate? gate = context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
 
         return gate is null
@@ -3219,6 +3250,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <returns>The exception the stalled write throws.</returns>
     internal OperationCanceledException FailSlowResponse(Http3Context context)
     {
+        // Publish the reason before resetting: the reset can wake another response writer at once.
+        context.LatchResponseAbortedByClient();
         Http3RequestBodyStream requestBody = context.RequestBody;
 
         if (!requestBody.IsReset)
@@ -3234,6 +3267,87 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         }
 
         return context.AbortSlowResponse();
+    }
+
+    /// <summary>
+    /// Bounds final response writes by the exchange's cancellation even when the caller supplied no
+    /// token; active interims retain their caller cancellation while observing peer stream closure.
+    /// Records a peer's RESET_STREAM or STOP_SENDING before the failure reaches the application.
+    /// The raw write alone is guarded: application response encoding and lifecycle hooks keep their
+    /// own failures, and local resets and request-body rejections never become response client faults.
+    /// </summary>
+    private async ValueTask RunResponseWriteAsync<TState>(
+        Http3Context context,
+        TState state,
+        Func<Http3ConnectionContext, Http3Context, TState, CancellationToken, ValueTask> operation,
+        CancellationToken cancellationToken,
+        bool linkExchangeCancellation = true)
+    {
+        ThrowIfResponsePeerAborted(context);
+        CancellationToken requestCancelled = context.RequestCancelled;
+        // An active interim retains its caller-token contract when the application cancels the
+        // exchange (#1428). Peer closure must still release it; final writes also observe local cancel.
+        CancellationToken transportCancellation = linkExchangeCancellation
+            ? requestCancelled
+            : context.StreamConnection.ConnectionClosed;
+        transportCancellation.ThrowIfCancellationRequested();
+        using CancellationTokenSource? linked = cancellationToken.CanBeCanceled && cancellationToken != transportCancellation
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, transportCancellation)
+            : null;
+        CancellationToken writeToken = linked?.Token ?? transportCancellation;
+
+        try
+        {
+            await operation(this, context, state, writeToken).ConfigureAwait(false);
+            // A pipe may report a completed flush instead of throwing when the peer stopped reading.
+            ThrowIfResponsePeerAborted(context);
+        }
+        catch (Exception exception) when (IsResponsePeerAbort(context, exception))
+        {
+            throw context.AbortResponseForPeer(exception);
+        }
+        catch (OperationCanceledException) when (requestCancelled.IsCancellationRequested)
+        {
+            requestCancelled.ThrowIfCancellationRequested();
+            throw;
+        }
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested
+            && exception.CancellationToken != cancellationToken)
+        {
+            throw new OperationCanceledException(exception.Message, exception, cancellationToken);
+        }
+    }
+
+    private void ThrowIfResponsePeerAborted(Http3Context context)
+    {
+        if (context.StreamConnection.ConnectionClosed.IsCancellationRequested
+            && CanReportResponsePeerAbort(context))
+        {
+            throw context.AbortResponseForPeer(new OperationCanceledException(context.StreamConnection.ConnectionClosed));
+        }
+    }
+
+    private bool IsResponsePeerAbort(Http3Context context, Exception exception)
+    {
+        if (!CanReportResponsePeerAbort(context))
+        {
+            return false;
+        }
+
+        // Native QUIC can throw before its closure callback; the in-memory driver carries the code in
+        // ConnectionResetException. Other pipe failures need the stream's closure as supporting evidence.
+        return exception is ConnectionResetException
+            || (exception is QuicException quic && IsQuicStreamAborted(quic))
+            || (context.StreamConnection.ConnectionClosed.IsCancellationRequested
+                && exception is IOException or ConnectionException or InvalidOperationException or OperationCanceledException);
+    }
+
+    private bool CanReportResponsePeerAbort(Http3Context context)
+    {
+        return !context.CancelRequested
+            && !context.RequestBody.IsReset
+            && context.RequestBody.ClientFaultStatusCode is null
+            && !ConnectionClosed.IsCancellationRequested;
     }
 
     private static async Task WriteFrameAsync(Stream stream, Http3FrameType frameType, byte[] payload, CancellationToken cancellationToken)

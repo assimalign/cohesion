@@ -4,8 +4,9 @@
 
 `Assimalign.Cohesion.Web.Server` holds the per-exchange contracts the Web server publishes:
 `IWebRequestIdFeature`, `IWebRequestActivityFeature`, `IWebResponseCompletionFeature`,
-`IWebServerDrainFeature`, `IWebClientFaultFeature` and `IWebResponseStartingFeature`. It is a contracts-only feature package.
-The default server in `Web.Hosting` implements and installs all six; feature libraries and
+`IWebServerDrainFeature`, `IWebClientFaultFeature`, `IWebResponseClientFaultFeature` and
+`IWebResponseStartingFeature`. It is a contracts-only feature package.
+The default server in `Web.Hosting` implements and installs all seven; feature libraries and
 applications read them.
 
 The package exists because of two rules that point in opposite directions:
@@ -28,7 +29,7 @@ The packages that publish, declare and read the contracts, with every arrow mean
 flowchart LR
     Server["Assimalign.Cohesion.Web.Server"] --> Root["Assimalign.Cohesion.Web"]
     Server --> Http["Assimalign.Cohesion.Http"]
-    Hosting["Web.Hosting — publishes all six"] --> Server
+    Hosting["Web.Hosting — publishes all seven"] --> Server
     WebSockets["Web.WebSockets — reads the drain"] --> Server
     Resources["Web.Hosting.Resources — reads completion"] --> Server
     Caching["Web.Caching — stores after completion"] --> Server
@@ -40,8 +41,8 @@ flowchart LR
 
 | Package | Role | Reference to `Web.Server` |
 |---|---|---|
-| `Assimalign.Cohesion.Web.Server` | declares the six contracts | — |
-| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all six (the client fault on a request that can have a body, on every version) | project reference (COHRES002, relaxed by decision 32) |
+| `Assimalign.Cohesion.Web.Server` | declares the seven contracts | — |
+| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all seven (the request client fault on a request that can have a body, on every version) | project reference (COHRES002, relaxed by decision 32) |
 | `Assimalign.Cohesion.Web.WebSockets` | closes open sockets with `1001 Going Away` when `Draining` fires | project reference |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | defers a control-plane stop until its `202` is written | project reference |
 | `Assimalign.Cohesion.Web.Caching` | stores the final response only after successful completion | project reference |
@@ -167,6 +168,28 @@ by EOF (#1439, owner decision 45). The read throws `OperationCanceledException` 
 `RequestCancelled` token, and the client-fault feature remains `null`. This replaces #1340's
 incomplete-body `400` and changes the transport exception observable in 10.0.0-preview.1 on the
 terms of decision 15; malformed syntax and configured limits still report their status.
+
+**`IWebResponseClientFaultFeature`** reports `ResponseAbortedByClient` (#1432): the transport ended
+the response because the peer abandoned it or failed the minimum response data rate. The value
+reads through to `IHttpExchangeControl.ResponseAbortedByClient` and stays true once latched.
+The default host's existing response-starting object implements both interfaces; the feature
+collection resolves the new interface from that object, so there is no extra per-exchange object,
+feature entry or interceptor. Every exchange receives it, including a bodyless GET. The request
+client-fault interceptor remains conditional because only request bodies need its status report.
+
+`Web.ErrorHandling` reads the response report before classifying an exception by its type. A
+content adapter can wrap a failed write in an unrelated exception and the boundary still cancels
+with the exchange token, skipping `OnException`, `OnError` and the error response. The host's
+last-resort pipeline boundary makes the same classification without ErrorHandling installed.
+Local application cancellation does not set this report. An absent feature means no response
+client fault was reported; the existing cancellation and application-fault paths remain in place.
+
+**Compatibility with 10.0.0-preview.1.** This Web contract is additive and changes no existing Web
+interface. A response abandoned by the peer now avoids fault observation even when its transport
+exception was wrapped; preview.1 relied on an `OperationCanceledException` and the request token.
+HTTP/1.1 already enforced its configured response rate in preview.1; HTTP/2 and HTTP/3 rate
+reclamation arrived later in #1384. The generic default member on the transport control is the
+public-interface addition sanctioned by #1432; no Web-root contract or dependency is added.
 
 **A custom server chooses which contracts it supports.** A custom `IWebApplicationServer` may omit any of them, so each
 reader handles an absent feature (SecurityHeaders and CORS require starting and throw without it): the control plane falls back to a direct stop, WebSockets has

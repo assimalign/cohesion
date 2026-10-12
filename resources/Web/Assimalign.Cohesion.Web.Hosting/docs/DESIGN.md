@@ -421,6 +421,25 @@ HTTP/2 reported the stream token instead of the exchange token. It also changes 
 HTTP/1.1 `400` handling for an incomplete body ended by EOF into cancellation. Invalid framing and
 body-limit violations retain their client-fault statuses.
 
+**Response-side client faults (#1432).** The host publishes the transport's
+`IHttpExchangeControl.ResponseAbortedByClient` latch as `IWebResponseClientFaultFeature` in
+`Web.Server`. The existing `ResponseStartingFeature` implements the report and reads the control
+on every access, adding no object, collection entry or interceptor. Its unconditional response
+interceptor supplies the report even on a bodyless GET; the conditional request client-fault
+interceptor continues to report only request-body faults. A slow reader reclaimed by the response
+rate, or a peer that resets or abandons an ongoing response, latches the report before its write
+failure reaches the pipeline. Local cancellation and application failures leave it false.
+
+`UseErrorHandling()` reads this report before inspecting cancellation exceptions, so an adapter
+that wraps a transport write failure still ends in cancellation with the exchange token, no
+`OnException` or `OnError`, no replacement response and no Error log. The host's last-resort
+pipeline boundary also reads the report when the application uses no exception middleware.
+Telemetry records `request_canceled` with the started response's status, and completion callbacks
+do not run. Compared with 10.0.0-preview.1, a peer-abandoned response whose exception is wrapped
+no longer runs the application's fault observer. HTTP/1.1 already enforced its configured response
+rate in preview.1; HTTP/2 and HTTP/3 response-rate reclamation arrived later in #1384. The additive
+Web.Server feature leaves existing Web interfaces unchanged.
+
 Catching bare `Exception` at each of these points is a deliberate, documented
 departure from the "catch specific exceptions" rule. This is a **fault-isolation
 boundary around arbitrary user code** — middleware, completion callbacks, application
@@ -1699,6 +1718,8 @@ There are five, in this order:
    interceptors above, it joins every response, including plain GETs. This adds a response sink and
    control to each exchange; the earlier fast-path measurements below describe the first four defaults
    without this fifth interceptor.
+   The same object also publishes `IWebResponseClientFaultFeature` (#1432), reading the transport's
+   response-side client-fault latch without another allocation or conditional request-body check.
 
 `Web.Hosting` references `Http.ProtocolUpgrade` and `Http.ExtendedConnect` for this, references
 outside the Web area (COHRES002 is about same-area references); both are private members of every

@@ -22,12 +22,19 @@ internal sealed class Http1Context : TransportHttpContext
         CancellationToken connectionClosed = default)
         : base(HttpVersion.Http11, requestHead, connectionInfo, requestAborted, featureCapacity, features, connectionAborted: connectionClosed)
     {
+        ReceiveCancellation = requestAborted;
         KeepAlive = keepAlive;
         _requestBody = requestBody;
         // Back-reference for the lazy Expect: 100-continue solicitation — the body stream checks
         // whether the final response has started before emitting the interim response.
         requestBody.SetOwner(this);
     }
+
+    /// <summary>
+    /// The host's original receive token, retained separately from the linked exchange token so a
+    /// local shutdown that also closes the driver is not reported as the client's response abort.
+    /// </summary>
+    internal CancellationToken ReceiveCancellation { get; }
 
     /// <summary>
     /// Whether the connection carries another request after this exchange. When it is

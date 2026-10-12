@@ -59,6 +59,9 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
     public HttpStatusCode? ClientFaultStatusCode => _context.Stream.ClientFaultStatusCode;
 
     /// <inheritdoc />
+    public bool ResponseAbortedByClient => _context.ResponseAbortedByClient || _context.Stream.ResponseAbortedByClient;
+
+    /// <inheritdoc />
     public bool CanWriteInterimResponse => !HasResponseStarted && !_context.CancelRequested;
 
     /// <inheritdoc />

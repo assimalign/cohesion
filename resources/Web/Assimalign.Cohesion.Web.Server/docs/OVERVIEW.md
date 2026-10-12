@@ -32,7 +32,12 @@ handlers read them from `context.Features`.
   version. `Web.Diagnostics`, `Web.ErrorHandling` and
   `Web.Compression` read it.
 
-A custom `IWebApplicationServer` may omit any of the six, so every reader handles an absent
+- **Response client fault** — `IWebResponseClientFaultFeature.ResponseAbortedByClient` reports that
+  the peer abandoned the response or could not receive it at the configured minimum rate. The
+  default host publishes it even for bodyless requests. `Web.ErrorHandling` uses this report to
+  cancel without fault observation, including when middleware wraps the transport exception (#1432).
+
+A custom `IWebApplicationServer` may omit any of the seven, so every reader handles an absent
 feature. SecurityHeaders and CORS require starting callbacks and throw if the feature is absent.
 
 ## Namespace
@@ -70,6 +75,9 @@ CancellationToken draining = context.Features.Get<IWebServerDrainFeature>()?.Dra
 
 // After a body read threw: was it the client's fault, and which status does the transport send?
 HttpStatusCode? clientFault = context.Features.Get<IWebClientFaultFeature>()?.StatusCode;
+
+// After a response write failed: did the transport end it because of the client?
+bool responseAbandoned = context.Features.Get<IWebResponseClientFaultFeature>()?.ResponseAbortedByClient == true;
 ```
 
 `Sdk.Web` applications get the package through the `App.Web` shared framework. A library that reads

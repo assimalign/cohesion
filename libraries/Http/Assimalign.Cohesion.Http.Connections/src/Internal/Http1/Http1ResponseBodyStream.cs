@@ -161,34 +161,58 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
         await FlushStreamAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask WriteToStreamAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    private ValueTask WriteToStreamAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+        => WriteOrFlushAsync(data, flush: false, cancellationToken);
+
+    private ValueTask FlushStreamAsync(CancellationToken cancellationToken)
+        => WriteOrFlushAsync(ReadOnlyMemory<byte>.Empty, flush: true, cancellationToken);
+
+    private async ValueTask WriteOrFlushAsync(ReadOnlyMemory<byte> data, bool flush, CancellationToken cancellationToken)
     {
-        if (_gate is null)
+        (CancellationToken writeToken, CancellationTokenSource? linked) =
+            Http1ConnectionContext.LinkResponseCancellation(_context, cancellationToken);
+        try
         {
-            await _stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
-            return;
-        }
+            writeToken.ThrowIfCancellationRequested();
+            if (_gate is null)
+            {
+                if (flush)
+                {
+                    await _stream.FlushAsync(writeToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _stream.WriteAsync(data, writeToken).ConfigureAwait(false);
+                }
+                return;
+            }
 
-        // The octets count toward the allowance as they are handed over (MinDataRateWait), so a reader
-        // draining a large write at a healthy pace is not held to the bare grace period, and a large write
-        // goes over in pieces, so a reader of none of it is not credited the whole write up front.
-        if (!await Http1MessageWriter.TryWriteWithinRateAsync(_stream, data, _gate, cancellationToken).ConfigureAwait(false))
-        {
-            throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
+            // Credit only bounded pieces, so a reader of none of a large write cannot buy its whole allowance.
+            if (!await Http1MessageWriter.TryWriteWithinRateAsync(_stream, data, _gate, writeToken).ConfigureAwait(false))
+            {
+                throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
+            }
         }
-    }
-
-    private async ValueTask FlushStreamAsync(CancellationToken cancellationToken)
-    {
-        if (_gate is null)
+        catch (Exception exception) when (Http1ConnectionContext.IsResponsePeerFailure(_connection, _context, exception))
         {
-            await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            return;
+            _context.KeepAlive = false;
+            throw _context.AbortResponseForPeer(exception);
         }
-
-        if (!await Http1MessageWriter.TryWriteWithinRateAsync(_stream, ReadOnlyMemory<byte>.Empty, _gate, cancellationToken).ConfigureAwait(false))
+        catch (OperationCanceledException exception) when (_context.RequestCancelled.IsCancellationRequested
+            || cancellationToken.IsCancellationRequested)
         {
-            throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
+            CancellationToken cancelledToken = _context.ResponseAbortedByClient || !cancellationToken.IsCancellationRequested
+                ? _context.RequestCancelled
+                : cancellationToken;
+            if (exception.CancellationToken == cancelledToken)
+            {
+                throw;
+            }
+            throw new OperationCanceledException(exception.Message, exception, cancelledToken);
+        }
+        finally
+        {
+            linked?.Dispose();
         }
     }
 }

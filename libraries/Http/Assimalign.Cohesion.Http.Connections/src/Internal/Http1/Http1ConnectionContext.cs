@@ -250,15 +250,42 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         http1Context.MarkFinalResponseStarted();
         MinDataRateGate? gate = http1Context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
 
-        if (!await Http1MessageWriter.WriteResponseAsync(
-            Stream,
-            head,
-            body,
-            writeBody: HttpResponseContentRules.CarriesContent(http1Context.Response.StatusCode, http1Context.Request.Method),
-            gate,
-            cancellationToken).ConfigureAwait(false))
+        (CancellationToken writeToken, CancellationTokenSource? linked) = LinkResponseCancellation(http1Context, cancellationToken);
+        try
         {
-            throw FailSlowResponse(Connection, http1Context);
+            if (!await Http1MessageWriter.WriteResponseAsync(
+                Stream,
+                head,
+                body,
+                writeBody: HttpResponseContentRules.CarriesContent(http1Context.Response.StatusCode, http1Context.Request.Method),
+                gate,
+                writeToken).ConfigureAwait(false))
+            {
+                throw FailSlowResponse(Connection, http1Context);
+            }
+        }
+        catch (Exception exception) when (IsResponsePeerFailure(Connection, http1Context, exception))
+        {
+            http1Context.KeepAlive = false;
+            throw http1Context.AbortResponseForPeer(exception);
+        }
+        catch (OperationCanceledException exception) when (http1Context.RequestCancelled.IsCancellationRequested
+            || cancellationToken.IsCancellationRequested)
+        {
+            // The write observes a linked token, but its caller observes its own cancellation, or the
+            // exchange's when a previously latched client abort stopped this write.
+            CancellationToken cancelledToken = http1Context.ResponseAbortedByClient || !cancellationToken.IsCancellationRequested
+                ? http1Context.RequestCancelled
+                : cancellationToken;
+            if (exception.CancellationToken == cancelledToken)
+            {
+                throw;
+            }
+            throw new OperationCanceledException(exception.Message, exception, cancelledToken);
+        }
+        finally
+        {
+            linked?.Dispose();
         }
 
         await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
@@ -276,8 +303,28 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     internal static OperationCanceledException FailSlowResponse(IConnection connection, Http1Context context)
     {
         context.KeepAlive = false;
+        context.LatchResponseAbortedByClient();
         connection.Abort(new IOException("The peer did not read the response at the configured minimum data rate."));
         return context.AbortSlowResponse();
+    }
+
+    internal static bool IsResponsePeerFailure(IConnection connection, Http1Context context, Exception exception)
+        => !context.CancelRequested && !context.ReceiveCancellation.IsCancellationRequested && !context.ResponseAbortedByClient
+            && (exception is IOException or SocketException or ConnectionException
+                || (connection.ConnectionClosed.IsCancellationRequested
+                    && exception is OperationCanceledException or ObjectDisposedException));
+
+    internal static (CancellationToken Token, CancellationTokenSource? Linked) LinkResponseCancellation(
+        Http1Context context, CancellationToken cancellationToken)
+    {
+        CancellationToken requestToken = context.RequestCancelled;
+        if (!cancellationToken.CanBeCanceled || cancellationToken == requestToken)
+        {
+            return (requestToken, null);
+        }
+
+        CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(requestToken, cancellationToken);
+        return (linked.Token, linked);
     }
 
     /// <summary>

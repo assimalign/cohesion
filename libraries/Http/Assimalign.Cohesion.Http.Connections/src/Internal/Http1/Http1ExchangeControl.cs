@@ -62,6 +62,9 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
     public HttpStatusCode? ClientFaultStatusCode => _context.RequestBodyRejectedStatusCode;
 
     /// <inheritdoc />
+    public bool ResponseAbortedByClient => _context.ResponseAbortedByClient;
+
+    /// <inheritdoc />
     public bool CanWriteInterimResponse => !HasResponseStarted && !_context.CancelRequested;
 
     /// <inheritdoc />

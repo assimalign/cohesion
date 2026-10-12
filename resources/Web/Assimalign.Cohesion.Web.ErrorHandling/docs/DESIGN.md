@@ -179,6 +179,39 @@ rely on a body cut short surfacing as `EndOfStreamException` or another transpor
 It also supersedes #1340's HTTP/1.1 incomplete-body `400`; malformed chunk syntax and configured
 request-body limits retain their client-fault status.
 
+### A response abandoned by its client is cancellation (#1432)
+
+The transport latches `IHttpExchangeControl.ResponseAbortedByClient` when it reclaims a slow reader
+under the minimum response data rate or the peer resets or abandons a response. The default host
+publishes that report through `IWebResponseClientFaultFeature` in `Web.Server` on every exchange,
+including a bodyless GET. The feature reads the latch on each access and remains true once set.
+
+The exception boundary reads it before its ordinary cancellation filter. When true, any downstream
+exception is normalized to `OperationCanceledException` carrying the exchange's `RequestCancelled`
+token and retaining the caught exception as its inner exception. It cancels the exchange, publishes
+no `IHttpExceptionFeature`, invokes neither `OnException` nor `OnError`, and stages no error response.
+Web.Hosting records `request_canceled`, skips completion callbacks and emits no Error log. A content
+adapter that wraps the transport failure in `InvalidOperationException` gets exactly the same result:
+classification uses the transport's report, not an exception type or an inner-exception walk.
+
+An absent or false report keeps the existing paths: an `OperationCanceledException` with a fired
+request token is cancellation; an ordinary application failure still reaches the fault observer and
+error handlers. Application cancellation alone does not latch a response client fault. No new
+Web-root contract, assembly reference, reflection or dependency on transport internals is needed.
+
+**Compatibility with 10.0.0-preview.1.** Peer-abandoned responses now skip the fault observer even
+when a writer wraps the failure; preview.1's boundary could recognize only the cancellation exception.
+This behavior change follows decision 15. HTTP/1.1 already enforced its configured response rate in
+preview.1; HTTP/2 and HTTP/3 response-rate reclamation arrived later in #1384.
+The new Web.Server feature is additive; the default member on `IHttpExchangeControl` is the
+public-interface addition explicitly sanctioned by #1432.
+
+`ResponseClientFaultTests` pins classification with an arbitrary exception and an explicit true or
+false feature. Web.Hosting's integration suite uses `UseErrorHandling()` around streamed GETs over
+HTTP/1.1, HTTP/2 and HTTP/3: a stalled response and a peer reset each produce a wrapped write failure,
+then cancellation with the exact exchange token, no fault hooks and no Error log. The false-latch
+unit test preserves existing application-fault behavior.
+
 ## Status-code pages and the 404 terminal (#881)
 
 `UseStatusCodePages()` installs `StatusCodePagesMiddleware`, which runs after `next` and upgrades a
@@ -206,7 +239,7 @@ The issue posed the choice: an area-root seam or a feature package. The default 
 it — it renders `Web.ProblemDetails`, and the area root must not reference feature packages, so
 a root-homed hook would either lose its default or invert the dependency direction. This is a
 feature package referencing `Http`, `Http.Streaming`, `Web`, `Web.ProblemDetails` and `Web.Server`
-(for `IWebClientFaultFeature`, #1340); `Web.Hosting` references
+(for `IWebClientFaultFeature`, #1340, and `IWebResponseClientFaultFeature`, #1432); `Web.Hosting` references
 none of it (COHRES002 forbade that until 2026-10-09), and applications receive it through the `App.Web` shared framework.
 The #881 boundary middleware — a pipeline feature, not runtime code — consumes it as an ordinary
 cross-feature reference.

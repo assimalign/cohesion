@@ -1008,6 +1008,37 @@ member, or a protocol version whose transport does not report faults yet, can ho
 hidden behind a runtime failure, so adding it is not a source break. The server transport overrides it
 on every version: HTTP/1.1 since #1340, HTTP/2 and HTTP/3 since #1378.
 
+### A response abandoned by its client (#1432)
+
+`IHttpExchangeControl.ResponseAbortedByClient` reports the response-side outcome separately from
+`ClientFaultStatusCode`: the transport ended the response because its peer stopped accepting it,
+whether by a connection or stream reset, HTTP/3 `STOP_SENDING`, or the minimum response data rate.
+It starts `false`, latches `true` for the rest of the exchange, and implies no HTTP status. The
+transport publishes the reason before exposing the response failure; a locally initiated slow-read
+abort publishes it before firing cancellation too. The exchange's `RequestCancelled` fires, and
+response failures normalized by the transport carry that token. Driver stream-closure notification
+can precede the write's observation of a peer reset; the latch is readable when the write fails.
+
+This is another generic fact on the exchange control, following decision 20 and the request-side
+report. Its default implementation returns `false`, so an existing implementation need not add a
+member. #1432 explicitly sanctions this addition to the public interface; it is recorded for the
+owner's stage review. An application exception, application cancellation, local reset, or a rejected
+request body alone does not set the response report. A consumer must read the latch, rather than infer
+it from `OperationCanceledException`, `IOException`, or a cancelled request token.
+
+The Web host projects the value through `IWebResponseClientFaultFeature` in `Web.Server`; its existing
+response-starting feature implements that second interface over the same control. This covers a
+bodiless streamed `GET` without adding a feature object or another response interceptor. The core and
+transport reference no Web package, and the Web root gains no contract. `Web.ErrorHandling` reads the
+projection before classifying the caught exception, so even a middleware wrapper that changes the
+exception type leaves the exchange cancelled, with no `OnException` or Error log. #1401 can consume
+the same fact for its event source.
+
+**Compatibility with 10.0.0-preview.1.** The default member is additive. Outcome classification changes
+under decision 15: peer-abandoned responses and a slow HTTP/1.1 streamed response no longer reach the
+application fault observer as faults. The cross-protocol minimum-rate enforcement was added by #1384;
+the response latch adds no new rate policy or wire reset code.
+
 ### The body signal: `HttpExchangeInterceptorRequestContext.CanHaveBody` (#1378)
 
 The control exists only in an exchange's response phase, which costs a response sink and the control
@@ -1401,8 +1432,8 @@ context instead of per-capability members:
   normal response path: interim (`1xx`) writes (`CanWriteInterimResponse` /
   `WriteInterimResponseAsync`), the raw-connection takeover (`CanTakeOver` /
   `TakeOver()`), the extended CONNECT stream tunnel (`CanAcceptTunnel` /
-  `AcceptTunnelAsync`), and the client-fault report (`ClientFaultStatusCode`, "The
-  client-fault report" above). One control deliberately replaces the former per-capability
+  `AcceptTunnelAsync`), and the client-fault reports (`ClientFaultStatusCode` and
+  `ResponseAbortedByClient`, "The client-fault report" above). One control deliberately replaces the former per-capability
   contracts (`IHttpConnectionTakeover`, `IHttpInterimResponseWriter`, and the
   core `IHttpExtendedConnectFeature` that #1368 removed): a new
   wire mechanism composes from the hooks plus this control instead of adding a
@@ -1447,7 +1478,9 @@ word — it fires immediately before the commit on whichever path commits first.
   `context.ExtendedConnect == null`) rather than surface a feature whose action
   could never work. `ClientFaultStatusCode` reports in the same spirit: `null`
   until the transport latches a client fault, then that status for the rest of the
-  exchange, and `null` from any control that does not report faults.
+  exchange, and `null` from any control that does not report faults. `ResponseAbortedByClient`
+  likewise stays `false` unless the transport latches a response the client abandoned, and then
+  remains `true` without implying a status or requiring exception-type inspection.
 - **`AcceptTunnelAsync` registers the tunnel before writing the head**, the
   per-stream analogue of `TakeOver` claiming the connection first: from that
   instant the exchange is taken over, so neither the transport's send path nor

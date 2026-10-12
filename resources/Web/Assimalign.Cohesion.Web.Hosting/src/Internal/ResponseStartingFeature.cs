@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 /// <summary>Callback registrations driven by the transport's existing head-commit hook.</summary>
-internal sealed class ResponseStartingFeature : IWebResponseStartingFeature
+internal sealed class ResponseStartingFeature : IWebResponseStartingFeature, IWebResponseClientFaultFeature
 {
     // These fields describe the refused message's body or framing, not policy that can
     // be carried to a replacement. The replacement and transport own their new values.
@@ -36,6 +36,8 @@ internal sealed class ResponseStartingFeature : IWebResponseStartingFeature
     internal void Bind(IHttpContext exchange) => _exchange = exchange;
 
     public string Name => nameof(IWebResponseStartingFeature);
+
+    public bool ResponseAbortedByClient => _context.Control?.ResponseAbortedByClient == true;
 
     internal bool HasFailed { get; private set; }
 

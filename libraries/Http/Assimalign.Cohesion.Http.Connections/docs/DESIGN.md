@@ -2494,6 +2494,63 @@ frame header into the request stream's own buffer (`PipeWriter.GetSpan`), so a f
 and goes out with its payload's write. The helpers pass their arguments through static lambdas and value
 tuples, and a write that completes synchronously completes its async helpers synchronously too.
 
+## Response-side client-fault reporting (#1432)
+
+### The fact the boundary needs
+
+The minimum response data rate already cancels slow readers (#1384), and a peer may reset a stream
+or send HTTP/3 `STOP_SENDING` while a handler streams its response. Previously a fault boundary had
+only the response exception's type and cancellation token to distinguish those outcomes from an
+application defect. A middleware wrapper could change the exception type and make an expected
+cancellation reach `OnException` as an application fault.
+
+Every protocol's exchange control now implements `IHttpExchangeControl.ResponseAbortedByClient`.
+The member defaults to `false` for other control implementations and latches `true` for this exchange
+when the transport abandons its response on the client's account. It is separate from the request's
+`ClientFaultStatusCode`, implies no status, and remains readable after the response write fails.
+`TransportHttpContext` owns the common latch and cancellation helpers. A transport-initiated slow-read
+abort latches before resetting the stream or connection, so the cancellation it fires cannot wake a
+handler ahead of the reason. A peer's driver-level stream-closure notification can arrive first; its
+failed response operation latches before surfacing the failure to the handler.
+
+### Protocol paths
+
+| Version | Where the outcome is latched |
+|---|---|
+| HTTP/1.1 | A minimum-rate failure latches before aborting the connection. Buffered and streamed raw response writes classify connection I/O failures and closure-backed cancellation, fire the exchange token, and fail as cancellation. |
+| HTTP/2 | A slow response latches before its `RST_STREAM`; a connection-wide output or credit stall marks every application response still in flight before teardown. Inbound `RST_STREAM` marks the active application response before cancelling the stream. The control reads both the exchange and stream latches. |
+| HTTP/3 | A minimum-rate failure latches before `H3_REQUEST_CANCELLED`. Final frame writes and flushes observe exchange cancellation even with no caller token. Active interims preserve caller cancellation and also observe peer-stream closure; peer `RESET_STREAM` or `STOP_SENDING` is latched before the operation throws with the exchange token. Native stream-abort exceptions are recognized even before the driver signals closure. |
+
+HTTP/2 preserves its existing response-write behavior on peer reset: a writer awaiting flow-control
+credit may return after discarding the unwritten remainder, while `RequestCancelled` and the latch
+report why the response ended. A thrown failure is not needed to retain the transport's fact.
+Application cancellation, application header or callback failures, and server resets caused by
+request-body rejection do not alone set the response latch. HTTP/3 excludes its local request reset
+and connection teardown from the peer-stream classifier. Request framing and limit failures continue
+to use `ClientFaultStatusCode`; losing a request connection mid-body remains the cancellation behavior
+of #1430 and #1439.
+
+### Projection and compatibility
+
+This is the generic exchange-control seam of owner decision 20. #1432 sanctions the new default
+interface member; the addition is recorded for the owner's stage review. No feature contract or Web
+reference enters the transport. Web.Hosting projects the control through `IWebResponseClientFaultFeature`
+in Web.Server, implemented by its existing response-starting feature, so bodiless streamed requests
+are covered without a new feature allocation or response interceptor. Web.ErrorHandling reads that
+projection before its application-fault boundary, including when middleware wraps the transport's
+exception, and ends the exchange as `request_canceled` without an Error log or `OnException`.
+
+Against 10.0.0-preview.1 this is an observable classification change on decision 15's terms: a peer
+reset during response writing, or a configured HTTP/1.1 slow streamed response, no longer invokes the
+application fault observer. HTTP/2 and HTTP/3 minimum-rate reclamation arrived later in #1384. The
+latch changes no rate default or wire reset code and keeps existing control implementations source
+compatible through its default `false`.
+
+The implementation remains AOT compatible: interface dispatch, static delegates and value tuples,
+with no reflection. Final response writes reuse the exchange token when the caller passes it or no
+token; active interims use the stream-closure token. A distinct cancellable caller token requires a
+temporary linked source so either cancellation ends the operation. The rate gate's reusable deadline still avoids a timer for synchronous writes.
+
 ## HTTP/2 request heads (RFC 9113 §8.3)
 
 `HPackDecoder.DecodeRequestHeaders` decodes the whole field block first, then folds the

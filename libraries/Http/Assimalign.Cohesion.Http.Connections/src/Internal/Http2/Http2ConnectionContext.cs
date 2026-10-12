@@ -1460,6 +1460,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// <returns>The exception the stalled writer throws.</returns>
     private async ValueTask<OperationCanceledException> FailSlowResponseAsync(Http2Context context, bool connectionStalled)
     {
+        // The reset below fires RequestCancelled before AbortSlowResponse returns. Publish the reason
+        // first so a handler woken by that token can already classify its response (#1432).
+        context.LatchResponseAbortedByClient();
         using CancellationTokenSource writeWindow = new(_abandonedResetWriteWindow);
 
         if (!connectionStalled)
@@ -1472,9 +1475,25 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             return context.AbortSlowResponse();
         }
 
+        LatchResponsesAbortedByClient();
         await TryEmitGoAwayAsync(Http2ErrorCode.EnhanceYourCalm, writeWindow.Token).ConfigureAwait(false);
         StopPumpOnStall();
         return context.AbortSlowResponse();
+    }
+
+    /// <summary>
+    /// A connection-wide output or credit stall ends every response still in flight. Record that fact
+    /// before stopping the pump or aborting the connection, either of which can wake handlers (#1432).
+    /// </summary>
+    private void LatchResponsesAbortedByClient()
+    {
+        lock (_syncRoot)
+        {
+            foreach (Http2Stream stream in _streams.Values)
+            {
+                stream.LatchResponseAbortedByClient();
+            }
+        }
     }
 
     /// <summary>

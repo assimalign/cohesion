@@ -581,6 +581,14 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                     (responded, outcome) = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
                 }
             }
+            // A client-abandoned buffered send has the same outcome as a streamed write in the
+            // pipeline. The transport report also survives a response adapter wrapping its failure.
+            catch (Exception) when (exchange.Features.Get<IWebResponseClientFaultFeature>() is { ResponseAbortedByClient: true })
+            {
+                outcome = ExchangeOutcome.Cancelled;
+                await TryResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+                responded = false;
+            }
             // Deviates from the specific-exception rule: arbitrary starting callbacks are application
             // work even when a buffered send drives them.
             // Their cancellation forbids a replacement head and completion callbacks alike.
@@ -638,6 +646,12 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             return cancellationToken.IsCancellationRequested || exchange.RequestCancelled.IsCancellationRequested
                 ? ExchangeOutcome.Cancelled
                 : ExchangeOutcome.Completed;
+        }
+        // An application may wrap the transport exception without installing ErrorHandling.
+        // The response outcome remains a cancellation, whatever exception reached this boundary.
+        catch (Exception) when (exchange.Features.Get<IWebResponseClientFaultFeature>() is { ResponseAbortedByClient: true })
+        {
+            return ExchangeOutcome.Cancelled;
         }
         catch (OperationCanceledException) when (
             cancellationToken.IsCancellationRequested || exchange.RequestCancelled.IsCancellationRequested)

@@ -71,6 +71,14 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
         {
             await next.Invoke(context).ConfigureAwait(false);
         }
+        // The transport's latched outcome survives middleware wrapping its original exception.
+        // This boundary classifies arbitrary downstream exceptions, so the filter deliberately
+        // covers every exception type once the response was abandoned by its client.
+        catch (Exception exception) when (context.Features.Get<IWebResponseClientFaultFeature>() is { ResponseAbortedByClient: true })
+        {
+            await context.CancelAsync().ConfigureAwait(false);
+            throw new OperationCanceledException("The client abandoned the response.", exception, context.RequestCancelled);
+        }
         catch (OperationCanceledException) when (context.RequestCancelled.IsCancellationRequested)
         {
             // A cancelled request is a clean drain, not a fault — let the server observe it and end
