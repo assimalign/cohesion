@@ -14,11 +14,13 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 internal sealed class FeatureLookupCountingConnection : IConnection
 {
     private readonly TestConnection _inner;
+    private readonly PipeReader _input;
     private readonly CountingFeatureCollection _features = new();
 
-    public FeatureLookupCountingConnection(byte[] input, bool hasDirectionalAbort)
+    public FeatureLookupCountingConnection(byte[] input, bool hasDirectionalAbort, PipeReader? inputReader = null)
     {
         _inner = new TestConnection(input);
+        _input = inputReader ?? _inner.Input;
         if (hasDirectionalAbort)
         {
             _features.Set(new DirectionalAbortFeature());
@@ -41,7 +43,7 @@ internal sealed class FeatureLookupCountingConnection : IConnection
     public ConnectionId Id => _inner.Id;
     public EndPoint? LocalEndPoint => _inner.LocalEndPoint;
     public EndPoint? RemoteEndPoint => _inner.RemoteEndPoint;
-    public PipeReader Input => _inner.Input;
+    public PipeReader Input => _input;
     public PipeWriter Output => _inner.Output;
     public ConnectionDirection Direction => _inner.Direction;
     public ConnectionCapabilities Capabilities => _inner.Capabilities;

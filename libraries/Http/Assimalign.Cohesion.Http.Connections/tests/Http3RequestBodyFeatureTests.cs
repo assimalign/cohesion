@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.IO.Pipelines;
 using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,6 +67,72 @@ public class Http3RequestBodyFeatureTests
         body.IsCompleted.ShouldBeTrue();
         stream.FeatureAccesses.ShouldBe(0);
         stream.FeatureEnumerations.ShouldBe(0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - HTTP/3 body: An unread buffered FIN avoids feature lookup when the response ends")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefuseRemainder_WithBufferedFinAfterHead_ShouldNotAccessFeatures(bool streamBacked)
+    {
+        // Arrange — HEADERS consumed all bytes, but no subsequent read has observed EOF.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        await using TestMultiplexedConnection connection = new();
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a");
+        using MemoryStream payload = new(request);
+        PipeReader? input = streamBacked ? PipeReader.Create(payload) : null;
+        await using FeatureLookupCountingConnection stream = new(request, hasDirectionalAbort: true, input);
+        Http3RequestStreamReader reader = new(stream.Input,
+            streamBacked ? new TestConnectionInputCompletion { IsInputCompleted = true } : null);
+
+        try
+        {
+            (await reader.ReadHeaderSectionAsync(65536, timeout.Token)).ShouldNotBeNull();
+            reader.IsEndBuffered().ShouldBeTrue();
+            reader.IsCompleted.ShouldBeFalse();
+            using Http3RequestBodyStream body = CreateBody(connection, stream, reader);
+
+            // Act — the send path refuses any remainder and releases input after sending its FIN.
+            body.RefuseRemainder();
+            body.StopReading();
+
+            // Assert — both pipe completion and transport-only FIN need no directional capability.
+            body.IsCompleted.ShouldBeTrue();
+            stream.FeatureAccesses.ShouldBe(0);
+            stream.FeatureEnumerations.ShouldBe(0);
+        }
+        finally
+        {
+            if (input is not null)
+            {
+                await input.CompleteAsync();
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - HTTP/3 body: A known transport FIN does not hide unread data or a partial trailer frame")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefuseRemainder_WithUnreadFrameBytes_ShouldNotReportCompletion(bool partialTrailer)
+    {
+        // Arrange — the transport knows FIN, but bytes after HEADERS still need framing or refusal.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        await using TestMultiplexedConnection connection = new();
+        byte[] head = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a");
+        byte[] remainder = partialTrailer ? [0x01] : HttpProtocolPayloadFactory.CreateHttp3Frame(0, [1]);
+        await using FeatureLookupCountingConnection stream = new([.. head, .. remainder], hasDirectionalAbort: true);
+        Http3RequestStreamReader reader = new(stream.Input, new TestConnectionInputCompletion { IsInputCompleted = true });
+        (await reader.ReadHeaderSectionAsync(65536, timeout.Token)).ShouldNotBeNull();
+        reader.IsEndBuffered().ShouldBeFalse();
+        using Http3RequestBodyStream body = CreateBody(connection, stream, reader);
+
+        // Act
+        body.RefuseRemainder();
+        body.StopReading();
+
+        // Assert — neither DATA nor a truncated trailer header is mistaken for a clean frame boundary.
+        body.IsCompleted.ShouldBeFalse();
+        stream.FeatureAccesses.ShouldBe(1);
+        stream.FeatureEnumerations.ShouldBe(1);
     }
 
     private static Http3RequestBodyStream CreateBody(

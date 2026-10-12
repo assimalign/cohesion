@@ -150,9 +150,11 @@ public class WebTlsHandshakeIsolationTests
 
         try
         {
-            // Act
-            await Should.ThrowAsync<HttpRequestException>(
+            // Act — QUIC can report the certificate refusal after client-side connection establishment,
+            // while HTTP/3 opens its request stream, where AuthenticationException is not wrapped.
+            Exception refusal = await Should.ThrowAsync<Exception>(
                 () => SendAsync(port, NetHttpVersion.Version30, clientCertificate: null, cancellation.Token));
+            (refusal is HttpRequestException or AuthenticationException).ShouldBeTrue();
             using HttpResponseMessage response = await SendAsync(port, NetHttpVersion.Version30, clientCertificate, cancellation.Token);
 
             // Assert

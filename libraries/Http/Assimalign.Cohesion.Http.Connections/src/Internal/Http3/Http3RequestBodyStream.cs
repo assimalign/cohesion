@@ -1056,6 +1056,14 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// <returns><see langword="true"/> when the request had already ended, so there is nothing to refuse.</returns>
     private bool ProbeEndOfStream()
     {
+        // A known FIN needs neither a pending read nor a directional-abort feature. The caller
+        // established the frame boundary and excluded concurrent reads before starting this probe.
+        if (_reader.TryCompleteAtFrameBoundary())
+        {
+            EndProbe();
+            return true;
+        }
+
         // Cancelling a pending read on the QUIC driver would stop the stream with the driver's default code, so
         // a stream that carries a code is stopped with H3_NO_ERROR instead, which fails the read.
         CancellationTokenSource? cancellation = DirectionalAbort is not null ? null : new CancellationTokenSource();

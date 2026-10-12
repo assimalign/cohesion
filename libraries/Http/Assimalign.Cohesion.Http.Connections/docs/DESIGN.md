@@ -41,8 +41,14 @@ is deliberate. A stream never inherits its multiplexed connection's features.
 
 The request-body reader resolves its directional abort feature at the first operation
 that needs it, caches both presence and absence, and reuses it for later reads and
-end probes. A known FIN creates no stream feature collection. Coded connection close
-and input completion keep their existing contracts pending Part 2 of decision 56.
+end probes. Before resolving the feature, response completion checks for a known FIN
+at a safe frame boundary: no read is active, no partial DATA or skipped payload remains,
+and the pipe contains no unread bytes. This includes a transport-reported FIN that the
+stream-backed pipe has not yet observed through a zero-byte read. It records the clean
+end without creating a stream feature collection; unread DATA, trailer bytes, partial
+frame headers, cancelled input and failed input keep the existing probe/abort path.
+Content-Length validation on body reads is unchanged. Coded connection close and input
+completion keep their existing contracts pending Part 2 of decision 56.
 
 ### Structural listener registration
 

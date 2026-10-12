@@ -222,6 +222,25 @@ internal sealed class Http3RequestStreamReader
     }
 
     /// <summary>
+    /// Records a clean end already observed by the pipe or transport, without another read.
+    /// </summary>
+    /// <remarks>
+    /// The caller must be at a frame boundary with no read in flight. Buffered octets, including a
+    /// partial frame header, and cancelled or failed input prevent completion.
+    /// </remarks>
+    /// <returns>Whether the stream has ended with no unread octets.</returns>
+    internal bool TryCompleteAtFrameBoundary()
+    {
+        if (!IsEndBuffered())
+        {
+            return false;
+        }
+
+        IsCompleted = true;
+        return true;
+    }
+
+    /// <summary>
     /// Reads the next frame header (type and length).
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the read.</param>
