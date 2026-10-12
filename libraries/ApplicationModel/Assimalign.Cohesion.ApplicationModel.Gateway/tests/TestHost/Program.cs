@@ -19,6 +19,15 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        if (Environment.GetEnvironmentVariable("TEST_LAUNCH_CAPTURE") is string launchCapture)
+        {
+            File.WriteAllLines(launchCapture, [Environment.ProcessPath!, Environment.CurrentDirectory, .. args]);
+            if (args.Length > 0 && args[0] == "capture-launch")
+            {
+                return 0;
+            }
+        }
+
         if ((args.Length > 0 && IsExecProbeArgument(args[0]))
             || string.Equals(Environment.GetEnvironmentVariable("TEST_MODE"), "exec-probe", StringComparison.OrdinalIgnoreCase))
         {
@@ -380,6 +389,21 @@ internal static class Program
         }
 
         var values = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        if (Environment.GetEnvironmentVariable("TEST_CAPTURE_PATHS") == "true")
+        {
+            var context = Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current;
+            values["baseDirectory"] = AppContext.BaseDirectory;
+            values["workingDirectory"] = Environment.CurrentDirectory;
+            values["workingContent"] = File.ReadAllText("content.txt");
+            values["baseContent"] = File.ReadAllText(FileSystemPath.Parse(
+                Path.Combine(AppContext.BaseDirectory, "content.txt")));
+            values["rootContent"] = File.ReadAllText(FileSystemPath.Parse(
+                Path.Combine(context.ContentRootPath, "content.txt")));
+            string mountPath = context.GetMount("data", "unused").Path!;
+            File.WriteAllText(FileSystemPath.Parse(Path.Combine(mountPath, "written-by-child.txt")), "mounted");
+            values["mountPath"] = mountPath;
+        }
+
         string endpointName = Environment.GetEnvironmentVariable("TEST_ENDPOINT_NAME") ?? "http";
         string[] knownNames =
         {

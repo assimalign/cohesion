@@ -13,6 +13,57 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public class ApplicationGatewayTests
 {
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Reconcile: names every failed resource and its latest detail")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_MultipleResourcesFail_IncludesLatestDetailsWithinEachApplication(bool multipleModels)
+    {
+        // Arrange
+        var state = new InMemoryResourceStateManager();
+        var controller = new RecordingController(new List<string>(), new List<string>());
+        var gateway = new TestGateway(state, [controller]);
+        IApplicationBuilder first = Application.CreateBuilder(ApplicationName.Parse("first"), []).UseGateway(gateway);
+        first.AddResource(new TestResource("host"));
+        IApplicationBuilder second = multipleModels
+            ? Application.CreateBuilder(ApplicationName.Parse("second"), []).UseGateway(gateway)
+            : first;
+        IApplicationResourceDescriptor gated = second.AddResource(new TestResource(multipleModels ? "host" : "other"));
+        IApplicationResourceDescriptor dependent = second.AddResource(new TestResource("dependent"));
+        dependent.DependsOn(gated);
+        IApplicationModel[] models = multipleModels
+            ? [first.Build().Model, second.Build().Model]
+            : [first.Build().Model];
+        IResourceControlContext? previous = null;
+        controller.AfterReconcile = context =>
+        {
+            if (previous is null)
+            {
+                previous = context;
+                return;
+            }
+
+            previous.State.SetState(previous.Resource.Id, ResourceLifecycle.Failed, "First resource lost its process.");
+            context.State.SetState(context.Resource.Id, ResourceLifecycle.Failed, "Outdated failure detail.");
+            context.State.SetState(context.Resource.Id, ResourceLifecycle.Failed, "Second resource could not start.");
+            context.State.SetState(dependent.Resource.Id, ResourceLifecycle.Failed, "Dependent failed independently.");
+        };
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        // Act
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(() =>
+            ((IMultiModelApplicationGateway)gateway).StartAsync(models, cancellation.Token));
+
+        // Assert
+        exception.Message.ShouldContain("Resource 'first/host' last state detail: First resource lost its process.", Case.Sensitive);
+        exception.Message.ShouldContain(
+            $"Resource '{(multipleModels ? "second/host" : "first/other")}' last state detail: Second resource could not start.",
+            Case.Sensitive);
+        exception.Message.ShouldNotContain("Outdated failure detail.", Case.Sensitive);
+        exception.Message.ShouldContain(
+            $"Resource '{(multipleModels ? "second" : "first")}/dependent' last state detail: Dependent failed independently.",
+            Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Source image identity is resolved during gather after validation")]
     public async Task StartAsync_SourceManifestWithoutImage_ShouldReachGatherWithManifestAsync()
     {

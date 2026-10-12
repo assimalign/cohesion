@@ -129,11 +129,16 @@ internal sealed class LocalProbeRunner
             throw new InvalidDataException("An exec probe must contain an executable.");
         }
 
+        string executablePath = LocalProcessPath.ResolveCommand(probe.Command[0], LocalProcessPath.TryGetShortPath);
+        string workingDirectory = LocalProcessPath.ResolveWorkingDirectory(
+            Path.GetDirectoryName(LocalProcessPath.Unquote(configuration.Artifact.ExecutablePath))
+                ?? Environment.CurrentDirectory,
+            LocalProcessPath.TryGetShortPath);
+
         var startInfo = new ProcessStartInfo
         {
-            FileName = probe.Command[0],
-            WorkingDirectory = Path.GetDirectoryName(configuration.Artifact.ExecutablePath)
-                ?? Environment.CurrentDirectory,
+            FileName = executablePath,
+            WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
