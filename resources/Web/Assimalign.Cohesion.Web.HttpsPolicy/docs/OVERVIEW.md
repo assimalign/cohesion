@@ -58,6 +58,18 @@ app.UseErrorHandling();
 // ...the rest of the pipeline...
 ```
 
+## Recognizing a redirect loop
+
+Behind a TLS-terminating proxy, a `307` or `308` on every route and clients that
+never reach the page indicate a redirect loop. Check HTTP access logs and the
+status breakdown in `http.server.request.duration`. No event reports the loop
+when `UseForwardedHeaders` is missing. If that middleware is present but does
+not trust the proxy, `ForwardingStopped(UntrustedPeer)` identifies the trust
+failure when forwarding headers arrive. Register it before `UseHttpsRedirection`
+and configure the actual proxy peers as trusted. See
+[Recognizing a redirect loop](DESIGN.md#recognizing-a-redirect-loop) for the
+diagnosis and checks.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Web` — the pipeline abstractions the verbs extend.

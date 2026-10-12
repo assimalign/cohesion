@@ -110,6 +110,21 @@ identity wherever `UseForwardedHeaders` sits.
 TLS-terminating proxy that is the proxy's public HTTPS port, not a port the
 application itself binds.
 
+#### Recognizing a redirect loop
+
+A sustained `307` or `308` rate on every route, with HTTPS clients repeatedly
+redirected and never reaching the page, is the proxy-loop symptom. Check the
+status breakdown in `http.server.request.duration` and the HTTP access logs.
+**No event reports this loop when `UseForwardedHeaders` is missing**: HttpsPolicy
+has no event source, and absent middleware cannot emit a forwarding diagnostic.
+When forwarded-headers middleware is present and receives forwarding headers,
+its `ForwardingStopped(UntrustedPeer)` signal identifies a proxy whose assertions
+were refused because the peer is not trusted. It diagnoses the trust failure,
+not the loop itself; absence of that signal does not rule out a loop. Check that
+`UseForwardedHeaders` runs before `UseHttpsRedirection`, that the proxy sends the
+original scheme, and that its address is in the configured trusted proxies or
+networks. Trust only the actual proxy peers.
+
 ## Redirection
 
 ### Location composition

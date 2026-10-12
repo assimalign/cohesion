@@ -38,7 +38,7 @@ flowchart TD
 | 2 | `UseSecurityHeaders` | Web.SecurityHeaders | Early enough to cover rejections and redirects from later middleware. Once registered, its starting callback also covers an error page from a boundary on either side. It reads no client identity, so it may run ahead of `UseForwardedHeaders`. |
 | 3 | `UseForwardedHeaders` | Web.ForwardedHeaders | Ahead of every middleware that reads the effective scheme, host or client address on the way in. Leave it out when no proxy sits in front of the application. |
 | 4 | `UseHostFiltering` | Web.HostFiltering | Validates the effective host, so it follows `UseForwardedHeaders`. It runs ahead of everything that uses the host: the redirect `Location`, absolute URLs, cache keys. |
-| 5 | `UseHttpsRedirection` | Web.HttpsPolicy | Redirects a plaintext request before anything does work for it, building the `Location` from the validated host. |
+| 5 | `UseHttpsRedirection` | Web.HttpsPolicy | Redirects a plaintext request before anything does work for it, building the `Location` from the validated host. Behind a TLS-terminating proxy, see [Recognizing a redirect loop](../../../resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/DESIGN.md#recognizing-a-redirect-loop) if every route returns `307` or `308`. |
 | 6 | `UseHsts` | Web.HttpsPolicy | Ahead of the exception boundary, so the header survives a reset error response. |
 | 7 | `UseErrorHandling` | Web.ErrorHandling | The exception boundary: a fault anywhere after it becomes a problem-details response. |
 | 8 | `UseStatusCodePages` | Web.ErrorHandling | Inside the boundary and ahead of the middleware whose bodyless `4xx`/`5xx` responses it fills in, including the `404` and `405` from routing. |
