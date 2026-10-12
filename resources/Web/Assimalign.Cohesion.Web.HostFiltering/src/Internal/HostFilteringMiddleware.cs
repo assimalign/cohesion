@@ -52,7 +52,8 @@ internal sealed class HostFilteringMiddleware : IWebApplicationMiddleware
         // are the same value.
         HttpHost host = context.EffectiveHost;
 
-        if (string.IsNullOrWhiteSpace(host.Value))
+        bool emptyHost = string.IsNullOrWhiteSpace(host.Value);
+        if (emptyHost)
         {
             // The empty/missing-Host policy (RFC 9112 §3.2): a hostless request cannot be
             // validated against the allowlist, so it passes only when explicitly permitted.
@@ -70,6 +71,7 @@ internal sealed class HostFilteringMiddleware : IWebApplicationMiddleware
         // Content-Length: 0). Rendering a richer problem payload is the application's choice
         // via its own error handling; the guard itself stays dependency-free.
         context.Response.StatusCode = HttpStatusCode.BadRequest;
+        HostFilteringEventSource.Log.RequestRejected(context, host, emptyHost);
         return Task.CompletedTask;
     }
 }

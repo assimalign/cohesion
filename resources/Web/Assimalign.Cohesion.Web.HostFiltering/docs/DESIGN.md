@@ -143,6 +143,35 @@ effective read, and the one allowlist covers both cases.
 Options → precompiled matcher at registration; request-time span comparisons
 only. No reflection, no configuration binding, no service location.
 
+## Diagnostics
+
+The internal `HostFilteringEventSource` is named
+`Assimalign.Cohesion.Web.HostFiltering`. It reports only rejected requests, at the
+middleware's single rejection branch after the effective-host allowlist decision.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `RequestRejected` | Verbose | `reason` (`EmptyHost` or `HostNotAllowed`), `host`, `forwarded:bool`, `requestId` |
+
+`host` is the untrusted `HttpHost.Host` component without its port, limited to 253
+characters inside `IsEnabled`; it is empty for `EmptyHost`. `forwarded` means the
+forwarded feature accepted at least one hop. No path, query, raw header value or
+route template is written. The request id is read from `IWebRequestIdFeature`
+inside `IsEnabled`, with an empty string when a custom server omits the feature.
+`Activity.Current` is never used. The contracts-only `Web.Server` reference supplies
+that feature and is already part of App.Web's closure.
+
+The `rejected-requests` total is a lazily created `PollingCounter`, backed by an
+interlocked increment for every rejection even without a listener. Accepted requests
+raise nothing and do not change the counter. No throttling is needed for Verbose
+events. The serial `HostFilteringEventSourceTests` verify the strict manifest,
+request correlation, empty and forwarded hosts, truncation, counter publication,
+and zero allocation for disabled diagnostics.
+
+Compared with 10.0.0-preview.1, this adds an opt-in diagnostic signal and exact
+counter, with no public API or host-acceptance change. Preview.1's rejection branch
+was silent; this observability gap does not itself bypass host validation.
+
 ## Non-goals
 
 - **No hosting integration.** `Web.Hosting` does not reference the package
