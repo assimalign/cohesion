@@ -946,8 +946,11 @@ behind a proxy is the proxy.
 
 Not logged here: an exception the application's pipeline throws. The server isolates it to its
 exchange (a `500`, or a reset), and reporting it belongs to the application's error handling
-(`Web.ErrorHandling`'s `OnException` hook) and to request telemetry, so the server does not add
-a second report of the same failure.
+(`Web.ErrorHandling`'s `Assimalign.Cohesion.Web.ErrorHandling` event source and optional
+`OnException` hook) and to request telemetry, so the server does not add a second report of the
+same failure. The source excludes client-caused and cancelled exchanges: a peer-abandoned response
+raises Verbose only, and a boundary abort after the response starts increments only its
+`aborted-responses` counter. See [ErrorHandling diagnostics](../../Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics).
 
 ## AOT posture
 

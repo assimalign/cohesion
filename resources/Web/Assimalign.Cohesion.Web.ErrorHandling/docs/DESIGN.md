@@ -136,8 +136,10 @@ The boundary exposes an `OnException` observation hook (fault → logging/metric
 so the boundary needs no logging stack) invoked for each caught fault. `SuppressDiagnosticsCallback` is
 the Cohesion parity for .NET 10's `ExceptionHandlerOptions.SuppressDiagnosticsCallback`: a predicate that
 marks a fault *expected*, skipping `OnException` for it while the fault is still handled and a response is
-still produced. Because the repo carries no `Microsoft.Extensions.Logging`, "suppress error-level logging"
-becomes "suppress the diagnostic hook the boundary exposes". A throwing `OnException` is swallowed —
+still produced. The predicate is evaluated once; the same result routes the source's `PipelineFault`
+Error event to `ExpectedPipelineFault` at Verbose, without changing the fault count. A throwing
+predicate is treated as unsuppressed. Both a throwing predicate and a throwing `OnException` raise
+`DiagnosticsCallbackFailed`. A throwing `OnException` is swallowed —
 observation must never defeat response rendering — whereas a throwing `IErrorHandler` propagates; the
 distinction is deliberate (an observer only watches; a handler owns the response).
 
@@ -262,12 +264,75 @@ everything a handler throws propagate (see above).
 Nothing dynamic: sealed internals, delegate/interface dispatch, and the payload rendering is
 `Web.ProblemDetails`' hand-rolled `Utf8JsonWriter` path. No reflection, no source generation.
 
+## Diagnostics
+
+The internal `ErrorHandlingEventSource`, named `Assimalign.Cohesion.Web.ErrorHandling`, owns
+application-fault reporting. Enable it by name with an EventListener or `dotnet-trace`, or forward
+it to configured sinks through `Assimalign.Cohesion.Logging.EventSource`. No logging dependency
+or public diagnostics surface is added. NativeAOT applications must enable `EventSourceSupport`.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `PipelineFault` | Error | `exceptionType`, `exceptionMessage`, `responseStarted:bool`, `requestId` |
+| 2 | `ExpectedPipelineFault` | Verbose | Same as event 1 |
+| 3 | `ErrorHandlerFailed` | Error | `handlerIndex:int` (zero-based), `handlerType`, `exceptionType`, `exceptionMessage`, `requestId` |
+| 4 | `DiagnosticsCallbackFailed` | Warning | `callback` (`OnException` or `SuppressDiagnosticsCallback`), `exceptionType`, `exceptionMessage`, `requestId` |
+| 5 | `ResponseAbortedByPeer` | Verbose | `exceptionType`, `exceptionMessage`, `requestId` |
+
+The boundary emits event 1 or 2 once after handling an unstarted application fault. Publication
+waits until callbacks and handlers finish so an exchange they cancel, or a client fault they
+encounter, is not reported as an application fault. Request-body client statuses and cancelled
+exchanges emit neither event. An `OperationCanceledException` whose exchange token is not
+cancelled remains an application fault. Handler failures in both the boundary and standalone
+`IErrorHandlingFeature.HandleAsync` raise event 3 through a false exception filter; the original
+exception propagates unchanged. A local async invocation captures synchronous throws first, so
+the handler's `finally` blocks finish before the filter checks cancellation. Cancelled and
+client-caused handler failures are excluded.
+
+Event 5 is raised directly from the boundary's existing response-client-fault catch (#1432).
+It uses `IWebResponseClientFaultFeature.ResponseAbortedByClient`, with no exception-type test,
+inner-exception inspection, or second peer classification. Slow readers, resets and STOP_SENDING
+remain cancellation even when a content adapter wraps the write failure.
+
+| Counter | Kind | Counting rule |
+| --- | --- | --- |
+| `total-faults` | PollingCounter | One per application fault reported through event 1 or 2, including when no listener is enabled |
+| `faults-per-second` | IncrementingPollingCounter | Rate over the same total |
+| `aborted-responses` | PollingCounter | One per boundary-initiated abort of a started response; excludes client faults and already-cancelled exchanges |
+
+**Reconciliation with #1411.** A started response that the boundary aborts is a cancelled
+exchange. It increments only `aborted-responses`, not `total-faults`, and emits neither
+`PipelineFault` nor `ExpectedPipelineFault`. Its original exception still reaches the existing
+`OnException` hook and `IHttpExceptionFeature`. This supersedes the older event-source scope's
+application-fault count for that branch. A response abandoned by its peer increments neither
+counter. Counter fields are maintained with Interlocked whether listeners are present or absent;
+the counters themselves are created on first enable. No request count or Meter duplicates are added.
+
+Application exceptions, including handler and diagnostic-callback failures, are written as their
+full type name and **Message**, never stack traces or `Exception.ToString()`. The source does not
+read the exception feature's path, query, method, headers, body, or other request content.
+Application messages can themselves contain application data; decision 49(d) accepts their
+delivery to configured sinks. Request ids come from `IWebRequestIdFeature` (empty if a custom
+server omits it), never `Activity.Current`. Payload reads and formatting occur only inside the
+appropriate `IsEnabled` check. These distinct application faults are not throttled.
+
+**Compatibility with 10.0.0-preview.1 (decision 15).** A default `UseErrorHandling()` now emits
+fault diagnostics, including application exception messages, without an `OnException` registration.
+`SuppressDiagnosticsCallback` now governs event 1 as well as the hook. An application whose
+`OnException` hook logs a fault and which also enables forwarding logs that fault twice; choose
+one reporting path if a single log entry is required. The HTTP error response remains safe by
+default, and no public signature changes.
+
+The serial `ErrorHandlingEventSourceTests` cover strict manifest validation, payloads and request
+correlation, cancellation/client exclusions, suppression, unchanged handler propagation, and exact
+counter deltas with and without listeners. Web.Hosting's streamed response tests cover slow readers
+and peer resets on HTTP/1.1, HTTP/2 and HTTP/3, including a wrapped write exception. Both suites link
+the canonical test-only recorder; fresh counter samples prove peer outcomes leave both totals unchanged.
+
 ## Non-goals
 
 - **Retry, compensation, or fault swallowing** — the boundary and hook shape responses; they do
   not manage recovery.
-- **A logging/diagnostics stack** — #794 (`Web.Diagnostics`) territory. The boundary's `OnException`
-  hook is a dependency-free observation seam, not a logger; it imposes no sink, format, or category.
 - **HTML developer error pages** — the developer-detail toggle enriches the problem+json *payload*
   (message + exception text); a rendered HTML exception page with source/stack framing is not in
   scope. Custom presentation is a status-code-pages responder or an `OnError` handler.

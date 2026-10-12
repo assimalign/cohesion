@@ -13,6 +13,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
 		<!-- The no-clobber tests fabricate a started-response streaming feature (HasStarted). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />

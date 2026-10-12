@@ -18,7 +18,9 @@ internal sealed class EventSourceRecorder : EventListener
 {
     private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
     private readonly ConcurrentDictionary<string, bool> _counterNames = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CounterSample> _counterSamples = new(StringComparer.Ordinal);
     private readonly EventSource _eventSource;
+    private long _counterSequence;
 
     public EventSourceRecorder(EventSource eventSource, EventLevel level, TimeSpan? counterInterval = null)
     {
@@ -33,6 +35,23 @@ internal sealed class EventSourceRecorder : EventListener
 
     /// <summary>The events written so far, excluding counter payloads.</summary>
     public IReadOnlyList<EventWrittenEventArgs> Events => _events.ToArray();
+
+    /// <summary>The sequence of the latest counter payload, for waiting on a fresh sample.</summary>
+    public long CounterSequence => Interlocked.Read(ref _counterSequence);
+
+    /// <summary>Waits for a counter value published after the supplied sequence.</summary>
+    public async Task<CounterSample> WaitForCounterAsync(string counterName, long afterSequence, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            if (_counterSamples.TryGetValue(counterName, out CounterSample sample) && sample.Sequence > afterSequence)
+            {
+                return sample;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken);
+        }
+    }
 
     /// <summary>Waits until every named counter has published at least one payload.</summary>
     public async Task WaitForCountersAsync(IReadOnlyCollection<string> counterNames, CancellationToken cancellationToken)
@@ -58,6 +77,12 @@ internal sealed class EventSourceRecorder : EventListener
                 name is string counterName)
             {
                 _counterNames[counterName] = true;
+
+                if ((counter.TryGetValue("Mean", out object? value) || counter.TryGetValue("Increment", out value)) &&
+                    value is double number)
+                {
+                    _counterSamples[counterName] = new(Interlocked.Increment(ref _counterSequence), number);
+                }
             }
 
             return;
@@ -65,4 +90,7 @@ internal sealed class EventSourceRecorder : EventListener
 
         _events.Enqueue(eventData);
     }
+
+    /// <summary>A polling counter's mean, or an incrementing counter's increment, and its publication sequence.</summary>
+    public readonly record struct CounterSample(long Sequence, double Value);
 }

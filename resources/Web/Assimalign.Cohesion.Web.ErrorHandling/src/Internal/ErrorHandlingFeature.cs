@@ -33,11 +33,21 @@ internal sealed class ErrorHandlingFeature : IErrorHandlingFeature
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(exception);
 
-        foreach (IErrorHandler handler in _handlers)
+        for (int index = 0; index < _handlers.Length; index++)
         {
-            if (await handler.TryHandleAsync(context, exception, cancellationToken).ConfigureAwait(false))
+            IErrorHandler handler = _handlers[index];
+            try
             {
-                return;
+                if (await ErrorHandlerInvoker.InvokeAsync(handler, context, exception, cancellationToken).ConfigureAwait(false))
+                {
+                    return;
+                }
+            }
+            // Deviates from the specific-catch rule: the false filter reports without catching
+            // or replacing the handler's exception.
+            catch (Exception failure) when (ErrorHandlingEventSource.Log.ErrorHandlerFailed(context, index, handler, failure))
+            {
+                throw;
             }
         }
 

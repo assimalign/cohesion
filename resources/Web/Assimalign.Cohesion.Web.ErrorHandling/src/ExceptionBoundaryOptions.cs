@@ -46,10 +46,12 @@ public sealed class ExceptionBoundaryOptions
     /// <summary>
     /// Gets or sets a predicate that marks a caught exception as <em>expected</em>. When it returns
     /// <see langword="true"/> the boundary skips <see cref="OnException"/> for that fault (the fault
-    /// is still handled and a response is still produced) — the Cohesion parity for the .NET 10
+    /// is still handled and a response is still produced). It also routes the event source's
+    /// <c>PipelineFault</c> Error event to <c>ExpectedPipelineFault</c> at Verbose; the fault counter
+    /// still increments. The predicate is evaluated once per fault. This is the Cohesion parity for the .NET 10
     /// <c>ExceptionHandlerOptions.SuppressDiagnosticsCallback</c> concept, adapted to the boundary's
     /// own diagnostic hook because the repo carries no <c>Microsoft.Extensions.Logging</c>. A
-    /// predicate that throws is treated as "do not suppress".
+    /// predicate that throws is treated as "do not suppress" and reports <c>DiagnosticsCallbackFailed</c>.
     /// </summary>
     public Func<IHttpContext, Exception, bool>? SuppressDiagnosticsCallback { get; set; }
 }

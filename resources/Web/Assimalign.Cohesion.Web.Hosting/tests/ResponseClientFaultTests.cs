@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
+using System.Diagnostics.Tracing;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,6 +14,7 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Logging;
+using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.ErrorHandling;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Testing;
@@ -22,7 +25,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 [Collection(nameof(TelemetryCollection))]
 public class ResponseClientFaultTests
 {
-    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Response client fault: A slow reader or peer reset should cancel through ErrorHandling even when its write failure is wrapped")]
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Response client fault: A slow reader or peer reset should report Verbose only and leave fault counters unchanged")]
     [InlineData(1, false)]
     [InlineData(2, false)]
     [InlineData(3, false)]
@@ -34,6 +37,9 @@ public class ResponseClientFaultTests
         // Arrange — a bodyless GET must carry the response-side report independently of request faults.
         using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(30));
         CancellationToken cancellationToken = cancellation.Token;
+        using EventSourceRecorder events = await CreateErrorHandlingRecorderAsync(cancellationToken);
+        EventSourceRecorder.CounterSample totalBefore = await events.WaitForCounterAsync("total-faults", 0, cancellationToken);
+        EventSourceRecorder.CounterSample abortedBefore = await events.WaitForCounterAsync("aborted-responses", 0, cancellationToken);
         using TelemetryRecorder recorder = new(metrics: false);
         RecordingLoggerProvider recorded = new();
         TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -42,6 +48,7 @@ public class ResponseClientFaultTests
         TaskCompletionSource<Exception?> boundaryResult = new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource<(InvalidOperationException Wrapped, CancellationToken Token, bool? Latched)> writeFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         string path = $"/response-client-fault/{Guid.NewGuid():N}";
+        string requestId = string.Empty;
         int exceptionCallbacks = 0;
         int errorHandlers = 0;
         int completionCallbacks = 0;
@@ -92,6 +99,7 @@ public class ResponseClientFaultTests
         });
         factory.Application.Use(async (context, _) =>
         {
+            requestId = context.Features.Get<IWebRequestIdFeature>()!.RequestId.ToHexString();
             using CancellationTokenRegistration cancellationRegistration = context.RequestCancelled.Register(
                 () => peerCancelled.TrySetResult());
             context.Features.Get<IWebResponseCompletionFeature>()!.Register(() =>
@@ -173,6 +181,9 @@ public class ResponseClientFaultTests
             Exception? result = await boundaryResult.Task.WaitAsync(cancellationToken);
             Activity span = await recorder.WaitForStoppedAsync(activity => Equals(activity.GetTagItem("url.path"), path), cancellationToken);
             await factory.StopAsync(cancellationToken);
+            long completedSequence = events.CounterSequence;
+            EventSourceRecorder.CounterSample totalAfter = await events.WaitForCounterAsync("total-faults", completedSequence, cancellationToken);
+            EventSourceRecorder.CounterSample abortedAfter = await events.WaitForCounterAsync("aborted-responses", completedSequence, cancellationToken);
 
             // Assert — the boundary reads the report, not InvalidOperationException's type or its inner exception.
             failure.Latched.ShouldBe(true);
@@ -186,10 +197,41 @@ public class ResponseClientFaultTests
             span.GetTagItem("error.type").ShouldBe("request_canceled");
             span.GetTagItem("http.response.status_code").ShouldBe(200);
             recorded.Entries.ShouldNotContain(entry => entry.Level >= LogLevel.Error);
+            EventWrittenEventArgs[] requestEvents = events.Events.Where(entry =>
+                entry.PayloadNames?.IndexOf("requestId") is int index && index >= 0 &&
+                Equals(entry.Payload![index], requestId)).ToArray();
+            requestEvents.ShouldNotContain(entry => entry.Level == EventLevel.Error);
+            EventWrittenEventArgs peerEvent = requestEvents.ShouldHaveSingleItem();
+            peerEvent.EventId.ShouldBe(5);
+            peerEvent.EventName.ShouldBe("ResponseAbortedByPeer");
+            peerEvent.Level.ShouldBe(EventLevel.Verbose);
+            peerEvent.PayloadNames!.ShouldBe(["exceptionType", "exceptionMessage", "requestId"]);
+            peerEvent.Payload![0].ShouldBe(typeof(InvalidOperationException).FullName);
+            peerEvent.Payload[1].ShouldBe(failure.Wrapped.Message);
+            totalAfter.Value.ShouldBe(totalBefore.Value);
+            abortedAfter.Value.ShouldBe(abortedBefore.Value);
+            events.Events.ShouldNotContain(entry => entry.EventId == 0);
         }
         finally
         {
             writeAgain.TrySetResult();
         }
+    }
+
+    private static async Task<EventSourceRecorder> CreateErrorHandlingRecorderAsync(CancellationToken cancellationToken)
+    {
+        // A separate exchange initializes the process-wide source through its public middleware.
+        // Its fault precedes the recorder and every counter baseline; no cross-assembly grant is needed.
+        await using WebApplicationTestFactory warmup = new();
+        warmup.Application.UseErrorHandling();
+        warmup.Application.Use((_, _) => throw new InvalidOperationException("Initialize application-fault diagnostics."));
+        await warmup.StartAsync(cancellationToken);
+        using var client = warmup.CreateClient();
+        using var response = await client.GetAsync($"/error-source-warmup/{Guid.NewGuid():N}", cancellationToken);
+        ((int)response.StatusCode).ShouldBe(500);
+        await warmup.StopAsync(cancellationToken);
+
+        EventSource source = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Web.ErrorHandling");
+        return new EventSourceRecorder(source, EventLevel.Verbose, TimeSpan.FromMilliseconds(100));
     }
 }

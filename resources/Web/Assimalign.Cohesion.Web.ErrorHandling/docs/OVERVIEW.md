@@ -71,6 +71,19 @@ IErrorHandlingFeature hook = context.Features.Get<IErrorHandlingFeature>()!;
 await hook.HandleAsync(context, exception, context.RequestCancelled);
 ```
 
+## Observing faults
+
+`UseErrorHandling()` reports application faults through the internal event source named
+`Assimalign.Cohesion.Web.ErrorHandling`. Enable it with `dotnet-trace` or forward it through
+`Assimalign.Cohesion.Logging.EventSource`. It writes exception types and messages, with request ids
+from the server feature; it writes no request paths, headers or bodies. `SuppressDiagnosticsCallback`
+routes expected faults from Error to Verbose and still suppresses `OnException`.
+
+Client-caused and cancelled exchanges are excluded from application-fault events and totals.
+Peer-abandoned responses are Verbose only. A boundary abort after the response starts increments
+only `aborted-responses`. If `OnException` logs and forwarding is also enabled, ordinary faults
+are logged twice. See [Diagnostics](DESIGN.md#diagnostics) for events, counters and compatibility.
+
 ## Scope boundaries
 
 - **Faults only.** Expected protocol outcomes — an authentication challenge's `401`, a router's

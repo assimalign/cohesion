@@ -76,6 +76,7 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
         // covers every exception type once the response was abandoned by its client.
         catch (Exception exception) when (context.Features.Get<IWebResponseClientFaultFeature>() is { ResponseAbortedByClient: true })
         {
+            ErrorHandlingEventSource.Log.ResponseAbortedByPeer(context, exception);
             await context.CancelAsync().ConfigureAwait(false);
             throw new OperationCanceledException("The client abandoned the response.", exception, context.RequestCancelled);
         }
@@ -105,54 +106,86 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
         // client's side, and the transport answers the exchange itself (#1340). That is an expected
         // protocol outcome, not an application defect, so the fault observer does not see it.
         HttpStatusCode? clientFault = context.Features.Get<IWebClientFaultFeature>()?.StatusCode;
+        bool suppressed = false;
+        bool responseStarted = false;
 
-        if (clientFault is null)
+        try
         {
-            await ObserveAsync(context, exception).ConfigureAwait(false);
-        }
-
-        // No-clobber: a started response can no longer be reshaped, so abort this one exchange.
-        if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
-        {
-            await context.CancelAsync().ConfigureAwait(false);
-            return;
-        }
-
-        if (clientFault is { } status)
-        {
-            // Stage the transport's own answer, with no body: no 500 problem, and no OnError handler,
-            // since those own application faults. Staging the status the transport sends keeps every
-            // reader downstream of the boundary (an access log, the server's telemetry) on the status
-            // that reaches the wire.
-            ResetResponse(context.Response, status);
-            return;
-        }
-
-        ResetResponse(context.Response, HttpStatusCode.InternalServerError);
-
-        // Give the application's OnError registrations first crack, in registration order — the
-        // first to own the fault stops the chain. A handler that throws is not masked.
-        if (context.Features.Get<IErrorHandlingFeature>() is { } hook)
-        {
-            foreach (IErrorHandler handler in hook.Handlers)
+            if (clientFault is null)
             {
-                if (await handler.TryHandleAsync(context, exception, cancellationToken).ConfigureAwait(false))
+                suppressed = ShouldSuppressDiagnostics(context, exception);
+                await ObserveAsync(context, exception, suppressed).ConfigureAwait(false);
+            }
+
+            // No-clobber: this branch ends as cancellation (#1411), not an application-fault event.
+            responseStarted = context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true };
+            if (responseStarted)
+            {
+                if (clientFault is null && !context.RequestCancelled.IsCancellationRequested &&
+                    context.Features.Get<IWebResponseClientFaultFeature>() is not { ResponseAbortedByClient: true })
                 {
-                    return;
+                    ErrorHandlingEventSource.Log.ResponseAborted();
+                }
+
+                await context.CancelAsync().ConfigureAwait(false);
+                return;
+            }
+
+            if (clientFault is { } status)
+            {
+                // Stage the transport's own answer, with no body: no 500 problem, and no OnError handler,
+                // since those own application faults. Staging the status the transport sends keeps every
+                // reader downstream of the boundary (an access log, the server's telemetry) on the status
+                // that reaches the wire.
+                ResetResponse(context.Response, status);
+                return;
+            }
+
+            ResetResponse(context.Response, HttpStatusCode.InternalServerError);
+
+            // Give the application's OnError registrations first crack, in registration order — the
+            // first to own the fault stops the chain. A handler that throws is not masked.
+            if (context.Features.Get<IErrorHandlingFeature>() is { } hook)
+            {
+                for (int index = 0; index < hook.Handlers.Count; index++)
+                {
+                    IErrorHandler handler = hook.Handlers[index];
+                    try
+                    {
+                        if (await ErrorHandlerInvoker.InvokeAsync(handler, context, exception, cancellationToken).ConfigureAwait(false))
+                        {
+                            return;
+                        }
+                    }
+                    // Deviates from the specific-catch rule: a false filter observes any handler
+                    // failure without catching it or changing its propagation.
+                    catch (Exception failure) when (ErrorHandlingEventSource.Log.ErrorHandlerFailed(context, index, handler, failure))
+                    {
+                        throw;
+                    }
                 }
             }
-        }
 
-        await WriteTerminalAsync(context, exception, cancellationToken).ConfigureAwait(false);
+            await WriteTerminalAsync(context, exception, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // A callback or handler can cancel the exchange or encounter a client fault itself.
+            // Publish only after it finishes, using the resulting state and the one suppression result.
+            if (clientFault is null && !responseStarted)
+            {
+                ErrorHandlingEventSource.Log.PipelineFault(context, exception, responseStarted, suppressed);
+            }
+        }
     }
 
     /// <summary>
     /// Invokes the diagnostic-observation hook for a caught fault, unless the suppression predicate
     /// marks the fault as expected.
     /// </summary>
-    private async ValueTask ObserveAsync(IHttpContext context, Exception exception)
+    private async ValueTask ObserveAsync(IHttpContext context, Exception exception, bool suppressed)
     {
-        if (ShouldSuppressDiagnostics(context, exception))
+        if (suppressed)
         {
             return;
         }
@@ -165,8 +198,9 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
             }
             // Deviates from the repo "catch specific exceptions" rule per design decision: the
             // diagnostic-observation hook is best-effort and must never defeat response rendering.
-            catch (Exception)
+            catch (Exception failure)
             {
+                ErrorHandlingEventSource.Log.DiagnosticsCallbackFailed(context, nameof(ExceptionBoundaryOptions.OnException), failure);
             }
         }
     }
@@ -184,8 +218,9 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
         }
         // Deviates from the repo "catch specific exceptions" rule per design decision: a faulty
         // suppression predicate must not break the boundary; treat it as "do not suppress".
-        catch (Exception)
+        catch (Exception failure)
         {
+            ErrorHandlingEventSource.Log.DiagnosticsCallbackFailed(context, nameof(ExceptionBoundaryOptions.SuppressDiagnosticsCallback), failure);
             return false;
         }
     }
