@@ -90,14 +90,8 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
                 ListenEndPoint = _options.EndPoint,
                 ApplicationProtocols = _options.ServerAuthenticationOptions.ApplicationProtocols!,
                 ListenBacklog = _options.Backlog,
-                ConnectionOptionsCallback = (connection, sslClientHelloInfo, token) => ValueTask.FromResult(new QuicServerConnectionOptions
-                {
-                    ServerAuthenticationOptions = _options.ServerAuthenticationOptions,
-                    MaxInboundBidirectionalStreams = maxInboundBidirectionalStreams,
-                    MaxInboundUnidirectionalStreams = _options.MaxUnidirectionalStreamCount,
-                    DefaultCloseErrorCode = _options.DefaultCloseErrorCode,
-                    DefaultStreamErrorCode = _options.DefaultStreamErrorCode
-                })
+                ConnectionOptionsCallback = (connection, sslClientHelloInfo, token) =>
+                    ValueTask.FromResult(_options.CreateConnectionOptions(maxInboundBidirectionalStreams))
             }, cancellationToken).ConfigureAwait(false);
             _boundMaxInboundBidirectionalStreams = maxInboundBidirectionalStreams;
 

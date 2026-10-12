@@ -23,7 +23,7 @@ correct for the protocols that run over it.
 | --- | --- | --- |
 | `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
-| `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes, and the bound on disposal's wait for stream delivery (`CloseDeliveryTimeout`, see "Lifecycle and teardown"). Both default ALPN to HTTP/3 (see "Error model"). |
+| `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes, and the bound on disposal's wait for stream delivery (`CloseDeliveryTimeout`, see "Lifecycle and teardown"). The listener also exposes `HandshakeTimeout`. Both default ALPN to HTTP/3 (see "Error model"). |
 | `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Implements the contracts library's `ITlsConnectionInfo` (see "Handshake facts") and `IMultiplexedConnectionAbort` (see "Application error codes"). |
 | `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. Implements `IMultiplexedStreamAbort`. |
 
@@ -251,9 +251,24 @@ is routine for streams released after their owning connection closed.
   Kestrel's QUIC transport makes the same call.
 - **Pending handshakes are bounded by `Backlog`.** It becomes `QuicListenerOptions.ListenBacklog`,
   which counts connections whose handshake is in progress plus those waiting to be accepted;
-  `System.Net.Quic` refuses new connections beyond it. The handshake timeout is
-  `System.Net.Quic`'s default (10 seconds). `TlsServerOptions.HandshakeTimeout` and
-  `MaxConcurrentHandshakes` belong to the TCP TLS layer and do not apply here.
+  `System.Net.Quic` refuses new connections beyond it. `MaxConcurrentHandshakes` belongs to the
+  TCP TLS layer and does not control this backlog.
+- **The inbound handshake timeout is configurable (#1311).**
+  `QuicConnectionListenerOptions.HandshakeTimeout` is copied into
+  `QuicServerConnectionOptions.HandshakeTimeout` by the options factory used by the listener's
+  actual connection-options callback. Its ten-second default preserves the previous
+  `System.Net.Quic` default. Positive values bound each handshake, and
+  `Timeout.InfiniteTimeSpan` disables that timeout. Other negative values are rejected on assignment;
+  remaining runtime validation belongs to `System.Net.Quic`. The connection-options factory takes
+  the frozen bidirectional stream allowance from bind time, preserving the snapshot described above.
+
+  Zero is passed through unchanged. Although the BCL property describes zero as choosing the
+  native default, [.NET 10's server path starts its managed cancellation timer with that value](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Quic/src/System/Net/Quic/QuicListener.cs#L207-L223),
+  so zero can expire immediately; callers should use `Timeout.InfiniteTimeSpan` to disable it.
+  Web.Hosting maps `TlsServerOptions.HandshakeTimeout` into this option for its TLS-options
+  overload and binds the endpoint's configured timeout. Its TLS non-positive/disabled convention
+  maps to `Timeout.InfiniteTimeSpan`. A timeout still drops only the failed connection, as #1304
+  requires. This option is additive relative to 10.0.0-preview.1 and leaves default behavior intact.
 - Contract-level failures surface through the area's
   `ConnectionException` family where the contracts demand it; raw
   `QuicException` / `SocketException` pass through on driver-specific

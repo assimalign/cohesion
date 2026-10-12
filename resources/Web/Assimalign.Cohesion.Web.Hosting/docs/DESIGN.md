@@ -1430,6 +1430,7 @@ command-line configuration providers; it adds no reflection binder or
     "Public":   { "Protocol": "Https", "Host": "0.0.0.0", "Port": 443,
                   "Certificate": { "Path": "certs/site.pem", "KeyPath": "certs/site.key" } },
     "Quic":     { "Protocol": "Http3", "Host": "0.0.0.0", "Port": 443,
+                  "HandshakeTimeout": "00:00:10",
                   "Certificate": { "Path": "certs/site.pfx", "Password": "…" } },
     "Internal": { "Protocol": "Http1", "Host": "localhost", "Port": 8080 }
   },
@@ -1545,6 +1546,13 @@ The binding is deliberately **not** reflection-based:
   non-negative integer.
 - **Timeouts.** A `TimeSpan` string (`"00:00:30"`), a bare whole number of
   seconds, or `"infinite"` / `"-1"` for `Timeout.InfiniteTimeSpan`.
+- **Endpoint handshake timeout.** `Http:Endpoints:<name>:HandshakeTimeout` applies to
+  `Https`, `Http1s`, `Http2s`, and `Http3` and defaults to 10 seconds (#1311). It accepts a
+  `TimeSpan` string or whole seconds (a bare `"3"` means three seconds), with `"infinite"`,
+  `"-1"`, zero, or another non-positive duration disabling it. Malformed or unrepresentable
+  values fail with an error naming the endpoint and key. The setting flows through
+  `TlsServerOptions.HandshakeTimeout`; HTTP/3 maps a disabled value to QUIC's explicit
+  `Timeout.InfiniteTimeSpan`; raw QUIC zero is passed to the runtime and may expire immediately.
 - **Endpoint host.** Literal IP addresses, `localhost` (→ loopback), and the
   wildcards `*` / `+` / `0.0.0.0` (→ any) / `[::]` / `::` (→ IPv6 any). DNS is
   **not** resolved at bind time — a hostname that is not one of those is an
@@ -1600,7 +1608,7 @@ The binding is deliberately **not** reflection-based:
 ### Scope boundary
 
 `UseConfiguration` binds HTTP, HTTPS, and HTTP/3 endpoints, their protocol-specific server
-limits, their client-certificate mode, the connection cap, `AllowAlternateSchemes`, and `AddDateHeader`.
+limits, their handshake timeout and client-certificate mode, the connection cap, `AllowAlternateSchemes`, and `AddDateHeader`.
 Not bound: the HTTP/3
 `MaxRequestHeadersFrameSize` and QPACK options, QUIC stream limits, and a client-certificate
 validation callback. The minimum request-body and response data rates are bound
@@ -2017,13 +2025,15 @@ Two overloads, one for each certificate-configuration ergonomic:
 - **`UseHttp3(Action<QuicConnectionListenerOptions>)`** — the QUIC-native form. The
   callback configures the endpoint, the certificate (through
   `ServerAuthenticationOptions.ServerCertificate` — the QUIC equivalent of the
-  `TlsServerOptions` surface), stream limits, and error codes in one place,
+  `TlsServerOptions` surface), `HandshakeTimeout`, stream limits, and error codes in one place,
   mirroring the `Http.Connections` HTTP/3 example.
 - **`UseHttp3(Action<QuicConnectionListenerOptions>, TlsServerOptions)`** — the
   cross-protocol-consistent form. The certificate flows through the *same*
   `TlsServerOptions` type as `UseHttp1s` / `UseHttp2s`; its `AuthenticationOptions`
-  becomes the QUIC listener's `ServerAuthenticationOptions`, leaving the callback for
-  the endpoint and QUIC tunables. This is the exact ergonomic mirror of
+  becomes the QUIC listener's `ServerAuthenticationOptions`, and its `HandshakeTimeout`
+  becomes the QUIC handshake timeout after the callback. These TLS settings override any
+  conflicting values in that callback, leaving it for the endpoint and QUIC tunables.
+  This is the exact ergonomic mirror of
   `UseHttp2s(configure, tlsOptions)`.
 
 Both default the ALPN application-protocol list to `h3` and the enabled TLS
@@ -2033,6 +2043,18 @@ eagerly to the passed options so a later read observes them, matching `UseHttp2s
 A third overload, `UseHttp3(configure, tlsOptions, configureHttp)`, also takes the
 `Http3ConnectionListenerOptions` (limits, QPACK); the configuration binder uses it for
 an `Http3` endpoint.
+
+The handshake timeout defaults to 10 seconds, preserving `System.Net.Quic`'s default (#1311).
+The TLS overload keeps TCP's disabling semantics: any non-positive `TlsServerOptions.HandshakeTimeout`
+maps to `Timeout.InfiniteTimeSpan`. The raw QUIC overload follows the native options instead:
+zero is passed to the runtime and may expire immediately, while `Timeout.InfiniteTimeSpan`
+disables the timeout (see the QUIC driver's DESIGN for the .NET 10 server-path behavior). The
+configuration key is `Http:Endpoints:<name>:HandshakeTimeout` (see "Binding specifics").
+Tests capture the QUIC options when the deferred listener is materialized, without binding or
+requiring msquic, and pin the configuration-to-TLS-to-QUIC flow and TLS precedence.
+Relative to 10.0.0-preview.1, non-default TLS options and endpoint configuration now affect the
+HTTP/3 handshake timeout where they were previously ignored. This changes behavior for callers
+that supplied those values; the default remains 10 seconds.
 
 ### Async binding without sync-over-async
 

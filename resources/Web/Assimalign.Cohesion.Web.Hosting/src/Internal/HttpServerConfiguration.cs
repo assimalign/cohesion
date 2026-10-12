@@ -38,6 +38,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 ///     "Public":   { "Protocol": "Https", "Host": "0.0.0.0", "Port": 443,
 ///                   "Certificate": { "Path": "certs/site.pem", "KeyPath": "certs/site.key" } },
 ///     "Quic":     { "Protocol": "Http3", "Host": "0.0.0.0", "Port": 443,
+///                   "HandshakeTimeout": "00:00:10",
 ///                   "Certificate": { "Path": "certs/site.pfx", "Password": "..." } },
 ///     "Internal": { "Protocol": "Http1", "Host": "localhost", "Port": 8080 }
 ///   },
@@ -67,7 +68,9 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// relative path resolves against the content root. A TLS endpoint's <c>ClientCertificateMode</c>
 /// (<c>NoCertificate</c>, the default; <c>AllowCertificate</c>; <c>RequireCertificate</c>) requests
 /// client certificates in the handshake and accepts one only when it chains to a root the machine
-/// trusts; a cleartext endpoint that declares one is refused.
+/// trusts; a cleartext endpoint that declares one is refused. A TLS endpoint's
+/// <c>HandshakeTimeout</c> defaults to 10 seconds and accepts a whole number of seconds, a
+/// <see cref="TimeSpan"/> string, or <c>infinite</c>; non-positive values disable the timeout.
 /// </para>
 /// <para>
 /// Limits are per HTTP version on the transport
@@ -484,12 +487,19 @@ internal static class HttpServerConfiguration
             http3 => CopySharedLimits(limits.Http1, http3.Limits));
     }
 
-    private static TlsServerOptions CreateTlsOptions(
+    /// <summary>Composes a TLS endpoint's certificate, handshake timeout, and client-certificate policy.</summary>
+    /// <param name="endpoint">The endpoint configuration section.</param>
+    /// <param name="endpointName">The endpoint name used in configuration errors.</param>
+    /// <param name="ownCertificate">Receives each loaded certificate for lifetime ownership.</param>
+    /// <param name="contentRootPath">The base directory for relative certificate paths.</param>
+    /// <returns>The TLS options shared by the secure TCP and QUIC registrations.</returns>
+    internal static TlsServerOptions CreateTlsOptions(
         IConfigurationSection endpoint,
         string endpointName,
         Action<X509Certificate2>? ownCertificate,
         string? contentRootPath)
     {
+        TimeSpan handshakeTimeout = ParseHandshakeTimeout(endpoint, endpointName);
         (X509Certificate2 leaf, X509Certificate2Collection chain) = ResolveCertificate(endpoint, endpointName, contentRootPath);
 
         ownCertificate?.Invoke(leaf);
@@ -500,6 +510,7 @@ internal static class HttpServerConfiguration
 
         TlsServerOptions tls = new()
         {
+            HandshakeTimeout = handshakeTimeout,
             AuthenticationOptions = new SslServerAuthenticationOptions
             {
                 ServerCertificateContext = SslStreamCertificateContext.Create(leaf, chain, offline: true),
@@ -519,6 +530,37 @@ internal static class HttpServerConfiguration
         }
 
         return tls;
+    }
+
+    private static TimeSpan ParseHandshakeTimeout(IConfigurationSection endpoint, string endpointName)
+    {
+        string? raw = GetString(endpoint, "HandshakeTimeout");
+        if (raw is null)
+        {
+            return TimeSpan.FromSeconds(10);
+        }
+
+        if (raw.Equals("infinite", StringComparison.OrdinalIgnoreCase) || raw == "-1")
+        {
+            return System.Threading.Timeout.InfiniteTimeSpan;
+        }
+
+        // A bare integer means seconds, not the days TimeSpan.TryParse would otherwise infer.
+        if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out long seconds))
+        {
+            if (seconds >= TimeSpan.MinValue.Ticks / TimeSpan.TicksPerSecond
+                && seconds <= TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerSecond)
+            {
+                return TimeSpan.FromTicks(seconds * TimeSpan.TicksPerSecond);
+            }
+        }
+        else if (TimeSpan.TryParse(raw, CultureInfo.InvariantCulture, out TimeSpan timeout))
+        {
+            return timeout;
+        }
+
+        throw new InvalidOperationException(
+            $"The HTTP endpoint '{endpointName}' declares an invalid 'HandshakeTimeout' ('{raw}'). Expected a TimeSpan, a whole number of seconds, or 'infinite'.");
     }
 
     private static ClientCertificateMode ParseClientCertificateMode(IConfigurationSection endpoint, string endpointName)

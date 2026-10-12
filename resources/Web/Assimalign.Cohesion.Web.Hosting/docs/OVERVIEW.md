@@ -62,6 +62,27 @@ Every final response carries an automatic `Date` unless the application supplied
 proxy add its own, set `options.AddDateHeader = false` in `Server.UseServer`, or configure
 `Http:AddDateHeader` through `UseConfiguration`. Interim responses carry no `Date`.
 
+TLS endpoints, including HTTP/3, default to a 10-second handshake timeout. Set
+`Http:Endpoints:<name>:HandshakeTimeout` through `UseConfiguration` to a `TimeSpan` string or
+whole seconds; `"infinite"`, `"-1"`, and non-positive durations disable it. The programmatic
+HTTP/3 TLS overload uses the same setting as the TCP TLS listeners:
+
+```csharp
+builder.Server.UseServer(options => options.UseHttp3(
+    quic => quic.EndPoint = new System.Net.IPEndPoint(System.Net.IPAddress.Any, 443),
+    new TlsServerOptions
+    {
+        AuthenticationOptions = { ServerCertificate = certificate },
+        HandshakeTimeout = TimeSpan.FromSeconds(5)
+    }));
+```
+
+`TlsServerOptions` comes from `Assimalign.Cohesion.Connections.Security`. Its timeout overrides
+the QUIC callback's value; any non-positive value disables it. With the raw QUIC overload, set
+`quic.HandshakeTimeout` directly and use `Timeout.InfiniteTimeSpan` to disable it. Raw QUIC zero
+is passed to the runtime and may expire immediately. Non-default TLS and configuration values
+now affect HTTP/3 where 10.0.0-preview.1 ignored them; the default stays 10 seconds.
+
 ## Telemetry
 
 The default server traces and measures every request (#1064). Subscribe by name:

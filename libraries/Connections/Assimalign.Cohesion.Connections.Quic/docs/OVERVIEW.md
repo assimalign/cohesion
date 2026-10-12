@@ -24,7 +24,7 @@ as every other transport.
   sizes, default QUIC application error codes (defaulting to the
   HTTP/3 codes, matching the default ALPN), and how long disposing a
   connection waits for its streams to deliver what they sent
-  (`CloseDeliveryTimeout`).
+  (`CloseDeliveryTimeout`). Listener options also expose `HandshakeTimeout`.
 
 Protocol semantics (stream typing, SETTINGS, GOAWAY) are out of scope —
 they belong to the protocol layer above. See `DESIGN.md` for the
@@ -58,6 +58,9 @@ using the facet to validate references, because pending disposals may include un
 QuicConnectionListenerOptions options = new();
 options.EndPoint = new IPEndPoint(IPAddress.Loopback, 4433);
 options.ServerAuthenticationOptions.ServerCertificate = certificate;
+
+// Bound each incoming handshake (ten seconds by default). InfiniteTimeSpan disables this timeout.
+options.HandshakeTimeout = TimeSpan.FromSeconds(5);
 
 // Disposing a connection waits this long, at most, for its streams' data and FINs to be
 // acknowledged before it closes the connection (five seconds by default).

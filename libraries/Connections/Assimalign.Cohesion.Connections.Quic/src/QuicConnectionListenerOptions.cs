@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.Quic;
 using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Security.Authentication;
@@ -24,6 +25,7 @@ public sealed class QuicConnectionListenerOptions
     private long _defaultStreamErrorCode = 0x10c;
     private long _defaultCloseErrorCode = 0x100;
     private TimeSpan _closeDeliveryTimeout = TimeSpan.FromSeconds(5);
+    private TimeSpan _handshakeTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Creates a new set of QUIC server transport options.
@@ -57,6 +59,33 @@ public sealed class QuicConnectionListenerOptions
     /// Gets or sets the listener backlog.
     /// </summary>
     public int Backlog { get; set; } = 512;
+
+    /// <summary>
+    /// Gets or sets the time allowed for an inbound QUIC connection's handshake to complete.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to ten seconds, matching <see cref="QuicServerConnectionOptions.HandshakeTimeout"/>.
+    /// A positive value bounds each handshake, and <see cref="Timeout.InfiniteTimeSpan"/> disables
+    /// that timeout. Zero is passed through to <c>System.Net.Quic</c>; its .NET 10 server path starts
+    /// an immediate cancellation timer for zero, so use <see cref="Timeout.InfiniteTimeSpan"/> to
+    /// disable the timeout. A failed handshake ends only that connection, not the listener's accept.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when the value is negative other than <see cref="Timeout.InfiniteTimeSpan"/>.
+    /// </exception>
+    public TimeSpan HandshakeTimeout
+    {
+        get => _handshakeTimeout;
+        set
+        {
+            if (value < TimeSpan.Zero && value != Timeout.InfiniteTimeSpan)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "A non-negative timeout or Timeout.InfiniteTimeSpan is required.");
+            }
+
+            _handshakeTimeout = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the maximum number of concurrent inbound bidirectional streams per connection.
@@ -187,6 +216,19 @@ public sealed class QuicConnectionListenerOptions
             ValidateCloseDeliveryTimeout(value);
             _closeDeliveryTimeout = value;
         }
+    }
+
+    internal QuicServerConnectionOptions CreateConnectionOptions(int maxInboundBidirectionalStreams)
+    {
+        return new QuicServerConnectionOptions
+        {
+            ServerAuthenticationOptions = ServerAuthenticationOptions,
+            MaxInboundBidirectionalStreams = maxInboundBidirectionalStreams,
+            MaxInboundUnidirectionalStreams = MaxUnidirectionalStreamCount,
+            DefaultCloseErrorCode = DefaultCloseErrorCode,
+            DefaultStreamErrorCode = DefaultStreamErrorCode,
+            HandshakeTimeout = HandshakeTimeout
+        };
     }
 
     internal StreamPipeOptionsContext CreateStreamOptions()

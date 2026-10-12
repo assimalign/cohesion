@@ -802,6 +802,30 @@ public class HttpServerConfigurationTests
         server.ShouldBeOfType<WebApplicationServer>().MaxConcurrentConnections.ShouldBe(3);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: An invalid handshake timeout should name the endpoint and key")]
+    [InlineData("forever")]
+    [InlineData("")]
+    [InlineData("9223372036854775807")]
+    public void Bind_OnInvalidHandshakeTimeout_ShouldThrowNamingEndpoint(string value)
+    {
+        // Arrange — validation precedes certificate loading, so a malformed timeout fails on its own key.
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Https",
+            ["Http:Endpoints:Secure:Port"] = "0",
+            ["Http:Endpoints:Secure:HandshakeTimeout"] = value,
+        });
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions()));
+
+        // Assert
+        error.Message.ShouldContain("Secure");
+        error.Message.ShouldContain("HandshakeTimeout");
+        error.Message.ShouldContain(value);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: An unsupported ClientCertificateMode names the endpoint")]
     public void Bind_UnsupportedClientCertificateMode_ShouldThrow()
     {

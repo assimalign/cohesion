@@ -8,9 +8,12 @@ using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections.Quic;
 using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Web.Hosting.Internal;
+using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 
 using Shouldly;
 
@@ -30,7 +33,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// <see cref="WebHttp3HostingIntegrationTests"/>.
 /// </summary>
 // System.Net.Quic is Windows/Linux/macOS only; the class is annotated to match UseHttp3 and the QUIC
-// driver, and every test that materializes a listener also gates on QuicListener.IsSupported at runtime.
+// driver. Tests that bind a listener gate on QuicListener.IsSupported; unbound construction needs no msquic.
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -109,6 +112,85 @@ public class WebHttp3HostingExtensionsTests
 
         // Assert — same instance, unmodified.
         tlsOptions.AuthenticationOptions.ApplicationProtocols.ShouldBeSameAs(explicitProtocols);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp3: The TLS handshake timeout should override the QUIC callback and preserve disabling")]
+    [InlineData(null, 10000)]
+    [InlineData(3500, 3500)]
+    [InlineData(0, -1)]
+    [InlineData(-1, -1)]
+    [InlineData(-3000, -1)]
+    public async Task UseHttp3WithTlsOptions_OnHandshakeTimeout_ShouldMapToQuic(int? milliseconds, int expectedMilliseconds)
+    {
+        // Arrange — an explicit TLS surface overrides a conflicting timeout from the raw QUIC callback.
+        HttpConnectionListenerOptions options = new();
+        TlsServerOptions tlsOptions = new();
+        if (milliseconds is { } value)
+        {
+            tlsOptions.HandshakeTimeout = TimeSpan.FromMilliseconds(value);
+        }
+
+        QuicConnectionListenerOptions? configured = null;
+        options.UseHttp3(quic =>
+        {
+            configured = quic;
+            quic.HandshakeTimeout = TimeSpan.FromSeconds(99);
+        }, tlsOptions);
+
+        // Act — materialize the deferred callback without acquiring an endpoint or using native QUIC.
+        await using HttpConnectionListener listener = new(options);
+
+        // Assert — a non-positive TLS value maps to QUIC's explicit infinite sentinel, including zero.
+        listener.Protocols.ShouldBe(HttpProtocol.Http30);
+        configured.ShouldNotBeNull().HandshakeTimeout.ShouldBe(TimeSpan.FromMilliseconds(expectedMilliseconds));
+        configured.ServerAuthenticationOptions.ShouldBeSameAs(tlsOptions.AuthenticationOptions);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTP/3 configuration: The endpoint handshake timeout should flow through TLS options into QUIC")]
+    [InlineData(null, 10000, 10000)]
+    [InlineData("3", 3000, 3000)]
+    [InlineData("00:00:03.500", 3500, 3500)]
+    [InlineData("0", 0, -1)]
+    [InlineData("infinite", -1, -1)]
+    [InlineData("-1", -1, -1)]
+    [InlineData("-3", -3000, -1)]
+    public async Task CreateTlsOptions_OnConfiguredHandshakeTimeout_ShouldFlowToHttp3(
+        string? raw, int tlsMilliseconds, int quicMilliseconds)
+    {
+        // Arrange — use the same TLS composition routine the endpoint binder calls for HTTP/3.
+        using CertificateFiles files = CertificateFiles.Create();
+        IConfiguration configuration = SeededConfiguration.Build(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Quic:Protocol"] = "Http3",
+            ["Http:Endpoints:Quic:Port"] = "0",
+            ["Http:Endpoints:Quic:Certificate:Path"] = files.PfxPath,
+            ["Http:Endpoints:Quic:Certificate:Password"] = CertificateFiles.Password,
+            ["Http:Endpoints:Quic:HandshakeTimeout"] = raw,
+        });
+        IConfigurationSection endpoint = configuration.GetEntry("Http:Endpoints:Quic").ShouldBeAssignableTo<IConfigurationSection>()!;
+        List<X509Certificate2> owned = new();
+
+        try
+        {
+            // Act — bind TLS settings, then materialize an unbound QUIC listener through the public overload.
+            TlsServerOptions tlsOptions = HttpServerConfiguration.CreateTlsOptions(endpoint, "Quic", owned.Add, contentRootPath: null);
+            HttpConnectionListenerOptions options = new();
+            QuicConnectionListenerOptions? configured = null;
+            options.UseHttp3(quic => configured = quic, tlsOptions);
+            await using HttpConnectionListener listener = new(options);
+
+            // Assert — bare integers are seconds, and TLS's disabling semantics survive the QUIC mapping.
+            tlsOptions.HandshakeTimeout.ShouldBe(TimeSpan.FromMilliseconds(tlsMilliseconds));
+            configured.ShouldNotBeNull().HandshakeTimeout.ShouldBe(TimeSpan.FromMilliseconds(quicMilliseconds));
+            listener.Protocols.ShouldBe(HttpProtocol.Http30);
+        }
+        finally
+        {
+            foreach (X509Certificate2 certificate in owned)
+            {
+                certificate.Dispose();
+            }
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp3: Should return the same options for chaining and defer QUIC creation")]

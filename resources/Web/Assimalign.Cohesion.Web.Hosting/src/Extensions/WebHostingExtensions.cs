@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Security.Authentication;
+using System.Threading;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections;
@@ -289,7 +290,7 @@ public static class WebHostingExtensions
         /// <param name="configure">
         /// The QUIC listener configuration callback (endpoint, TLS via
         /// <see cref="QuicConnectionListenerOptions.ServerAuthenticationOptions"/>, per-connection
-        /// stream limits, and error codes). The caller supplies the server certificate through
+        /// stream limits, handshake timeout, and error codes). The caller supplies the server certificate through
         /// <see cref="SslServerAuthenticationOptions.ServerCertificate"/> (or a selection callback) on
         /// those authentication options — the QUIC-native equivalent of the <c>TlsServerOptions</c>
         /// surface the TCP <c>UseHttp1s</c>/<c>UseHttp2s</c> members use. When the callback leaves the
@@ -341,8 +342,9 @@ public static class WebHostingExtensions
         /// </summary>
         /// <param name="configure">
         /// The QUIC listener configuration callback (endpoint, per-connection stream limits, and error
-        /// codes). Any <see cref="QuicConnectionListenerOptions.ServerAuthenticationOptions"/> set here
-        /// is superseded by <paramref name="tlsOptions"/>, which is the authoritative TLS surface for
+        /// codes). Any <see cref="QuicConnectionListenerOptions.ServerAuthenticationOptions"/> or
+        /// <see cref="QuicConnectionListenerOptions.HandshakeTimeout"/> set here is superseded by
+        /// <paramref name="tlsOptions"/>, which is the authoritative TLS surface for
         /// this overload.
         /// </param>
         /// <param name="tlsOptions">
@@ -352,7 +354,8 @@ public static class WebHostingExtensions
         /// <see cref="SslServerAuthenticationOptions.ApplicationProtocols"/> is left unset it is defaulted
         /// to <see cref="SslApplicationProtocol.Http3"/> (ALPN <c>h3</c>, RFC 7301) and, when the enabled
         /// TLS protocols are unset, to <see cref="SslProtocols.Tls13"/> (QUIC requires TLS 1.3, RFC 9001);
-        /// a caller-supplied protocol list is preserved unmodified.
+        /// a caller-supplied protocol list is preserved unmodified. <see cref="TlsServerOptions.HandshakeTimeout"/>
+        /// also flows to QUIC: the default is 10 seconds, and any non-positive value disables it.
         /// </param>
         /// <returns>The current options instance.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> or <paramref name="tlsOptions"/> is <see langword="null"/>.</exception>
@@ -376,13 +379,15 @@ public static class WebHostingExtensions
         /// </summary>
         /// <param name="configure">
         /// The QUIC listener configuration callback (endpoint, per-connection stream limits, and error
-        /// codes). Any <see cref="QuicConnectionListenerOptions.ServerAuthenticationOptions"/> set here
-        /// is superseded by <paramref name="tlsOptions"/>.
+        /// codes). Any <see cref="QuicConnectionListenerOptions.ServerAuthenticationOptions"/> or
+        /// <see cref="QuicConnectionListenerOptions.HandshakeTimeout"/> set here is superseded by
+        /// <paramref name="tlsOptions"/>.
         /// </param>
         /// <param name="tlsOptions">
         /// The server TLS options. When <see cref="SslServerAuthenticationOptions.ApplicationProtocols"/> is
         /// left unset it is defaulted to <c>h3</c> and, when the enabled TLS protocols are unset, to
-        /// <see cref="SslProtocols.Tls13"/>.
+        /// <see cref="SslProtocols.Tls13"/>. The handshake timeout defaults to 10 seconds; non-positive
+        /// values disable it, as they do for the TCP TLS listeners.
         /// </param>
         /// <param name="configureHttp">Optional HTTP/3 settings, including request limits and QPACK.</param>
         /// <returns>The current options instance.</returns>
@@ -408,6 +413,9 @@ public static class WebHostingExtensions
                     QuicConnectionListenerOptions quicOptions = new();
                     configure(quicOptions);
                     quicOptions.ServerAuthenticationOptions = tlsOptions.AuthenticationOptions;
+                    quicOptions.HandshakeTimeout = tlsOptions.HandshakeTimeout > TimeSpan.Zero
+                        ? tlsOptions.HandshakeTimeout
+                        : Timeout.InfiniteTimeSpan;
 
                     return new QuicConnectionListener(quicOptions);
                 },
