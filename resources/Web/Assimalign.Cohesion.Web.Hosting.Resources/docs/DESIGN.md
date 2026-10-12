@@ -71,9 +71,12 @@ management lifecycle acknowledgement, with `deferred` indicating response-comple
 Malformed JSON/base64/argument faults retain HTTP 400. `phase=Envelope` covers parsing and command
 construction; it changes to `Handler` immediately before command dispatch. A handler failure
 already reported by the shared control plane is omitted from this source (#1434); custom control
-planes still report `Handler` when they throw a JSON, format or argument exception. Only the exception type
-is written: JSON and handler messages can contain command input. No event contains an Authorization
-value, credential, claim, caller identity, command key or command payload. Command execution outcomes
+planes still report `Handler` when they throw a JSON, format or argument exception. Successful response
+status, headers and body are written after these catches. A response adapter failure propagates to the
+owning HTTP error boundary and never emits CommandMalformed or changes the applied command outcome.
+Only the exception type is written: JSON and handler messages can contain command input. No event
+contains an Authorization value, credential, claim, caller identity, command key or command payload.
+Command execution outcomes
 belong to Hosting.Resources, not this HTTP source.
 
 The two assemblies compile one stateless internal `CommandFailureDiagnostics` helper. It uses the
@@ -97,5 +100,8 @@ The producer's DESIGN documents the event, counter and exception-message policy.
 the scope's requested Web-source ownership and is recorded for owner review, with no public API,
 shipped visibility grant, or reverse dependency added.
 
-These diagnostics add operator visibility relative to 10.0.0-preview.1; request status codes, token
-acceptance and probe serialization are unchanged.
+These diagnostics add operator visibility relative to 10.0.0-preview.1; token acceptance and probe
+serialization are unchanged. **Breaking behavior change from 10.0.0-preview.1 (#1400, decision 15's
+preview terms):** failures while writing a successful command response now propagate instead of
+being converted into a command-level 400, 501 or 409 after the command has already succeeded.
+Envelope and handler failures retain their existing HTTP mappings.

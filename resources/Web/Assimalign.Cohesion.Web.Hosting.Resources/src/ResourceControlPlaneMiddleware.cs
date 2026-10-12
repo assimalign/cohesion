@@ -407,9 +407,6 @@ public static class ResourceControlPlaneMiddleware
             response = context.Request.Method == HttpMethod.Delete
                 ? await controlPlane.DeleteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false)
                 : await controlPlane.ExecuteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false);
-            context.Response.StatusCode = HttpStatusCode.Ok;
-            context.Response.Headers[HttpHeaderKey.ContentType] = "application/octet-stream";
-            await context.Response.Body.WriteAsync(response, context.RequestCancelled).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is JsonException or FormatException or ArgumentException)
         {
@@ -432,6 +429,10 @@ public static class ResourceControlPlaneMiddleware
             await WriteCommandRefusalAsync(context, exception.Detail).ConfigureAwait(false);
             return;
         }
+
+        context.Response.StatusCode = HttpStatusCode.Ok;
+        context.Response.Headers[HttpHeaderKey.ContentType] = "application/octet-stream";
+        await context.Response.Body.WriteAsync(response, context.RequestCancelled).ConfigureAwait(false);
     }
 
     private static Task WriteCommandRefusalAsync(IHttpContext context, string detail) =>
