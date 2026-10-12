@@ -88,10 +88,11 @@ flowchart TD
     Method -->|"yes"| Ack
     Method -->|"no"| Header{"Token header present?"}
     Header -->|"no, and a form body"| Form["Read and cache the form"]
-    Header -->|"otherwise"| Validate["Validate the cookie and request tokens"]
-    Form -->|"parsed"| Validate
+    Form -->|"transport fault latched"| Transport["Propagate to transport / ErrorHandling"]
     Form -->|"over an Http.Forms limit"| TooLarge["413 problem+json; the endpoint does not run"]
     Form -->|"malformed"| Reject["400 problem+json; the endpoint does not run"]
+    Header -->|"otherwise"| Validate["Validate the cookie and request tokens"]
+    Form -->|"parsed"| Validate
     Validate -->|"invalid"| Reject
     Validate -->|"valid"| Ack
 ```
@@ -122,6 +123,11 @@ flowchart TD
   `413 Content Too Large` instead (RFC 9110 §15.5.14, #1061): the client must send less whatever its
   token, and the endpoint's own form binding answers the same body the same way, so the status does not
   depend on whether the token travels in the header or the form.
+- **Transport faults keep their owner.** Both form-error catches require
+  `IWebClientFaultFeature.StatusCode` to be null (or the feature to be absent).
+  A latched fault, such as invalid chunk framing, propagates to transport /
+  `UseErrorHandling` without an antiforgery response or rejection diagnostic
+  (#1300 integration repair). The endpoint remains unexecuted.
 - **Validation** is `IHttpAntiforgery.IsRequestValidAsync` on the exchange's service
   (`context.Antiforgery`): the one `AddAntiforgery` registered, unless a middleware replaced it for the
   exchange. The service that validates is therefore always the one handlers mint with.
@@ -309,6 +315,7 @@ The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md
 | Missing, malformed, forged, or unbound token on a protected unsafe request | `400` `application/problem+json`; the endpoint does not run |
 | Malformed form body, with no token header | `400` `application/problem+json` |
 | Form body over a configured Http.Forms limit, with no token header | `413` `application/problem+json` |
+| Form read fails with `IWebClientFaultFeature.StatusCode` already latched | Propagates to transport / `UseErrorHandling`; no antiforgery rejection |
 | Rejection after the response head was committed | The exchange is aborted |
 | A protected endpoint dispatched without `UseAntiforgery` having processed it | `InvalidOperationException` at dispatch |
 | `UseAntiforgery` without `AddAntiforgery` | `InvalidOperationException` when the pipeline is built |
@@ -323,6 +330,11 @@ creation and failed only when a request stored a cookie token. Since #1416 it re
 composition, so `AddAntiforgery` inherits the earlier failure. This Web package did not ship in
 10.0.0-preview.1. Defaults and other valid token names are unchanged; configurations with an invalid
 name must be corrected before the application can register antiforgery.
+
+The #1300 integration repair adds no break against 10.0.0-preview.1, which did
+not contain this package. Relative to integrated Stage 14, transport-classified
+form failures propagate instead of producing a second rejection. Transport still
+owns the client response; normal form and token rejections retain their behavior.
 
 ## Diagnostics
 
@@ -350,6 +362,11 @@ middleware counts it once. The counter includes every rejected exchange, includi
 warning is suppressed. `RejectionAborted` is limited to one event per second across the process; the
 next event reports the number suppressed. There is no unprotect-attempt counter because one request
 can require two unprotect operations.
+
+Transport-classified form failures belong exclusively to
+`Assimalign.Cohesion.Http.Connections` and produce no antiforgery event or counter
+increment. The combined-source `Web.Hosting` tests verify invalid chunk framing
+on a protected form-token endpoint, with and without `UseErrorHandling`.
 
 The two middleware events read `IWebRequestIdFeature` and `IWebEndpointFeature.RouteTemplate` only
 inside `IsEnabled`. They never use ambient activities. The protector seam has no request context:

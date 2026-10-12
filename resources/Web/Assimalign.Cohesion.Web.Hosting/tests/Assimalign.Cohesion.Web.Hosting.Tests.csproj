@@ -25,6 +25,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<!-- Test-only: the exception boundary aborts an already-streaming response (#1411). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
+		<!-- Test-only: form and antiforgery parsing must leave transport-classified rejections to HTTP (#1300). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Forms" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
 		<!-- Test-only: a raw in-memory connection pipelines HTTP/1.1 requests, which a real client never does. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

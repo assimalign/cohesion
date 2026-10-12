@@ -42,7 +42,11 @@ answers it and the rest of the pipeline does not run:
 | --- | --- |
 | `InvalidDataException` whose `InnerException` is `HttpFormLimitExceededException` (a body over a configured `HttpFormOptions` limit) | `413 Content Too Large` (RFC 9110 §15.5.14), `application/problem+json`, detail "The request form exceeds a configured size limit." |
 | Any other `InvalidDataException` (a malformed body) | `400 Bad Request`, `application/problem+json`, detail "One or more binding errors occurred." and `errors` keyed `$form` |
-| Anything else | Not caught (below) |
+| A failure with `IWebClientFaultFeature.StatusCode` already latched, or anything else | Not caught (below) |
+
+The two form-error classifications apply only when the transport has reported no
+client-fault status. An absent feature or a feature whose `StatusCode` is `null`
+still allows normal form rejection handling.
 
 - **The same payload as a form-bound endpoint.** Both answers are byte for byte
   what the endpoint-binding generator's form read writes for the same failure,
@@ -63,7 +67,10 @@ answers it and the rest of the pipeline does not run:
   committed it (`IHttpResponseStreamingFeature.HasStarted`), the status can no
   longer be set and a problem body would land inside another response, so the
   middleware cancels the exchange instead, as `UseAntiforgery` does.
-- **What is not caught.** A body over the transport's own cap, an over-limit
+- **What is not caught.** A latched transport fault, including an
+  `InvalidDataException` for malformed chunk framing, propagates to the existing
+  transport / `UseErrorHandling` boundary without a form response, event or counter
+  increment (#1300 integration repair). A body over the transport's own cap, an over-limit
   decompressed body (`Web.Compression`), an `IOException` from a broken
   connection and a cancelled request belong to their owners, exactly as they do
   for a form-bound endpoint.
@@ -112,7 +119,11 @@ redesign, and is deliberately not built until a consumer needs it.
 The internal `WebFormsEventSource`, in namespace `Assimalign.Cohesion.Web.Internal`,
 uses provider name `Assimalign.Cohesion.Web.Forms`. Enable it with `dotnet-trace`
 or the EventSource log forwarder. It reports rejected parses only; a successful
-form read emits no event and increments no counter.
+form read emits no event and increments no counter. Transport-classified failures
+belong exclusively to `Assimalign.Cohesion.Http.Connections`; checking the live
+client-fault status before either catch prevents duplicate rejection attribution.
+The combined-source `Web.Hosting` tests send an invalid chunk size through
+`UseForms` with and without `UseErrorHandling` and verify only the transport counts it.
 
 | Id | Event | Level | Payload |
 | --- | --- | --- | --- |
@@ -147,6 +158,12 @@ counters. This is a diagnostic behavior break under program decision 15:
 applications forwarding the Web provider prefix can receive these new entries
 in configured sinks. Public form APIs and rejection status/body behavior do
 not change.
+
+The #1300 integration repair introduces no additional breaking change against
+10.0.0-preview.1: that release's `UseForms` had neither these rejection catches
+nor these diagnostics. Relative to the integrated Stage 14 implementation,
+transport-classified form reads now propagate instead of writing a second form
+rejection; the transport remains responsible for the client response.
 
 ## Non-goals
 

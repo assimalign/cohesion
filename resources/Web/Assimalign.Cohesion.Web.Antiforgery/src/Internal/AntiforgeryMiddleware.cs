@@ -88,17 +88,19 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
             try
             {
                 // Parses and caches the form on the exchange, so a form-bound endpoint binds from the same
-                // parse instead of reading a consumed body.
+                // parse instead of reading a consumed body. The catch filters leave latched transport
+                // faults to their owner rather than reporting another antiforgery rejection.
                 await context.ReadFormAsync(context.RequestCancelled).ConfigureAwait(false);
             }
-            catch (InvalidDataException exception) when (exception.InnerException is HttpFormLimitExceededException)
+            catch (InvalidDataException exception) when (context.Features.Get<IWebClientFaultFeature>()?.StatusCode is null
+                && exception.InnerException is HttpFormLimitExceededException)
             {
                 // A form over a configured Http.Forms limit is answered as the endpoint's own form binding
                 // answers it, 413 Content Too Large (RFC 9110 §15.5.14): the client must send less, whatever
                 // its token.
                 return (HttpStatusCode.RequestEntityTooLarge, "FormTooLarge", tokenLocation);
             }
-            catch (InvalidDataException)
+            catch (InvalidDataException) when (context.Features.Get<IWebClientFaultFeature>()?.StatusCode is null)
             {
                 // A malformed body carries no token the server can verify.
                 return (HttpStatusCode.BadRequest, "FormMalformed", tokenLocation);

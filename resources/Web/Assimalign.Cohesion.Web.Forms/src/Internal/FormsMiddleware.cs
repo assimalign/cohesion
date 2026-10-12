@@ -16,7 +16,9 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// A form over a configured Http.Forms limit is answered <c>413 Content Too Large</c> (RFC 9110
 /// §15.5.14), recognized by the <see cref="HttpFormLimitExceededException"/> the parse records as its
 /// <see cref="InvalidDataException"/>'s cause; any other <see cref="InvalidDataException"/> is a
-/// malformed body, answered <c>400 Bad Request</c>. Both are written as <c>application/problem+json</c>
+/// malformed form body, answered <c>400 Bad Request</c>, unless the transport has already classified
+/// the failure through <see cref="IWebClientFaultFeature.StatusCode"/>. Both form rejections are written
+/// as <c>application/problem+json</c>
 /// with the payload a source-generated form-bound endpoint writes for the same failure, so a client
 /// gets one answer whether this middleware or the endpoint parsed the form. The rest of the pipeline
 /// does not run.
@@ -48,20 +50,22 @@ internal sealed class FormsMiddleware : IWebApplicationMiddleware
         }
 
         // Parse and cache the form. The read stays inline rather than in a helper so a parse that
-        // suspends on the body allocates one state machine per request, not two.
+        // suspends on the body allocates one state machine per request, not two. The catch filters
+        // leave a latched transport fault to its owner, including invalid chunk framing.
         HttpStatusCode? rejection = null;
 
         try
         {
             await feature.ReadFormAsync(context.RequestCancelled).ConfigureAwait(false);
         }
-        catch (InvalidDataException exception) when (exception.InnerException is HttpFormLimitExceededException limit)
+        catch (InvalidDataException exception) when (features.Get<IWebClientFaultFeature>()?.StatusCode is null
+            && exception.InnerException is HttpFormLimitExceededException limit)
         {
             WebFormsEventSource.Log.FormLimitExceeded(limit, context);
             // The client must send less: RFC 9110 §15.5.14.
             rejection = HttpStatusCode.RequestEntityTooLarge;
         }
-        catch (InvalidDataException exception)
+        catch (InvalidDataException exception) when (features.Get<IWebClientFaultFeature>()?.StatusCode is null)
         {
             WebFormsEventSource.Log.FormMalformed(exception, context);
             rejection = HttpStatusCode.BadRequest;
