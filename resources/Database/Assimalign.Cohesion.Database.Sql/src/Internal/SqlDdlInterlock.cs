@@ -12,6 +12,40 @@ internal sealed class SqlDdlInterlock
     private readonly object _sync = new();
     private string? _schema;
     private int _statements;
+    private int _metadataStatements;
+    private bool _definitionStatement;
+
+    // A definition drop checks persisted dependencies against a stable metadata directory.
+    // Unrelated table DDL remains concurrent; conflicting definition DDL refuses immediately.
+    internal IDisposable EnterMetadata(string database, bool definition)
+    {
+        lock (_sync)
+        {
+            if (_definitionStatement || definition && _metadataStatements != 0)
+            {
+                throw new DatabaseObjectLockedException(database, database, "SQL definition DDL");
+            }
+            _metadataStatements++;
+            _definitionStatement = definition;
+            return new MetadataLease(this);
+        }
+    }
+
+    private sealed class MetadataLease : IDisposable
+    {
+        private SqlDdlInterlock? _owner;
+        internal MetadataLease(SqlDdlInterlock owner) { _owner = owner; }
+        public void Dispose()
+        {
+            if (_owner is not { } owner) { return; }
+            lock (owner._sync)
+            {
+                owner._metadataStatements--;
+                owner._definitionStatement = false;
+                _owner = null;
+            }
+        }
+    }
 
     internal IDisposable EnterApply(string schema)
     {

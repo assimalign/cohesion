@@ -24,6 +24,34 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlDomainWireTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - SQL functions and domains execute and enforce constraints over the wire")]
+    public async Task QueryAsync_SqlDefinitions_ShouldUseTheFunctionAndDomainPaths()
+    {
+        // Arrange
+        await using var harness = await DomainHarness.StartAsync(_ => { });
+        await using var connection = await harness.Client.ConnectAsync(Timeout());
+        await connection.ExecuteAsync("CREATE FUNCTION inc(p INT) RETURNS INT IMMUTABLE STRICT RETURN p + 1", cancellationToken: Timeout());
+        await connection.ExecuteAsync("CREATE DOMAIN positive AS INT CHECK (VALUE > 0)", cancellationToken: Timeout());
+        await connection.ExecuteAsync("CREATE FUNCTION fallback(p INT) RETURNS INT RETURN COALESCE(p, 9)", cancellationToken: Timeout());
+        await connection.ExecuteAsync("CREATE FUNCTION twice(p INT) RETURNS INT IMMUTABLE RETURN inc(p) * 2", cancellationToken: Timeout());
+        await connection.ExecuteAsync("CREATE TABLE values_table (id INT, n positive DEFAULT inc(1), CHECK (inc(n) > 0))", cancellationToken: Timeout());
+        await connection.ExecuteAsync("INSERT INTO values_table (id) VALUES (1)", cancellationToken: Timeout());
+        // Act
+        var result = await connection.QueryAsync("SELECT inc(n) AS answer, twice(n) AS doubled, inc(NULL) AS missing, fallback(NULL) AS filled FROM values_table WHERE inc(n) = 3", cancellationToken: Timeout());
+        // Assert
+        var row = result.ShouldHaveSingleItem();
+        row["answer"].ShouldBe(3);
+        row["doubled"].ShouldBe(6);
+        row["missing"].ShouldBeNull();
+        row["filled"].ShouldBe(9);
+        var failure = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("INSERT INTO values_table VALUES (2, -1)", cancellationToken: Timeout()));
+        failure.ConnectionUsable.ShouldBeTrue();
+        await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("CREATE FUNCTION weak(p INT) RETURNS INT IMMUTABLE RETURN fallback(p)", cancellationToken: Timeout()));
+        await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("CREATE FUNCTION recursive(p INT) RETURNS INT RETURN recursive(p)", cancellationToken: Timeout()));
+        await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("DROP DOMAIN positive", cancellationToken: Timeout()));
+        await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("DROP FUNCTION inc(INT)", cancellationToken: Timeout()));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Domains: DDL and DML over a domain, and an application's cast, over the wire")]
     public async Task QueryAsync_DomainColumnAndApplicationCast_ShouldRunOverTheWire()
     {

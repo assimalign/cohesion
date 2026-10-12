@@ -4,10 +4,12 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog

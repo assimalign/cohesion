@@ -67,6 +67,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
     // isolation syntax (SET TRANSACTION ISOLATION LEVEL) that would change it is not implemented.
     private readonly IsolationLevel _isolationLevel = IsolationLevel.Snapshot;
     private SqlStatementMetrics? _lastStatementMetrics;
+    internal SqlCatalogScript? ScriptReceipt { get; set; }
 
     /// <summary>Opens a session over a database.</summary>
     /// <param name="database">The database.</param>
@@ -298,7 +299,17 @@ public sealed class SqlDatabaseSession : DatabaseSession
             && _lastStatementMetrics is { SelfCommits: > 0 } metrics
             && !ReferenceEquals(metrics, previousMetrics);
 
-    private async ValueTask<QueryResult> ExecuteStatementAsync(QueryRequest request, CancellationToken cancellationToken)
+    private ValueTask<QueryResult> ExecuteStatementAsync(QueryRequest request, CancellationToken cancellationToken)
+        => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken) : ExecuteStatementCoreAsync(request, cancellationToken);
+
+    private async ValueTask<QueryResult> ExecuteMetadataStatementAsync(QueryRequest request, CancellationToken cancellationToken)
+    {
+        using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), request is SqlQueryRequest
+            { Statement.SqlExpression: SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression });
+        return await ExecuteStatementCoreAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<QueryResult> ExecuteStatementCoreAsync(QueryRequest request, CancellationToken cancellationToken)
     {
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
@@ -421,6 +432,10 @@ public sealed class SqlDatabaseSession : DatabaseSession
                 _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress);
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            if (ScriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == QueryResultStatus.Success)
+            {
+                await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
+            }
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             return result;
         }
@@ -444,6 +459,15 @@ public sealed class SqlDatabaseSession : DatabaseSession
             await RollbackAutoCommitAsync(context).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private async ValueTask CompleteScriptStatementAsync(QueryResult result, TransactionContext transaction, SqlCatalogScript receipt, CancellationToken cancellationToken)
+    {
+        if (result is QueryResultSet rows)
+        {
+            await foreach (var row in rows.GetRowsAsync(cancellationToken).ConfigureAwait(false)) { _ = row; }
+        }
+        await SqlScriptDataReceipt.AppendAsync(_database, transaction, receipt, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

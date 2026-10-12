@@ -10,7 +10,7 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 
 - **Parser** — `SELECT` (joins, grouping, ordering, limits, subqueries), `INSERT`
   (multi-row, `INSERT ... SELECT`), `UPDATE`, `DELETE`, `CREATE/ALTER/DROP TABLE`,
-  and a full expression grammar (precedence, `CASE`, `CAST`, predicates,
+  `CREATE/DROP FUNCTION`, `CREATE/DROP DOMAIN`, and a full expression grammar (precedence, `CASE`, `CAST`, predicates,
   parameters). Error-tolerant: malformed input yields diagnostics, never
   exceptions.
 - **AST** — sealed statement/expression node families under
@@ -31,8 +31,7 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   declared in the lexer tables and the dialect doc.
 - **Canonical rendering** — `SqlExpressionRenderer` turns a parsed expression or
   `SELECT` back into canonical SQL text that parses to the same tree. It is the
-  form in which the engine persists every stored definition (CHECK, DEFAULT, and
-  later expression defaults and views); see
+  form in which the engine persists stored expressions (CHECK, DEFAULT and SQL function bodies); see
   [DIALECT.md](DIALECT.md#persisted-definitions-are-canonical).
 
 ## Dependencies

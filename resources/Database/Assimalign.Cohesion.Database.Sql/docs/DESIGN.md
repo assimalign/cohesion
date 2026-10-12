@@ -4229,9 +4229,9 @@ shipped-to-shipped internal grant or assembly scanning was added.
 Scripts use statement-granular recovery. The catalog's scoped receipt enlists in each final DDL
 publication. Object-id reservations advance the generation without completing a statement. Data
 statements add an MVCC receipt in the same logical transaction, in a reserved internal chain
-(owner long.MaxValue), never exposed as a SQL table. If data commits before catalog progress,
+(owner ulong.MaxValue, which the checked catalog allocator cannot hand out), never exposed as a SQL table. If data commits before catalog progress,
 recovery finds that receipt and advances without replay. The ordinary row recovery protocol
-handles these versions. Forward-only receipts are retained; removing code deletes no history.
+handles these versions. The cold reconciliation path reads the committed receipt chain once; statement lookups use a hash set. Forward-only receipts are retained; removing code deletes no history.
 
 The ordered script-set digest is computed before I/O. A matching digest plus DDL generation
 skips reconciliation in O(1), without parsing, hashing, receipt scans or catalog walks. Verify
@@ -4244,5 +4244,6 @@ data-scaling scripts therefore add Build latency (49a). Scripts remain outside t
 artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
 Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
 SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views
-show the merged type environment with the same provenance. INFORMATION_SCHEMA.ROUTINES remains
+show the merged type environment with the same provenance. SQL view rows use the statement/transaction
+catalog snapshot, while native registrations stay frozen. INFORMATION_SCHEMA.ROUTINES remains
 absent. The format gate refuses older files without a legacy reader or upgrade path.

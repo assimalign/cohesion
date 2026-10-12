@@ -83,6 +83,8 @@ internal sealed partial class SqlPlanExecutor
     {
         switch (plan)
         {
+            case SqlDefinitionPlan definition:
+                return await ExecuteDefinitionAsync(definition, statement, cancellationToken).ConfigureAwait(false);
             case SqlSubqueryPlan subquery:
                 return await ExecuteSubqueryAsync(subquery, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertSelectPlan insertSelect:

@@ -21,6 +21,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+		<!-- Q8 uses the same 50-table fixture as the NativeAOT benchmark. -->
+		<Compile Include="..\samples\Assimalign.Cohesion.Database.Sql.Benchmarks\Q8Schema.cs" Link="TestObjects\Q8Schema.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\SimulatedDurableFileHandle.cs" Link="TestObjects\SimulatedDurableFileHandle.cs" />
 		<!-- Rewrites index pages into the layouts the old-format refusal tests need (#1194). -->
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Indexing\tests\TestObjects\LegacyBTreePages.cs" Link="TestObjects\LegacyBTreePages.cs" />

@@ -33,6 +33,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlBoundTableCache
 {
     private readonly SqlCatalog _catalog;
+    private readonly SqlFunctionEnvironment _native;
     private readonly ConditionalWeakTable<SqlCatalogTable, SqlBoundTable> _bound = new();
     private readonly object _sync = new();
     private long _bindCount;
@@ -52,14 +53,25 @@ internal sealed class SqlBoundTableCache
     internal SqlBoundTableCache(SqlCatalog catalog, SqlFunctionEnvironment? functions = null)
     {
         _catalog = catalog;
-        Functions = functions ?? SqlFunctionEnvironment.Standard;
+        _native = functions ?? SqlFunctionEnvironment.Standard;
+        Functions = SqlDefinitionBinder.Load(catalog, _native);
     }
 
     /// <summary>
     /// Gets the engine's function catalog and the database: what a statement of the database
     /// resolves its calls against, and what the bound CHECK predicates were bound against.
     /// </summary>
-    internal SqlFunctionEnvironment Functions { get; }
+    internal SqlFunctionEnvironment Functions { get; private set; }
+
+    internal void RefreshDefinitions()
+    {
+        lock (_sync)
+        {
+            Functions = SqlDefinitionBinder.Load(_catalog, _native);
+            _bound.Clear();
+            _validatedGeneration = null;
+        }
+    }
 
     /// <summary>
     /// Gets how many table versions this cache has bound. Binding is the only place the engine
@@ -79,7 +91,10 @@ internal sealed class SqlBoundTableCache
     internal SqlBoundTable Get(SqlCatalogTable table)
     {
         ArgumentNullException.ThrowIfNull(table);
-        return _bound.TryGetValue(table, out var bound) ? bound : Store(table, Bind(table));
+        lock (_sync)
+        {
+            return _bound.TryGetValue(table, out var bound) ? bound : Store(table, Bind(table));
+        }
     }
 
     /// <summary>
@@ -181,9 +196,27 @@ internal sealed class SqlBoundTableCache
             ulong generation = _catalog.DdlGeneration;
             SqlUnresolvedDefinition? definition = null;
             SqlUnresolvedDomain? unresolvedDomain = null;
+            foreach (var function in Functions.Catalog.OfType<SqlExpressionFunction>())
+            {
+                if (function.Unresolved is { } reason) { definition ??= new SqlUnresolvedDefinition("SQL function '" + function.Name + "'", function.Name, reason); }
+            }
+            foreach (var type in Functions.Types)
+            {
+                if (type.Check is SqlExpressionFunction { Unresolved: { } reason }) { definition ??= new SqlUnresolvedDefinition("SQL domain '" + type.Name + "'", type.Name, reason); }
+            }
             foreach (var table in _catalog.Tables)
             {
                 var bound = Get(table);
+                foreach (var column in table.Columns)
+                {
+                    if (column.DefaultLiteral is not { } text) { continue; }
+                    var expression = SqlPersistedExpression.Load(text, "DEFAULT");
+                    var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: Functions);
+                    if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
+                    {
+                        definition ??= new SqlUnresolvedDefinition("DEFAULT of '" + table.Name + "." + column.Name + "'", text, "which this engine does not register");
+                    }
+                }
                 foreach (var check in bound.Checks)
                 {
                     definition ??= check.Unresolved;
@@ -245,8 +278,8 @@ internal sealed class SqlBoundTableCache
             if (column.DefaultLiteral is not null)
             {
                 // Converted to the column's type once, here: no decoded row and no INSERT converts it again.
-                defaults[ordinal] = SqlPlanExecutor.BindDefault(column, SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
-                    $"DEFAULT of column '{column.Name}' on table '{tableName}'"));
+                defaults[ordinal] = SqlPlanExecutor.BindDefaultExpression(column,
+                    $"DEFAULT of column '{column.Name}' on table '{tableName}'", Functions, _catalog.DefaultCollation);
             }
 
             if (column.DomainName is not null)

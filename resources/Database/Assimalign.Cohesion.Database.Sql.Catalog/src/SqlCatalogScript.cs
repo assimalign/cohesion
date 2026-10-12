@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>A durable, forward-only declared-script receipt. Statement positions are one-based completed prefixes.</summary>

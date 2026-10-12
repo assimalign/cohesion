@@ -209,6 +209,9 @@ internal sealed partial class SqlExpressionEvaluator
         {
             case SqlBoundExpressionKind.Column:
                 return row[((SqlBoundColumn)expression).Ordinal];
+            case SqlBoundExpressionKind.Default:
+                var defaultValue = (SqlBoundDefault)expression;
+                return SqlPlanExecutor.CoerceForColumn(EvaluateCore(defaultValue.Value, row), defaultValue.Column);
             case SqlBoundExpressionKind.Constant:
                 return ((SqlBoundConstant)expression).Value;
             case SqlBoundExpressionKind.Binary:

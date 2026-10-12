@@ -79,7 +79,7 @@ internal sealed partial class SqlPlanExecutor
                 if (!assigned[ordinal])
                 {
                     // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
-                    values[ordinal] = defaults[ordinal] is { } boundDefault ? DefaultValue(boundDefault) : ResolveDefault(table.Columns[ordinal], null);
+                    values[ordinal] = defaults[ordinal] is { } boundDefault ? DefaultValue(boundDefault, cancellationToken) : ResolveDefault(table.Columns[ordinal], null);
                 }
             }
 

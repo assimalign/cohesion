@@ -54,6 +54,19 @@ public sealed class SqlType : IEquatable<SqlType>
         Check = check;
     }
 
+    internal string? DefaultLiteral { get; private set; }
+    internal bool IsNotNull { get; private set; }
+    internal bool IsSqlDefined { get; private set; }
+
+    internal static SqlType CreateSqlDomain(string name, SqlType baseType, SqlScalarFunction? check, string? defaultLiteral, bool notNull)
+    {
+        var domain = CreateDomain(name, baseType, check);
+        domain.DefaultLiteral = defaultLiteral;
+        domain.IsNotNull = notNull;
+        domain.IsSqlDefined = true;
+        return domain;
+    }
+
     /// <summary>Gets the type's SQL name, as a diagnostic or a signature shows it.</summary>
     public string Name { get; }
 

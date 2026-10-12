@@ -1,6 +1,8 @@
 using System.Linq;
+
 using Shouldly;
 using Xunit;
+
 namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDefinitionParserTests

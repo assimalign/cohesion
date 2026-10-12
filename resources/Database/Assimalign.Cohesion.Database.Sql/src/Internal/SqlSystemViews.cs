@@ -37,7 +37,9 @@ internal static class SqlSystemViews
         // decision 66): engine-wide, so every database of the engine lists the same rows.
         Cohesion(FunctionsView, Text("FUNCTION_NAME"), Text("FUNCTION_KIND"), Text("PARAMETER_TYPES", true),
             Number("PARAMETER_COUNT", true), Text("RETURN_TYPE", true), Text("VOLATILITY", true), Text("NULL_BEHAVIOR", true),
-            Text("IS_BUILT_IN")),
+            Text("IS_BUILT_IN"), Text("IS_SQL_DEFINED")),
+        Cohesion("TYPES", Text("TYPE_NAME"), Text("BASE_TYPE"), Text("IS_DOMAIN"), Text("IS_SQL_DEFINED")),
+        Cohesion("DOMAINS", Text("DOMAIN_NAME"), Text("BASE_TYPE"), Text("IS_SQL_DEFINED")),
     ];
 
     /// <summary>The name of <c>COHESION_SCHEMA.FUNCTIONS</c>, the engine's function catalog as rows.</summary>

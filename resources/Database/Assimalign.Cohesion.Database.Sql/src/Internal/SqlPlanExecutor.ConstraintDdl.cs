@@ -23,8 +23,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (column.DefaultLiteral is not null)
             {
-                ResolveDefault(column, SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
-                    $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'"));
+                BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, declaring: true);
             }
         }
 
@@ -230,8 +229,11 @@ internal sealed partial class SqlPlanExecutor
         // until every default and existing-row constraint has been checked.
         if (plan.Column.DefaultLiteral is not null)
         {
-            ResolveDefault(plan.Column, SqlPersistedExpression.LoadDefaultValue(plan.Column.DefaultLiteral,
-                $"DEFAULT of column '{plan.Column.Name}' on table '{plan.Schema}.{plan.Name}'"));
+            if (!SqlPersistedExpression.IsDefaultLiteral(SqlPersistedExpression.Load(plan.Column.DefaultLiteral, "ADD COLUMN DEFAULT")))
+            {
+                throw SqlDefinitionBinder.Refuse("ADD COLUMN requires a literal DEFAULT; expression defaults require row materialization, which this metadata-only addition does not perform.");
+            }
+            BindDefaultExpression(plan.Column, $"DEFAULT of column '{plan.Column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, declaring: true);
         }
 
         var columns = table.Columns.Append(plan.Column).ToArray();
@@ -258,7 +260,7 @@ internal sealed partial class SqlPlanExecutor
             // value is one immutable literal, so validate it once instead of scanning rows.
             var definition = _definitions.Get(replacement);
             var row = new object?[columns.Length];
-            row[^1] = definition.DefaultValues[^1] is { } literal ? DefaultValue(literal) : null;
+            row[^1] = definition.DefaultValues[^1] is { } literal ? DefaultValue(literal, cancellationToken) : null;
             try
             {
                 CheckDomains(definition, row, ExecutionEvaluator(null, cancellationToken), [columns.Length - 1]);

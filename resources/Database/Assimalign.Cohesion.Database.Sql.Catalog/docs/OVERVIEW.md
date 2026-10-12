@@ -27,6 +27,10 @@ physical index registrations exported by `Database.Indexing`.
   change advances `DdlGeneration` in its own transaction, so interrupted provisioning
   and later DDL trigger live-catalog reconciliation.
 
+- **SQL definitions and scripts** — format 10 persists function bodies, domains, dependencies,
+  ownership, statement-prefix script receipts and a script-set reconciliation marker. Catalog
+  mutations can enlist a receipt in their existing transaction; the catalog remains language-free.
+
 ## Dependencies
 
 `Database` (root), `Database.Storage`, `Database.Sql.Storage` (the record facade

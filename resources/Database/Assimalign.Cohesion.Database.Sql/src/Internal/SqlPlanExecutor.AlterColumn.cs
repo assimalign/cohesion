@@ -32,8 +32,7 @@ internal sealed partial class SqlPlanExecutor
         }
         if (column.DefaultLiteral is not null)
         {
-            ResolveDefault(column, SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
-                $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'"));
+            BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'", _definitions.Functions, _catalog.DefaultCollation, declaring: true);
         }
 
         bool tightens = previous.IsNullable && !column.IsNullable ||

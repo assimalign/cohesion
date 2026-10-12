@@ -20,10 +20,12 @@ internal sealed partial class SqlPlanExecutor
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 
-        // The function catalog is the engine's, frozen at its build: no catalog snapshot describes it.
+        // Native registrations are frozen; SQL definitions use the statement/transaction catalog snapshot.
         var rows = plan.View.Name == SqlSystemViews.FunctionsView
-            ? EnumerateFunctionRows(_definitions.Functions.Catalog)
-            : EnumerateSystemViewRows(plan.View, statement, cancellationToken);
+            ? EnumerateFunctionRows(_definitions.Functions.Catalog, statement.CatalogSnapshot)
+            : plan.View.Schema == "COHESION_SCHEMA" && plan.View.Name is "TYPES" or "DOMAINS"
+                ? EnumerateTypeRows(plan.View.Name == "DOMAINS", statement.CatalogSnapshot)
+                : EnumerateSystemViewRows(plan.View, statement, cancellationToken);
         foreach (var values in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -198,16 +200,29 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    /// <summary>
-    /// The rows of <c>COHESION_SCHEMA.FUNCTIONS</c>: every function of the engine's catalog, one row
-    /// per overload in registration order (the standard library first), then the special forms,
-    /// which are grammar and have no signature (owner decision 66 of 2026-10-09). An aggregate's
-    /// VOLATILITY is NULL: it is never folded or admitted in a CHECK.
-    /// </summary>
-    private static IEnumerable<object?[]> EnumerateFunctionRows(SqlFunctionCatalog catalog)
+    private IEnumerable<object?[]> EnumerateTypeRows(bool domainsOnly, SqlCatalogSnapshot? snapshot)
+    {
+        foreach (var type in _definitions.Functions.Types)
+        {
+            if (type.IsSqlDefined) { continue; }
+            if (domainsOnly)
+            {
+                if (type.IsDomain) { yield return [type.Name, type.BaseType!.Name, "NO"]; }
+            }
+            else { yield return [type.Name, type.BaseType?.Name ?? type.Name, type.IsDomain ? "YES" : "NO", "NO"]; }
+        }
+        foreach (var domain in snapshot?.Domains ?? [])
+        {
+            yield return domainsOnly ? [domain.Name, domain.BaseType, "YES"] : [domain.Name, domain.BaseType, "YES", "YES"];
+        }
+    }
+
+    /// <summary>Frozen native overloads, persisted SQL overloads from the catalog snapshot, and special forms.</summary>
+    private static IEnumerable<object?[]> EnumerateFunctionRows(SqlFunctionCatalog catalog, SqlCatalogSnapshot? snapshot)
     {
         foreach (var function in catalog)
         {
+            if (function is SqlExpressionFunction) { continue; }
             var types = new StringBuilder();
             var parameters = function.Parameters;
             for (int index = 0; index < parameters.Count; index++)
@@ -240,12 +255,20 @@ internal sealed partial class SqlPlanExecutor
                 },
                 function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput ? "RETURNS NULL ON NULL INPUT" : "CALLED ON NULL INPUT",
                 SqlStandardLibrary.Contains(function) ? "YES" : "NO",
+                "NO",
             ];
+        }
+
+        foreach (var function in snapshot?.Functions ?? [])
+        {
+            yield return [function.Name, "SCALAR", string.Join(", ", function.ParameterTypes),
+                (long)function.ParameterTypes.Count, function.ReturnType, function.Volatility,
+                function.IsStrict ? "RETURNS NULL ON NULL INPUT" : "CALLED ON NULL INPUT", "NO", "YES"];
         }
 
         foreach (string form in SqlStandardLibrary.SpecialForms)
         {
-            yield return [form, "SPECIAL FORM", null, null, null, null, null, "YES"];
+            yield return [form, "SPECIAL FORM", null, null, null, null, null, "YES", "NO"];
         }
     }
 
