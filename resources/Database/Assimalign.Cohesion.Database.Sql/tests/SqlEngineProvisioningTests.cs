@@ -468,10 +468,12 @@ public sealed class SqlEngineProvisioningTests : IDisposable
                 }
             }
 
+            // The budget only bounds a hang: a full build of the schema, which a Windows CI runner
+            // has stalled past 10 s while the suite as a whole ran faster than before.
             var retry = SqlDatabaseEngine.CreateBuilder("cancel");
             retry.Options.RootPath = root;
             retry.AddDatabase(wide);
-            await using SqlDatabaseEngine converged = await retry.BuildAsync(TestTimeout.Token());
+            await using SqlDatabaseEngine converged = await retry.BuildAsync(TestTimeout.Token(60));
             converged.TryGetDatabase("wide", out SqlDatabase? database).ShouldBeTrue();
             database!.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(wide.Compile().Hash);
             database.Catalog.Tables.Count.ShouldBe(10);
