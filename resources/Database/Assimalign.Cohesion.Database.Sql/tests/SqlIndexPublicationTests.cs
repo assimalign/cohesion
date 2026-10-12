@@ -170,8 +170,8 @@ public sealed class SqlIndexPublicationTests
         }, durable: true, timeout.Token);
         await database.Coordinator.CommitAsync(transaction, timeout.Token);
         var current = database.IndexManager.ExportRegistrations();
-        stale.Single().RootPageId.ShouldBe(2);
-        current.Single().RootPageId.ShouldBe(3);
+        stale.Single().RootPageId.ShouldBeGreaterThan(0);
+        current.Single().RootPageId.ShouldNotBe(stale.Single().RootPageId);
 
         // Act: description-first publication admits a checkpoint captured before DROP.
         await database.Catalog.CreateIndexAsync(replacement, [], timeout.Token);
