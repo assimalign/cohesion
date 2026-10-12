@@ -279,7 +279,9 @@ or public diagnostics surface is added. NativeAOT applications must enable `Even
 | 4 | `DiagnosticsCallbackFailed` | Warning | `callback` (`OnException` or `SuppressDiagnosticsCallback`), `exceptionType`, `exceptionMessage`, `requestId` |
 | 5 | `ResponseAbortedByPeer` | Verbose | `exceptionType`, `exceptionMessage`, `requestId` |
 
-The boundary emits event 1 or 2 once after handling an unstarted application fault. Publication
+The boundary emits event 1 or 2 once for an application fault, including after headers commit.
+For a started response, it reports the fault with `responseStarted=true` before cancelling the
+exchange. For an unstarted response, publication
 waits until callbacks and handlers finish so an exchange they cancel, or a client fault they
 encounter, is not reported as an application fault. Request-body client statuses and cancelled
 exchanges emit neither event. An `OperationCanceledException` whose exchange token is not
@@ -301,10 +303,11 @@ remain cancellation even when a content adapter wraps the write failure.
 | `aborted-responses` | PollingCounter | One per boundary-initiated abort of a started response; excludes client faults and already-cancelled exchanges |
 
 **Reconciliation with #1411.** A started response that the boundary aborts is a cancelled
-exchange. It increments only `aborted-responses`, not `total-faults`, and emits neither
-`PipelineFault` nor `ExpectedPipelineFault`. Its original exception still reaches the existing
-`OnException` hook and `IHttpExceptionFeature`. This supersedes the older event-source scope's
-application-fault count for that branch. A response abandoned by its peer increments neither
+exchange, while its originating application fault remains reportable. It increments
+`total-faults` and emits `PipelineFault` or `ExpectedPipelineFault` with `responseStarted=true`
+before cancellation; `aborted-responses` independently counts the boundary's abort. Its original
+exception also reaches the existing `OnException` hook and `IHttpExceptionFeature`. Exchange
+completion classification does not change application-fault attribution. A response abandoned by its peer increments neither
 counter. Counter fields are maintained with Interlocked whether listeners are present or absent;
 the counters themselves are created on first enable. No request count or Meter duplicates are added.
 

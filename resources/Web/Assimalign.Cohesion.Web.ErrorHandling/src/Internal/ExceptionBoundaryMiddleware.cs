@@ -117,13 +117,14 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
                 await ObserveAsync(context, exception, suppressed).ConfigureAwait(false);
             }
 
-            // No-clobber: this branch ends as cancellation (#1411), not an application-fault event.
+            // No-clobber: report the originating fault before cancellation classifies the exchange (#1411).
             responseStarted = context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true };
             if (responseStarted)
             {
                 if (clientFault is null && !context.RequestCancelled.IsCancellationRequested &&
                     context.Features.Get<IWebResponseClientFaultFeature>() is not { ResponseAbortedByClient: true })
                 {
+                    ErrorHandlingEventSource.Log.PipelineFault(context, exception, responseStarted, suppressed);
                     ErrorHandlingEventSource.Log.ResponseAborted();
                 }
 

@@ -437,8 +437,10 @@ public sealed class ErrorHandlingEventSourceTests
         (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Started response: Should count the boundary abort without reporting a cancelled exchange as an application fault")]
-    public async Task InvokeAsync_StartedResponse_ShouldCountOnlyBoundaryAbort()
+    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Started response: Should report the application fault and count the boundary abort separately")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvokeAsync_StartedResponse_ShouldReportFaultAndCountBoundaryAbort(bool suppressed)
     {
         // Arrange
         using EventSourceRecorder recorder = new(ErrorHandlingEventSource.Log, EventLevel.Verbose);
@@ -450,6 +452,7 @@ public sealed class ErrorHandlingEventSourceTests
         long aborted = ErrorHandlingEventSource.Log.AbortedResponses;
         ExceptionBoundaryMiddleware boundary = new(new ExceptionBoundaryOptions
         {
+            SuppressDiagnosticsCallback = (_, _) => suppressed,
             OnException = (_, exception) => { observed = exception; return ValueTask.CompletedTask; }
         });
 
@@ -457,10 +460,14 @@ public sealed class ErrorHandlingEventSourceTests
         await boundary.InvokeAsync(context, _ => throw fault);
 
         // Assert
-        RequireNoEvents(recorder, context);
+        EventWrittenEventArgs recorded = RequireEvent(recorder, context, suppressed ? 2 : 1,
+            suppressed ? "ExpectedPipelineFault" : "PipelineFault", suppressed ? EventLevel.Verbose : EventLevel.Error,
+            "exceptionType", "exceptionMessage", "responseStarted", "requestId");
+        recorded.Payload!.ToArray().ShouldBe(new object?[] { typeof(InvalidOperationException).FullName, fault.Message, true, RequestId(context) });
+        EventsFor(recorder, context).Length.ShouldBe(1);
         context.CancelRequested.ShouldBeTrue();
-        observed.ShouldBeSameAs(fault);
-        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(0);
+        observed.ShouldBeSameAs(suppressed ? null : fault);
+        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(1);
         (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(1);
     }
 
@@ -497,7 +504,7 @@ public sealed class ErrorHandlingEventSourceTests
         fault.MessageReadCount.ShouldBe(0);
         callbackFault.MessageReadCount.ShouldBe(0);
         handlerFault.MessageReadCount.ShouldBe(0);
-        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(1);
+        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(2);
         (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(1);
     }
 
