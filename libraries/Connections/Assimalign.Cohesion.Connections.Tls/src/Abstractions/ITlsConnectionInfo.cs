@@ -10,18 +10,19 @@ namespace Assimalign.Cohesion.Connections;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A connection that terminates TLS implements this interface beside its connection contract: the
-/// connection a TLS <see cref="IConnectionLayer"/> returns from
-/// <see cref="IConnectionLayer.UpgradeAsync(IConnection, System.Threading.CancellationToken)"/>, and a
-/// multiplexed connection whose transport carries TLS itself (QUIC, RFC 9001). A consumer discovers it
-/// with a type test on the connection it holds; a connection without it is either plaintext or secured
-/// by a layer that does not report its handshake.
+/// A TLS layer or a transport that carries TLS itself (QUIC, RFC 9001) registers an implementation in
+/// <see cref="IConnection.Features"/> or <see cref="IMultiplexedConnection.Features"/> with
+/// <c>features.Set(feature)</c>, normally in <c>ConfigureFeatures</c>. The implementation's
+/// <see cref="IConnectionFeature.Name"/> returns <see cref="FeatureName"/>. Consumers read the
+/// <c>connection.Tls</c> extension property, which returns <see langword="null"/> when no TLS feature is
+/// visible. The connection object need not implement this interface itself.
 /// </para>
 /// <para>
 /// The values are fixed once the handshake completes, which is before the connection is handed to a
-/// consumer. A layer composed above the TLS layer that returns a new connection hides this interface
-/// unless that connection implements it too and forwards to the connection it wraps; a pass-through
-/// layer that returns the connection it was given keeps it visible.
+/// consumer. A wrapper deriving from a guided connection base propagates the wrapped connection's
+/// <c>Features</c> through <c>InnerFeatures</c>, so TLS facts remain visible without manually implementing
+/// and forwarding this interface. Registering the same feature name replaces the inner feature;
+/// removing that name hides it.
 /// </para>
 /// </remarks>
 public interface ITlsConnectionInfo : IConnectionFeature

@@ -4,8 +4,19 @@ namespace Assimalign.Cohesion.Connections;
 /// Reports optional transport limits for peer-initiated streams on a multiplexed connection.
 /// </summary>
 /// <remarks>
-/// Consumers discover this facet with a type test on <see cref="IMultiplexedConnection"/>.
-/// It supplies transport facts without requiring a connection to interpret application protocols.
+/// <para>
+/// A transport registers an implementation in <see cref="IMultiplexedConnection.Features"/> with
+/// <c>features.Set(feature)</c>, normally in <c>ConfigureFeatures</c>. The implementation's
+/// <see cref="IConnectionFeature.Name"/> returns <see cref="FeatureName"/>. Consumers read the
+/// <c>connection.StreamLimits</c> extension property, which returns <see langword="null"/> when no
+/// stream-limit feature is visible. The connection object need not implement this interface itself.
+/// The feature supplies transport facts without requiring a connection to interpret application protocols.
+/// </para>
+/// <para>
+/// A wrapper deriving from <see cref="MultiplexedConnection"/> propagates the wrapped connection's
+/// <c>Features</c> through <c>InnerFeatures</c>, without manually implementing and forwarding this
+/// interface. Registering the same feature name replaces the inner feature; removing that name hides it.
+/// </para>
 /// </remarks>
 public interface IMultiplexedConnectionStreamLimits : IConnectionFeature
 {

@@ -33,6 +33,6 @@ The collection does not own or dispose feature objects. Features that delegate t
 
 ## Compatibility and AOT
 
-The contract's existing members and XML documentation move unchanged from Connections. The contract did not ship in 10.0.0-preview.1, so its move introduces no released API break. Adding `Features` to the three connection root interfaces does break preview.1 implementers, accepted under decision 15; subclasses of the guided bases inherit the implementation.
+The contract's existing members move unchanged from Connections. Its XML documentation describes feature registration, the `StreamLimits` accessor and `InnerFeatures` propagation. The contract did not ship in 10.0.0-preview.1, so its move introduces no released API break. Adding `Features` to the three connection root interfaces does break preview.1 implementers, accepted under decision 15; subclasses of the guided bases inherit the implementation.
 
 The package uses ordinary interfaces and a C# extension property, with no reflection, dynamic generation or generic virtual lookup on the read path. NativeAOT compatibility remains enabled by repository defaults.

@@ -12,9 +12,19 @@ namespace Assimalign.Cohesion.Connections;
 /// multiplexed transport such as QUIC signals its configured default code. A protocol that gives the codes
 /// meaning (HTTP/3, RFC 9114 §8.1) chooses one per call and per direction. A server that has sent a complete
 /// response, for example, stops the request direction with <c>H3_NO_ERROR</c> and still ends the response
-/// direction gracefully. A stream that can carry the code implements this interface beside its connection
-/// contract. A consumer finds it with a type test on the stream it holds, and falls back to
-/// <see cref="IConnection.Abort(Exception)"/> on a stream without it.
+/// direction gracefully. A stream that can carry the code registers an implementation in
+/// <see cref="IConnection.Features"/> with <c>features.Set(feature)</c>, normally in
+/// <c>ConfigureFeatures</c>. The implementation's <see cref="IConnectionFeature.Name"/> returns
+/// <see cref="FeatureName"/>. Consumers read <c>stream.DirectionalAbort</c> and fall back to
+/// <see cref="IConnection.Abort(Exception)"/> when the extension property returns <see langword="null"/>.
+/// The stream object need not implement this interface itself.
+/// </para>
+/// <para>
+/// A wrapper deriving from <see cref="Connection"/> propagates the wrapped stream's <c>Features</c>
+/// through <c>InnerFeatures</c>, without manually implementing and forwarding this interface.
+/// Registering the same feature name replaces the inner feature; removing that name hides it. A layer
+/// that cannot preserve the abort guarantees on its own input and output must replace or remove the
+/// inner feature, including when it buffers data that an inner abort cannot discard.
 /// </para>
 /// <para>
 /// Each direction ends once. The first signal for a direction fixes the code the peer receives, whether it

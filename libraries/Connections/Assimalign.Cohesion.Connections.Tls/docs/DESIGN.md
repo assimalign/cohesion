@@ -5,8 +5,9 @@
 TLS is optional and can be added by a connection layer. Its handshake facts belong in a separate
 feature package so plaintext transports and the base connection contracts do not carry TLS APIs.
 Owner decision 56 moves `ITlsConnectionInfo` from Connections into this package, preserving its
-namespace, four handshake members and XML documentation, and adds `IConnectionFeature` and the
-`FeatureName` constant. `Connections.Security` remains the SslStream layer; this package runs no
+namespace and four handshake members, and adds `IConnectionFeature` and the `FeatureName` constant.
+Its XML documentation describes feature registration, the `Tls` accessor and `InnerFeatures` propagation.
+`Connections.Security` remains the SslStream layer; this package runs no
 handshake and imposes no certificate policy.
 
 ## Family map
@@ -45,10 +46,6 @@ and removing the name hides it. The concrete collection performs typed lookup wi
 A missing TLS feature returns `null`. A wrapper preserves features by forwarding `InnerFeatures`,
 without implementing and forwarding every optional contract. Multiplexed streams do not inherit
 connection-level TLS facts from their parent connection.
-
-The moved contract retains its original XML documentation as required by the migration; this
-registration and lookup section supersedes that documentation's historical connection type-test
-and manual-forwarding description.
 
 ## Ownership and errors
 
