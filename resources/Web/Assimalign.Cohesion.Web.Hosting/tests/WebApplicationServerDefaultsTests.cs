@@ -5,10 +5,12 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
+using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 
 using Shouldly;
 
@@ -116,6 +118,51 @@ public class WebApplicationServerDefaultsTests
 
         await ((IWebApplication)application).StopAsync();
         customServer.StopCount.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: HTTP/3 request hooks should run inline with every default interceptor")]
+    [InlineData("GET", true)]
+    [InlineData("POST", false)]
+    public async Task ApplyDefaultInterceptors_OnBufferedHttp3Head_ShouldRunRequestHooksInline(string method, bool endStream)
+    {
+        // Arrange — queue the complete head before ReceiveAsync starts, so accepting the stream and
+        // parsing its head require no asynchronous I/O. Use the real hosting composition, including
+        // client-fault and response-starting hooks, rather than a copy of its interceptor list.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        CancellationToken cancellationToken = timeout.Token;
+        await using InMemoryMultiplexedConnectionListener transport = new();
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(transport);
+        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+        InlineRequestProbe probe = new();
+        options.Interceptors.Add(probe);
+        await using HttpConnectionListener listener = new(options);
+        await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
+        await client.OpenControlStreamAsync(cancellationToken);
+        await client.SendRequestAsync(method, "/inline", [], [], endStream, cancellationToken);
+        IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync(cancellationToken)).OpenAsync(cancellationToken);
+        await using IAsyncEnumerator<IHttpContext> requests = connection.ReceiveAsync(cancellationToken).GetAsyncEnumerator();
+
+        // Act — record both the calling thread and this synchronous call's lifetime. A queued hook
+        // cannot satisfy both, even if the pool happens to finish it before MoveNextAsync returns.
+        ValueTask<bool> receive;
+        probe.EnterReceive();
+        try
+        {
+            receive = requests.MoveNextAsync();
+        }
+        finally
+        {
+            probe.ExitReceive();
+        }
+
+        (await receive).ShouldBeTrue();
+        await using IHttpContext context = requests.Current;
+
+        // Assert
+        probe.RanInline.ShouldBeTrue();
+        context.Request.Path.Value.ShouldBe("/inline");
+        await connection.SendAsync(context, cancellationToken);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the request-limits interceptor first")]
@@ -346,6 +393,30 @@ public class WebApplicationServerDefaultsTests
             ConnectionInfo = HttpConnectionInfo.Empty,
             MaxRequestBodySize = null,
         };
+    }
+
+    /// <summary>Records whether a request hook ran on the active receive call's synchronous stack.</summary>
+    private sealed class InlineRequestProbe : HttpExchangeInterceptor
+    {
+        private int _receiveThread;
+        private bool _isReceiving;
+
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+        public bool RanInline { get; private set; }
+
+        public void EnterReceive()
+        {
+            _receiveThread = Environment.CurrentManagedThreadId;
+            _isReceiving = true;
+        }
+
+        public void ExitReceive() => _isReceiving = false;
+
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
+        {
+            RanInline = Environment.CurrentManagedThreadId == _receiveThread && _isReceiving;
+        }
     }
 
     /// <summary>An exchange control that reports a client fault and offers no wire mechanism.</summary>

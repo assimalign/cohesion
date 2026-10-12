@@ -116,38 +116,41 @@ public class Http3RequestStreamTests
         rejection.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestRejected);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A blocking request hook should stall only its own stream")]
-    public async Task ReceiveAsync_OnBlockingRequestHook_ShouldStillDispatchOtherStreams()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: An explicitly offloaded response hook should stall only its own stream")]
+    public async Task ReceiveAsync_OnOffloadedResponseHook_ShouldStillDispatchOtherStreams()
     {
-        // The seam contract forbids blocking in a parse-path hook, but the transport must not let one that
-        // does anyway stall acceptance: hooks run off the accept loop.
-        using GatedHeadInterceptor gate = new();
+        // Arrange — parse hooks stay CPU-only. A hook with long work joins the response phase only
+        // for the affected request and explicitly offloads at its asynchronous hook.
+        using GatedResponseInterceptor gate = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             configureListener: options => options.Interceptors.Add(gate));
-
-        // The first wait starts the server's receive loop; the slow request's hook then blocks.
-        Task<IHttpContext> firstDispatch = peer.NextContextAsync();
 
         Connection slow = await peer.OpenRequestStreamAsync();
         await slow.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/slow", "https", "a"));
         slow.Output.Complete();
-        await gate.Entered.Task.WaitAsync(_timeout);
-
-        Connection fast = await peer.OpenRequestStreamAsync();
-        await fast.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/fast", "https", "a"));
-        fast.Output.Complete();
+        IHttpContext slowContext = await peer.NextContextAsync();
+        Task slowSend = peer.ConnectionContext.SendAsync(slowContext).AsTask();
 
         try
         {
-            // Act / Assert — the fast request is dispatched while the slow hook is still blocked.
-            (await firstDispatch).Request.Path.Value.ShouldBe("/fast");
+            await gate.Entered.Task.WaitAsync(_timeout);
+
+            // Act — another stream arrives while the slow response's hook remains blocked.
+            Connection fast = await peer.OpenRequestStreamAsync();
+            await fast.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/fast", "https", "a"));
+            fast.Output.Complete();
+            IHttpContext fastContext = await peer.NextContextAsync();
+
+            // Assert — both dispatch and response completion are independent of that hook.
+            fastContext.Request.Path.Value.ShouldBe("/fast");
+            await peer.ConnectionContext.SendAsync(fastContext);
+            slowSend.IsCompleted.ShouldBeFalse();
         }
         finally
         {
             gate.Release();
+            await slowSend.WaitAsync(_timeout);
         }
-
-        (await peer.NextContextAsync()).Request.Path.Value.ShouldBe("/slow");
     }
 
     // ------------------------------------------------------------ exchanges outliving the receive enumeration
@@ -888,10 +891,10 @@ public class Http3RequestStreamTests
     }
 
     /// <summary>
-    /// A head hook that blocks the request for <c>/slow</c> until released — a seam-contract violation
-    /// the transport has to survive without stalling other streams.
+    /// A request hook that claims a response callback for <c>/slow</c>. The callback explicitly
+    /// offloads its long work rather than making every request's parse hooks pay for a dispatch.
     /// </summary>
-    private sealed class GatedHeadInterceptor : HttpExchangeInterceptor, IDisposable
+    private sealed class GatedResponseInterceptor : HttpExchangeInterceptor, IDisposable
     {
         private readonly ManualResetEventSlim _gate = new(initialState: false);
 
@@ -907,9 +910,15 @@ public class Http3RequestStreamTests
         {
             if (context.Path.Value == "/slow")
             {
-                Entered.TrySetResult();
-                _gate.Wait(TimeSpan.FromSeconds(10));
+                context.AddResponseInterceptor(this);
             }
+        }
+
+        public override async ValueTask BeforeResponseHeadAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken)
+        {
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+            Entered.TrySetResult();
+            _gate.Wait(TimeSpan.FromSeconds(10), cancellationToken);
         }
     }
 

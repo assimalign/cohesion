@@ -641,8 +641,12 @@ streaming body stream (forward-only, exactly what the hook contract requires
 wrappers to tolerate). HTTP/3 dispatches at the request's HEADERS frame and
 reads the body lazily, exactly like h1: no body octet is read before the hooks
 run, and a body hook wraps the lazy `Http3RequestBodyStream`. HTTP/3 runs the
-hooks off its accept loop (on a thread-pool thread), so a hook that blocks
-despite the contract stalls only its own stream.
+CPU-only parse hooks inline, as HTTP/2 does on its frame pump (#1338). The default
+Web.Hosting interceptors complete synchronously, so registering them adds no
+thread-pool dispatch. A hook with long-running work must explicitly offload that
+work before blocking; the transport cannot infer which arbitrary hook will block.
+Request hooks can install a lazy body wrapper; long work belongs in asynchronous
+body reads or response callbacks, where the hook can explicitly yield or offload it.
 
 The **cap is enforced on all three**, and its freeze follows the body. HTTP/1.1
 and HTTP/3 enforce it in their lazy body streams: the pipeline hands an
@@ -4395,10 +4399,12 @@ then continues on its own. Finished request heads are published to a
 ready-context channel, which `ReceiveAsync` yields from, in the order heads
 become ready. A request whose HEADERS (or whose QPACK insertions) are still in
 flight, or whose body is still arriving, holds back no other stream. Request
-interceptor hooks are application code, so when any are registered the
-processing hops to the thread pool before running them: a hook that blocks
-despite the seam contract (one that reads the whole body before dispatch, say)
-stalls only its own stream. The channel is unbounded because QUIC's
+interceptor hooks run inline under the CPU-only parse-hook contract, matching
+HTTP/2. A blocking synchronous hook can stall acceptance (#1338); long work
+belongs in a lazy body wrapper or asynchronous response callback that explicitly
+offloads it. The post-preview.1 thread-isolation behavior is removed; the CPU-only
+hook contract and public surface shipped in 10.0.0-preview.1 are unchanged.
+The channel is unbounded because QUIC's
 concurrent-stream limit already bounds it, and it holds request heads, never
 bodies. When acceptance stops, the loop waits for every started stream to finish
 its head processing before completing the channel, so no context is published

@@ -2299,14 +2299,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         HttpConnectionInfo connectionInfo = HttpTlsConnectionInfo.Create(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint, _tls);
 
-        if (_requestInterceptors.Length > 0 || _responseInterceptors.Length > 0)
-        {
-            // Interceptor hooks are application code. The seam contract makes the parse-path hooks
-            // CPU-only, but a hook that blocks anyway (one that reads the whole body before dispatch, say)
-            // must stall only its own stream, never the accept loop, so the hooks run on a thread-pool
-            // thread instead of inline on the loop.
-            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
-        }
+        // Like HTTP/2's frame pump, run the CPU-only parse hooks inline. A hook with long-running
+        // work must offload it explicitly; registering a synchronous feature must not schedule
+        // a work item for every request.
 
         // Request-parse interceptor phase — the HTTP/3 analogue of the HTTP/1.1 invocation point,
         // run as the request head is assembled. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
