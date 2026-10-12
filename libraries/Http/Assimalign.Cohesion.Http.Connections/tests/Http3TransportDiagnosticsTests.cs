@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
@@ -126,6 +127,96 @@ public class Http3TransportDiagnosticsTests
         EventWrittenEventArgs reset = FindEvent(events, "StreamReset", peer.Server.Id);
         Payload(reset, "streamId").ShouldBe(0L);
         Payload(reset, "errorCode").ShouldBe(270L);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HTTP/3 diagnostics: Concurrent body failure and response timeout should claim one reset before aborting")]
+    public async Task ResetRequestStream_OnConcurrentBodyFailureAndResponseTimeout_ShouldReportAndAbortOnce()
+    {
+        // Arrange — pause the body fault before it marks the body reset, then pause the response
+        // timeout after it reports its reset but before the driver closes. Both paths saw an open
+        // stream; only the first reset claim may report or choose the driver's error code.
+        await HttpTransportEventSourceTests.WaitForThrottleAsync();
+        using CancellationTokenSource timeout = new(_timeout);
+        HttpTransportEventSource source = HttpTransportEventSource.Log;
+        using EventSourceRecorder events = new(source, EventLevel.Verbose);
+        using TransportMeterRecorder meter = new();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "POST"), (":scheme", "https"), (":path", "/diagnostics-secret"),
+            (":authority", "a"), ("content-length", "3")), timeout.Token);
+        await request.Output.CompleteAsync();
+        await using IHttpContext exchange = await peer.NextContextAsync();
+        Http3Context context = exchange.ShouldBeOfType<Http3Context>();
+        Http3ConnectionContext connection = peer.ConnectionContext.ShouldBeOfType<Http3ConnectionContext>();
+        using ManualResetEventSlim releaseBodyFault = new();
+        using ManualResetEventSlim releaseTimeoutReset = new();
+        TaskCompletionSource bodyFaultReported = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource timeoutResetReported = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int resetReports = 0;
+        using MeterListener barriers = new()
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == "Assimalign.Cohesion.Http.Connections"
+                    && instrument.Name is rejectedRequests or protocolErrors)
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            }
+        };
+        barriers.SetMeasurementEventCallback<long>((instrument, _, _, _) =>
+        {
+            if (instrument.Name == rejectedRequests)
+            {
+                bodyFaultReported.TrySetResult();
+                releaseBodyFault.Wait(timeout.Token);
+            }
+            else if (Interlocked.Increment(ref resetReports) == 1)
+            {
+                timeoutResetReported.TrySetResult();
+                releaseTimeoutReset.Wait(timeout.Token);
+            }
+        });
+        barriers.Start();
+        long resetCount = source.StreamResets;
+        long resetMeasured = meter.Count(protocolErrors, "3", scope: "stream");
+        int closures = 0;
+        using CancellationTokenRegistration closed = context.StreamConnection.ConnectionClosed.Register(
+            () => Interlocked.Increment(ref closures));
+        Task bodyRead = Task.Run(async () =>
+            await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[1], timeout.Token).AsTask()), timeout.Token);
+        Task? slowResponse = null;
+
+        // Act
+        try
+        {
+            await bodyFaultReported.Task.WaitAsync(timeout.Token);
+            slowResponse = Task.Run(() => connection.FailSlowResponse(context), timeout.Token);
+            await timeoutResetReported.Task.WaitAsync(timeout.Token);
+            releaseBodyFault.Set();
+            await bodyRead.WaitAsync(timeout.Token);
+        }
+        finally
+        {
+            releaseBodyFault.Set();
+            releaseTimeoutReset.Set();
+            await bodyRead.WaitAsync(timeout.Token);
+            if (slowResponse is not null)
+            {
+                await slowResponse.WaitAsync(timeout.Token);
+            }
+        }
+
+        // Assert — the timeout claimed the reset first, so its code must reach the peer unchanged.
+        (source.StreamResets - resetCount).ShouldBe(1);
+        (meter.Count(protocolErrors, "3", scope: "stream") - resetMeasured).ShouldBe(1);
+        resetReports.ShouldBe(1);
+        closures.ShouldBe(1);
+        ConnectionResetException reset = await Should.ThrowAsync<ConnectionResetException>(
+            () => request.Input.ReadAsync(timeout.Token).AsTask());
+        reset.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
+        Payload(FindEvent(events, "StreamReset", peer.Server.Id), "errorCode").ShouldBe(268L);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HTTP/3 diagnostics: A malformed body read before dispatch should count only its first reset")]

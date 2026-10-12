@@ -168,6 +168,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// <param name="reader">The request stream's frame reader, positioned after the request head.</param>
     /// <param name="streamConnection">The request stream.</param>
     /// <param name="streamId">The request stream's wire ID (keys QPACK decoder instructions).</param>
+    /// <param name="resetState">The reset claim shared with head processing and response cleanup.</param>
     /// <param name="trailers">The supported, initially empty trailer collection surfaced on the request.</param>
     /// <param name="declaredContentLength">The request's Content-Length, or <see langword="null"/> when absent.</param>
     /// <param name="isTunnel">Whether the request is a CONNECT, whose DATA frames carry tunnel octets.</param>
@@ -196,6 +197,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         Http3RequestStreamReader reader,
         IMultiplexedStream streamConnection,
         long streamId,
+        Http3RequestResetState resetState,
         HttpTrailerCollection trailers,
         long? declaredContentLength,
         bool isTunnel,
@@ -211,6 +213,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         _reader = reader;
         _streamConnection = streamConnection;
         _streamId = streamId;
+        ResetState = resetState;
         _trailers = trailers;
         _declaredContentLength = declaredContentLength;
         _isTunnel = isTunnel;
@@ -253,6 +256,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// written on it.
     /// </summary>
     public bool IsReset { get; private set; }
+
+    /// <summary>The reset claim shared before and after the exchange is constructed.</summary>
+    internal Http3RequestResetState ResetState { get; }
 
     /// <summary>
     /// Gets a value indicating whether the request stream ended cleanly: the peer's FIN was read — by a body
@@ -949,7 +955,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         }
 
         IsReset = true;
-        _connection.ResetRequestStream(_streamConnection, _streamId, error, abandonsReading: !_reader.IsCompleted);
+        _connection.ResetRequestStream(_streamConnection, _streamId, ResetState, error, abandonsReading: !_reader.IsCompleted);
     }
 
     /// <summary>

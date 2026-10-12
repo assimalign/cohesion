@@ -505,6 +505,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 ResetRequestStream(
                     streamConnection,
                     requestStreamId,
+                    new Http3RequestResetState(),
                     new Http3StreamException(
                         Http3ErrorCode.RequestRejected,
                         "The request stream was opened after the connection began to close (RFC 9114 §5.2)."),
@@ -974,16 +975,16 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     /// <param name="streamConnection">The request stream.</param>
     /// <param name="requestStreamId">The request stream's wire ID.</param>
+    /// <param name="resetState">The reset claim shared by every path that can end this request.</param>
     /// <param name="reason">The stream error, carrying the RFC 9114 §8.1 code.</param>
     /// <param name="abandonsReading">Whether the stream still had unread octets.</param>
-    internal void ResetRequestStream(IMultiplexedStream streamConnection, long requestStreamId, Http3StreamException reason, bool abandonsReading)
+    internal void ResetRequestStream(IMultiplexedStream streamConnection, long requestStreamId, Http3RequestResetState resetState, Http3StreamException reason, bool abandonsReading)
     {
-        if (abandonsReading && _decoderState is not null)
+        if (ResetStream(streamConnection, reason, _connection.Id, requestStreamId, resetState)
+            && abandonsReading && _decoderState is not null)
         {
             _ = TrySendStreamCancellationAsync(requestStreamId);
         }
-
-        ResetStream(streamConnection, reason, _connection.Id, requestStreamId);
     }
 
     /// <summary>
@@ -997,17 +998,26 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="reason">The stream error, carrying the code.</param>
     /// <param name="connectionId">The parent multiplexed connection's identifier.</param>
     /// <param name="streamId">The request stream's wire ID.</param>
-    internal static void ResetStream(IMultiplexedStream streamConnection, Http3StreamException reason, ConnectionId connectionId, long streamId)
+    /// <param name="resetState">The first-wins reset claim for this request, including before dispatch.</param>
+    /// <returns>Whether this call owns reset cleanup, even if the peer already ended the stream.</returns>
+    internal static bool ResetStream(IMultiplexedStream streamConnection, Http3StreamException reason, ConnectionId connectionId, long streamId, Http3RequestResetState resetState)
     {
-        // A body read from a request interceptor can reset the stream before its exception reaches
-        // the head reader. The root already ended its lifecycle; do not count its second decision.
-        if (streamConnection.State is ConnectionState.Aborted or ConnectionState.Closed)
+        // A body failure and response timeout can both observe an open driver. Claim before reporting:
+        // a Meter listener runs inline, so even its callbacks must not permit another reset decision.
+        if (!resetState.TryClaimReset())
         {
-            return;
+            return false;
         }
 
-        HttpTransportEventSource.Log.StreamReset(connectionId, "3", streamId, (long)reason.ErrorCode);
-        streamConnection.Abort((long)reason.ErrorCode, reason);
+        if (streamConnection.State is not (ConnectionState.Aborted or ConnectionState.Closed))
+        {
+            HttpTransportEventSource.Log.StreamReset(connectionId, "3", streamId, (long)reason.ErrorCode);
+            streamConnection.Abort((long)reason.ErrorCode, reason);
+        }
+
+        // The peer may already have reset this stream, but abandoned field sections still require
+        // the caller's QPACK cancellation. Only the winning cleanup path emits that instruction.
+        return true;
     }
 
     /// <summary>Reports the transport's first decision to reject one request.</summary>
@@ -2104,10 +2114,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     private async Task ProcessRequestStreamAsync(IMultiplexedStream streamConnection, long requestStreamId, CancellationToken receiveToken)
     {
         Http3Context? context = null;
+        Http3RequestResetState resetState = new();
 
         try
         {
-            context = await ReadRequestHeadAsync(streamConnection, requestStreamId, receiveToken).ConfigureAwait(false);
+            context = await ReadRequestHeadAsync(streamConnection, requestStreamId, resetState, receiveToken).ConfigureAwait(false);
 
             if (context is not null && !_readyContexts.Writer.TryWrite(context))
             {
@@ -2122,7 +2133,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // longer be answered, so it is reset.
         catch (Exception exception)
         {
-            ResetStream(streamConnection, new Http3StreamException(Http3ErrorCode.InternalError, "The request stream failed unexpectedly.", exception), _connection.Id, requestStreamId);
+            ResetStream(streamConnection, new Http3StreamException(Http3ErrorCode.InternalError, "The request stream failed unexpectedly.", exception), _connection.Id, requestStreamId, resetState);
             _readyContexts.Writer.TryComplete(exception);
         }
         finally
@@ -2147,7 +2158,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// returns <see langword="null"/> when the stream yields no exchange: a stream error resets the
     /// stream, a connection error aborts the connection.
     /// </summary>
-    private async Task<Http3Context?> ReadRequestHeadAsync(IMultiplexedStream streamConnection, long requestStreamId, CancellationToken receiveToken)
+    private async Task<Http3Context?> ReadRequestHeadAsync(IMultiplexedStream streamConnection, long requestStreamId, Http3RequestResetState resetState, CancellationToken receiveToken)
     {
         // The head read — and a request hook that reads the body before dispatch — observes connection
         // teardown, so a stream whose HEADERS never arrive cannot hold up the accept loop's drain.
@@ -2175,6 +2186,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 ResetRequestStream(
                     streamConnection,
                     requestStreamId,
+                    resetState,
                     new Http3StreamException(Http3ErrorCode.RequestIncomplete, "The HTTP/3 request stream ended before its HEADERS frame."),
                     abandonsReading: false);
                 return null;
@@ -2188,13 +2200,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            return await CreateContextAsync(streamConnection, reader, requestStreamId, fields, receiveToken, cancellationToken).ConfigureAwait(false);
+            return await CreateContextAsync(streamConnection, reader, requestStreamId, resetState, fields, receiveToken, cancellationToken).ConfigureAwait(false);
         }
         catch (Http3StreamException exception)
         {
             // RFC 9114 §4.1.2 / §7.1 — a malformed request head or an oversized HEADERS frame is a
             // stream error: reset this stream; the connection keeps serving its other streams.
-            ResetRequestStream(streamConnection, requestStreamId, exception, abandonsReading: !reader.IsCompleted);
+            ResetRequestStream(streamConnection, requestStreamId, resetState, exception, abandonsReading: !reader.IsCompleted);
             return null;
         }
         catch (Http3LimitExceededException exception)
@@ -2208,6 +2220,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 reader,
                 streamConnection,
                 requestStreamId,
+                resetState,
                 new HttpTrailerCollection(isSupported: true),
                 declaredContentLength: null,
                 isTunnel: false,
@@ -2238,6 +2251,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             ResetRequestStream(
                 streamConnection,
                 requestStreamId,
+                resetState,
                 new Http3StreamException(
                     Http3ErrorCode.RequestRejected,
                     timedOut
@@ -2253,6 +2267,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             ResetRequestStream(
                 streamConnection,
                 requestStreamId,
+                resetState,
                 new Http3StreamException(Http3ErrorCode.RequestIncomplete, "The HTTP/3 request stream failed before its request head was complete.", exception),
                 abandonsReading: !reader.IsCompleted);
             return null;
@@ -2267,6 +2282,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         IMultiplexedStream streamConnection,
         Http3RequestStreamReader reader,
         long requestStreamId,
+        Http3RequestResetState resetState,
         List<(string Name, string Value)> fields,
         CancellationToken receiveToken,
         CancellationToken headToken)
@@ -2305,6 +2321,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             reader,
             streamConnection,
             requestStreamId,
+            resetState,
             trailers,
             contentLength,
             isConnect,
@@ -2356,6 +2373,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             ResetRequestStream(
                 streamConnection,
                 requestStreamId,
+                resetState,
                 new Http3StreamException(Http3ErrorCode.RequestRejected, "A request interceptor rejected the request."),
                 abandonsReading: !reader.IsCompleted);
             return null;
@@ -2822,6 +2840,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         ResetRequestStream(
             http3Context.StreamConnection,
             http3Context.StreamId,
+            requestBody.ResetState,
             new Http3StreamException(Http3ErrorCode.RequestCancelled, "The exchange was cancelled."),
             abandonsReading);
     }
@@ -2848,6 +2867,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             ResetRequestStream(
                 http3Context.StreamConnection,
                 http3Context.StreamId,
+                requestBody.ResetState,
                 new Http3StreamException(Http3ErrorCode.InternalError, "The response's trailer section could not be sent."),
                 abandonsReading);
 
@@ -2952,6 +2972,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         ResetRequestStream(
             context.StreamConnection,
             context.StreamId,
+            requestBody.ResetState,
             new Http3StreamException(Http3ErrorCode.RequestRejected, "The connection stopped before the request was dispatched."),
             abandonsReading);
 
@@ -3296,6 +3317,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             ResetRequestStream(
                 context.StreamConnection,
                 context.StreamId,
+                requestBody.ResetState,
                 new Http3StreamException(Http3ErrorCode.RequestCancelled, "The peer did not read the response at the configured minimum data rate."),
                 abandonsReading);
         }

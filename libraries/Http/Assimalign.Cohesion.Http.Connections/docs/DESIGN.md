@@ -1630,8 +1630,13 @@ The raising sites describe decisions, not successful wire delivery:
   `ENHANCE_YOUR_CALM`. Graceful close and successful unread-body cleanup are not errors.
 - HTTP/3 reports connection errors exactly at `AbortConnection` and whole-stream resets exactly
   at `ResetStream`, including critical-stream errors and numeric RFC 9114/QPACK codes. Those
-  methods use the multiplexed root coded abort members; no driver raises HTTP events. Request
-  fault latches and pre-dispatch answers report once. An interceptor refusal reports its rejection
+  methods use the multiplexed root coded abort members; no driver raises HTTP events. A per-request
+  atomic reset claim exists before the head is read and is shared by head failures, interceptor body
+  reads, and response cleanup. The first claimant owns reporting and the coded abort, so concurrent
+  malformed-body and response-rate failures cannot double-count a reset or replace its winning code.
+  Only that cleanup path emits any required QPACK Stream Cancellation, including when the peer has
+  already ended the stream. Request fault latches and pre-dispatch answers report once. An interceptor
+  refusal reports its rejection
   status even when HTTP/3 resets the stream instead of writing that status.
 - Minimum request-body rates report their 408 outcomes; slow-response enforcement reports its
   rate abort and the client's response-abort outcome. The latter's first latch also covers peer

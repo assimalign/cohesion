@@ -27,7 +27,7 @@ public class Http3RequestBodyFeatureTests
         Http3StreamException reason = new(Http3ErrorCode.RequestCancelled, "The exchange was cancelled.");
 
         // Act
-        Http3ConnectionContext.ResetStream(stream, reason, ConnectionId.New(), streamId: 0);
+        Http3ConnectionContext.ResetStream(stream, reason, ConnectionId.New(), streamId: 0, new Http3RequestResetState());
 
         // Assert
         stream.AbortErrorCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
@@ -173,6 +173,7 @@ public class Http3RequestBodyFeatureTests
             reader,
             stream,
             streamId: 0,
+            new Http3RequestResetState(),
             new HttpTrailerCollection(),
             declaredContentLength: null,
             isTunnel: false,
