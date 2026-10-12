@@ -6,6 +6,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.SecurityHeaders" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.WebSockets" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
@@ -24,5 +25,8 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
 </Project>

@@ -112,6 +112,9 @@ already an App.Web member.
   fields cannot be added to a head already sent.
 - **Heads outside pipeline dispatch.** Transport-generated rejections and protocol-takeover heads do not
   run response-starting callbacks. A parse-time rejection never reaches this middleware.
+- **`101 Switching Protocols` and upgraded exchanges.** WebSocket and extended-CONNECT acceptance
+  bypass response-starting callbacks in the default server. A `101` is also excluded explicitly
+  when a custom server invokes the callback for it. These exchanges are not unprotected documents.
 - **`304 Not Modified`.** A `304` freshens a response the user agent has already stored, and RFC 9111
   §4.3.4 replaces only the stored fields the `304` carries. The stored response already has the fields
   of the response that created it. Re-emitting them would change nothing, except that a fresh nonce
@@ -297,6 +300,42 @@ through switch expressions. Field values are computed once when a policy is comp
 middleware does feature-collection lookups, header presence checks and assignments, and one
 `string.Join` for a nonce-bearing policy. The Structured Field serializer and `RandomNumberGenerator` are
 AOT-safe.
+
+## Diagnostics
+
+The internal `SecurityHeadersEventSource` is named `Assimalign.Cohesion.Web.SecurityHeaders`.
+It reports a policy that could not be staged because the starting callback saw read-only response
+headers. Successful staging, including a policy deliberately configured without CSP and application
+framing ownership, emits nothing. `304`, `101`, protocol takeovers (including HTTP/2 extended CONNECT),
+and `DisableSecurityHeaders` endpoints are excluded before the read-only check. Protocol takeovers
+do not run the default server's starting callbacks at all.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `HeadersNotApplied` | Warning | `statusCode:int`, `routeTemplate`, `committedBeforeTurn:bool`, `suppressedCount:int`, `requestId` |
+
+The callback is the sole raising site. The pre-#1156 unwind and streaming-decorator sites no longer
+exist, so `committedBeforeTurn` is always `false`: staging happens before the server commits the head.
+Registering after commit fails instead of silently sending an unprotected response. A nonce or
+endpoint-adjustment failure aborts the exchange and raises no unprotected-response warning or count,
+because no response is sent. The diagnostic describes the skipped staging attempt; it cannot prove
+that a custom server subsequently completed the response or that another callback supplied a policy.
+
+The process-wide warning is limited to one event per second. `suppressedCount` reports earlier
+warnings withheld during the interval (saturating at `Int32.MaxValue`); the `unprotected-responses`
+PollingCounter counts every read-only staging skip exactly with `Interlocked`, even with no listener
+or when the warning is suppressed. The counter is created on the first enable command. Route-template
+and request-id reads occur only inside `IsEnabled`. An internal failure marker shared by nested
+registrations counts each exchange once; it is allocated only on the read-only failure path. The
+request id comes from `IWebRequestIdFeature`, never an ambient activity. No request path, header value,
+nonce, or exception text is emitted.
+
+### Compatibility against 10.0.0-preview.1 (#1402)
+
+The released tag has no Web.SecurityHeaders package. This change introduces diagnostics for the
+post-tag implementation and explicitly skips a `101` passed to a starting callback by a custom server.
+There is no released public API or response behavior break. No shipped dependency or framework closure
+changes; the WebSocket acceptance tests add a test-only Web.WebSockets reference.
 
 ## Non-goals
 

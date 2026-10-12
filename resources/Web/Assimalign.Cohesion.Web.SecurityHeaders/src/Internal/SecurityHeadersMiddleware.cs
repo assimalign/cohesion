@@ -72,8 +72,24 @@ internal sealed class SecurityHeadersMiddleware : IWebApplicationMiddleware
     {
         IHttpResponse response = context.Response;
 
-        if (response.StatusCode == HttpStatusCode.NotModified || response.Headers.IsReadOnly)
+        // Protocol takeovers bypass response-starting callbacks. Exclude a 101 even when a
+        // custom server invokes its callback for that head, and preserve the 304 nonce rule.
+        if (response.StatusCode == HttpStatusCode.NotModified || response.StatusCode == HttpStatusCode.SwitchingProtocols)
         {
+            return;
+        }
+
+        if (response.Headers.IsReadOnly)
+        {
+            // Do not compile an endpoint adjustment when no fields can be staged. An explicit
+            // endpoint opt-out is not a lost protection, even on a read-only response facade.
+            bool disabled = context.GetRouteMatch() is { IsPreflight: false } match
+                && match.Metadata.GetMetadata<SecurityHeadersMetadata>()?.IsDisabled == true;
+            if (!disabled && context.Features.Get<SecurityHeadersFailureFeature>() is null)
+            {
+                context.Features.Set(new SecurityHeadersFailureFeature());
+                SecurityHeadersEventSource.Log.HeadersNotApplied(context);
+            }
             return;
         }
 

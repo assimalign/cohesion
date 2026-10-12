@@ -91,6 +91,7 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 | `Assimalign.Cohesion.Web.Cors` | Refused preflights and pass-through causes, with bounded origin and rejected header name (Verbose) | `rejected-preflights` | [Cors DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Cors/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.ForwardedHeaders` | Forwarding stop reason, family and applied depth (Verbose); transport peer IP only for an untrusted peer at depth zero | `untrusted-forwarding`, `malformed-forwarding` | [ForwardedHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.HostFiltering` | Rejected effective host with bounded host component, reason and request id (Verbose) | `rejected-requests` | [HostFiltering DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.HostFiltering/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.SecurityHeaders` | Security policy staging skipped by read-only headers (Warning, throttled); excludes disabled endpoints and protocol takeovers | `unprotected-responses` | [SecurityHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/DESIGN.md#diagnostics) |
 
 Deliberately not instrumented: `Connections.InMemory` (a test driver), `Connections.Security` (TLS
 handshakes are already reported by the runtime's `System.Net.Security` source, and a handshake that
