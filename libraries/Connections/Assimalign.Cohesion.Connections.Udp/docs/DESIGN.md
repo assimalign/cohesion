@@ -52,8 +52,8 @@ peer.
 
 ## Diagnostics
 
-The diagnostics tests link the canonical test-only `EventSourceRecorder` through
-`CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests"`; it records
+The diagnostics tests link the canonical test-only `build/TestSupport/EventSourceRecorder.cs`
+with MSBuild `Compile`/`Link` (see `.claude/rules/testing.md`); it records
 events and counter publication without adding a shipped dependency.
 
 The driver reports through its own internal event source, named for the assembly:

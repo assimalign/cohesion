@@ -178,6 +178,10 @@ internal sealed class TcpConnectionEventSource : EventSource
 
 ## Tests (required for every event source)
 
+Link the canonical test-only `build/TestSupport/EventSourceRecorder.cs` using the single
+`Compile`/`Link` item in [testing.md](testing.md#shared-eventsource-recorder). The recorder lives
+in neutral test support, not in a shipped library; use `Assimalign.Cohesion.Testing`.
+
 Each instrumented library's test project carries a `<Subject>EventSourceTests` class that:
 
 1. asserts `EventSource.GetName(typeof(<Subject>EventSource))` equals the assembly name;

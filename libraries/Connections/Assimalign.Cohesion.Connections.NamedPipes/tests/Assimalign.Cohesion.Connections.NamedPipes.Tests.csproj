@@ -19,6 +19,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests" />
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
 </Project>

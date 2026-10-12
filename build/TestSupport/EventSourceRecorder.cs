@@ -7,9 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 
 // Deviates from the repo RootNamespace rule per shared-source design: linked test assemblies
-// keep the owning test namespace. This EventListener is test-only; its instances never cross
+// use a neutral test-support namespace. This EventListener is test-only; its instances never cross
 // an assembly boundary, and no shipped project compiles this shared folder.
-namespace Assimalign.Cohesion.DependencyInjection.Tests;
+namespace Assimalign.Cohesion.Testing;
 
 /// <summary>
 /// Records the events one event source writes, and optionally the names of the counters it publishes.

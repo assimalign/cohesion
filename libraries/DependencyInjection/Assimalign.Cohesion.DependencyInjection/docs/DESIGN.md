@@ -181,10 +181,10 @@ raises. Events 7 and 8 carry the `ServiceProviderInitialized` keyword (`0x1`).
 
 ### Shared diagnostic test recorder
 
-`shared/EventSourceRecorder.cs` is the canonical test-only `EventListener` used by this
-project and the Connections root, Tcp, Quic, NamedPipes and Udp test projects. Each names
-`Assimalign.Cohesion.DependencyInjection.Tests` in its own `CohesionSharedSource` item;
-the existing resolver supports test project names and links the sibling `shared/` folder.
+`build/TestSupport/EventSourceRecorder.cs` is the canonical test-only `EventListener` used by this
+project and the Connections root, Tcp, Quic, NamedPipes and Udp test projects. Each links it
+with one MSBuild `Compile`/`Link` item rooted at `CohesionRepositoryDirectory`, as documented
+in `.claude/rules/testing.md`. No shipped library owns the helper (owner decision 52, #1448).
 The recorder preserves event payloads and optionally waits for named counters to publish.
 Its state belongs to each listener instance and never crosses an assembly boundary. No
 shipped project compiles this folder or references the test assembly. Keeping one file
@@ -224,8 +224,6 @@ Assimalign.Cohesion.DependencyInjection/
     Properties/
     Scopes/
     Utilities/
-  shared/
-    EventSourceRecorder.cs  # compiled into test projects only
   tests/
   docs/
     OVERVIEW.md
