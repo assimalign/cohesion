@@ -26,7 +26,8 @@ public sealed partial class SqlQueryParser
             AddExpectedDiagnostic(ref lexer, "a type name");
             return "?";
         }
-        string type = CurrentIdentifierText(ref lexer);
+        // Type text retains lexical delimiters so a quoted '(' cannot become a type argument.
+        string type = CurrentText(ref lexer);
         Advance(ref lexer);
         return lexer.Current.Type == TokenType.LeftParen ? type + ParseTypeArguments(ref lexer) : type;
     }

@@ -13,7 +13,7 @@ public sealed class SqlCatalogScriptPublication
     /// <param name="previous">The exact preceding durable receipt, or null if the script has not begun.</param>
     /// <param name="expectedGeneration">The catalog generation observed before the mutation.</param>
     /// <param name="schemaHash">The typed schema hash at execution, or null.</param>
-    /// <param name="expectedObject">The statement's expected T:schema.table, I:schema.table.index, F:signature or D:name target; empty for a non-DDL statement.</param>
+    /// <param name="expectedObject">The statement's expected target: T:"schema"."table", I:"schema"."table"."index", F:"name"(storage types) or D:"name"; empty for a non-DDL statement. Every identifier is double-quoted and embedded quotes are doubled. Names compare case-insensitively.</param>
     /// <exception cref="ArgumentException">A name, digest, statement count or target is invalid.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="expectedObject"/> is null.</exception>
     public SqlCatalogScriptPublication(

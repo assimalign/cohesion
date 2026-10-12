@@ -44,6 +44,14 @@ internal static class SqlTypeRules
                     $"Domain name '{name}' is not an identifier: it may hold only ASCII letters, digits and underscores.", nameof(name));
             }
         }
+        ValidateSqlDomainName(name);
+    }
+
+    // SQL has already lexed a delimited name, so punctuation is part of its value.
+    // Native registrations keep the ASCII name contract the typed schema consumes.
+    internal static void ValidateSqlDomainName(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         foreach (string keyword in SqlLanguageProfile.Instance.Keywords)
         {
             if (string.Equals(keyword, name, StringComparison.OrdinalIgnoreCase))
@@ -86,7 +94,32 @@ internal static class SqlTypeRules
         name = text.Trim();
         first = null;
         second = null;
-        int open = name.IndexOf('(');
+        int open;
+        if (name.StartsWith('"'))
+        {
+            int end = 1;
+            while (end < name.Length)
+            {
+                if (name[end] != '"') { end++; continue; }
+                if (end + 1 < name.Length && name[end + 1] == '"') { end += 2; continue; }
+                break;
+            }
+            if (end == name.Length) { return false; }
+            string quotedName = name[1..end].Replace("\"\"", "\"", StringComparison.Ordinal);
+            string remainder = name[(end + 1)..].TrimStart();
+            if (remainder.Length == 0)
+            {
+                name = quotedName;
+                return name.Length > 0;
+            }
+            if (remainder[0] != '(') { return false; }
+            name = quotedName + remainder;
+            open = quotedName.Length;
+        }
+        else
+        {
+            open = name.IndexOf('(');
+        }
         if (open >= 0)
         {
             string arguments = name[(open + 1)..];
@@ -113,11 +146,6 @@ internal static class SqlTypeRules
 
                 second = parsedSecond;
             }
-        }
-
-        if (name.Length >= 2 && name[0] == '"' && name[^1] == '"')
-        {
-            name = name[1..^1];
         }
 
         return name.Length > 0;

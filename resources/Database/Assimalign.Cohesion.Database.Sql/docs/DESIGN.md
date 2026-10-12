@@ -796,12 +796,16 @@ flowchart LR
   `src/backend/commands/typecmds.c`) is a name over a built-in base type, with its length,
   precision and scale, and an optional check: an `Immutable` scalar function of one argument
   that takes the base type (its storage type, an implicit widening of it, or a pseudo-type)
-  and returns BOOLEAN, the rule E2 holds a CHECK's functions to (decision 64). The name is an
-  ASCII identifier, the rule the typed schema, `Sdk.Database` and the DDL renderer apply, that is
+  and returns BOOLEAN, the rule E2 holds a CHECK's functions to (decision 64). A native registration's
+  name is an ASCII identifier, the rule the typed schema, `Sdk.Database` and the DDL renderer apply, that is
   not a keyword, a built-in type name or alias, or a pseudo-type's name, since a built-in name
   resolves first. A domain over a domain is refused in this iteration. A
   function parameter or result of a domain type is its base type for resolution and signature
-  identity, as `func_get_detail` reduces one.
+  identity, as `func_get_detail` reduces one. SQL-defined domains also admit delimited names with
+  punctuation. Function type text retains its quotes until resolution, so separators inside a
+  quoted type name remain part of that name. Persisted parameter and result type spellings quote
+  domain names, so a domain named `VARCHAR(1)` remains distinct from the built-in `VARCHAR(1)`
+  after reopen. Cast keys encode each domain name independently.
 - **One catalog** (open-closed). `SqlDatabaseEngineBuilder.Types` starts with the built-in
   types and casts; `Add` registers a domain and `AddCast` a cast, refusing a built-in type, a
   second domain of a name, a cast that names a domain the collection does not register, a second
@@ -4229,6 +4233,8 @@ on open and definition DDL. Namespace collisions, recursive dependencies and dec
 than their called functions are refused before publication. SQL defaults are volatile and called
 on NULL, while native shorthand keeps its strict default. SQL domain columns use E3's existing
 bounds and check path. Function metadata preserves domain names for parameters and results.
+SQL functions accept the parser's delimited names; native registrations retain their identifier
+name rule. Both paths retain the same reserved-name and overload admission checks.
 The synthetic parameter columns used for declaration and every cached body binding also retain
 those domain names, so casts inside a SQL body select domain-specific registrations just as a
 domain column does, including after reopen. Result-domain validation resolves and caches the
@@ -4275,7 +4281,12 @@ generation through its context. Ordinary catalog mutations retain their pre-E4 s
 explicit publication overloads take `SqlCatalogScriptPublication` before the final optional
 CancellationToken. Under its metadata lock, the catalog compares the expectation with the actual
 mutation and durable preceding state, derives the object claims itself, and atomically commits
-metadata and the next receipt. A mismatched target or preceding receipt/generation is
+metadata and the next receipt. Catalog and SQL compile one stateless identity encoder from the
+catalog shared source: every schema, table, index, function and domain name is double-quoted,
+with embedded quotes doubled. Function storage type codes remain separate signature components.
+Publication, persisted targets, dependency keys and script ownership checks use this encoding
+with the catalog's case-insensitive name rules; script names, digests and preceding receipt
+snapshots retain exact comparison. A mismatched target or preceding receipt/generation is
 `COHSQLS001` before commit. `BeginScriptAsync` records the checksum before effects. Explicit
 object-id reservations advance the generation without completing a statement; direct catalog
 table creation completes it. An IF EXISTS drop verifies absence and completes its receipt

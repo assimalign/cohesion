@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
@@ -19,19 +20,19 @@ internal static class SqlDefinitionBinder
 
     internal static DatabaseException Refuse(string message) => new($"{DefinitionCode}: {message}");
     internal static string Signature(string name, IEnumerable<SqlType> types)
-        => name.ToUpperInvariant() + "(" + string.Join(",", types.Select(type => type.IsPseudo ? type.Name : ((int)type.Storage.Type).ToString(CultureInfo.InvariantCulture))) + ")";
+        => SqlObjectIdentity.Signature(name, types.Select(TypeIdentity));
     internal static string Key(SqlFunction function)
     {
         string signature = Signature(function.Name, function.Parameters);
         return "F:" + (function.VariadicParameter is { } variadic
             ? signature[..^1] + (function.Parameters.Count == 0 ? string.Empty : ",") + "VARIADIC:" +
-                (variadic.IsPseudo ? variadic.Name : ((int)variadic.Storage.Type).ToString(CultureInfo.InvariantCulture)) + ")"
+                TypeIdentity(variadic) + ")"
             : signature);
     }
 
     internal static string DescribeIdentity(string identity)
     {
-        int start = identity.IndexOf('(');
+        int start = identity.LastIndexOf('(');
         var types = identity[(start + 1)..^1].Split(',');
         for (int index = 0; index < types.Length; index++)
         {
@@ -42,9 +43,15 @@ internal static class SqlDefinitionBinder
                 types[index] = (variadic ? "VARIADIC " : string.Empty) + SqlType.NameOf((DatabaseType)code);
             }
         }
-        return identity[2..(start + 1)] + string.Join(", ", types) + ")";
+        return identity[3..(start - 1)].Replace("\"\"", "\"") + "(" + string.Join(", ", types) + ")";
     }
-    internal static string DomainKey(string name) => "D:" + name.ToUpperInvariant();
+    private static string TypeIdentity(SqlType type)
+        => type.IsPseudo ? SqlObjectIdentity.Quote(type.Name) : ((int)type.Storage.Type).ToString(CultureInfo.InvariantCulture);
+
+    internal static string TypeName(SqlType type)
+        => type.IsDomain ? SqlObjectIdentity.Quote(type.Name) : type.Name;
+
+    internal static string DomainKey(string name) => SqlObjectIdentity.Domain(name.ToUpperInvariant());
 
     internal static SqlType ResolveType(string name, SqlFunctionEnvironment environment)
         => environment.Types.Resolve(name, out string? error) is { } type && error is null
@@ -89,7 +96,7 @@ internal static class SqlDefinitionBinder
         }
         string body = SqlPersistedExpression.Canonicalize(create.Body, $"Function '{create.Name}'");
         return new SqlCatalogFunction(create.Name, signature, create.Parameters.Select(parameter => parameter.Name).ToArray(),
-            types.Select(type => type.Name).ToArray(), result.Name,
+            types.Select(TypeName).ToArray(), TypeName(result),
             create.Volatility, create.IsStrict, body, dependencies.Order(StringComparer.Ordinal).ToArray(),
             schema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema, schema, FunctionCalls(create.Body, scope));
     }
@@ -111,8 +118,8 @@ internal static class SqlDefinitionBinder
         {
             throw Refuse($"Domain '{create.Name}' must have a built-in base type.");
         }
-        // The public factory owns identifier and type admission for both registration paths.
-        _ = SqlType.CreateDomain(create.Name, type);
+        // The SQL factory preserves type and reserved-name checks for delimited SQL names.
+        _ = SqlType.CreateSqlDomain(create.Name, type, null, null, false);
         string? literal = null;
         if (create.DefaultValue is { } value)
         {
@@ -285,7 +292,7 @@ internal static class SqlDefinitionBinder
             RuntimeHelpers.EnsureSufficientExecutionStack();
             if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
             {
-                if (position == identities.Count || !identities[position].StartsWith("F:" + call.FunctionName.ToUpperInvariant() + "(", StringComparison.Ordinal))
+                if (position == identities.Count || !identities[position].StartsWith("F:" + SqlObjectIdentity.Quote(call.FunctionName.ToUpperInvariant()) + "(", StringComparison.Ordinal))
                 {
                     throw Refuse($"Persisted function-call identity is missing or mismatched for '{call.FunctionName}'.");
                 }
@@ -359,7 +366,7 @@ internal static class SqlDefinitionBinder
             }
             catch (DatabaseException) { return true; }
         }
-        if (expression is SqlCastExpression cast && scope.Functions.Types.Find(cast.TargetType) is { } target &&
+        if (expression is SqlCastExpression cast && scope.Functions.Types.Resolve(cast.TargetType, out string? error) is { } target && error is null &&
             UnresolvedDomainReason(target) is not null)
         {
             return true;

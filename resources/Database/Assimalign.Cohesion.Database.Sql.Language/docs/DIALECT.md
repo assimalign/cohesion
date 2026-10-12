@@ -1296,7 +1296,9 @@ domain applies the base type's length, precision and scale, then evaluates the
 domain's check, of which only FALSE refuses the value (`DOMAIN constraint 'email' on
 'dbo.contacts' was violated.`, a `SqlConstraintViolationException` of kind `DOMAIN`,
 which a `CAST` raises too, with an empty table). Plain columns and domain base types
-use the same bounds, described next. A domain's name is an ASCII identifier.
+use the same bounds, described next. A native domain's name is an ASCII identifier. SQL-defined
+domains and functions may use delimited names containing punctuation, such as `"positive.type:amount"`.
+Function parameters, results, columns and CAST targets resolve the same domain name ignoring case.
 
 ## Declared bounds on writes (#1418)
 

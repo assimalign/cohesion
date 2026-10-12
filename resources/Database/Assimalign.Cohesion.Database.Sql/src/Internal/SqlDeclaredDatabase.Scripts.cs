@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
@@ -185,7 +186,7 @@ internal sealed partial class SqlDeclaredDatabase
         var expression = script.Statements[position].Statement.SqlExpression;
         if (expression is SqlAlterTableExpression { Action: SqlAlterDropConstraintAction drop } alter)
         {
-            string index = "I:" + (alter.Table.SchemaName ?? "dbo") + "." + alter.Table.TableName + "." + drop.ConstraintName;
+            string index = SqlObjectIdentity.Index(alter.Table.SchemaName ?? "dbo", alter.Table.TableName, drop.ConstraintName);
             // UNIQUE is represented by an index. For completed statements either this exact
             // index or the containing table (CHECK/FK) is a legitimate DROP CONSTRAINT target.
             if (recorded ? string.Equals(receipt.StatementObjects[position], index, StringComparison.OrdinalIgnoreCase)
@@ -206,7 +207,8 @@ internal sealed partial class SqlDeclaredDatabase
             // paired with the actual mutation's storage signature, so historical identity needs
             // no live type registration.
             if (recorded && parameter < receipt.StatementParameterTypes[position].Count &&
-                string.Equals(receipt.StatementParameterTypes[position][parameter], name, StringComparison.OrdinalIgnoreCase))
+                SqlTypeRules.TrySplit(name, out _, out int? first, out int? second) && first is null && second is null &&
+                SqlTypeRules.SameTypeName(receipt.StatementParameterTypes[position][parameter], name))
             {
                 string target = receipt.StatementObjects[position];
                 int opening = target.LastIndexOf('(');

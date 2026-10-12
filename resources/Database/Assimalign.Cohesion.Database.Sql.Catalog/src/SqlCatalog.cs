@@ -418,7 +418,7 @@ public sealed partial class SqlCatalog
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeTable(table));
-                CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, actualObject: "T:" + schema + "." + name, createsObject: true);
+                CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, actualObject: SqlObjectIdentity.Table(schema, name), createsObject: true);
                 _tables[(schema, name)] = new TableSlot(table, location);
             }
 
@@ -480,7 +480,7 @@ public sealed partial class SqlCatalog
             {
                 if (publication is not null)
                 {
-                    CommitScriptAbsence(publication, "T:" + schema + "." + name);
+                    CommitScriptAbsence(publication, SqlObjectIdentity.Table(schema, name));
                     return default;
                 }
                 throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
@@ -533,7 +533,7 @@ public sealed partial class SqlCatalog
                     registrationsLocation = UpsertRecord(transaction, registrationsLocation, EncodeRegistrations(remainingRegistrations));
                 }
 
-                CommitCatalogChange(transaction, publication: publication, actualObject: "T:" + schema + "." + name);
+                CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(schema, name));
                 _registrationsLocation = registrationsLocation;
             }
 
@@ -911,7 +911,7 @@ public sealed partial class SqlCatalog
             {
                 var location = _storage.InsertRow(transaction, EncodeIndex(index));
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
-                CommitCatalogChange(transaction, publication: publication, actualObject: "I:" + table.Schema + "." + table.Name + "." + index.Name, createsObject: true);
+                CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Index(table.Schema, table.Name, index.Name), createsObject: true);
                 _registrationsLocation = registrationsLocation;
                 _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, location);
             }
@@ -988,7 +988,7 @@ public sealed partial class SqlCatalog
             {
                 if (publication is not null && FindTableByObjectId(tableObjectId) is { } existingTable)
                 {
-                    CommitScriptAbsence(publication, "I:" + existingTable.Schema + "." + existingTable.Name + "." + name);
+                    CommitScriptAbsence(publication, SqlObjectIdentity.Index(existingTable.Schema, existingTable.Name, name));
                     return default;
                 }
                 throw new SqlCatalogException($"No index named '{name}' exists on object {tableObjectId}.");
@@ -1002,7 +1002,7 @@ public sealed partial class SqlCatalog
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
-                CommitCatalogChange(transaction, publication: publication, actualObject: "I:" + table.Schema + "." + table.Name + "." + slot.Index.Name);
+                CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Index(table.Schema, table.Name, slot.Index.Name));
                 _registrationsLocation = registrationsLocation;
             }
 
@@ -1417,7 +1417,7 @@ public sealed partial class SqlCatalog
         using (var transaction = _storage.BeginTransaction())
         {
             var location = UpsertRecord(transaction, slot.Location, record);
-            CommitCatalogChange(transaction, publication: publication, actualObject: "T:" + updated.Schema + "." + updated.Name);
+            CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
         }
     }
@@ -2069,7 +2069,7 @@ public sealed partial class SqlCatalog
             // Persist the identity before physical trees are created. A crash can
             // leave unused trees, but can never reuse their identity for a table.
             using var transaction = _storage.BeginTransaction();
-            CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, reservationOnly: true, actualObject: "T:" + schema + "." + name);
+            CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, reservationOnly: true, actualObject: SqlObjectIdentity.Table(schema, name));
             return new ValueTask<SqlCatalogTable>(table);
         }
     }
@@ -2204,7 +2204,7 @@ public sealed partial class SqlCatalog
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
             var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
-            CommitCatalogChange(transaction, publication: publication, actualObject: "T:" + table.Schema + "." + table.Name, createsObject: !replaceExisting);
+            CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(table.Schema, table.Name), createsObject: !replaceExisting);
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
             {

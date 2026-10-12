@@ -498,7 +498,9 @@ bound runtime trees. The format gate refuses older files without an upgrade path
 Kind 12 stores SqlCatalogScript: case-sensitive name, exact-body SHA-256, statement count and
 committed prefix, initial/latest DDL generations, typed schema hash and created table/index
 identities. Each completed statement also records its catalog-derived target (empty for non-DDL)
-and function parameter type spellings, paired with the function's normalized storage signature.
+and canonical SQL function parameter type spellings, paired with the function's normalized storage signature.
+Domain names in parameter and result types are quoted, distinguishing a domain named `VARCHAR(1)`
+from the built-in `VARCHAR(1)` type even after reopen; column domain names remain identifier values.
 CREATE FUNCTION takes those spellings from the published definition; DROP FUNCTION receives the
 SQL binder's already-resolved requested spellings as explicit mutation input. SQL owns type-name
 resolution, including native domains; the catalog owns the actual removed function identity and
@@ -508,6 +510,18 @@ digest and reconciled generation. These changes retain the unreleased format 10.
 source-generated System.Text.Json metadata with unknown-member refusal; no reflection serializer.
 Definitions and receipts must fit the existing one-page record bound. The declaration's body stays
 in application code, not the receipt.
+
+Object identities use the catalog's stateless `SqlObjectIdentity` encoder, compiled from shared
+source into Catalog and SQL. Each identifier component is SQL-delimited with double quotes and
+every embedded double quote is doubled: `T:"a"."b.c"` and `T:"a.b"."c"` identify different tables,
+as do `I:"a"."b"."c.d"` and `I:"a"."b.c"."d"` for indexes. Domain targets use `D:"name"`; function
+targets use `F:` followed by a signature with a quoted normalized name and separately encoded
+parameter types, including quoted pseudo-type names. The same encoding identifies publication
+expectations, persisted statement targets, created-object ownership claims, later-Build receipt
+validation and the provisioner's script-object checks. Name comparisons use the catalog's
+`OrdinalIgnoreCase` rule. Script names, checksums and exact preceding receipt-state vectors retain
+ordinal comparisons. The encoding change stays within unreleased catalog format 10, without a
+second bump or a legacy reader.
 
 Ordinary mutation methods retain their pre-E4 signatures. Explicit publication overloads take
 `SqlCatalogScriptPublication` before a final optional CancellationToken, with one parameter per

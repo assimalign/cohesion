@@ -357,3 +357,5 @@ SqlQueryParser.Definitions parses single-expression CREATE FUNCTION, DROP FUNCTI
 parameter-type signature, and CREATE/DROP DOMAIN. Immutable AST nodes carry bodies, domain
 checks/defaults and declaration attributes. Syntax belongs here; namespace, volatility, recursion,
 ownership and binding belong to the engine. DIALECT.md defines the supported clauses and errors.
+Function parameter and return type text retains identifier delimiters until the engine resolves
+it, so a quoted type name's punctuation cannot be mistaken for type arguments.

@@ -40,7 +40,7 @@ public sealed partial class SqlDefinedFunctionTests
             var database = await engine.OpenDatabaseAsync("functions", CancellationToken.None);
             ulong generation = database.Catalog.DdlGeneration;
             string json = $$"""
-                {"Name":"001","ContentHash":"{{hash}}","StatementCount":1,"CompletedStatements":1,"BaseGeneration":{{generation}},"Generation":{{generation}},"SchemaHash":null,"Objects":["T:dbo.unrelated"],"StatementObjects":["T:dbo.unrelated"]}
+                {"Name":"001","ContentHash":"{{hash}}","StatementCount":1,"CompletedStatements":1,"BaseGeneration":{{generation}},"Generation":{{generation}},"SchemaHash":null,"Objects":["T:\"dbo\".\"unrelated\""],"StatementObjects":["T:\"dbo\".\"unrelated\""]}
                 """;
             var record = new DatabaseKeyWriter().AppendInt32(12).AppendString(json, Collation.Binary).ToArray();
             using var transaction = database.CatalogStorage.BeginTransaction();
@@ -131,7 +131,7 @@ public sealed partial class SqlDefinedFunctionTests
         var result = await reopened.OpenDatabaseAsync("functions", CancellationToken.None);
 
         // Assert
-        result.Catalog.Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:dbo.script_rows", "I:dbo.script_rows.uq"]);
+        result.Catalog.Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:\"dbo\".\"script_rows\"", "I:\"dbo\".\"script_rows\".\"uq\""]);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Successful IF EXISTS drops record verified absence")]
@@ -154,8 +154,8 @@ public sealed partial class SqlDefinedFunctionTests
         // Assert
         var receipt = result.Catalog.Scripts.ShouldHaveSingleItem();
         receipt.CompletedStatements.ShouldBe(3);
-        receipt.StatementObjects.ShouldBe(["T:dbo.absent", "T:dbo.script_rows", "I:dbo.script_rows.absent"]);
-        receipt.Objects.ShouldBe(["T:dbo.script_rows"]);
+        receipt.StatementObjects.ShouldBe(["T:\"dbo\".\"absent\"", "T:\"dbo\".\"script_rows\"", "I:\"dbo\".\"script_rows\".\"absent\""]);
+        receipt.Objects.ShouldBe(["T:\"dbo\".\"script_rows\""]);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Historical function drops preserve equivalent domain aliases")]
@@ -204,8 +204,8 @@ public sealed partial class SqlDefinedFunctionTests
         // Assert
         var receipt = result.Catalog.Scripts.ShouldHaveSingleItem();
         receipt.CompletedStatements.ShouldBe(2);
-        receipt.StatementParameterTypes[0].ShouldBe(["a"]);
-        receipt.StatementParameterTypes[1].ShouldBe(["b"]);
+        receipt.StatementParameterTypes[0].ShouldBe(["\"a\""]);
+        receipt.StatementParameterTypes[1].ShouldBe(["\"b\""]);
         result.Catalog.Functions.ShouldBeEmpty();
     }
 

@@ -11,10 +11,10 @@ public sealed class SqlCatalogFunction
 {
     /// <summary>Creates immutable function metadata.</summary>
     /// <param name="name">The SQL name.</param>
-    /// <param name="signature">The normalized overload identity.</param>
+    /// <param name="signature">The normalized overload identity: a double-quoted uppercase name (embedded quotes doubled), followed by parenthesized comma-separated storage type codes.</param>
     /// <param name="parameterNames">The ordered parameter names.</param>
-    /// <param name="parameterTypes">The ordered declared SQL types.</param>
-    /// <param name="returnType">The declared result type.</param>
+    /// <param name="parameterTypes">The ordered canonical SQL type spellings, with domain names delimited by double quotes.</param>
+    /// <param name="returnType">The canonical SQL result type spelling, with a domain name delimited by double quotes.</param>
     /// <param name="volatility">The volatility keyword.</param>
     /// <param name="isStrict">Whether NULL arguments bypass execution.</param>
     /// <param name="body">The canonical SQL expression body.</param>
@@ -70,10 +70,10 @@ public sealed class SqlCatalogFunction
     /// <summary>Gets the ordered parameter names.</summary>
     public IReadOnlyList<string> ParameterNames { get; }
 
-    /// <summary>Gets the ordered declared SQL types.</summary>
+    /// <summary>Gets the ordered canonical SQL type spellings, with domain names delimited by double quotes.</summary>
     public IReadOnlyList<string> ParameterTypes { get; }
 
-    /// <summary>Gets the declared result type.</summary>
+    /// <summary>Gets the canonical SQL result type spelling, with a domain name delimited by double quotes.</summary>
     public string ReturnType { get; }
 
     /// <summary>Gets the volatility keyword.</summary>

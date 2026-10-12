@@ -172,16 +172,17 @@ internal static class SqlStandardLibrary
     /// type or quantifier name collides with grammar the dialect will parse.
     /// </summary>
     /// <param name="name">The name.</param>
+    /// <param name="sqlDefined">Whether the SQL parser already read the name, including delimiters.</param>
     /// <exception cref="ArgumentException">The name breaks a rule.</exception>
-    internal static void ValidateName(string name)
+    internal static void ValidateName(string name, bool sqlDefined = false)
     {
-        if (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_'))
+        if (!sqlDefined && (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_')))
         {
             throw new ArgumentException($"Function name '{name}' is not an identifier: it must start with a letter or an underscore.", nameof(name));
         }
         foreach (char character in name)
         {
-            if (!(char.IsLetterOrDigit(character) || character == '_'))
+            if (!sqlDefined && !(char.IsLetterOrDigit(character) || character == '_'))
             {
                 throw new ArgumentException($"Function name '{name}' is not an identifier: it may hold only letters, digits and underscores.", nameof(name));
             }

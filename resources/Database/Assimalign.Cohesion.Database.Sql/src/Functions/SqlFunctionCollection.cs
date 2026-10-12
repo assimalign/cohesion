@@ -67,7 +67,7 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
     {
         ArgumentNullException.ThrowIfNull(function);
         _ensureMutable?.Invoke();
-        SqlStandardLibrary.ValidateName(function.Name);
+        SqlStandardLibrary.ValidateName(function.Name, function is SqlExpressionFunction);
 
         foreach (var registered in _functions)
         {

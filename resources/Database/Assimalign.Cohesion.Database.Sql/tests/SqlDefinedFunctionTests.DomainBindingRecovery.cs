@@ -11,10 +11,13 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed partial class SqlDefinedFunctionTests
 {
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - SQL function domain dependencies propagate weakened CHECK bindings and recover with the native registration")]
-    [InlineData("cast")]
-    [InlineData("parameter")]
-    [InlineData("result")]
-    public async Task OpenAsync_UnresolvedDomainDependency_ShouldRefuseFunctionUseAndRecover(string dependency)
+    [InlineData("cast", "positive")]
+    [InlineData("parameter", "positive")]
+    [InlineData("result", "positive")]
+    [InlineData("cast", "\"positive.type:amount\"")]
+    [InlineData("parameter", "\"positive.type:amount\"")]
+    [InlineData("result", "\"positive.type:amount\"")]
+    public async Task OpenAsync_UnresolvedDomainDependency_ShouldRefuseFunctionUseAndRecover(string dependency, string domain)
     {
         // Arrange
         var storage = new CrashCaptureSqlStorageStrategy();
@@ -24,12 +27,12 @@ public sealed partial class SqlDefinedFunctionTests
         await using (var first = await builder.BuildAsync(CancellationToken.None))
         {
             await using var session = await SessionAsync(first);
-            await ExecuteAsync(session, "CREATE DOMAIN positive AS INT CHECK(allowed(VALUE))");
+            await ExecuteAsync(session, $"CREATE DOMAIN {domain} AS INT CHECK(allowed(VALUE))");
             await ExecuteAsync(session, dependency switch
             {
-                "parameter" => "CREATE FUNCTION use_domain(p positive) RETURNS BOOLEAN IMMUTABLE RETURN TRUE",
-                "result" => "CREATE FUNCTION use_domain(p INT) RETURNS positive IMMUTABLE RETURN p",
-                _ => "CREATE FUNCTION use_domain(p INT) RETURNS BOOLEAN IMMUTABLE RETURN CASE WHEN p = 0 THEN TRUE ELSE CAST(p AS positive) > 0 END",
+                "parameter" => $"CREATE FUNCTION use_domain(p {domain}) RETURNS BOOLEAN IMMUTABLE RETURN TRUE",
+                "result" => $"CREATE FUNCTION use_domain(p INT) RETURNS {domain} IMMUTABLE RETURN p",
+                _ => $"CREATE FUNCTION use_domain(p INT) RETURNS BOOLEAN IMMUTABLE RETURN CASE WHEN p = 0 THEN TRUE ELSE CAST(p AS {domain}) > 0 END",
             });
             await ExecuteAsync(session, dependency == "result"
                 ? "CREATE TABLE t(v INT CHECK(v = 0 OR use_domain(v) > 0))"
@@ -54,11 +57,11 @@ public sealed partial class SqlDefinedFunctionTests
             (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET v = 0"))).Message.ShouldContain("COHSQLE009");
             (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT use_domain(0) FROM t"))).Message.ShouldContain("COHSQLE009");
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
-                "CREATE FUNCTION invalid_parameter(p positive) RETURNS INT IMMUTABLE RETURN p"));
+                $"CREATE FUNCTION invalid_parameter(p {domain}) RETURNS INT IMMUTABLE RETURN p"));
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
-                "CREATE FUNCTION invalid_result(p INT) RETURNS positive IMMUTABLE RETURN p"));
+                $"CREATE FUNCTION invalid_result(p INT) RETURNS {domain} IMMUTABLE RETURN p"));
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
-                "CREATE FUNCTION invalid_cast(p INT) RETURNS INT IMMUTABLE RETURN CAST(p AS positive)"));
+                $"CREATE FUNCTION invalid_cast(p INT) RETURNS INT IMMUTABLE RETURN CAST(p AS {domain})"));
         }
 
         var restored = SqlDatabaseEngine.CreateBuilder("domain-binding-recovery");

@@ -19,7 +19,7 @@ public sealed class SqlCatalogFunctionCallTests
         // Arrange: the SQL text fits the catalog's record limit; repeating its identity must not exhaust it.
         const int depth = 1200;
         string expression = string.Concat(Enumerable.Repeat("ABS(", depth)) + "qty" + new string(')', depth) + " < 100";
-        string[] calls = Enumerable.Repeat("F:ABS(4)", depth).ToArray();
+        string[] calls = Enumerable.Repeat("F:\"ABS\"(4)", depth).ToArray();
         var check = new SqlCatalogConstraint("ck", SqlCatalogConstraintKind.Check, ["qty"],
             checkExpression: expression, checkFunctionCalls: calls);
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "repeated-calls");
@@ -39,9 +39,9 @@ public sealed class SqlCatalogFunctionCallTests
     public async Task Open_InterleavedFunctionCalls_ShouldRetainEveryVector()
     {
         // Arrange
-        string[] firstCalls = ["F:F(4)", "F:G(4)", "F:F(4)", "F:G(4)"];
-        string[] nextCalls = ["F:H(4)", "F:H(4)"];
-        string[] checkCalls = ["F:P(4,4)", "F:F(4)", "F:F(4)", "F:G(4)", "F:G(4)"];
+        string[] firstCalls = ["F:\"F\"(4)", "F:\"G\"(4)", "F:\"F\"(4)", "F:\"G\"(4)"];
+        string[] nextCalls = ["F:\"H\"(4)", "F:\"H\"(4)"];
+        string[] checkCalls = ["F:\"P\"(4,4)", "F:\"F\"(4)", "F:\"F\"(4)", "F:\"G\"(4)", "F:\"G\"(4)"];
         SqlCatalogColumn[] columns =
         [
             new("a", new DatabaseTypeInfo(DatabaseType.Int32), defaultLiteral: "f(g(f(g(1))))", defaultFunctionCalls: firstCalls),
@@ -71,7 +71,7 @@ public sealed class SqlCatalogFunctionCallTests
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "invalid-calls");
         var catalog = SqlCatalog.Open(storage);
         var column = new SqlCatalogColumn("v", new DatabaseTypeInfo(DatabaseType.Int32), defaultLiteral: "1",
-            defaultFunctionCalls: ["F:F(4)", "F:F(4)"]);
+            defaultFunctionCalls: ["F:\"F\"(4)", "F:\"F\"(4)"]);
 
         // Act
         var failure = await Should.ThrowAsync<SqlCatalogException>(() => catalog.CreateTableAsync("dbo", "t", [column]).AsTask());

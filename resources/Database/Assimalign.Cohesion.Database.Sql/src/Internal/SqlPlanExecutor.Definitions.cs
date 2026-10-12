@@ -33,8 +33,8 @@ internal sealed partial class SqlPlanExecutor
             }
             case SqlDropFunctionExpression drop:
             {
-                string signature = SqlDefinitionBinder.Signature(drop.Name,
-                    drop.ParameterTypes.Select(type => SqlDefinitionBinder.ResolveType(type, environment)));
+                var parameterTypes = drop.ParameterTypes.Select(type => SqlDefinitionBinder.ResolveType(type, environment)).ToArray();
+                string signature = SqlDefinitionBinder.Signature(drop.Name, parameterTypes);
                 var definition = _catalog.Functions.FirstOrDefault(function => function.Signature.Equals(signature, StringComparison.OrdinalIgnoreCase));
                 if (definition is null)
                 {
@@ -47,7 +47,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 CheckDefinitionOwner(definition.Name, definition.Owner, definition.OwningSchema, statement);
                 EnsureNoDependents("F:" + signature);
-                await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropFunctionAsync(signature, cancellationToken) : _catalog.DropFunctionAsync(signature, drop.ParameterTypes, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
+                await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropFunctionAsync(signature, cancellationToken) : _catalog.DropFunctionAsync(signature, parameterTypes.Select(SqlDefinitionBinder.TypeName).ToArray(), statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
                 break;
             }
             case SqlDropDomainExpression drop:
@@ -153,7 +153,8 @@ internal sealed partial class SqlPlanExecutor
             void Visit(SqlExpression node)
             {
                 System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-                if (node is SqlCastExpression cast && key.Equals(SqlDefinitionBinder.DomainKey(cast.TargetType), StringComparison.OrdinalIgnoreCase)) { Dependent(subject); }
+                if (node is SqlCastExpression cast && SqlTypeRules.TrySplit(cast.TargetType, out string name, out _, out _) &&
+                    key.Equals(SqlDefinitionBinder.DomainKey(name), StringComparison.OrdinalIgnoreCase)) { Dependent(subject); }
                 foreach (var child in SqlPlanner.Children(node)) { Visit(child); }
             }
         }

@@ -18,6 +18,30 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDefinedFunctionTests
 {
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Quoted script objects retain ownership during cold typed reconciliation")]
+    public async Task BuildAsync_QuotedScriptOwnership_ShouldPreserveObjects()
+    {
+        // Arrange
+        const string sql = "CREATE TABLE \"script.rows:one\"(id INT); CREATE INDEX \"ix.id:one\" ON \"script.rows:one\"(id)";
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using (var engine = await ScriptBuilder(storage, sql: sql).BuildAsync(CancellationToken.None))
+        {
+            var database = await engine.OpenDatabaseAsync("functions", CancellationToken.None);
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await ExecuteAsync(session, "CREATE TABLE sentinel(id INT)");
+        }
+
+        // Act
+        var reopen = ScriptBuilder(storage.CaptureDurableImages(), sql: sql);
+        await using var reopened = await reopen.BuildAsync(CancellationToken.None);
+        var result = await reopened.OpenDatabaseAsync("functions", CancellationToken.None);
+
+        // Assert
+        result.Catalog.TryGetTable("DBO", "SCRIPT.ROWS:ONE", out var table).ShouldBeTrue();
+        result.Catalog.TryGetIndex(table.ObjectId, "IX.ID:ONE", out _).ShouldBeTrue();
+        result.Catalog.Scripts.ShouldHaveSingleItem().Objects.ShouldBe(["T:\"dbo\".\"script.rows:one\"", "I:\"dbo\".\"script.rows:one\".\"ix.id:one\""]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Cold Apply and Verify refuse receipts for colliding quoted object names")]
     [InlineData(SqlProvisioningMode.Apply, "CREATE TABLE a.\"b.c\"(id INT)", "CREATE TABLE \"a.b\".c(id INT)", null)]
     [InlineData(SqlProvisioningMode.Verify, "CREATE TABLE a.\"b.c\"(id INT)", "CREATE TABLE \"a.b\".c(id INT)", null)]

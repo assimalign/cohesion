@@ -11,6 +11,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Types;
 
@@ -18,6 +19,22 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
 
 public sealed class SqlCatalogScriptTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Identity encoding quotes each component and doubles embedded quotes")]
+    public void ObjectIdentity_SeparatorAndQuoteComponents_ShouldKeepDistinctTuples()
+    {
+        // Arrange
+        string[] expected = ["T:\"a\".\"b.c\"", "T:\"a.b\".\"c\"", "T:\"a\"\"\".\"b:c\"",
+            "I:\"a\".\"b\".\"c.d\"", "I:\"a\".\"b.c\".\"d\"", "I:\"a\".\"b\"\"\".\"c:d\""];
+
+        // Act
+        string[] actual = [SqlObjectIdentity.Table("a", "b.c"), SqlObjectIdentity.Table("a.b", "c"), SqlObjectIdentity.Table("a\"", "b:c"),
+            SqlObjectIdentity.Index("a", "b", "c.d"), SqlObjectIdentity.Index("a", "b.c", "d"), SqlObjectIdentity.Index("a", "b\"", "c:d")];
+
+        // Assert
+        actual.ShouldBe(expected);
+        actual.Distinct(StringComparer.OrdinalIgnoreCase).Count().ShouldBe(actual.Length);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Table receipt targets distinguish quoted separator components")]
     [InlineData("a", "b.c", "a.b", "c")]
     [InlineData("a\"", "b.c", "a\".b", "c")]
@@ -32,7 +49,7 @@ public sealed class SqlCatalogScriptTests
         var catalog = SqlCatalog.Open(storage);
         ulong generation = catalog.DdlGeneration;
         var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, generation, null,
-            $"T:{expectedSchema}.{expectedTable}");
+            SqlObjectIdentity.Table(expectedSchema, expectedTable));
 
         // Act
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateTableAsync(actualSchema, actualTable,
@@ -68,7 +85,7 @@ public sealed class SqlCatalogScriptTests
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], cancellationToken: CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
         var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, generation, null,
-            $"I:{expectedSchema}.{expectedTable}.{expectedIndex}");
+            SqlObjectIdentity.Index(expectedSchema, expectedTable, expectedIndex));
         var index = new SqlCatalogIndex(table.ObjectId, actualIndex, ["id"], false);
         var registration = new BTreeIndexRegistration(table.ObjectId, new IndexDefinition(actualIndex), 42);
 
@@ -96,13 +113,13 @@ public sealed class SqlCatalogScriptTests
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-target-case");
         var catalog = SqlCatalog.Open(storage);
         string hash = new('A', 64);
-        var tablePublication = new SqlCatalogScriptPublication("001", hash, 2, null, catalog.DdlGeneration, null, "T:A.B.C");
+        var tablePublication = new SqlCatalogScriptPublication("001", hash, 2, null, catalog.DdlGeneration, null, "T:\"A\".\"B.C\"");
 
         // Act
         var table = await catalog.CreateTableAsync("a", "b.c", [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)],
             null, tablePublication, CancellationToken.None);
         var indexPublication = new SqlCatalogScriptPublication("001", hash, 2, catalog.Scripts.ShouldHaveSingleItem(),
-            catalog.DdlGeneration, null, "I:A.B.C.D:E.F");
+            catalog.DdlGeneration, null, "I:\"A\".\"B.C\".\"D:E.F\"");
         var index = new SqlCatalogIndex(table.ObjectId, "d:e.f", ["id"], false);
         await catalog.CreateIndexAsync(index, [new BTreeIndexRegistration(table.ObjectId, new IndexDefinition(index.Name), 42)],
             indexPublication, CancellationToken.None);
@@ -113,7 +130,7 @@ public sealed class SqlCatalogScriptTests
         reopened.TryGetIndex(table.ObjectId, "D:E.F", out _).ShouldBeTrue();
         var receipt = reopened.Scripts.ShouldHaveSingleItem();
         receipt.CompletedStatements.ShouldBe(2);
-        receipt.StatementObjects.ShouldBe(["T:a.b.c", "I:a.b.c.d:e.f"]);
+        receipt.StatementObjects.ShouldBe(["T:\"a\".\"b.c\"", "I:\"a\".\"b.c\".\"d:e.f\""]);
         receipt.Objects.ShouldBe(receipt.StatementObjects);
     }
 
@@ -123,7 +140,7 @@ public sealed class SqlCatalogScriptTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-function-alias");
         var catalog = SqlCatalog.Open(storage);
-        var function = new SqlCatalogFunction("identity", "IDENTITY(5)", ["p"], ["a"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
+        var function = new SqlCatalogFunction("identity", "\"IDENTITY\"(5)", ["p"], ["a"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
         await catalog.CreateFunctionAsync(function, CancellationToken.None);
         var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, catalog.DdlGeneration, null, "F:" + function.Signature);
 
@@ -146,7 +163,7 @@ public sealed class SqlCatalogScriptTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-function-count");
         var catalog = SqlCatalog.Open(storage);
-        var function = new SqlCatalogFunction("identity", "IDENTITY(5)", ["p"], ["BIGINT"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
+        var function = new SqlCatalogFunction("identity", "\"IDENTITY\"(5)", ["p"], ["BIGINT"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
         await catalog.CreateFunctionAsync(function, CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
         var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, generation, null, "F:" + function.Signature);
@@ -172,7 +189,7 @@ public sealed class SqlCatalogScriptTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-function-type-name");
         var catalog = SqlCatalog.Open(storage);
-        var function = new SqlCatalogFunction("identity", "IDENTITY(5)", ["p"], ["BIGINT"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
+        var function = new SqlCatalogFunction("identity", "\"IDENTITY\"(5)", ["p"], ["BIGINT"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
         await catalog.CreateFunctionAsync(function, CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
         var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, generation, null, "F:" + function.Signature);
@@ -197,7 +214,7 @@ public sealed class SqlCatalogScriptTests
         var catalog = SqlCatalog.Open(storage);
         var table = await catalog.CreateTableAsync("dbo", "existing", [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], cancellationToken: CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
-        string target = index ? "I:dbo.existing.missing" : "T:dbo.missing";
+        string target = index ? "I:\"dbo\".\"existing\".\"missing\"" : "T:\"dbo\".\"missing\"";
         var previous = await catalog.BeginScriptAsync("001", new string('A', 64), 1, null, CancellationToken.None);
         var publication = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, generation, null, target);
 
@@ -234,7 +251,7 @@ public sealed class SqlCatalogScriptTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-function-types");
         var catalog = SqlCatalog.Open(storage);
-        var function = new SqlCatalogFunction("identity", "IDENTITY(5)", ["p"], ["cents"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
+        var function = new SqlCatalogFunction("identity", "\"IDENTITY\"(5)", ["p"], ["cents"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
         var initial = await catalog.BeginScriptAsync("001", new string('A', 64), 2, null, CancellationToken.None);
         var create = new SqlCatalogScriptPublication("001", initial.ContentHash, 2, initial, catalog.DdlGeneration, null, "F:" + function.Signature);
 
@@ -271,7 +288,7 @@ public sealed class SqlCatalogScriptTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-altered-types");
         var catalog = SqlCatalog.Open(storage);
-        var function = new SqlCatalogFunction("identity", "IDENTITY(5)", ["p"], ["cents"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
+        var function = new SqlCatalogFunction("identity", "\"IDENTITY\"(5)", ["p"], ["cents"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
         var create = new SqlCatalogScriptPublication("001", new string('A', 64), 2, null, catalog.DdlGeneration, null, "F:" + function.Signature);
         await catalog.CreateFunctionAsync(function, create, CancellationToken.None);
         var previous = catalog.Scripts.ShouldHaveSingleItem();
@@ -297,7 +314,7 @@ public sealed class SqlCatalogScriptTests
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-invalid-types");
         string json = "{\"Name\":\"001\",\"ContentHash\":\"" + new string('A', 64) +
             "\",\"StatementCount\":1,\"CompletedStatements\":1,\"BaseGeneration\":0,\"Generation\":0," +
-            "\"SchemaHash\":null,\"Objects\":[],\"StatementObjects\":[\"F:IDENTITY(5)\"],\"StatementParameterTypes\":" + types + "}";
+            "\"SchemaHash\":null,\"Objects\":[],\"StatementObjects\":[\"F:\\\"IDENTITY\\\"(5)\"],\"StatementParameterTypes\":" + types + "}";
         using (var transaction = storage.BeginTransaction())
         {
             storage.InsertRow(transaction, new DatabaseKeyWriter().AppendInt32(12).AppendString(json, Collation.Binary).ToArray());
@@ -319,7 +336,7 @@ public sealed class SqlCatalogScriptTests
         var catalog = SqlCatalog.Open(storage);
         ulong generation = catalog.DdlGeneration;
         string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("CREATE TABLE wanted (id INT)")));
-        var publication = new SqlCatalogScriptPublication("wanted", hash, 1, null, generation, null, "T:dbo.wanted");
+        var publication = new SqlCatalogScriptPublication("wanted", hash, 1, null, generation, null, "T:\"dbo\".\"wanted\"");
 
         // Act
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateTableAsync("dbo", "unrelated",
@@ -343,11 +360,11 @@ public sealed class SqlCatalogScriptTests
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-stale-state");
         var catalog = SqlCatalog.Open(storage);
         var previous = await catalog.BeginScriptAsync("001", new string('A', 64), 1, null, CancellationToken.None);
-        var reservation = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, "T:dbo.wanted");
+        var reservation = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, "T:\"dbo\".\"wanted\"");
         await catalog.ReserveTableAsync("dbo", "wanted", [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)],
             null, [], DatabaseObjectOwner.Schema, "App", reservation, CancellationToken.None);
         var current = catalog.Scripts.ShouldHaveSingleItem();
-        var stale = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, "T:dbo.wanted");
+        var stale = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, "T:\"dbo\".\"wanted\"");
 
         // Act
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateTableAsync("dbo", "wanted",
@@ -396,9 +413,9 @@ public sealed class SqlCatalogScriptTests
         var original = await catalog.BeginScriptAsync("001", new string('A', 64), 1, null, CancellationToken.None);
         ulong suppliedOrigin = changed == "futureorigin" ? generation + 2 : changed == "origin" ? generation + 1 : generation;
         var preceding = new SqlCatalogScript("001", original.ContentHash, 1, 0, suppliedOrigin, suppliedOrigin, null,
-            changed == "claims" ? ["T:dbo.fake"] : []);
+            changed == "claims" ? ["T:\"dbo\".\"fake\""] : []);
         var invalid = new SqlCatalogScriptPublication("001", new string(changed == "checksum" ? 'B' : 'A', 64), changed == "count" ? 2 : 1,
-            preceding, generation, changed == "schema" ? "different" : null, "T:dbo.t");
+            preceding, generation, changed == "schema" ? "different" : null, "T:\"dbo\".\"t\"");
 
         // Act
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateTableAsync("dbo", "t",
@@ -417,7 +434,7 @@ public sealed class SqlCatalogScriptTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-reservation");
         var catalog = SqlCatalog.Open(storage);
-        var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, catalog.DdlGeneration, null, "T:dbo.t");
+        var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, catalog.DdlGeneration, null, "T:\"dbo\".\"t\"");
 
         // Act
         var table = await catalog.ReserveTableAsync("dbo", "t", [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)],
@@ -429,12 +446,12 @@ public sealed class SqlCatalogScriptTests
         reserved.Objects.ShouldBeEmpty();
         reserved.StatementObjects.ShouldBeEmpty();
         catalog.Tables.ShouldBeEmpty();
-        var refreshed = new SqlCatalogScriptPublication("001", publication.ContentHash, 1, reserved, catalog.DdlGeneration, null, "T:dbo.t");
+        var refreshed = new SqlCatalogScriptPublication("001", publication.ContentHash, 1, reserved, catalog.DdlGeneration, null, "T:\"dbo\".\"t\"");
         await catalog.PublishTableAsync(table, [], [], false, refreshed, CancellationToken.None);
         catalog.Scripts.ShouldHaveSingleItem().CompletedStatements.ShouldBe(1);
         catalog.Scripts.ShouldHaveSingleItem().Generation.ShouldBe(catalog.DdlGeneration);
-        catalog.Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:dbo.t"]);
-        catalog.Scripts.ShouldHaveSingleItem().Objects.ShouldBe(["T:dbo.t"]);
+        catalog.Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:\"dbo\".\"t\""]);
+        catalog.Scripts.ShouldHaveSingleItem().Objects.ShouldBe(["T:\"dbo\".\"t\""]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - A public table publication completes only its given script receipt")]
@@ -443,7 +460,7 @@ public sealed class SqlCatalogScriptTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-receipt");
         var catalog = SqlCatalog.Open(storage);
-        var receipt = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, catalog.DdlGeneration, null, "T:dbo.t");
+        var receipt = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, catalog.DdlGeneration, null, "T:\"dbo\".\"t\"");
 
         // Act
         await catalog.CreateTableAsync("dbo", "t", [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], null, receipt, CancellationToken.None);
@@ -453,14 +470,14 @@ public sealed class SqlCatalogScriptTests
         // Assert
         catalog.Scripts.ShouldHaveSingleItem().CompletedStatements.ShouldBe(1);
         catalog.Scripts.ShouldHaveSingleItem().Generation.ShouldBe(publication);
-        catalog.Scripts.ShouldHaveSingleItem().Objects.ShouldBe(["T:dbo.t"]);
-        catalog.Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:dbo.t"]);
+        catalog.Scripts.ShouldHaveSingleItem().Objects.ShouldBe(["T:\"dbo\".\"t\""]);
+        catalog.Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:\"dbo\".\"t\""]);
         catalog.Tables.Count.ShouldBe(2);
         await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateTableAsync("dbo", "reused_receipt",
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], null, receipt, CancellationToken.None));
         catalog.Tables.Count.ShouldBe(2);
         catalog.Scripts.ShouldHaveSingleItem().Generation.ShouldBe(publication);
-        SqlCatalog.Open(storage).Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:dbo.t"]);
+        SqlCatalog.Open(storage).Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:\"dbo\".\"t\""]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Non-DDL completion refuses object claims")]
@@ -470,7 +487,7 @@ public sealed class SqlCatalogScriptTests
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-data");
         var catalog = SqlCatalog.Open(storage);
         var previous = await catalog.BeginScriptAsync("001", new string('A', 64), 1, null, CancellationToken.None);
-        var publication = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, "T:dbo.t");
+        var publication = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, "T:\"dbo\".\"t\"");
 
         // Act
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CompleteScriptStatementAsync(publication, CancellationToken.None));
@@ -498,23 +515,23 @@ public sealed class SqlCatalogScriptTests
             catalog.Scripts.ShouldHaveSingleItem(), catalog.DdlGeneration, null, target);
         var column = new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true);
         var domain = new SqlCatalogDomain("cents", "BIGINT", null, false, null, null, [], DatabaseObjectOwner.Schema, "App");
-        var function = new SqlCatalogFunction("identity", "IDENTITY(5)", ["p"], ["BIGINT"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
+        var function = new SqlCatalogFunction("identity", "\"IDENTITY\"(5)", ["p"], ["BIGINT"], "BIGINT", "IMMUTABLE", false, "p", [], DatabaseObjectOwner.Schema, "App");
 
         // Act
-        await catalog.CreateTableAsync("dbo", "t", [column], null, Next("T:dbo.t"), CancellationToken.None);
-        await catalog.AddColumnAsync("dbo", "t", new SqlCatalogColumn("extra", new DatabaseTypeInfo(DatabaseType.Int32), true), Next("T:dbo.t"), CancellationToken.None);
-        await catalog.DropColumnAsync("dbo", "t", "extra", Next("T:dbo.t"), CancellationToken.None);
-        await catalog.DropTableAsync("dbo", "t", Next("T:dbo.t"), CancellationToken.None);
-        await catalog.CreateDomainAsync(domain, Next("D:cents"), CancellationToken.None);
-        await catalog.CreateFunctionAsync(function, Next("F:IDENTITY(5)"), CancellationToken.None);
-        await catalog.DropFunctionAsync(function.Signature, function.ParameterTypes, Next("F:IDENTITY(5)"), CancellationToken.None);
-        await catalog.DropDomainAsync(domain.Name, Next("D:cents"), CancellationToken.None);
+        await catalog.CreateTableAsync("dbo", "t", [column], null, Next("T:\"dbo\".\"t\""), CancellationToken.None);
+        await catalog.AddColumnAsync("dbo", "t", new SqlCatalogColumn("extra", new DatabaseTypeInfo(DatabaseType.Int32), true), Next("T:\"dbo\".\"t\""), CancellationToken.None);
+        await catalog.DropColumnAsync("dbo", "t", "extra", Next("T:\"dbo\".\"t\""), CancellationToken.None);
+        await catalog.DropTableAsync("dbo", "t", Next("T:\"dbo\".\"t\""), CancellationToken.None);
+        await catalog.CreateDomainAsync(domain, Next("D:\"cents\""), CancellationToken.None);
+        await catalog.CreateFunctionAsync(function, Next("F:\"IDENTITY\"(5)"), CancellationToken.None);
+        await catalog.DropFunctionAsync(function.Signature, function.ParameterTypes, Next("F:\"IDENTITY\"(5)"), CancellationToken.None);
+        await catalog.DropDomainAsync(domain.Name, Next("D:\"cents\""), CancellationToken.None);
 
         // Assert
         var receipt = SqlCatalog.Open(storage).Scripts.ShouldHaveSingleItem();
         receipt.CompletedStatements.ShouldBe(statementCount);
-        receipt.Objects.ShouldBe(["T:dbo.t"]);
-        receipt.StatementObjects.ShouldBe(["T:dbo.t", "T:dbo.t", "T:dbo.t", "T:dbo.t", "D:cents", "F:IDENTITY(5)", "F:IDENTITY(5)", "D:cents"]);
+        receipt.Objects.ShouldBe(["T:\"dbo\".\"t\""]);
+        receipt.StatementObjects.ShouldBe(["T:\"dbo\".\"t\"", "T:\"dbo\".\"t\"", "T:\"dbo\".\"t\"", "T:\"dbo\".\"t\"", "D:\"cents\"", "F:\"IDENTITY\"(5)", "F:\"IDENTITY\"(5)", "D:\"cents\""]);
         receipt.Generation.ShouldBe(catalog.DdlGeneration);
     }
 
@@ -525,7 +542,7 @@ public sealed class SqlCatalogScriptTests
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-generation");
         var catalog = SqlCatalog.Open(storage);
         var previous = await catalog.BeginScriptAsync("001", new string('A', 64), 1, null, CancellationToken.None);
-        var publication = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, "T:dbo.wanted");
+        var publication = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, "T:\"dbo\".\"wanted\"");
         await catalog.CreateTableAsync("dbo", "intervening", [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], cancellationToken: CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
 

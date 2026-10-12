@@ -117,7 +117,7 @@ public sealed partial class SqlCatalog
     {
         ArgumentNullException.ThrowIfNull(domain);
         return CreateDefinitionAsync(_domains, domain.Name, domain, domainRecordKind,
-            SqlCatalogJsonContext.Default.SqlCatalogDomain, cancellationToken, publication, "D:" + domain.Name);
+            SqlCatalogJsonContext.Default.SqlCatalogDomain, cancellationToken, publication, SqlObjectIdentity.Domain(domain.Name));
     }
 
     /// <summary>Drops a SQL function after the engine has checked ownership and dependencies.</summary>
@@ -204,7 +204,7 @@ public sealed partial class SqlCatalog
         string name,
         CancellationToken cancellationToken,
         SqlCatalogScriptPublication? publication)
-        => DropDefinitionAsync(_domains, name, cancellationToken, publication, "D:" + name);
+        => DropDefinitionAsync(_domains, name, cancellationToken, publication, SqlObjectIdentity.Domain(name));
 
     private ValueTask CreateDefinitionAsync<T>(Dictionary<string, DefinitionSlot<T>> directory, string key, T value,
         int kind, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken, SqlCatalogScriptPublication? publication, string actualObject)

@@ -155,7 +155,7 @@ public sealed partial class SqlDefinedFunctionTests
 
         // Assert
         (await RowsAsync(session, "SELECT Id FROM typed_rows")).ShouldBe([[3]]);
-        database.Catalog.Scripts.ShouldHaveSingleItem().Objects.ShouldContain("I:dbo.typed_rows.script_ix");
+        database.Catalog.Scripts.ShouldHaveSingleItem().Objects.ShouldContain("I:\"dbo\".\"typed_rows\".\"script_ix\"");
     }
 
     private sealed class EvolvedScriptRow
