@@ -1272,6 +1272,10 @@ internal sealed partial class SqlPlanExecutor
                     $"Function '{call.FunctionName}' is {(function.Volatility == SqlFunctionVolatility.Stable ? "STABLE" : "VOLATILE")}, and a CHECK admits only IMMUTABLE functions. " +
                     "Register the function as SqlFunctionVolatility.Immutable if its result depends on nothing but its arguments.");
             }
+            if (function is SqlExpressionFunction { Unresolved: { } reason })
+            {
+                throw SqlDefinitionBinder.Refuse($"Function '{function.Name}' has an unresolved SQL definition ({reason}).");
+            }
 
             return function;
         }

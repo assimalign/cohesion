@@ -401,7 +401,8 @@ publishing a definition, and when it opens a database it parses and binds every
 stored table check and default once per table version, and reconstructs SQL functions
 and domain definitions on open. Calls bind only to the recorded identities, so added overloads
 cannot replace existing CHECKs, DEFAULTs or bodies. DROP reads those same vectors. Missing
-identities use the engine's unresolved-definition path: open and reads succeed, but use and
+identities, and recorded native signatures whose volatility is now incompatible with their
+persisted use, use the engine's unresolved-definition path: open and reads succeed, but use and
 declared Build fail with `COHSQLE009`. CHECK rechecks Immutable admission at every bind;
 other tightened declaration-only rules are not reapplied. A structurally malformed definition
 fails open, naming the table and constraint or column. Canonical storage began in data-storage
@@ -484,6 +485,12 @@ volatility/null behavior, domain dependencies and Adhoc/Schema ownership. Public
 include both kinds. The engine owns semantic binding and dependency/ownership admission.
 Native function ownership is resolved by the requested normalized signature; an unrelated
 engine overload does not turn a missing SQL definition into an engine-owned one.
+The engine retains parameter domain identities in both declaration and body binding, including
+reopen, so domain-specific casts are selected inside function bodies. Return-domain checks cache
+their supported argument widening and use the same converted invocation and NULL rules as column
+and argument checks. Weakened native volatility propagates unresolved bindings through SQL wrappers
+and domain CHECKs (including function signature and CAST dependencies); restoring the registration
+on reopen restores writes.
 The engine evaluates domain argument coercion before STRICT dispatch and caches SQL body
 variants by invocation collation; the catalog persists the declarations and identities, not
 bound runtime trees. The format gate refuses older files without an upgrade path.

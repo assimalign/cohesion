@@ -1333,6 +1333,10 @@ Engine-registered domains remain code; SQL domains are persisted catalog objects
 on reopen. The persisted-expression inventory includes CREATE TABLE function-call DEFAULTs.
 Function parameter/result domain names persist. Domain argument coercion runs before STRICT's
 NULL short-circuit, for native and SQL calls, and result validation follows body execution.
+E4 second-review fixes retain domain names on synthetic parameter columns in declaration and
+body binding, preserving domain-specific casts for direct and explicitly cast arguments after
+reopen. Return-domain checks cache their resolved argument conversion and use converted invocation,
+including INTEGER-to-BIGINT widening and the check's NULL behavior.
 Invocation collation reaches SQL body parameters, comparisons and LIKE; string results retain
 it for ordering/grouping. Bound bodies are cached per collation, prepared during binding for
 fixed-collation calls, and reused across rows and statements. Defaults are volatile/called-on-NULL for SQL functions, and CHECK
@@ -1345,8 +1349,12 @@ ownership. Table/domain CHECKs, column/domain DEFAULTs and SQL bodies reload eac
 original normalized signature; native or SQL overload additions cannot rebind them. DROP reads
 the same call records. Literal-only defaults carry empty lists. Format 10 remains unchanged;
 table call vectors compact consecutive identical signatures while preserving every call on reload.
-The gate refuses 9 and older without a reader or upgrade path. Missing recorded calls remain unresolved
-on open and fail use/declared Build. CREATE TABLE accepts function-call defaults, evaluated once
+The gate refuses 9 and older without a reader or upgrade path. Missing recorded calls and native
+signatures whose volatility has become incompatible remain unresolved on open and fail
+use/declared Build with COHSQLE009. This propagates through SQL wrappers and domain CHECKs,
+including function signatures and casts; reads
+and SQL cleanup remain available, declaration-time admission stays strict, and reopening with
+the original volatility restores writes. CREATE TABLE accepts function-call defaults, evaluated once
 per omitted INSERT value; ADD COLUMN remains literal-only because missing historical row tails
 are not materialized. The FUNCTIONS view adds IS_SQL_DEFINED; TYPES and DOMAINS expose the merged
 registry with the same provenance and SQL definition rows respect catalog transaction snapshots.

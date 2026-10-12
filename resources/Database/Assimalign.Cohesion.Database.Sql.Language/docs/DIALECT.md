@@ -1694,6 +1694,11 @@ A function may call only functions whose volatility is at least its own; CHECK, 
 domain CHECK, admits Immutable functions only. Functions share the engine namespace and E2's
 storage-type overload identity. Domain names in SQL function signatures persist, and their
 bounds and checks apply to arguments before dispatch and results after body execution.
+Parameters keep their domain identity inside the body: a domain-specific cast is selected for
+both a direct domain-column argument and an argument explicitly CAST to that domain, also after
+reopen. Return-domain checks accept the same supported widening as column and argument checks,
+including INTEGER to a BIGINT check parameter. Strict checks skip NULL; CALLED ON NULL INPUT
+checks receive it, and a NOT NULL result domain still rejects it.
 The invocation collation becomes the parameter collation inside the body: a case-insensitive
 column or explicit COLLATE affects comparisons and LIKE, and string results use it for ordering
 and grouping. A call without an input collation uses the database default. Body variants are
@@ -1703,8 +1708,13 @@ CASCADE, qualified function name or domain-over-domain, unlike PostgreSQL's broa
 Every persisted function call in table/domain CHECKs, column/domain DEFAULTs and SQL bodies
 records its normalized name and resolved parameter signature beside canonical SQL. A later
 overload never rebinds these calls, including after reopen with different engine registrations.
-DROP dependencies use the same identities. A missing recorded identity follows COHSQLE009;
-CHECK also rechecks Immutable-only admission on every bind. Domain defaults remain literal-only
+DROP dependencies use the same identities. A missing recorded identity or a native signature
+whose volatility has weakened below the persisted use's requirement follows COHSQLE009. The
+database opens and stored rows remain readable; affected writes fail, including through SQL
+wrappers and domain CHECKs, including domains in casts and function parameter/result types.
+Reopening with the original compatible registration restores use.
+New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
+on every bind. Domain defaults remain literal-only
 and carry an empty call list. Format 10 is unchanged and has no compatibility reader.
 
 Domains share E3's type namespace and coercion/check path. Columns inherit their domain's

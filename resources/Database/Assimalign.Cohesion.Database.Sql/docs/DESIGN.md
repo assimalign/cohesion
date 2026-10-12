@@ -4229,14 +4229,25 @@ on open and definition DDL. Namespace collisions, recursive dependencies and dec
 than their called functions are refused before publication. SQL defaults are volatile and called
 on NULL, while native shorthand keeps its strict default. SQL domain columns use E3's existing
 bounds and check path. Function metadata preserves domain names for parameters and results.
+The synthetic parameter columns used for declaration and every cached body binding also retain
+those domain names, so casts inside a SQL body select domain-specific registrations just as a
+domain column does, including after reopen. Result-domain validation resolves and caches the
+check's argument conversion once, then uses the same converted invocation as argument and column
+checks (for example, INTEGER widening to BIGINT). A strict check skips NULL; a check declared
+CALLED ON NULL INPUT receives NULL, and the domain's NOT NULL rule still applies.
 Bound domain-argument nodes coerce base bounds and validate each argument before STRICT tests
 for NULL; an invalid domain argument still fails when another argument is NULL. A domain's
 NOT NULL rejects a NULL argument before dispatch. STRICT still skips the body, and the scalar
 leaf validates its result after execution. The same argument path covers native functions.
 This follows PostgreSQL's domain coercion node (`src/backend/parser/parse_coerce.c:699-723`)
 and argument evaluation before strict dispatch (`src/backend/executor/execExpr.c:2752-2791`).
-Missing recorded calls produce unresolved bindings: open succeeds but use fails, and a declared
-database fails Build's generation-cached validation. CHECK is Immutable-only on every bind.
+Missing recorded calls and native signatures whose volatility no longer satisfies their stored
+use produce unresolved bindings: open and ordinary reads succeed, but affected evaluation fails
+with COHSQLE009, and a declared database fails Build's generation-cached validation. This propagates
+through SQL wrappers and domain CHECKs, including domains used by casts and function parameters
+or results; short-circuit branches cannot bypass an unresolved CHECK.
+Reopening with the compatible registration restores writes. New declarations still refuse
+incompatible calls, and CHECK is Immutable-only on every bind.
 CREATE TABLE function-call defaults bind once and run for each omitted value; ADD COLUMN stays
 literal-only because its metadata operation does not materialize missing row tails.
 

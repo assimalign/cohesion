@@ -69,13 +69,18 @@ internal static class SqlDefinitionBinder
         var placeholder = new SqlExpressionFunction(create.Name, types, result, volatility, create.IsStrict, new SqlBoundConstant(null));
         var collection = MergeFunctions(environment.Catalog, placeholder);
         var scopeEnvironment = new SqlFunctionEnvironment(collection, environment.Database, environment.Types);
-        var columns = create.Parameters.Select((parameter, index) => new SqlCatalogColumn(parameter.Name, types[index].Storage)).ToArray();
+        var columns = create.Parameters.Select((parameter, index) => new SqlCatalogColumn(parameter.Name, types[index].Storage,
+            domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
         var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: scopeEnvironment);
         SqlPersistedExpression.Bind(create.Body, scope);
         SqlPlanner.ValidateExpression(create.Body, scope);
         var dependencies = Dependencies(create.Body, scope, volatility);
         foreach (var type in types.Append(result).Where(type => type.IsDomain))
         {
+            if (UnresolvedDomainReason(type) is { } reason)
+            {
+                throw Refuse(reason);
+            }
             dependencies.Add(DomainKey(type.Name));
         }
         if (dependencies.Contains("F:" + signature))
@@ -199,6 +204,7 @@ internal static class SqlDefinitionBinder
             throw Refuse($"Malformed persisted signature of '{function.Name}'.");
         }
         var expression = SqlPersistedExpression.Load(function.Body, $"Function '{function.Name}'");
+        string? unavailableDomain = types.Append(result).Select(UnresolvedDomainReason).FirstOrDefault(reason => reason is not null);
         string? unresolved = null;
         SqlBoundExpression body = BindBody(collation);
         return new SqlExpressionFunction(function.Name, types, result, Volatility(function.Volatility), function.IsStrict,
@@ -209,17 +215,23 @@ internal static class SqlDefinitionBinder
             // A parameter inherits the invocation's collation; literals retain the database default.
             // PostgreSQL: src/backend/executor/functions.c:496-505.
             var columns = function.ParameterNames.Select((name, index) => new SqlCatalogColumn(name, types[index].Storage,
-                collation: types[index].Storage.Type == DatabaseType.String ? inputCollation : null)).ToArray();
+                collation: types[index].Storage.Type == DatabaseType.String ? inputCollation : null,
+                domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
             var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment);
             PinCalls(expression, scope, function.BodyFunctionCalls);
             try
             {
+                if (unavailableDomain is not null)
+                {
+                    throw Refuse(unavailableDomain);
+                }
                 SqlPersistedExpression.Bind(expression, scope);
                 SqlPlanner.ValidateExpression(expression, scope);
                 _ = Dependencies(expression, scope, Volatility(function.Volatility));
                 return scope.Bind(expression);
             }
-            catch (DatabaseException failure) when (failure is SqlFunctionResultMismatchException || HasUnavailableCall(expression, scope))
+            catch (DatabaseException failure) when (unavailableDomain is not null || failure is SqlFunctionResultMismatchException ||
+                HasUnavailableCall(expression, scope, Volatility(function.Volatility)))
             {
                 unresolved = $"Function '{function.Name}': {failure.Message}";
                 string reason = unresolved;
@@ -307,10 +319,18 @@ internal static class SqlDefinitionBinder
                 {
                     throw Refuse($"Function '{function.Name}' is not a scalar of volatility {volatility} or stronger.");
                 }
+                if (function is SqlExpressionFunction { Unresolved: { } reason })
+                {
+                    throw Refuse($"Function '{function.Name}' has an unresolved SQL definition ({reason}).");
+                }
                 dependencies.Add(Key(function));
             }
             if (node is SqlCastExpression cast && ResolveType(cast.TargetType, scope.Functions) is { IsDomain: true } domain)
             {
+                if (UnresolvedDomainReason(domain) is { } reason)
+                {
+                    throw Refuse(reason);
+                }
                 dependencies.Add(DomainKey(domain.Name));
             }
             foreach (var child in SqlPlanner.Children(node))
@@ -320,22 +340,36 @@ internal static class SqlDefinitionBinder
         }
     }
 
-    internal static bool HasUnavailableCall(SqlExpression expression, SqlExpressionEvaluator scope)
+    internal static bool HasUnavailableCall(SqlExpression expression, SqlExpressionEvaluator scope,
+        SqlFunctionVolatility? requiredVolatility = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlFunctionCallExpression call && !call.FunctionName.Equals("COALESCE", StringComparison.OrdinalIgnoreCase))
         {
             try
             {
-                if (scope.ResolveFunction(call) is null or SqlExpressionFunction { Unresolved: not null })
+                var function = scope.ResolveFunction(call);
+                // A recorded signature can still exist after its registration weakens. The stored
+                // definition then remains readable, but cannot run under its original contract.
+                if (function is null or SqlExpressionFunction { Unresolved: not null } ||
+                    requiredVolatility is { } volatility && (function.Kind != SqlFunctionKind.Scalar || function.Volatility < volatility))
                 {
                     return true;
                 }
             }
             catch (DatabaseException) { return true; }
         }
-        return SqlPlanner.Children(expression).Any(child => HasUnavailableCall(child, scope));
+        if (expression is SqlCastExpression cast && scope.Functions.Types.Find(cast.TargetType) is { } target &&
+            UnresolvedDomainReason(target) is not null)
+        {
+            return true;
+        }
+        return SqlPlanner.Children(expression).Any(child => HasUnavailableCall(child, scope, requiredVolatility));
     }
+
+    private static string? UnresolvedDomainReason(SqlType type)
+        => type.Check is SqlExpressionFunction { Unresolved: { } reason }
+            ? $"Domain '{type.Name}' has an unresolved SQL CHECK ({reason})." : null;
 
     private static SqlFunctionVolatility Volatility(string value) => value switch
     {

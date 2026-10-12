@@ -16,6 +16,7 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
     private readonly Func<Collation, SqlBoundExpression>? _bindBody;
     private readonly ConcurrentDictionary<Collation, Lazy<SqlBoundExpression>> _bodies = new();
     private readonly SqlCatalogColumn _result;
+    private readonly DatabaseType _resultCheckTarget;
     private readonly bool _notNullCheck;
 
     internal SqlExpressionFunction(string name, SqlType[] parameters, SqlType returnType,
@@ -28,6 +29,8 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
         _bodyCollation = bodyCollation;
         _bindBody = bindBody;
         _result = new SqlCatalogColumn(name, returnType.Storage);
+        _resultCheckTarget = returnType.Check is { } check && SqlFunctionResolver.CoercionTargets(check, 1) is { } targets
+            ? targets[0] : DatabaseType.Null;
         _notNullCheck = notNullCheck;
         Unresolved = unresolved;
     }
@@ -91,13 +94,10 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
     }
     private void CheckDomain(SqlType type, object? value, scoped in SqlFunctionContext context)
     {
-        if (type.IsDomain && type.Check is { } check)
+        if (type.IsDomain && type.Check is { } check && (value is not null || check.NullBehavior == SqlNullBehavior.CalledOnNullInput)
+            && check.InvokeResolved(value, _resultCheckTarget, context.Database, context.Collation, context.CancellationToken) is false)
         {
-            var arguments = new SqlArguments([SqlValue.FromObject(value)], context);
-            if (check.Invoke(in arguments).ToObject() is false)
-            {
-                throw new SqlConstraintViolationException($"A value of SQL function '{Name}' violates domain '{type.Name}'.", type.Name, string.Empty, "DOMAIN");
-            }
+            throw new SqlConstraintViolationException($"A value of SQL function '{Name}' violates domain '{type.Name}'.", type.Name, string.Empty, "DOMAIN");
         }
     }
 }
