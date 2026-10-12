@@ -57,6 +57,65 @@ public partial class CompileDatabaseSchemaTaskTests
         number.DefaultLiteral.ShouldBe("7");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: checked and unchecked selectors match runtime document and hash")]
+    public void Execute_WithCheckedAndUncheckedSelectors_ShouldMatchRuntimeDocumentAndHash()
+    {
+        // Arrange
+        SqlCompiledSchema runtime = SqlSchema.Compile("defaults", schema => schema.Table<DefaultSelectorRow>(table =>
+        {
+            table.Default<short>(row => checked((short)row.Number), (short)7);
+            table.Default<short>(row => (short)(unchecked((short)(row.Number))), (short)7);
+            table.Column(row => (object)(checked((char)(unchecked(row.Character)))));
+            table.Column(row => checked((row)).Number);
+            table.Column(row => unchecked((row)).Character);
+            table.Column(row => unchecked((object)(checked((int)(row.Number)))), "int");
+            table.Key(row => checked((object)(unchecked((long)(row.Number)))));
+            table.PrimaryKey(row => (object)(unchecked((long)(checked(row.Number)))));
+            table.Index(row => unchecked((object)(checked((char)(row.Character)))));
+            table.DefaultSql(row => checked((object)(unchecked((char)(row.Character)))), "'A'");
+            table.References<DefaultSelectorRow>(row => unchecked((object)(checked((long)(row.Number)))));
+        }));
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Schema.cs");
+        File.WriteAllText(sourcePath, """
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            namespace Assimalign.Cohesion.Sdk.Database.Tests;
+            public sealed record DefaultSelectorRow(int Number, char Character);
+            public static class Program
+            {
+                public static void Configure() => SqlSchema.Compile("defaults", schema => schema.Table<DefaultSelectorRow>(table =>
+                {
+                    table.Default<short>(row => checked((short)row.Number), (short)7);
+                    table.Default<short>(row => (short)(unchecked((short)(row.Number))), (short)7);
+                    table.Column(row => (object)(checked((char)(unchecked(row.Character)))));
+                    table.Column(row => checked((row)).Number);
+                    table.Column(row => unchecked((row)).Character);
+                    table.Column(row => unchecked((object)(checked((int)(row.Number)))), "int");
+                    table.Key(row => checked((object)(unchecked((long)(row.Number)))));
+                    table.PrimaryKey(row => (object)(unchecked((long)(checked(row.Number)))));
+                    table.Index(row => unchecked((object)(checked((char)(row.Character)))));
+                    table.DefaultSql(row => checked((object)(unchecked((char)(row.Character)))), "'A'");
+                    table.References<DefaultSelectorRow>(row => unchecked((object)(checked((long)(row.Number)))));
+                }));
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        // Act
+        bool success = task.Execute();
+
+        // Assert
+        success.ShouldBeTrue(Errors(engine));
+        File.ReadAllText(SchemaPath(task, "defaults")).ShouldBe(runtime.CanonicalDocument);
+        task.Schemas.ShouldHaveSingleItem().GetMetadata("Hash").ShouldBe(runtime.Hash);
+        File.ReadAllText(HashPath(task, "defaults")).ShouldBe(runtime.Hash + "\n");
+        CompiledSchemaColumn number = SqlCompiledSchemaSerializer.Read(SchemaPath(task, "defaults")).Tables.ShouldHaveSingleItem()
+            .Columns.Single(static column => column.Name == "Number");
+        number.Type.ShouldBe(DatabaseType.Int32);
+        number.DefaultLiteral.ShouldBe("7");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a captured row member is refused by runtime and source compilation")]
     [InlineData("Default")]
     [InlineData("DefaultSql")]

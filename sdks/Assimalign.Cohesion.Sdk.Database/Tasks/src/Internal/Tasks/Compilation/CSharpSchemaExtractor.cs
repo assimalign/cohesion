@@ -975,17 +975,22 @@ internal sealed class CSharpSchemaExtractor
             return null;
         }
 
-        while (body is ParenthesizedExpressionSyntax parenthesized)
+        // Checked and unchecked contexts disappear from runtime expression trees except for
+        // ConvertChecked nodes. Strip every nesting order just as the runtime strips conversions.
+        while (true)
         {
-            body = parenthesized.Expression;
-        }
-        while (body is CastExpressionSyntax cast)
-        {
-            body = cast.Expression;
-            while (body is ParenthesizedExpressionSyntax parenthesizedOperand)
+            ExpressionSyntax? operand = body switch
             {
-                body = parenthesizedOperand.Expression;
+                ParenthesizedExpressionSyntax parenthesized => parenthesized.Expression,
+                CastExpressionSyntax cast => cast.Expression,
+                CheckedExpressionSyntax checkedExpression => checkedExpression.Expression,
+                _ => null
+            };
+            if (operand is null)
+            {
+                break;
             }
+            body = operand;
         }
 
         if (body is not MemberAccessExpressionSyntax access)

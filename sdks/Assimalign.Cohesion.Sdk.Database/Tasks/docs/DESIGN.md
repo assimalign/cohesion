@@ -98,6 +98,14 @@ each own a database of one name at run time. A schema principal fails the build
 decision 58), so an artifact for it would only move the failure to the first start. Every
 declaration is compiled before any artifact is written, so a failure replaces none.
 
+Every table selector strips parentheses, casts, and `checked`/`unchecked` expression contexts in
+any nesting order before resolving the direct row member. This applies uniformly to columns,
+primary keys (`Key` and `PrimaryKey`), indexes, foreign keys, `Default`, and `DefaultSql`, matching
+the runtime's `Convert`/`ConvertChecked` expression-tree handling. The selected member's declared
+type remains the storage type: `Default<short>(row => checked((short)row.Number), (short)7)` on an
+`int` member stores literal `7` on an Int32 column. Runtime/SDK canonical document and hash parity
+cover these wrappers across every selector operation.
+
 `table.Check(name, sql)` (E2, design §5.7) extracts as two compile-time string constants into
 a CHECK constraint with the text as written and no columns, the record the runtime compiler
 writes, so the artifact's document and hash equal the runtime's (`CompileDatabaseSchemaTaskTests`).
