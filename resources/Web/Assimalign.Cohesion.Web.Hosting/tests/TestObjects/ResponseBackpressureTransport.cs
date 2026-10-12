@@ -39,7 +39,7 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
         await MultiplexedConnections.DisposeAsync();
     }
 
-    private Connection Decorate(Connection connection)
+    private MultiplexedStream Decorate(Connection connection)
     {
         BlockingWriter writer = new(connection.Output);
         _writer = writer;
@@ -78,7 +78,7 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
         }
     }
 
-    private sealed class ResponseConnection : Connection
+    private sealed class ResponseConnection : MultiplexedStream
     {
         private readonly Connection _inner;
         private readonly PipeWriter _writer;
@@ -91,6 +91,7 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
 
         protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
 
+        public override bool IsInputCompleted => (_inner as IMultiplexedStream)?.IsInputCompleted ?? false;
         public override ConnectionId Id => _inner.Id;
         public override EndPoint? LocalEndPoint => _inner.LocalEndPoint;
         public override EndPoint? RemoteEndPoint => _inner.RemoteEndPoint;
@@ -100,6 +101,19 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
         public override ConnectionCapabilities Capabilities => _inner.Capabilities;
         public override ConnectionState State => _inner.State;
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+        public override void Abort(long errorCode, Exception? reason = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+            if (_inner is IMultiplexedStream stream)
+            {
+                stream.Abort(errorCode, reason);
+            }
+            else
+            {
+                _inner.Abort(reason);
+            }
+        }
+
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
         public override ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
@@ -154,15 +168,16 @@ internal sealed class ResponseBackpressureTransport : IAsyncDisposable
         public override ConnectionCapabilities Capabilities => _inner.Capabilities;
         public override ConnectionState State => _inner.State;
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+        public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
         public override ValueTask DisposeAsync() => _inner.DisposeAsync();
-        public override ValueTask<Connection> OpenStreamAsync(
+        public override ValueTask<MultiplexedStream> OpenStreamAsync(
             ConnectionDirection direction = ConnectionDirection.Bidirectional,
             CancellationToken cancellationToken = default) => _inner.OpenStreamAsync(direction, cancellationToken);
 
-        public override async ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+        public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         {
-            Connection stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+            MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
             return stream.Direction == ConnectionDirection.Bidirectional ? _owner.Decorate(stream) : stream;
         }
     }

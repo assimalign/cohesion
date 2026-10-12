@@ -278,7 +278,7 @@ public class ResponseClientFaultTests
         await using Http3RawClient? http3 = protocol == 3
             ? await Http3RawClient.ConnectAsync(transport.MultiplexedConnections, cancellationToken)
             : null;
-        await using Connection? requestStream = http3 is not null
+        await using MultiplexedStream? requestStream = http3 is not null
             ? await http3.SendRequestAsync("GET", path, [], [], endStream: true, cancellationToken)
             : null;
 

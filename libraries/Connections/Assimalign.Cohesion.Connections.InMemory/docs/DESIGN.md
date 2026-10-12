@@ -80,9 +80,9 @@ followed by dispose are all safe.
 
 `InMemoryMultiplexedConnection` models a QUIC-shaped connection: each end owns an inbound-stream
 `Channel`, and the two ends reference each other. `OpenStreamAsync` builds a cross-wired
-single-stream pair (via `InMemoryConnection.CreatePair`), returns the local end to the opener, and
+stream pair (via `InMemoryConnection.CreateStreamPair`), returns the local end to the opener, and
 enqueues the peer end on the *other* multiplexed connection's inbound channel, where
-`AcceptStreamAsync` picks it up. Each stream is a full `Connection` with its own lifetime and
+`AcceptStreamAsync` picks it up. Each stream is a `MultiplexedStream` with its own lifetime and
 duplex pipe; stream capabilities report `IsMultiplexed = false` while the parent reports `true`.
 
 Stream direction is honored: an outbound unidirectional (`WriteOnly`) stream mirrors to a
@@ -120,11 +120,22 @@ tested over this driver puts its codes where the QUIC driver puts them:
   dispose does not complete an aborted direction again, so the other end keeps seeing the code, not the
   reason. Codes outside 0 to 2^62 - 1 throw, as on the QUIC driver.
 - The ends of a byte-stream pair do not register the feature: a single-stream transport has no code to
-  carry, and its `DirectionalAbort` is `null`. The stream ends are a private subclass of the connection
-  type, created only for multiplexed streams.
+  carry. `DirectionalAbort` is available only on `IMultiplexedStream`. Stream ends derive from
+  `MultiplexedStream` and compose the internal `InMemoryConnection` pipe and lifecycle mechanics.
 
-The multiplexed connection itself does not implement `IMultiplexedConnectionAbort`: its abort reaches
-no peer, so a close code would have nowhere to go.
+**The multiplexed roots (#1453).** Streams expose `Abort(code, reason)`, which resets both
+available directions before ending the lifecycle. A direction already ended retains its first code.
+`IsInputCompleted` is true when the peer completed output cleanly and this end has not aborted
+reading; buffered bytes may still remain. The parent root accepts coded aborts in the same 62-bit
+range as streams; the first abort or disposal decides its close. Peer notification is the follow-up
+in #1451.
+
+The stream return types change from `ValueTask<IConnection>` to `ValueTask<IMultiplexedStream>`
+(and from `ValueTask<Connection>` to `ValueTask<MultiplexedStream>` on guided bases). Together
+with the required coded connection abort, these break preview.1 binaries and external implementers,
+accepted during previews on decisions 15 and 56. Awaited streams can still be assigned to
+`IConnection`. Stream reset and completion members are new; the removed optional contracts
+postdate preview.1.
 
 ## Connection features (#1452)
 

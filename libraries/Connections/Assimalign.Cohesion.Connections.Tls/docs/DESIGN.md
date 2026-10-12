@@ -45,7 +45,9 @@ before effective inner features; setting a feature with the same name replaces t
 and removing the name hides it. The concrete collection performs typed lookup without allocation.
 A missing TLS feature returns `null`. A wrapper preserves features by forwarding `InnerFeatures`,
 without implementing and forwarding every optional contract. Multiplexed streams do not inherit
-connection-level TLS facts from their parent connection.
+connection-level TLS facts from their parent connection. The #1453 `IMultiplexedStream` root
+inherits `IConnection`, so existing stream-level `Tls` access remains available but reports only
+features registered on that stream.
 
 ## Ownership and errors
 

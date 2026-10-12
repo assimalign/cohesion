@@ -260,7 +260,7 @@ public class WebApplicationServerClientFaultTests
 
         // Act — the stream ends after 16 of the 100 octets it declares (RFC 9114 §4.1.2), or a trailer
         // section carries a field no trailer may.
-        Connection stream = fault == "content-length"
+        MultiplexedStream stream = fault == "content-length"
             ? await client.SendRequestAsync("POST", "/upload", [("content-length", "100")], [Http3RawClient.Data(json)], endStream: true, cancellationToken)
             : await client.SendRequestAsync("POST", "/upload", [], [Http3RawClient.Data(json), Http3RawClient.Trailers(("content-length", "5"))], endStream: true, cancellationToken);
         (IReadOnlyList<int> statuses, long? resetCode) = await Http3RawClient.ReadResponseAsync(stream, cancellationToken);
@@ -291,7 +291,7 @@ public class WebApplicationServerClientFaultTests
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
 
         // Act — no Content-Length, so only the DATA frame crosses the cap.
-        Connection stream = await client.SendRequestAsync("POST", "/upload", [], [Http3RawClient.Data(new byte[32])], endStream: false, cancellationToken);
+        MultiplexedStream stream = await client.SendRequestAsync("POST", "/upload", [], [Http3RawClient.Data(new byte[32])], endStream: false, cancellationToken);
         (IReadOnlyList<int> statuses, long? resetCode) = await Http3RawClient.ReadResponseAsync(stream, cancellationToken);
         await observed.Recorded.Task.WaitAsync(cancellationToken);
 
@@ -377,7 +377,7 @@ public class WebApplicationServerClientFaultTests
 
         // Act — RESET_STREAM(H3_REQUEST_CANCELLED) once the server has read the first DATA frame: the client
         // cancels its own request (RFC 9114 §4.1.1).
-        Connection stream = await client.SendRequestAsync(
+        MultiplexedStream stream = await client.SendRequestAsync(
             "POST",
             "/upload",
             [],
@@ -416,7 +416,7 @@ public class WebApplicationServerClientFaultTests
         // Act — the GET's FIN goes out with its HEADERS frame. The in-memory driver reports it with the head;
         // the QUIC driver's completion facet exposes its observed FIN before the input pipe reads zero
         // (Http.Connections' HttpRequestCanHaveBodyTests pins the same gate over a stream-backed input).
-        Connection stream = await client.SendRequestAsync("GET", "/plain", [], [], endStream: true, cancellationToken);
+        MultiplexedStream stream = await client.SendRequestAsync("GET", "/plain", [], [], endStream: true, cancellationToken);
         (IReadOnlyList<int> statuses, _) = await Http3RawClient.ReadResponseAsync(stream, cancellationToken);
         await observed.Recorded.Task.WaitAsync(cancellationToken);
 

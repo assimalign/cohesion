@@ -30,7 +30,8 @@ in the Connections area because it composes directly over the connection contrac
   `Tls` name: ALPN protocol, TLS version, cipher suite, and the peer's certificate. Read it with
   `connection.Tls`. Features registered below the TLS layer pass through automatically except
   `StreamAbort`: its inner implementation cannot invalidate plaintext buffered by TLS's outer pipes,
-  so `connection.DirectionalAbort` returns `null`.
+  so `connection.Features.Get<IMultiplexedStreamAbort>()` returns `null`. The TLS layer returns an
+  `IConnection`; the `DirectionalAbort` accessor is available only on `IMultiplexedStream`.
 
 ## Source Layout
 

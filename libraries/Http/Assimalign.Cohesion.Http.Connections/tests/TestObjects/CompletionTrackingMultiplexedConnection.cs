@@ -48,9 +48,9 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
     public override ConnectionState State => _inner.State;
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
-    public override async ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
-        Connection stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+        MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
         if (stream.Direction != ConnectionDirection.Bidirectional)
         {
             return stream;
@@ -65,24 +65,27 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
         return tracked;
     }
 
-    public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
+
+    public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
 
     public override void Abort(Exception? reason = null) => _inner.Abort(reason);
     public override ValueTask DisposeAsync() => _inner.DisposeAsync();
 
-    private sealed class TrackedConnection : Connection
+    private sealed class TrackedConnection : MultiplexedStream
     {
-        private readonly Connection _inner;
+        private readonly MultiplexedStream _inner;
         private readonly CompletionReader _input;
         private int _disposed;
 
-        public TrackedConnection(Connection inner)
+        public TrackedConnection(MultiplexedStream inner)
         {
             _inner = inner;
             _input = new CompletionReader(inner.Input);
         }
 
+        public override bool IsInputCompleted => _inner.IsInputCompleted;
         public bool InputCompleted => _input.IsCompleted;
         public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
         protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
@@ -96,6 +99,8 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
         public override ConnectionCapabilities Capabilities => _inner.Capabilities;
         public override ConnectionState State => _inner.State;
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+        public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
+
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
         public override async ValueTask DisposeAsync()
         {

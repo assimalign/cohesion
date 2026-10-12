@@ -11,7 +11,7 @@ public class StreamAbortFeatureTests
     public void DirectionalAbort_WhenRegistered_ShouldReturnFeature()
     {
         // Arrange
-        IConnection connection = new TestConnection();
+        IMultiplexedStream connection = new TestConnection();
         TestFeature feature = new();
         connection.Features.Set(feature);
 
@@ -26,7 +26,7 @@ public class StreamAbortFeatureTests
     public void DirectionalAbort_WhenAbsent_ShouldReturnNull()
     {
         // Arrange
-        IConnection connection = new TestConnection();
+        IMultiplexedStream connection = new TestConnection();
 
         // Act
         IMultiplexedStreamAbort? result = connection.DirectionalAbort;

@@ -31,7 +31,7 @@ public class Http3ExtendedConnectClientFaultTests
             http3 => http3.Limits.MinResponseDataRate = null,
             ConfigureInterceptors,
             inner => server = new StallingMultiplexedConnection(inner));
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),

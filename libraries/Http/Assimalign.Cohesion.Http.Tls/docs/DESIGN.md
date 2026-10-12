@@ -92,6 +92,11 @@ package (owner decision 20 of the Stage 10 review, 2026-10-09). A transport publ
 facts as facets on its connection info, or offers wire mechanisms through `IHttpExchangeControl`. The
 feature packages own the application-facing contracts (core Http DESIGN, "Where things live").
 
+HTTP/3 reads TLS from its parent multiplexed connection, not from the `IMultiplexedStream`
+that carries a request: stream features do not inherit connection features. The coded close,
+whole-stream reset and clean input-completion members on the multiplexed roots (#1453) do not
+change TLS ownership or this package's public surface.
+
 The live connection exposes `ITlsConnectionInfo` through `connection.Tls`, backed by its layered
 feature collection (owner decision 56). The transport copies those facts into the exchange's
 connection-info object, where the existing type test remains appropriate: HTTP connection info is

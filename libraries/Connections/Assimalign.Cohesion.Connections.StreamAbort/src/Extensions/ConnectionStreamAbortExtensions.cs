@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Connections;
 /// </summary>
 public static partial class ConnectionStreamAbortExtensions
 {
-    extension(IConnection connection)
+    extension(IMultiplexedStream connection)
     {
         /// <summary>
         /// Gets the registered StreamAbort feature, or <see langword="null"/> when absent.

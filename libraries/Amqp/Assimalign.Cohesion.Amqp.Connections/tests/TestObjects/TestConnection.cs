@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 /// observed on <see cref="PeerInput"/>. Use <see cref="CreatePair"/> to produce two cross-wired
 /// connections that act as each other's remote peer.
 /// </summary>
-internal sealed class TestConnection : Connection
+internal sealed class TestConnection : MultiplexedStream
 {
     private readonly Connection _self;
     private readonly Connection _peer;
@@ -89,6 +89,10 @@ internal sealed class TestConnection : Connection
 
     public Exception? AbortReason => _abortReason;
 
+    public bool InputCompleted { get; set; }
+
+    public override bool IsInputCompleted => InputCompleted;
+
     public override ConnectionId Id => _self.Id;
 
     public override EndPoint? LocalEndPoint => _self.LocalEndPoint;
@@ -132,8 +136,19 @@ internal sealed class TestConnection : Connection
         return bytes;
     }
 
+    public override void Abort(long errorCode, Exception? reason = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        Abort(reason);
+    }
+
     public override void Abort(Exception? reason = null)
     {
+        if (_isAborted || _isDisposed)
+        {
+            return;
+        }
+
         _isAborted = true;
         _abortReason = reason;
         _self.Abort(reason);

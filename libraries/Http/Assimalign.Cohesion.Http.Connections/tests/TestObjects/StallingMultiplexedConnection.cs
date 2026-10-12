@@ -58,9 +58,9 @@ internal sealed class StallingMultiplexedConnection : MultiplexedConnection
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
     /// <inheritdoc />
-    public override async ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
-        Connection stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+        MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
 
         if (stream.Direction != ConnectionDirection.Bidirectional)
         {
@@ -78,10 +78,12 @@ internal sealed class StallingMultiplexedConnection : MultiplexedConnection
     }
 
     /// <inheritdoc />
-    public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
 
     /// <inheritdoc />
+    public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
+
     public override void Abort(Exception? reason = null) => _inner.Abort(reason);
 
     /// <inheritdoc />

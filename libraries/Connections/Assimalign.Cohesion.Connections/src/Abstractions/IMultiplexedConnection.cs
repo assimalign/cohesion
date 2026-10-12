@@ -6,11 +6,11 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections;
 
 /// <summary>
-/// Represents a connection that carries multiple independent <see cref="IConnection"/> streams
+/// Represents a connection that carries multiple independent <see cref="IMultiplexedStream"/> streams
 /// over a single underlying transport (for example, a QUIC connection).
 /// </summary>
 /// <remarks>
-/// Each accepted or opened stream is a full <see cref="IConnection"/> with its own lifetime,
+/// Each accepted or opened stream is an <see cref="IMultiplexedStream"/> with its own lifetime,
 /// duplex pipe, and <see cref="IConnection.Direction"/>. Disposing the multiplexed connection
 /// tears down all of its streams.
 /// </remarks>
@@ -60,10 +60,14 @@ public interface IMultiplexedConnection : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the accept operation.</param>
     /// <returns>
-    /// The accepted stream as an <see cref="IConnection"/>; inspect <see cref="IConnection.Direction"/>
+    /// The accepted stream as an <see cref="IMultiplexedStream"/>; inspect <see cref="IConnection.Direction"/>
     /// to determine whether the peer opened it as bidirectional or unidirectional.
     /// </returns>
-    ValueTask<IConnection> AcceptStreamAsync(CancellationToken cancellationToken = default);
+    /// <remarks>
+    /// A transport that supports only bidirectional streams never returns a stream whose
+    /// <see cref="IConnection.Direction"/> is <see cref="ConnectionDirection.ReadOnly"/>.
+    /// </remarks>
+    ValueTask<IMultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Opens a new outbound stream to the remote peer.
@@ -73,16 +77,35 @@ public interface IMultiplexedConnection : IAsyncDisposable
     /// write to, or <see cref="ConnectionDirection.WriteOnly"/> for an outbound unidirectional stream.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the open operation.</param>
-    /// <returns>The opened stream as an <see cref="IConnection"/>.</returns>
+    /// <returns>The opened stream as an <see cref="IMultiplexedStream"/>.</returns>
     /// <exception cref="ArgumentException">
     /// Thrown when <paramref name="direction"/> is <see cref="ConnectionDirection.ReadOnly"/>; a peer
     /// cannot open a stream that only the remote side writes to.
     /// </exception>
-    ValueTask<IConnection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default);
+    /// <exception cref="NotSupportedException">
+    /// Thrown when <paramref name="direction"/> is <see cref="ConnectionDirection.WriteOnly"/> and
+    /// the transport supports only bidirectional streams.
+    /// </exception>
+    ValueTask<IMultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Aborts the connection and all of its streams immediately.
     /// </summary>
     /// <param name="reason">An optional exception describing why the connection was aborted.</param>
     void Abort(Exception? reason = null);
+
+    /// <summary>
+    /// Aborts the connection and all of its streams immediately, closing it with <paramref name="errorCode"/>.
+    /// </summary>
+    /// <param name="errorCode">The transport-specific application error code sent to the peer when supported.</param>
+    /// <param name="reason">An optional exception describing why the connection was aborted.</param>
+    /// <remarks>
+    /// The first abort or disposal decides the close; later calls do not change it. The state becomes
+    /// <see cref="ConnectionState.Aborted"/>, <see cref="ConnectionClosed"/> is signaled, and every stream ends.
+    /// A transport that cannot carry a close code closes as <see cref="Abort(Exception)"/> does.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="errorCode"/> is negative or outside the range supported by the transport.
+    /// </exception>
+    void Abort(long errorCode, Exception? reason = null);
 }

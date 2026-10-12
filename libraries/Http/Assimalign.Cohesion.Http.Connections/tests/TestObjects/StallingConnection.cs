@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// connection (HTTP/1.1, HTTP/2) or grants no stream credit (an HTTP/3 request stream). Everything else is
 /// the inner connection's, including the coded stream aborts of a multiplexed stream end.
 /// </summary>
-internal sealed class StallingConnection : Connection, IMultiplexedStreamAbort
+internal sealed class StallingConnection : MultiplexedStream, IMultiplexedStreamAbort
 {
     private readonly Connection _inner;
 
@@ -40,6 +40,8 @@ internal sealed class StallingConnection : Connection, IMultiplexedStreamAbort
     public long? WriteAbortCode { get; private set; }
 
     /// <inheritdoc />
+    public override bool IsInputCompleted => (_inner as IMultiplexedStream)?.IsInputCompleted ?? false;
+
     public override ConnectionId Id => _inner.Id;
 
     /// <inheritdoc />
@@ -67,6 +69,21 @@ internal sealed class StallingConnection : Connection, IMultiplexedStreamAbort
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
     /// <inheritdoc />
+    public override void Abort(long errorCode, Exception? reason = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        WriteAbortCode ??= errorCode;
+        IsAborted = true;
+        if (_inner is IMultiplexedStream stream)
+        {
+            stream.Abort(errorCode, reason);
+        }
+        else
+        {
+            _inner.Abort(reason);
+        }
+    }
+
     public override void Abort(Exception? reason = null)
     {
         IsAborted = true;
@@ -76,14 +93,14 @@ internal sealed class StallingConnection : Connection, IMultiplexedStreamAbort
     /// <inheritdoc />
     public void AbortRead(long errorCode)
     {
-        _inner.DirectionalAbort?.AbortRead(errorCode);
+        (_inner as IMultiplexedStream)?.DirectionalAbort?.AbortRead(errorCode);
     }
 
     /// <inheritdoc />
     public void AbortWrite(long errorCode)
     {
         WriteAbortCode ??= errorCode;
-        _inner.DirectionalAbort?.AbortWrite(errorCode);
+        (_inner as IMultiplexedStream)?.DirectionalAbort?.AbortWrite(errorCode);
     }
 
     /// <inheritdoc />

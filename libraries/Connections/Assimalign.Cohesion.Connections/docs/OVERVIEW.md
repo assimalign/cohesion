@@ -18,8 +18,11 @@ transformations (such as TLS) compose over it.
 - `IConnectionListener` / `ConnectionListener` — explicitly binds and accepts inbound connections
   (server side).
 - `IConnectionFactory` / `ConnectionFactory` — establishes outbound connections (client side).
-- `IMultiplexedConnection` / `MultiplexedConnection` — carries multiple `IConnection` streams;
-  `OpenStreamAsync(ConnectionDirection, ...)` for bidirectional or unidirectional streams.
+- `IMultiplexedConnection` / `MultiplexedConnection` — carries multiple `IMultiplexedStream` streams;
+  `OpenStreamAsync(ConnectionDirection, ...)` for bidirectional or supported unidirectional streams,
+  and `Abort(code, reason)` for a transport-specific coded connection close.
+- `IMultiplexedStream` / `MultiplexedStream` — an `IConnection` with coded whole-stream reset
+  (`Abort(code, reason)`) and clean input completion (`IsInputCompleted`).
 - `IMultiplexedConnectionListener` / `IMultiplexedConnectionFactory` (+ bases).
 - `IConnectionFeature` / `IConnectionFeatureCollection` / `ConnectionFeatureCollection` — typed,
   named optional capabilities on all three connection shapes, with own features before wrapped
@@ -31,12 +34,8 @@ transformations (such as TLS) compose over it.
   or timed-out upgrade closes only that connection.
 - Optional packages keep the family namespace: `Connections.Tls` owns `ITlsConnectionInfo`
   (`connection.Tls`); `Connections.StreamAbort` owns `IMultiplexedStreamAbort`
-  (`connection.DirectionalAbort`); `Connections.StreamLimits` owns
+  (`stream.DirectionalAbort`); `Connections.StreamLimits` owns
   `IMultiplexedConnectionStreamLimits` (`connection.StreamLimits`).
-- `IConnectionInputCompletion` — optional clean transport input completion; combine it with an empty
-  input buffer before concluding that no bytes remain. The QUIC driver publishes this facet.
-- `IMultiplexedConnectionAbort` — aborts a multiplexed connection with an application error code on its
-  close (QUIC `CONNECTION_CLOSE`), implemented by the QUIC driver and found with a type test.
 - `ConnectionCapabilities`, `ConnectionProtocol`, `ConnectionDelivery`, `ConnectionSecurity`,
   `ConnectionDirection`, `ConnectionState`, `ConnectionId`, `DatagramReceiveResult`.
 - `DuplexPipeStream`, `ConnectionExtensions.AsStream()` — lazy pipe-to-stream adaptation.
@@ -55,6 +54,22 @@ name with `Remove(name)`. Cache a feature when using it repeatedly during I/O.
 Adding `Features` to `IConnection`, `IMultiplexedConnection`, and `IDatagramConnection` breaks direct
 implementers of 10.0.0-preview.1. The guided bases provide the implementation; see the accepted
 breaking change and layering rules in [DESIGN.md](DESIGN.md).
+
+## Multiplexed stream lifecycle
+
+A whole-stream `Abort(code, reason)` resets both directions and ends the lifecycle. A direction
+already ended keeps its first code. Drivers validate transport-specific codes; negative codes are
+always invalid. The first connection abort or disposal decides its close.
+
+`IsInputCompleted` reports a clean peer half-close without reading or waiting. Combine it with an
+empty input buffer before concluding no bytes remain; `false` means the end is not known yet.
+Per-direction aborts remain the optional `stream.DirectionalAbort` feature.
+
+A bidirectional-only transport rejects `OpenStreamAsync(WriteOnly)` with `NotSupportedException`
+and never accepts a `ReadOnly` stream. Accept/open return types changed from `IConnection` to
+`IMultiplexedStream` (from `Connection` to `MultiplexedStream` on the guided base), and coded
+connection abort is now required. These break preview.1 implementers and existing binaries under
+decisions 15 and 56; see [DESIGN.md](DESIGN.md).
 
 ## Source Layout
 

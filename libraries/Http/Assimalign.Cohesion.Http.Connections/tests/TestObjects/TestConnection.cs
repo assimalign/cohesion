@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.IO;
 using System.IO.Pipelines;
 using System.Net;
 using System.Threading;
@@ -22,13 +23,14 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// <c>Open → Closing</c> transition when the holder completes <see cref="Output"/>, and close/dispose
 /// propagation — now live in the driver rather than in a bespoke pipe-pair implementation.
 /// </remarks>
-internal sealed class TestConnection : Connection
+internal sealed class TestConnection : MultiplexedStream
 {
     private readonly Connection _self;
     private readonly Connection _peer;
     private readonly ConnectionDirection _direction;
     private bool _isAborted;
     private bool _isDisposed;
+    private byte[]? _abortedOutput;
 
     public TestConnection(
         byte[]? input = null,
@@ -75,6 +77,10 @@ internal sealed class TestConnection : Connection
 
     public Exception? AbortReason { get; private set; }
 
+    public bool InputCompleted { get; set; }
+
+    public override bool IsInputCompleted => InputCompleted;
+
     public override ConnectionId Id => _self.Id;
 
     public override EndPoint? LocalEndPoint => _self.LocalEndPoint;
@@ -98,6 +104,11 @@ internal sealed class TestConnection : Connection
     /// </summary>
     public async Task<byte[]> ReadOutputAsync()
     {
+        if (Interlocked.Exchange(ref _abortedOutput, null) is { } captured)
+        {
+            return captured;
+        }
+
         ReadResult result = await _peer.Input.ReadAsync();
         byte[] output = result.Buffer.ToArray();
         _peer.Input.AdvanceTo(result.Buffer.End);
@@ -128,10 +139,34 @@ internal sealed class TestConnection : Connection
     /// <summary>Aborts the remote end, exposing a peer loss to the server transport.</summary>
     public void AbortPeer(Exception? reason = null) => _peer.Abort(reason);
 
+    public override void Abort(long errorCode, Exception? reason = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        Abort(reason);
+    }
+
     public override void Abort(Exception? reason = null)
     {
+        if (_isAborted || _isDisposed)
+        {
+            return;
+        }
+
         _isAborted = true;
         AbortReason = reason;
+        // Preserve already-written bytes for protocol assertions before the pipe reset hides them.
+        try
+        {
+            if (_peer.Input.TryRead(out ReadResult output))
+            {
+                _abortedOutput = output.Buffer.ToArray();
+                _peer.Input.AdvanceTo(output.Buffer.End);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or ConnectionException or InvalidOperationException)
+        {
+            // The peer may already have closed or failed its read side.
+        }
         _self.Abort(reason);
     }
 

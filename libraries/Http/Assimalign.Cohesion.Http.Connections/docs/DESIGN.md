@@ -23,8 +23,8 @@ extensions) has been replaced by consumption of the
   **is** the duplex pipe (`Input`/`Output` directly on it; there is no
   separate "context" and no `OpenAsync` step on the transport).
 - `IMultiplexedConnectionListener` produces `IMultiplexedConnection`s
-  whose accepted/opened streams are themselves `IConnection`s with a
-  per-stream `Direction`.
+  whose accepted/opened streams are `IMultiplexedStream`s with a per-stream
+  `Direction`, whole-stream coded abort and observable clean input completion.
 
 HTTP **consumes** these contracts; it never extends them. The HTTP-side
 contracts (`IHttpConnectionListener`, `IHttpConnection`,
@@ -47,8 +47,13 @@ and the pipe contains no unread bytes. This includes a transport-reported FIN th
 stream-backed pipe has not yet observed through a zero-byte read. It records the clean
 end without creating a stream feature collection; unread DATA, trailer bytes, partial
 frame headers, cancelled input and failed input keep the existing probe/abort path.
-Content-Length validation on body reads is unchanged. Coded connection close and input
-completion keep their existing contracts pending Part 2 of decision 56.
+Content-Length validation on body reads is unchanged. Since Part 2 of decision 56 (#1453),
+HTTP/3 calls coded connection close and whole-stream reset on the multiplexed roots, and
+reads `IMultiplexedStream.IsInputCompleted` directly. A whole reset is one
+`Abort(code, reason)` call that ends both directions and the lifecycle. Directional
+abort stays optional, and the request-body reader keeps its fallback when that feature
+is absent. The root return-type and coded-abort changes are the Connections package's
+accepted source/binary breaks against 10.0.0-preview.1; HTTP's public API is unchanged.
 
 ### Structural listener registration
 
@@ -2991,11 +2996,11 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
 - **HTTP/3** sets it unless the request stream's FIN is already buffered behind its HEADERS frame
   (`Http3RequestStreamReader.IsEndBuffered`, a `TryRead` that consumes nothing), and only when a
   request hook is registered (or an `Expect: 100-continue` needs the signal). The QUIC driver's
-  `IConnectionInputCompletion` facet exposes a clean FIN already observed by the runtime (#1427),
+  `IMultiplexedStream.IsInputCompleted` exposes a clean FIN already observed by the runtime (#1427, #1453),
   even before its stream-backed pipe reads zero bytes. The probe requires an empty, uncancelled
   pipe as well; buffered DATA followed by FIN still reports a body. A positive declared content
   length also retains the gate: an empty stream then faults when its body is validated. It never
-  waits for a late FIN or overrides a reset. Drivers without the facet keep the conservative pipe-only probe.
+  waits for a late FIN or overrides a reset. Streams reporting no known completion keep the conservative pipe-only probe.
 
   A bodiless GET or POST whose head ends the QUIC stream now skips body-gated response interceptors
   and does not arm automatic `100 Continue`. Real-QUIC tests pin both empty and DATA-bearing
@@ -4589,24 +4594,22 @@ The signals and their RFC 9114 §8.1 codes:
 | DATA before HEADERS; DATA or HEADERS after the trailer section; HEADERS after a CONNECT head; a control, push, reserved HTTP/2, or PRIORITY_UPDATE frame on a request stream | connection close | `H3_FRAME_UNEXPECTED` | §4.1, §4.4, §7.2.x, §7.2.8, RFC 9218 §7.2 |
 | QPACK decompression failure | connection close | `QPACK_DECOMPRESSION_FAILED` | RFC 9204 §2.2 |
 
-**The codes reach the wire through the connection contracts' code-carrying
-aborts (#1080).** QUIC and in-memory streams register the `DirectionalAbort` feature
-from `Connections.StreamAbort`. The coded connection-close contract remains
-`IMultiplexedConnectionAbort`, found with a type test until Part 2 of decision 56:
+**The codes reach the wire through the multiplexed roots (#1080, #1453).**
+QUIC and in-memory streams also register the `DirectionalAbort` feature from
+`Connections.StreamAbort`, for operations that end only one direction:
 
-- **`STOP_SENDING`** is `DirectionalAbort.AbortRead(code)` on the
-  request stream.
-- **A reset** is `AbortWrite(code)` and `AbortRead(code)`, then
-  `IConnection.Abort(Http3StreamException)`. The abort keeps its job of ending
-  the stream's lifecycle and firing the exchange's `RequestCancelled`, and the
-  directions already carry the code, so the driver's default never reaches the
-  wire (`Http3ConnectionContext.ResetStream`).
-- **A connection error** is `IMultiplexedConnectionAbort.Abort(code,
+- **`STOP_SENDING`** is `DirectionalAbort.AbortRead(code)` on the request stream.
+- **A reset** is `IMultiplexedStream.Abort(code, Http3StreamException)`. The
+  driver ends both directions with the code where carried, preserving any direction
+  already ended, then ends the lifecycle and fires the exchange's `RequestCancelled`
+  (`Http3ConnectionContext.ResetStream`).
+- **A connection error** is `IMultiplexedConnection.Abort(code,
   Http3ConnectionException)`, so the QUIC `CONNECTION_CLOSE` carries the error's
   code (`AbortConnection`).
 
-On a stream without the feature, or connection without the close contract, the code
-travels only as the reason, and the driver sends its own default. The in-memory
+A transport without wire codes still resets or closes through the same roots.
+A stream without directional abort keeps the request reader's no-code fallback.
+The in-memory
 driver reports a code to the peer as `ConnectionResetException.ApplicationErrorCode`,
 which is how the in-memory tests assert codes. A real QUIC peer sees
 `QuicException.ApplicationErrorCode`, which `Http3ErrorCodeRoundTripTests`
@@ -4963,12 +4966,11 @@ queue is a `System.Threading.Channels` channel.
   same first-read solicitation (see "Automatic `Expect: 100-continue` on HTTP/2
   and HTTP/3"). The connection timeouts and the request-body data rate are
   enforced (see "HTTP/2 and HTTP/3 connection timeouts and data rates (#1085)").
-- **Error codes on a driver without the code-carrying facets.** The transport
-  decides every RFC 9114 §8.1 code (see the table under "Request streams") and
-  puts it on the wire through the `DirectionalAbort` feature and
-  `IMultiplexedConnectionAbort` (#1080). A multiplexed driver that implements
-  neither, such as a third-party transport or a test double, sends its own
-  defaults, and the code travels only as the abort reason.
+- **Error codes on transports without wire codes.** The transport decides every
+  RFC 9114 §8.1 code (see the table under "Request streams") and passes it through
+  the multiplexed roots for whole-stream resets and connection close. Each driver
+  validates and carries its own code space. Only per-direction abort is optional:
+  a stream without `DirectionalAbort` uses the request reader's no-code fallback.
 
 ## QPACK field-section compression
 

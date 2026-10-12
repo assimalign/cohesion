@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Connections.Quic.Internal;
 namespace Assimalign.Cohesion.Connections.Quic;
 
 /// <summary>
-/// A QUIC connection that multiplexes independent streams, each surfaced as a <see cref="Connection"/>.
+/// A QUIC connection that multiplexes independent streams, each surfaced as a <see cref="MultiplexedStream"/>.
 /// </summary>
 /// <remarks>
 /// QUIC carries TLS 1.3 in its own handshake (RFC 9001), so the connection reports what that
@@ -32,15 +32,16 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// stream-level teardown signal for them.
 /// <para>
 /// The connection and its streams carry application error codes: <see cref="Abort(long, Exception)"/>
-/// closes the connection with the caller's code (<see cref="IMultiplexedConnectionAbort"/>), and every
-/// stream implements <see cref="IMultiplexedStreamAbort"/>. <see cref="Abort(Exception)"/> and
+/// closes the connection with the caller's code, and every stream exposes a whole-stream reset through
+/// <see cref="IMultiplexedStream.Abort(long, Exception)"/> and the optional <see cref="IMultiplexedStreamAbort"/>
+/// directional-abort feature. <see cref="Abort(Exception)"/> and
 /// <see cref="DisposeAsync"/> close with the configured default close code.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiplexedConnectionAbort
+public sealed class QuicMultiplexedConnection : MultiplexedConnection
 {
     // RFC 9000 §16 — an application error code is a variable-length integer.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
@@ -58,6 +59,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
 
     private volatile ConnectionState _state;
     private bool _isDisposed;
+    private long _closeErrorCode;
     private int _closeReported;
     private long _inboundBidirectionalStreamLimit;
 
@@ -76,6 +78,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
         _connection = connection;
         _defaultStreamErrorCode = defaultStreamErrorCode;
         _defaultCloseErrorCode = defaultCloseErrorCode;
+        _closeErrorCode = defaultCloseErrorCode;
         _closeDeliveryTimeout = closeDeliveryTimeout;
         _streamOptions = streamOptions;
         _inboundBidirectionalStreamLimit = maxInboundBidirectionalStreams;
@@ -146,7 +149,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
 
     /// <inheritdoc />
     /// <exception cref="ObjectDisposedException">Thrown when the connection has been disposed.</exception>
-    public override async ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
@@ -162,7 +165,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
     /// the remote side writes to.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Thrown when the connection has been disposed.</exception>
-    public override async ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
@@ -189,7 +192,8 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
     }
 
     /// <inheritdoc />
-    public void Abort(long errorCode, Exception? reason = null)
+    /// <exception cref="ArgumentOutOfRangeException">The code is outside QUIC's range of 0 to 2^62 - 1.</exception>
+    public override void Abort(long errorCode, Exception? reason = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
@@ -200,6 +204,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
+        long closeErrorCode;
         lock (_stateLock)
         {
             if (_isDisposed)
@@ -208,6 +213,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
             }
 
             _isDisposed = true;
+            closeErrorCode = _closeErrorCode;
 
             if (_state != ConnectionState.Aborted)
             {
@@ -237,7 +243,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
             await WaitForDeliveryAsync(deliveries).ConfigureAwait(false);
         }
 
-        await CloseConnectionAsync(_defaultCloseErrorCode).ConfigureAwait(false);
+        await CloseConnectionAsync(closeErrorCode).ConfigureAwait(false);
 
         // The close ended any stream still delivering. Release the remaining streams together,
         // including streams accepted after the first snapshot, within a second shared bound. Repeated
@@ -295,7 +301,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
         }
     }
 
-    private async ValueTask<Connection> WrapStreamAsync(QuicStream stream, bool isInbound)
+    private async ValueTask<MultiplexedStream> WrapStreamAsync(QuicStream stream, bool isInbound)
     {
         QuicStreamConnection connection;
         Action? onReleaseStarted = isInbound && stream.Type == QuicStreamType.Bidirectional
@@ -388,17 +394,18 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, IMultiple
         }
     }
 
-    // The first abort or disposal decides the close: QuicConnection.CloseAsync sends CONNECTION_CLOSE once,
-    // and a later call has no effect on the wire.
+    // The first abort or disposal decides the close, even while disposal waits for stream delivery.
+    // Retain its code so disposal cannot overtake an abort between choosing the code and sending it.
     private void AbortCore(long errorCode)
     {
         lock (_stateLock)
         {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            if (_isDisposed || _state is ConnectionState.Aborted or ConnectionState.Closed)
             {
                 return;
             }
 
+            _closeErrorCode = errorCode;
             _state = ConnectionState.Aborted;
         }
 

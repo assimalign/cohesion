@@ -352,11 +352,17 @@ public class Http3PriorityTests
 
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
-        public override ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+        public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
             => _inner.AcceptStreamAsync(cancellationToken);
 
-        public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+        public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
             => _inner.OpenStreamAsync(direction, cancellationToken);
+
+        public override void Abort(long errorCode, Exception? reason = null)
+        {
+            AbortReason = reason;
+            _inner.Abort(errorCode, reason);
+        }
 
         public override void Abort(Exception? reason = null)
         {

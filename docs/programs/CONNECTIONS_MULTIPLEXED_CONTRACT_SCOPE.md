@@ -14,8 +14,8 @@ against the specification cited), **[Likely]** (a strong inference) or **[Guessi
 
 ## 1. The owner's asks (2026-10-12)
 
-1. Roll `IMultiplexedStreamAbort` and `IMultiplexedConnectionAbort` into the multiplexed root contract.
-2. Explain `IConnectionInputCompletion`, and consolidate it if possible.
+1. Roll `IMultiplexedStreamAbort` and the former coded-connection facet into the multiplexed root contract.
+2. Explain the former input-completion facet, and consolidate it if possible.
 3. Replace `IMultiplexedConnectionStreamLimits` with a generic type on the root.
 4. Make sure none of it is shaped only for HTTP and QUIC. Other multiplexed transports must be able to implement
    the roots without dead members or conflicting semantics.
@@ -54,8 +54,8 @@ against the specification cited), **[Likely]** (a strong inference) or **[Guessi
 
   | Facet | Added | Issue |
   |---|---|---|
-  | `IMultiplexedStreamAbort`, `IMultiplexedConnectionAbort` | `83dd297e`, 2026-10-09 | #1080 |
-  | `IConnectionInputCompletion` | `5a2ce987`, 2026-10-12 | #1427 |
+  | `IMultiplexedStreamAbort`, the former coded-connection facet | `83dd297e`, 2026-10-09 | #1080 |
+  | the former input-completion facet | `5a2ce987`, 2026-10-12 | #1427 |
   | `IMultiplexedConnectionStreamLimits` | `3c0e5c6e`, 2026-10-12 | #1425 |
 
   Neither did `ITlsConnectionInfo` (`d8e7b9a6`, 2026-10-06). Moving, renaming or deleting them breaks nothing
@@ -97,7 +97,7 @@ SCTP (RFC 9260) multiplexes message-oriented streams with no per-stream close. I
 - A member that most transports would implement as a no-op, or by breaking its own documentation, is the dead
   member this change must not create.
 
-## 4. What `IConnectionInputCompletion` does
+## 4. What the former input-completion facet does
 
 It tells HTTP/3 that the peer's FIN has already arrived, without another read (#1427).
 
@@ -145,12 +145,12 @@ The four facets appear in 42 files (135 occurrences, docs included), and `ITlsCo
 
 | Site | Today | After Part 1 | After Part 2 |
 |---|---|---|---|
-| `Http3ConnectionContext.cs:962` | `is IMultiplexedConnectionAbort` | unchanged | root `Abort(code, reason)` |
+| `Http3ConnectionContext.cs:962` | type-test for the former coded-connection facet | unchanged | root `Abort(code, reason)` |
 | `Http3ConnectionContext.cs:1006` (`ResetStream`) | `is IMultiplexedStreamAbort`, then `Abort(reason)` | `DirectionalAbort` | root stream `Abort(code, reason)` |
 | `Http3ConnectionContext.cs:1024` (`StopReadingWithCode`) | `is IMultiplexedStreamAbort` | `DirectionalAbort` | `DirectionalAbort` |
 | `Http3ConnectionContext.cs:1516` | `is IMultiplexedConnectionStreamLimits` | `StreamLimits` | `StreamLimits` |
 | `Http3ConnectionContext.cs:2062`, `:542`, `:561` | streams typed `IConnection` | unchanged | `IMultiplexedStream` |
-| `Http3ConnectionContext.cs:2153`, `Http3RequestStreamReader.cs:48` | `as IConnectionInputCompletion` | unchanged | root `IsInputCompleted` |
+| `Http3ConnectionContext.cs:2153`, `Http3RequestStreamReader.cs:48` | cast to the former input-completion facet | unchanged | root `IsInputCompleted` |
 | `Http3RequestBodyStream.cs:528`, `:540`, `:1038` | no-code fallback keyed on the facet | keyed on `DirectionalAbort` | keyed on `DirectionalAbort` |
 
 **[Likely]** Amqp's `AmqpMultiplexedTransportConnection` holds streams as `IConnection` and compiles unchanged
@@ -261,7 +261,7 @@ extension(IConnectionFeatureCollection features)
     NativeAOT.
   - The typed `Get<TFeature>()` is an extension member, as HTTP's is: no generic virtual dispatch on the hot path.
   - Hot-path consumers cache a feature once per connection or stream.
-- **Part 2's interfaces wait.** `IMultiplexedConnectionAbort` and `IConnectionInputCompletion` stay as they are
+- **Part 2's interfaces wait.** The former coded-connection facet and the former input-completion facet stay as they are
   until Part 2 moves them onto the roots.
 
 ## 7. Part 2: the multiplexed roots (#1453)
@@ -271,7 +271,7 @@ Signed off by the owner (decision 56).
 ### (A) The connection close with a code moves to the root
 
 `IMultiplexedConnection.Abort(long errorCode, Exception? reason = null)`, abstract on `MultiplexedConnection`.
-It replaces `IMultiplexedConnectionAbort`.
+It replaces the former coded-connection facet.
 - Five of the six transports in §3 carry a close code.
 - **The code space is the transport's.** QUIC takes 0 to 2^62 - 1; WebTransport, HTTP/2 and SSH take 32-bit
   codes. A driver throws `ArgumentOutOfRangeException` for a code it cannot carry, and a negative code is never
@@ -305,7 +305,7 @@ three-step `ResetStream`.
 
 ### (C) Input completion moves to the root; limits stay a feature
 
-- `IMultiplexedStream.IsInputCompleted` replaces `IConnectionInputCompletion`. It is a plain member: every
+- `IMultiplexedStream.IsInputCompleted` replaces the former input-completion facet. It is a plain member: every
   transport can answer it, and `false` means "not known yet".
 - The `StreamLimits` feature stays a feature.
   - QUIC's `MAX_STREAMS` and WebTransport's `WT_MAX_STREAMS` can implement it.
@@ -361,7 +361,7 @@ public interface IMultiplexedStream : IConnection                             //
 }
 ```
 
-`IMultiplexedConnectionAbort` and `IConnectionInputCompletion` are deleted. `ITlsConnectionInfo`,
+The former coded-connection facet and the former input-completion facet are deleted. `ITlsConnectionInfo`,
 `IMultiplexedStreamAbort` and `IMultiplexedConnectionStreamLimits` live in their feature packages.
 
 ## 9. Migration and tests
@@ -388,7 +388,7 @@ public interface IMultiplexedStream : IConnection                             //
 
 **Part 2 (#1453):**
 - **Connections:** add `IMultiplexedStream` and `MultiplexedStream`, change the multiplexed root and its base,
-  and delete `IMultiplexedConnectionAbort` and `IConnectionInputCompletion`. Extend `GuidedBaseTests`.
+  and delete the former coded-connection facet and the former input-completion facet. Extend `GuidedBaseTests`.
 - **Connections.Quic:** `QuicStreamConnection` derives `MultiplexedStream`. Its root `Abort(code, reason)` ends
   both directions with the code, then the lifecycle. The connection-abort and input-completion tests move to the
   root members over real QUIC.
@@ -398,7 +398,7 @@ public interface IMultiplexedStream : IConnection                             //
 
 **Gates for both parts:**
 - No source or test type-tests a connection for a feature contract.
-- After Part 2, nothing names `IMultiplexedConnectionAbort` or `IConnectionInputCompletion`.
+- After Part 2, nothing names the former coded-connection facet or the former input-completion facet.
 - The public surface diff is exactly §6 and §8, and no `InternalsVisibleTo` is added.
 - The suites pass: Connections and its drivers (Connections.Quic over real QUIC, no skips), the three new
   packages, Http.Connections (with `--blame-hang-timeout 5m`), Http.Tls, Web.Hosting (three runs),

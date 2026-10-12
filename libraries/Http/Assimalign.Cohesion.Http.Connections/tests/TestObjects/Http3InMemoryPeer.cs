@@ -92,7 +92,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// Opens a client-initiated bidirectional stream — a request stream, as the server sees it.
     /// </summary>
     /// <returns>The client end of the request stream.</returns>
-    public async Task<Connection> OpenRequestStreamAsync()
+    public async Task<MultiplexedStream> OpenRequestStreamAsync()
     {
         return await _client.OpenStreamAsync(ConnectionDirection.Bidirectional);
     }
@@ -102,7 +102,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// its stream-type prefix.
     /// </summary>
     /// <returns>The client end of the unidirectional stream.</returns>
-    public async Task<Connection> OpenUnidirectionalStreamAsync()
+    public async Task<MultiplexedStream> OpenUnidirectionalStreamAsync()
     {
         return await _client.OpenStreamAsync(ConnectionDirection.WriteOnly);
     }
@@ -168,7 +168,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// decoder stream second.
     /// </summary>
     /// <returns>The client end of the server's next unidirectional stream.</returns>
-    public async Task<Connection> AcceptServerStreamAsync()
+    public async Task<MultiplexedStream> AcceptServerStreamAsync()
     {
         using CancellationTokenSource timeout = new(_timeout);
         return await _client.AcceptStreamAsync(timeout.Token);

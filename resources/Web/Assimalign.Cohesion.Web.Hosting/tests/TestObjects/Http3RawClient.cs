@@ -35,9 +35,9 @@ internal sealed class Http3RawClient : IAsyncDisposable
     }
 
     /// <summary>Opens the client control stream and writes its empty SETTINGS frame, leaving it open.</summary>
-    public async Task<Connection> OpenControlStreamAsync(CancellationToken cancellationToken)
+    public async Task<MultiplexedStream> OpenControlStreamAsync(CancellationToken cancellationToken)
     {
-        Connection stream = await _connection.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken).ConfigureAwait(false);
+        MultiplexedStream stream = await _connection.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken).ConfigureAwait(false);
         await stream.Output.WriteAsync(new byte[] { 0x00, 0x04, 0x00 }, cancellationToken).ConfigureAwait(false);
         return stream;
     }
@@ -49,7 +49,7 @@ internal sealed class Http3RawClient : IAsyncDisposable
     /// out in the same write, so the server sees the stream end with what it carries.
     /// </summary>
     /// <returns>The client end of the request stream.</returns>
-    public async Task<Connection> SendRequestAsync(
+    public async Task<MultiplexedStream> SendRequestAsync(
         string method,
         string path,
         (string Name, string Value)[] fields,
@@ -57,7 +57,7 @@ internal sealed class Http3RawClient : IAsyncDisposable
         bool endStream,
         CancellationToken cancellationToken)
     {
-        Connection stream = await _connection.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken).ConfigureAwait(false);
+        MultiplexedStream stream = await _connection.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken).ConfigureAwait(false);
         List<(string Name, string Value)> head = new()
         {
             (":method", method),

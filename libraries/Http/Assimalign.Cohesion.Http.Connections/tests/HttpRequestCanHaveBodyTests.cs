@@ -156,7 +156,7 @@ public class HttpRequestCanHaveBodyTests
         // does not report completion until its next read returns zero.
         using MemoryStream requestStream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a"));
         PipeReader input = PipeReader.Create(requestStream);
-        TestConnectionInputCompletion completion = new() { IsInputCompleted = true };
+        await using TestConnection completion = new() { InputCompleted = true };
         Http3RequestStreamReader reader = new(input, completion);
         byte[]? head = await reader.ReadHeaderSectionAsync(maxHeadersFrameSize: 16 * 1024, CancellationToken.None);
 
@@ -203,7 +203,8 @@ public class HttpRequestCanHaveBodyTests
         byte[] payload = Encoding.ASCII.GetBytes("hello");
         using MemoryStream requestStream = new(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/", "https", "a", body: payload));
         PipeReader input = PipeReader.Create(requestStream);
-        Http3RequestStreamReader reader = new(input, new TestConnectionInputCompletion { IsInputCompleted = true });
+        await using TestConnection completion = new() { InputCompleted = true };
+        Http3RequestStreamReader reader = new(input, completion);
         await reader.ReadHeaderSectionAsync(maxHeadersFrameSize: 16 * 1024, CancellationToken.None);
 
         // Act
@@ -229,19 +230,19 @@ public class HttpRequestCanHaveBodyTests
     {
         // Arrange — publish the final DATA and FIN immediately after the probe sees an empty pipe.
         Pipe pipe = new();
-        TestConnectionInputCompletion completion = new();
+        await using TestConnection completion = new();
         byte[] payload = Encoding.ASCII.GetBytes("hello");
         CompletingInputReader input = new(pipe.Reader, () =>
         {
             pipe.Writer.Write(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, payload));
             pipe.Writer.Complete();
-            completion.IsInputCompleted = true;
+            completion.InputCompleted = true;
         });
         Http3RequestStreamReader reader = new(input, completion);
         await pipe.Writer.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/", "https", "a"));
         await reader.ReadHeaderSectionAsync(maxHeadersFrameSize: 16 * 1024, CancellationToken.None);
 
-        // Act — the facet changes during the empty probe, so its prior value must remain conservative.
+        // Act — the completion answer changes during the empty probe, so its prior value must remain conservative.
         bool endBuffered = reader.IsEndBuffered();
         Http3FrameHeader? frame = await reader.ReadFrameHeaderAsync(CancellationToken.None);
         byte[] received = new byte[payload.Length];
@@ -265,9 +266,10 @@ public class HttpRequestCanHaveBodyTests
     {
         // Arrange
         Pipe pipe = new();
-        Http3RequestStreamReader reader = new(pipe.Reader, new TestConnectionInputCompletion());
+        await using TestConnection completion = new();
+        Http3RequestStreamReader reader = new(pipe.Reader, completion);
 
-        // Act / Assert — a completion facet does not imply that completion has happened.
+        // Act / Assert — the completion member does not imply that completion has happened.
         reader.IsEndBuffered().ShouldBeFalse();
 
         await pipe.Writer.CompleteAsync();
@@ -281,7 +283,8 @@ public class HttpRequestCanHaveBodyTests
     {
         // Arrange — even a previously completed transport cannot override failure of the input itself.
         Pipe pipe = new();
-        Http3RequestStreamReader reader = new(pipe.Reader, new TestConnectionInputCompletion { IsInputCompleted = true });
+        await using TestConnection completion = new() { InputCompleted = true };
+        Http3RequestStreamReader reader = new(pipe.Reader, completion);
         if (fail)
         {
             await pipe.Writer.CompleteAsync(new IOException("The peer reset its sending direction."));

@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// The server end of a multiplexed connection whose accepted request streams (the bidirectional streams the
 /// client opens) are <see cref="StreamInputConnection"/>s, so the HTTP/3 layer reads them the way it reads
 /// the QUIC driver's: through a <see cref="System.IO.Pipelines.PipeReader"/> over a stream, which sees the
-/// peer's FIN only on a read that returns nothing, with a completion facet exposing an end the transport
+/// peer's FIN only on a read that returns nothing, with a completion member exposing an end the transport
 /// already knows. Unidirectional streams and the streams the server opens pass through.
 /// </summary>
 internal sealed class StreamInputMultiplexedConnection : MultiplexedConnection
@@ -45,18 +45,20 @@ internal sealed class StreamInputMultiplexedConnection : MultiplexedConnection
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
     /// <inheritdoc />
-    public override async ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
-        Connection stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+        MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
 
         return stream.Direction == ConnectionDirection.Bidirectional ? new StreamInputConnection(stream) : stream;
     }
 
     /// <inheritdoc />
-    public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
 
     /// <inheritdoc />
+    public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
+
     public override void Abort(Exception? reason = null) => _inner.Abort(reason);
 
     /// <inheritdoc />

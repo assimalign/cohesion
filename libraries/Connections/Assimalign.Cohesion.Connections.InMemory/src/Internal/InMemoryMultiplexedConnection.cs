@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// </remarks>
 internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
 {
-    private readonly Channel<Connection> _inboundStreams = Channel.CreateUnbounded<Connection>(
+    private readonly Channel<MultiplexedStream> _inboundStreams = Channel.CreateUnbounded<MultiplexedStream>(
         new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
 
     private readonly ConnectionCapabilities _capabilities;
@@ -73,7 +73,7 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
     public override CancellationToken ConnectionClosed => _connectionClosedSource.Token;
 
     /// <inheritdoc />
-    public override async ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -87,7 +87,7 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
     }
 
     /// <inheritdoc />
-    public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
         if (direction == ConnectionDirection.ReadOnly)
         {
@@ -108,12 +108,11 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
 
         // The local end takes the requested direction; the peer end takes the mirror direction. The
         // ends signal each other's ConnectionClosed when one abandons the stream, as QUIC streams do.
-        (InMemoryConnection local, InMemoryConnection remote) = InMemoryConnection.CreatePair(
+        (MultiplexedStream local, MultiplexedStream remote) = InMemoryConnection.CreateStreamPair(
             _streamCapabilities,
             endPointA: _localEndPoint,
             endPointB: _remoteEndPoint,
-            directionA: direction,
-            isStream: true);
+            directionA: direction);
 
         if (!_peer._inboundStreams.Writer.TryWrite(remote))
         {
@@ -123,12 +122,18 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
             throw new ConnectionAbortedException("The peer multiplexed connection has been closed.");
         }
 
-        return ValueTask.FromResult<Connection>(local);
+        return ValueTask.FromResult<MultiplexedStream>(local);
     }
 
     /// <inheritdoc />
-    public override void Abort(Exception? reason = null)
+    public override void Abort(Exception? reason = null) => Abort(0, reason);
+
+    /// <inheritdoc />
+    public override void Abort(long errorCode, Exception? reason = null)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, (1L << 62) - 1);
+
         lock (_gate)
         {
             if (_state is ConnectionState.Aborted or ConnectionState.Closed)
@@ -157,17 +162,13 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
 
             _isDisposed = true;
             wasAborted = _state == ConnectionState.Aborted;
-        }
-
-        TearDownStreams();
-
-        if (!wasAborted)
-        {
-            lock (_gate)
+            if (!wasAborted)
             {
                 _state = ConnectionState.Closed;
             }
         }
+
+        TearDownStreams();
 
         CancelConnectionClosed();
 
@@ -199,7 +200,7 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
     {
         _inboundStreams.Writer.TryComplete();
 
-        while (_inboundStreams.Reader.TryRead(out Connection? stream))
+        while (_inboundStreams.Reader.TryRead(out MultiplexedStream? stream))
         {
             _ = stream.DisposeAsync();
         }

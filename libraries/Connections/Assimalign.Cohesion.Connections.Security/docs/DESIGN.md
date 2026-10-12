@@ -51,8 +51,9 @@ listener").
   features registered beneath TLS remain visible unless TLS hides them. It removes
   `IMultiplexedStreamAbort.FeatureName` (`StreamAbort`): aborting the inner transport cannot invalidate
   plaintext already buffered in TLS's outer `PipeReader`, so the inner feature cannot guarantee that
-  every later read fails. `connection.DirectionalAbort` therefore returns `null` through TLS; the
-  inner connection's collection is unchanged. An application protocol reads `connection.Tls`
+  every later read fails. `connection.Features.Get<IMultiplexedStreamAbort>()` therefore returns
+  `null` through TLS; the inner connection's collection is unchanged. The TLS result remains an
+  `IConnection`; `DirectionalAbort` is an accessor on `IMultiplexedStream` after #1453. An application protocol reads `connection.Tls`
   without referencing this library: the ALPN application protocol, the TLS
   version, the cipher suite, and the peer's certificate (`SslStream.NegotiatedApplicationProtocol`,
   `SslProtocol`, `NegotiatedCipherSuite`, `RemoteCertificate`), captured once when the handshake
@@ -202,5 +203,6 @@ flowchart LR
 
 Hiding `StreamAbort` corrects the unreleased #1452 feature propagation behavior. It adds no break
 against 10.0.0-preview.1: that release had neither connection features nor directional aborts.
-Consumers of the unreleased behavior must treat `DirectionalAbort == null` as unsupported on the
-TLS connection. Other inner features and TLS handshake facts remain discoverable.
+Consumers of the unreleased behavior must treat a missing `StreamAbort` feature as unsupported on
+the TLS connection. The #1453 multiplexed root changes do not widen the TLS layer's `IConnection`
+result to a multiplexed stream. Other inner features and TLS handshake facts remain discoverable.

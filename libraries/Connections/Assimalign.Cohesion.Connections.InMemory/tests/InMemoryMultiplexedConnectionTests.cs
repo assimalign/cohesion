@@ -22,8 +22,8 @@ public class InMemoryMultiplexedConnectionTests
         await using (server)
         {
             // Act
-            await using Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
             IMultiplexedStreamAbort clientAbort = clientStream.DirectionalAbort.ShouldNotBeNull();
             IMultiplexedStreamAbort serverAbort = serverStream.DirectionalAbort.ShouldNotBeNull();
 
@@ -61,8 +61,8 @@ public class InMemoryMultiplexedConnectionTests
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
 
         // Act
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
 
         byte[] payload = [4, 5, 6];
         await clientStream.Output.WriteAsync(payload, cancellation.Token);
@@ -85,11 +85,11 @@ public class InMemoryMultiplexedConnectionTests
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
 
         // Act
-        Connection first = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection second = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream first = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream second = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
 
-        Connection serverFirst = await server.AcceptStreamAsync(cancellation.Token);
-        Connection serverSecond = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream serverFirst = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream serverSecond = await server.AcceptStreamAsync(cancellation.Token);
 
         // Assert
         first.Id.ShouldNotBe(second.Id);
@@ -107,8 +107,8 @@ public class InMemoryMultiplexedConnectionTests
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
 
         // Act
-        Connection clientStream = await client.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
 
         byte[] payload = [1, 1, 2, 3, 5];
         await clientStream.Output.WriteAsync(payload, cancellation.Token);
@@ -167,8 +167,8 @@ public class InMemoryMultiplexedConnectionTests
         MultiplexedConnection client = await factory.ConnectAsync(listener.EndPoint, cancellation.Token);
         MultiplexedConnection server = await acceptTask;
 
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
 
         byte[] payload = [42];
         await clientStream.Output.WriteAsync(payload, cancellation.Token);
@@ -204,8 +204,8 @@ public class InMemoryMultiplexedConnectionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
         ConnectionAbortedException reason = new("The peer abandoned the stream.");
 
         // Act
@@ -238,8 +238,8 @@ public class InMemoryMultiplexedConnectionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
 
         // Act — the in-memory STOP_SENDING.
         serverStream.DirectionalAbort.ShouldNotBeNull().AbortRead(0x100);
@@ -267,8 +267,8 @@ public class InMemoryMultiplexedConnectionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
         ValueTask<System.IO.Pipelines.ReadResult> pendingRead = clientStream.Input.ReadAsync(cancellation.Token);
 
         // Act — the in-memory RESET_STREAM.
@@ -291,8 +291,8 @@ public class InMemoryMultiplexedConnectionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
         Task<System.IO.Pipelines.ReadResult> pendingRead = serverStream.Input.ReadAsync(cancellation.Token).AsTask();
 
         // Act
@@ -312,8 +312,8 @@ public class InMemoryMultiplexedConnectionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
 
         // Act — a reset with a code, then the lifecycle abort with a reason of its own.
         IMultiplexedStreamAbort abort = serverStream.DirectionalAbort.ShouldNotBeNull();
@@ -342,8 +342,8 @@ public class InMemoryMultiplexedConnectionTests
         // Arrange — the opener writes only; the peer reads only.
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        Connection writeOnly = await client.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellation.Token);
-        Connection readOnly = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream writeOnly = await client.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellation.Token);
+        MultiplexedStream readOnly = await server.AcceptStreamAsync(cancellation.Token);
 
         // Act
         writeOnly.DirectionalAbort.ShouldNotBeNull().AbortRead(0x100);
@@ -368,7 +368,7 @@ public class InMemoryMultiplexedConnectionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
         IMultiplexedStreamAbort abort = clientStream.DirectionalAbort.ShouldNotBeNull();
 
         // Act / Assert
@@ -386,8 +386,8 @@ public class InMemoryMultiplexedConnectionTests
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Assert — a single-stream transport has no per-direction code to carry.
-        client.DirectionalAbort.ShouldBeNull();
-        server.DirectionalAbort.ShouldBeNull();
+        client.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeNull();
+        server.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Multiplexed: A peer ending its side of a stream should not signal the other end's ConnectionClosed")]
@@ -396,8 +396,8 @@ public class InMemoryMultiplexedConnectionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellation.Token);
 
         // Act — the FIN.
         await clientStream.Output.CompleteAsync();

@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Connections;
 /// The stream object need not implement this interface itself.
 /// </para>
 /// <para>
-/// A wrapper deriving from <see cref="Connection"/> propagates the wrapped stream's <c>Features</c>
+/// A wrapper deriving from <see cref="MultiplexedStream"/> propagates the wrapped stream's <c>Features</c>
 /// through <c>InnerFeatures</c>, without manually implementing and forwarding this interface.
 /// Registering the same feature name replaces the inner feature; removing that name hides it. A layer
 /// that cannot preserve the abort guarantees on its own input and output must replace or remove the
@@ -29,9 +29,8 @@ namespace Assimalign.Cohesion.Connections;
 /// <para>
 /// Each direction ends once. The first signal for a direction fixes the code the peer receives, whether it
 /// comes from this interface, <see cref="IConnection.Abort(Exception)"/>, or disposal, and a later one does
-/// not signal that direction again. To reset a whole stream with a code, abort both directions here, then call
-/// <see cref="IConnection.Abort(Exception)"/>, which ends the stream's lifecycle with the directions already
-/// carrying the code.
+/// not signal that direction again. To reset a whole stream with a code, call
+/// <see cref="IMultiplexedStream.Abort(long, Exception)"/>, which ends both directions and the lifecycle.
 /// </para>
 /// <para>
 /// Neither member changes <see cref="IConnection.State"/> or signals this stream's

@@ -20,7 +20,8 @@ if (tls is not null)
 ```
 
 `Tls` is available on `IConnection` and `IMultiplexedConnection` and returns `null` when absent.
-A driver registers its implementation in `ConfigureFeatures`; its `Name` returns
+Multiplexed streams implement `IConnection` and expose only their own features, without inheriting
+the parent connection's TLS facts. A driver registers its implementation in `ConfigureFeatures`; its `Name` returns
 `ITlsConnectionInfo.FeatureName`, pinned to `"Tls"`. A layer exposes the wrapped collection through
 `InnerFeatures`, so its consumers keep seeing TLS facts without forwarding the TLS contract.
 

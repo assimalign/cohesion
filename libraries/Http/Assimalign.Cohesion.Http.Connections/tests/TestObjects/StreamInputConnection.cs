@@ -14,15 +14,15 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// <see cref="PipeReader.Create(System.IO.Stream, StreamPipeReaderOptions?)"/> over the inner input, as the QUIC
 /// driver's request streams read through a <see cref="PipeReader"/> over the <c>QuicStream</c>. Such a reader
 /// learns of the peer's FIN only from a read that returns no octets, so a FIN that arrived with the last
-/// octets read stays unseen until the next read. Its completion facet probes the inner pipe, exposing the
+/// octets read stays unseen until the next read. Its completion member probes the inner pipe, exposing the
 /// transport completion independently from the stream-backed pipe. Everything else is the inner connection's, including the
 /// coded stream aborts of a multiplexed stream end.
 /// </summary>
-internal sealed class StreamInputConnection : Connection, IConnectionInputCompletion
+internal sealed class StreamInputConnection : MultiplexedStream
 {
-    private readonly Connection _inner;
+    private readonly MultiplexedStream _inner;
 
-    public StreamInputConnection(Connection inner)
+    public StreamInputConnection(MultiplexedStream inner)
     {
         _inner = inner;
         Input = PipeReader.Create(inner.Input.AsStream());
@@ -44,7 +44,7 @@ internal sealed class StreamInputConnection : Connection, IConnectionInputComple
     public override PipeReader Input { get; }
 
     /// <inheritdoc />
-    public bool IsInputCompleted
+    public override bool IsInputCompleted
     {
         get
         {
@@ -87,6 +87,8 @@ internal sealed class StreamInputConnection : Connection, IConnectionInputComple
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
     /// <inheritdoc />
+    public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
+
     public override void Abort(Exception? reason = null) => _inner.Abort(reason);
 
     /// <inheritdoc />

@@ -2,7 +2,7 @@
 
 ## Design intent
 
-Abandon one stream direction with an application error code. Owner decision 56 (#1452) places this optional capability in its own package, keeping the Connections core limited to shared contracts and generic feature discovery. Consumers read `DirectionalAbort` instead of testing a connection's runtime type.
+Abandon one stream direction with an application error code. Owner decision 56 (#1452) places this optional capability in its own package, keeping the Connections core limited to shared contracts and generic feature discovery. Consumers read `DirectionalAbort` on `IMultiplexedStream` instead of testing a connection's runtime type.
 
 ## Family map
 
@@ -27,12 +27,16 @@ The accessor uses `Features.Get<IMultiplexedStreamAbort>()`. The connection's ow
 
 ## Semantics and lifetime
 
-`AbortRead(code)` stops receiving and asks the peer to stop sending; `AbortWrite(code)` resets sending. Each direction keeps its first end signal. Neither call ends the local stream lifecycle; callers can subsequently use `Abort(reason)` to do that. The contract preserves its existing code range and failure semantics.
+`AbortRead(code)` stops receiving and asks the peer to stop sending; `AbortWrite(code)` resets sending. Each direction keeps its first end signal. Neither call ends the local stream lifecycle; callers can subsequently use `Abort(reason)` to do that. The root `stream.Abort(code, reason)` resets both directions and ends the lifecycle in one call, retaining each direction's first code.
+
+Directional abort remains optional after #1453: QUIC, WebTransport and the in-memory model can end one direction independently; HTTP/2, SSH, yamux and mplex cannot. Whole-stream reset and clean input completion belong to the root `IMultiplexedStream`.
 
 The collection does not own or dispose feature objects. Features that delegate to a driver share the driver's lifetime. QUIC registers distinct objects for TLS and stream limits; its stream registers itself for directional abort, as does the in-memory multiplexed stream.
 
 ## Compatibility and AOT
 
 The contract's existing members move unchanged from Connections. Its XML documentation describes feature registration, the `DirectionalAbort` accessor and `InnerFeatures` propagation. The contract did not ship in 10.0.0-preview.1, so its move introduces no released API break. Adding `Features` to the three connection root interfaces does break preview.1 implementers, accepted under decision 15; subclasses of the guided bases inherit the implementation.
+
+Narrowing `DirectionalAbort` from `IConnection` to `IMultiplexedStream` in #1453 affects unreleased callers only. Multiplexed streams returned by accept/open already have the new root type.
 
 The package uses ordinary interfaces and a C# extension property, with no reflection, dynamic generation or generic virtual lookup on the read path. NativeAOT compatibility remains enabled by repository defaults.

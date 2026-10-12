@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Connections.Quic.Internal;
 namespace Assimalign.Cohesion.Connections.Quic.Internal;
 
 /// <summary>
-/// A single QUIC stream surfaced as a <see cref="Connection"/>.
+/// A single QUIC stream surfaced as a <see cref="MultiplexedStream"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -59,7 +59,7 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort, IConnectionInputCompletion
+internal sealed class QuicStreamConnection : MultiplexedStream, IMultiplexedStreamAbort
 {
     // RFC 9000 §16 — an application error code is a variable-length integer.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
@@ -164,7 +164,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     }
 
     /// <inheritdoc />
-    public bool IsInputCompleted => !_readAborted && _readsClosed.IsCompletedSuccessfully;
+    public override bool IsInputCompleted => !_readAborted && _readsClosed.IsCompletedSuccessfully;
 
     /// <inheritdoc />
     public override ConnectionId Id { get; } = ConnectionId.New();
@@ -202,9 +202,18 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     /// <inheritdoc />
     public override void Abort(Exception? reason = null)
     {
+        Abort(_defaultStreamErrorCode, reason);
+    }
+
+    /// <inheritdoc />
+    public override void Abort(long errorCode, Exception? reason = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
+
         lock (_stateLock)
         {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            if (_isDisposed || _state is ConnectionState.Aborted or ConnectionState.Closed)
             {
                 return;
             }
@@ -215,7 +224,8 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         // A direction already aborted through IMultiplexedStreamAbort keeps its code: QuicStream ends each
         // direction once and skips one that has ended. A sending direction ended by completing Output keeps its
         // FIN: QuicStream would still reset it until the peer acknowledges the FIN, so only reading is aborted.
-        _stream.Abort(_writesEnded ? QuicAbortDirection.Read : QuicAbortDirection.Both, _defaultStreamErrorCode);
+        AbortRead(errorCode);
+        AbortWrite(errorCode);
 
         CancelConnectionClosedToken();
         ReportClosed();

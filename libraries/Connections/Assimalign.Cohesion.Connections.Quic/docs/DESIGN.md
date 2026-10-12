@@ -24,14 +24,14 @@ correct for the protocols that run over it.
 | `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
 | `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes, and the bound on disposal's wait for stream delivery (`CloseDeliveryTimeout`, see "Lifecycle and teardown"). The listener also exposes `HandshakeTimeout`. Both default ALPN to HTTP/3 (see "Error model"). |
-| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Registers `Tls` and `StreamLimits` feature objects (see below), and implements `IMultiplexedConnectionAbort` (see "Application error codes"). |
-| `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. Registers itself as the `DirectionalAbort` feature. |
+| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `MultiplexedStream`s and track them for teardown. Registers `Tls` and `StreamLimits` feature objects (see below), and implements the root coded connection close (see "Application error codes"). |
+| `QuicStreamConnection` | `internal` | One QUIC stream as a `MultiplexedStream`: pipes over the stream, direction from the stream's readable/writable halves, whole-stream reset and input completion on the root. Registers itself as the `DirectionalAbort` feature. |
 
 `QuicMultiplexedConnection` and the listener/factory are `public sealed`
 concretes (not interface-first `internal` implementations) because they
 *are* the driver's surface: consumers select the driver by constructing
 it, then immediately fall back to the `IMultiplexedConnection` /
-`IConnection` contracts. This mirrors the Tcp/Udp sibling drivers.
+`IMultiplexedStream` contracts. This mirrors the Tcp/Udp sibling drivers.
 
 ## Connection features (#1452)
 
@@ -107,7 +107,7 @@ facts properties remain available, while consumers discover the contracts throug
 
 ### A FIN already observed (#1427)
 
-Each stream publishes `IConnectionInputCompletion`. `IsInputCompleted` checks the existing
+Each stream's root `IMultiplexedStream.IsInputCompleted` checks the existing
 `QuicStream.ReadsClosed` task for successful completion and excludes a locally aborted read.
 .NET 10 completes that task when its final buffered bytes are copied to the caller, before
 returning that final nonzero read. Thus a stream-backed `PipeReader` can expose the fact without
@@ -116,9 +116,10 @@ a FIN after data is not an empty input until those bytes are consumed.
 
 The implementation uses [the runtime's completion behavior](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Quic/src/System/Net/Quic/QuicStream.cs#L284-L301),
 with real-QUIC tests pinning it. There is no prefetch task, extra read buffer, or speculative read;
-late FINs remain conservative until the runtime observes them. This optional generic facet adds
-no HTTP dependency and no change to existing connection interfaces. Relative to 10.0.0-preview.1,
-the API is additive; the incremental HTTP/3 body signal it improves was introduced afterward.
+late FINs remain conservative until the runtime observes them. Moving the completion fact to the
+stream root (#1453) adds no HTTP dependency: every byte-stream multiplexer supports a half-close.
+The incremental HTTP/3 body signal it improves was introduced after 10.0.0-preview.1; the root's
+stream return type changes are recorded under "Breaking changes" below.
 
 ## Inbound stream allowance (#1425)
 
@@ -186,7 +187,7 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
      host's connection slot, would wait for as long as the peer chose.
      When the bound runs out the close in step 2 ends every stream still
      delivering, which completes its disposal, and the tail is lost. An
-     abort of the connection during the wait closes it at once too.
+     abort after disposal started keeps disposal's chosen default code and delivery wait.
      (Before #1330 the wait happened on the exchange's own thread, inside
      the blocking disposal of the `QuicStream`; the bound was added with
      the half-close, which moved it into this phase.)
@@ -214,8 +215,10 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
   `ConnectionClosed`. In-flight data may be discarded; that is the
   contract of abort. `Abort(Exception?)` closes with
   `DefaultCloseErrorCode`; `Abort(long errorCode, Exception?)`
-  (`IMultiplexedConnectionAbort`) closes with the caller's code. The
-  first abort or disposal decides the close: `QuicConnection` sends one
+  on the multiplexed root closes with the caller's code. The first abort or disposal decides
+  the close under the state lock, before any delivery wait: a later abort cannot replace
+  disposal's default code, and disposal retains a preceding abort's code even if it overtakes
+  that abort before its asynchronous close starts. `QuicConnection` sends one
   `CONNECTION_CLOSE`, and a later close request has no effect on the wire.
 
 A stream's `ConnectionClosed` fires on its own `Abort` and `DisposeAsync`,
@@ -314,22 +317,25 @@ is routine for streams released after their owning connection closed.
 
 ## Application error codes
 
-The driver registers the `Connections.StreamAbort` directional-abort feature and
-implements core's `IMultiplexedConnectionAbort` contract (#1080), so a protocol
-chooses the code each abort puts on the wire:
+The connection and stream roots carry the coded close and whole-stream reset (#1453).
+The driver also registers the `Connections.StreamAbort` directional-abort feature, so a
+protocol may end one direction independently where QUIC supports it. QUIC validates its own
+code range, 0 to 2^62 - 1; the generic roots do not impose QUIC's range on other transports.
 
 | Call | `System.Net.Quic` call | Frame |
 | --- | --- | --- |
 | stream `AbortRead(errorCode)` | `QuicStream.Abort(QuicAbortDirection.Read, errorCode)` | `STOP_SENDING` |
 | stream `AbortWrite(errorCode)` | `QuicStream.Abort(QuicAbortDirection.Write, errorCode)` | `RESET_STREAM` |
+| stream `Abort(errorCode, reason)` | Both directional aborts, then stream lifecycle teardown | `STOP_SENDING` and `RESET_STREAM` for directions still open |
 | connection `Abort(errorCode, reason)` | `QuicConnection.CloseAsync(errorCode)` | `CONNECTION_CLOSE` |
 
 - **A direction ends once.** `QuicStream.Abort` skips a direction that
   has already ended (read to its end, aborted, or completed and
   acknowledged), so a stream `Abort(Exception?)` or disposal after a
   coded abort sends the default code only for a direction still open.
-  That is how the HTTP/3 transport resets with a code: both directions,
-  then `Abort(reason)`. A sending direction whose FIN is queued but not
+  The root `Abort(errorCode, reason)` performs both directional aborts and ends the
+  lifecycle in one call, retaining any direction's earlier code or clean completion.
+  A sending direction whose FIN is queued but not
   yet acknowledged is still open to `QuicStream`, so the driver tracks
   `Output`'s completion itself and skips that direction too.
 - **A half abort is not the stream ending.** It changes no `State` and
@@ -447,6 +453,16 @@ break is accepted during the previews and recorded here.
    Changing the original `MaxBidirectionalStreamCount` option after binding used to
    change the value used by subsequent handshakes. It now leaves the bound listener's
    allowance unchanged, keeping its handshake and generic limit facet consistent.
+6. **Multiplexed stream return types change (#1453).** The connection's typed accept/open
+   members now return `ValueTask<MultiplexedStream>` instead of `ValueTask<Connection>`;
+   the interface returns `ValueTask<IMultiplexedStream>`. Assigning the awaited stream to
+   `IConnection` still compiles, but existing binaries and implementations must migrate.
+   `Abort(long, Exception?)` is now required on the multiplexed connection root and guided
+   base. The new stream root requires whole-stream reset and `IsInputCompleted`.
+   Retired optional contracts postdate preview.1, so their removal breaks nothing released.
+7. **The first disposal selects the connection close (#1453).** A coded abort made while
+   disposal waits for stream delivery cannot replace its default close code or interrupt
+   that delivery wait. Earlier code allowed the later abort to choose the wire close.
 
 Completing a half also no longer blocks the completing thread until the
 peer acknowledges the FIN; that is not expected to break a consumer.

@@ -59,8 +59,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     private Http3ConnectionException? _connectionError;
     private volatile bool _localConnectionClose;
     private CancellationToken _receiveCancellation;
-    private IConnection? _controlStream;
-    private IConnection? _decoderStream;
+    private IMultiplexedStream? _controlStream;
+    private IMultiplexedStream? _decoderStream;
     private Task? _acceptLoopTask;
     // Interlocked one-shot latches: unidirectional streams are typed concurrently, so "at most one
     // control / QPACK encoder / QPACK decoder stream" (RFC 9114 §6.2.1, RFC 9204 §4.2) is enforced
@@ -540,7 +540,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         try
         {
-            IConnection controlStream = await _connection
+            IMultiplexedStream controlStream = await _connection
                 .OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken)
                 .ConfigureAwait(false);
             _controlStream = controlStream;
@@ -559,7 +559,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // stream: its type prefix is written and it is left open.
             if (_decoderState is not null)
             {
-                IConnection decoderStream = await _connection
+                IMultiplexedStream decoderStream = await _connection
                     .OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken)
                     .ConfigureAwait(false);
                 _decoderStream = decoderStream;
@@ -699,7 +699,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </remarks>
     internal async Task SendGoAwayAsync(CancellationToken cancellationToken = default)
     {
-        IConnection? controlStream = Volatile.Read(ref _controlStream);
+        IMultiplexedStream? controlStream = Volatile.Read(ref _controlStream);
         if (controlStream is null)
         {
             // The server never opened its control stream (the receive loop did
@@ -947,8 +947,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     /// <remarks>
     /// The connection closes with the error's RFC 9114 §8.1 / RFC 9204 §6 code wherever the driver can
-    /// carry one (<see cref="IMultiplexedConnectionAbort"/>, which the QUIC driver implements); a driver
-    /// without it closes with its own default.
+    /// carry one. The multiplexed root delegates code validation and carriage to the driver.
     /// </remarks>
     /// <param name="error">The connection error, carrying the code the connection is closed with.</param>
     internal void AbortConnection(Http3ConnectionException error)
@@ -961,14 +960,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         MarkLocalConnectionClose();
         _teardownSource.Cancel();
 
-        if (_connection is IMultiplexedConnectionAbort coded)
-        {
-            coded.Abort((long)error.ErrorCode, error);
-        }
-        else
-        {
-            _connection.Abort(error);
-        }
+        _connection.Abort((long)error.ErrorCode, error);
     }
 
     /// <summary>
@@ -983,7 +975,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="requestStreamId">The request stream's wire ID.</param>
     /// <param name="reason">The stream error, carrying the RFC 9114 §8.1 code.</param>
     /// <param name="abandonsReading">Whether the stream still had unread octets.</param>
-    internal void ResetRequestStream(IConnection streamConnection, long requestStreamId, Http3StreamException reason, bool abandonsReading)
+    internal void ResetRequestStream(IMultiplexedStream streamConnection, long requestStreamId, Http3StreamException reason, bool abandonsReading)
     {
         if (abandonsReading && _decoderState is not null)
         {
@@ -997,21 +989,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// Resets a request stream in both directions with the stream error's RFC 9114 §8.1 code
     /// (<c>RESET_STREAM</c> and <c>STOP_SENDING</c>), then aborts it with the error as the reason, which
     /// ends the stream's lifecycle and fires the exchange's <c>RequestCancelled</c>. The code reaches the
-    /// wire wherever the stream can carry one (<see cref="IMultiplexedStreamAbort"/>, which the QUIC and
-    /// in-memory drivers implement); on a stream without it the abort alone resets the stream, with the
-    /// driver's default code.
+    /// wire wherever the stream transport can carry one. The root operation ends both directions and
+    /// the lifecycle together, preserving an already-ended direction's first code.
     /// </summary>
     /// <param name="streamConnection">The request stream.</param>
     /// <param name="reason">The stream error, carrying the code.</param>
-    internal static void ResetStream(IConnection streamConnection, Http3StreamException reason)
+    internal static void ResetStream(IMultiplexedStream streamConnection, Http3StreamException reason)
     {
-        if (streamConnection.DirectionalAbort is { } coded)
-        {
-            coded.AbortWrite((long)reason.ErrorCode);
-            coded.AbortRead((long)reason.ErrorCode);
-        }
-
-        streamConnection.Abort(reason);
+        streamConnection.Abort((long)reason.ErrorCode, reason);
     }
 
     /// <summary>
@@ -1021,7 +1006,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     /// <param name="streamConnection">The request stream.</param>
     /// <param name="errorCode">The RFC 9114 §8.1 code the peer receives.</param>
-    internal static void StopReadingWithCode(IConnection streamConnection, Http3ErrorCode errorCode)
+    internal static void StopReadingWithCode(IMultiplexedStream streamConnection, Http3ErrorCode errorCode)
     {
         if (streamConnection.DirectionalAbort is { } coded)
         {
@@ -1033,7 +1018,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// Processes one peer-initiated unidirectional stream on its own, off the accept loop, and turns a
     /// connection-level violation into a connection error.
     /// </summary>
-    private async Task ProcessUnidirectionalStreamAsync(IConnection streamConnection, CancellationToken receiveToken)
+    private async Task ProcessUnidirectionalStreamAsync(IMultiplexedStream streamConnection, CancellationToken receiveToken)
     {
         try
         {
@@ -1053,7 +1038,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// a connection error. <paramref name="cancellationToken"/> bounds only the stream's opening — its type
     /// and, for a control stream, its SETTINGS frame; the drains that follow live as long as the connection.
     /// </summary>
-    private async Task HandleUnidirectionalStreamAsync(IConnection streamConnection, CancellationToken cancellationToken)
+    private async Task HandleUnidirectionalStreamAsync(IMultiplexedStream streamConnection, CancellationToken cancellationToken)
     {
         try
         {
@@ -1088,7 +1073,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// (<c>H3_STREAM_CREATION_ERROR</c>); otherwise <see langword="null"/>.
     /// </summary>
     private async Task<Http3ConnectionException?> TryHandleUnidirectionalStreamAsync(
-        IConnection streamConnection,
+        IMultiplexedStream streamConnection,
         CancellationToken cancellationToken)
     {
         // RFC 9114 §6.2 — read directly off the stream connection's PipeReader
@@ -1187,7 +1172,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     /// <param name="streamConnection">The unidirectional stream.</param>
     /// <returns>A task that completes once the stream is released.</returns>
-    private static async Task AbandonUnidirectionalStreamAsync(IConnection streamConnection)
+    private static async Task AbandonUnidirectionalStreamAsync(IMultiplexedStream streamConnection)
     {
         StopReadingWithCode(streamConnection, Http3ErrorCode.StreamCreationError);
 
@@ -2061,7 +2046,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     {
         try
         {
-            IConnection streamConnection = await _connection.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+            IMultiplexedStream streamConnection = await _connection.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
             return new StreamAcceptOutcome(streamConnection, terminate: false);
         }
         catch (OperationCanceledException)
@@ -2099,7 +2084,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// Expected failures are handled inside <see cref="ReadRequestHeadAsync"/>; an unexpected one is
     /// forwarded to the enumeration rather than swallowed.
     /// </summary>
-    private async Task ProcessRequestStreamAsync(IConnection streamConnection, long requestStreamId, CancellationToken receiveToken)
+    private async Task ProcessRequestStreamAsync(IMultiplexedStream streamConnection, long requestStreamId, CancellationToken receiveToken)
     {
         Http3Context? context = null;
 
@@ -2145,14 +2130,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// returns <see langword="null"/> when the stream yields no exchange: a stream error resets the
     /// stream, a connection error aborts the connection.
     /// </summary>
-    private async Task<Http3Context?> ReadRequestHeadAsync(IConnection streamConnection, long requestStreamId, CancellationToken receiveToken)
+    private async Task<Http3Context?> ReadRequestHeadAsync(IMultiplexedStream streamConnection, long requestStreamId, CancellationToken receiveToken)
     {
         // The head read — and a request hook that reads the body before dispatch — observes connection
         // teardown, so a stream whose HEADERS never arrive cannot hold up the accept loop's drain.
         using CancellationTokenSource headCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
         CancellationToken cancellationToken = headCancellation.Token;
-        Http3RequestStreamReader reader = new(streamConnection.Input, streamConnection as IConnectionInputCompletion);
+        Http3RequestStreamReader reader = new(streamConnection.Input, streamConnection);
 
         // #1085 — the request head must arrive, and decode, within RequestHeadersTimeout of the stream's
         // acceptance — which QUIC makes the arrival of its first octets. The deadline is disarmed once the
@@ -2262,7 +2247,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// request body, runs the request-parse interceptors, and wires the response side.
     /// </summary>
     private async Task<Http3Context?> CreateContextAsync(
-        IConnection streamConnection,
+        IMultiplexedStream streamConnection,
         Http3RequestStreamReader reader,
         long requestStreamId,
         List<(string Name, string Value)> fields,
@@ -2575,13 +2560,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     private readonly struct StreamAcceptOutcome
     {
-        public StreamAcceptOutcome(IConnection? streamConnection, bool terminate)
+        public StreamAcceptOutcome(IMultiplexedStream? streamConnection, bool terminate)
         {
             StreamConnection = streamConnection;
             TerminateConnection = terminate;
         }
 
-        public IConnection? StreamConnection { get; }
+        public IMultiplexedStream? StreamConnection { get; }
         public bool TerminateConnection { get; }
     }
 
@@ -2891,7 +2876,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// a peer that is already gone leaves nothing to answer.
     /// </summary>
     private async Task AnswerRejectedRequestAsync(
-        IConnection streamConnection,
+        IMultiplexedStream streamConnection,
         Http3RequestBodyStream requestBody,
         long requestStreamId,
         HttpStatusCode statusCode,
@@ -2948,13 +2933,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <summary>
     /// Ends the request stream's write side once the final response is fully written, emitting the
     /// graceful QUIC FIN that delimits an HTTP/3 response body (RFC 9114 §4.1). Completing the
-    /// connection's outbound <see cref="PipeWriter"/> is the <see cref="IConnection"/> contract's
+    /// connection's outbound <see cref="PipeWriter"/> is the <see cref="IMultiplexedStream"/> contract's
     /// documented half-close signal: the read side stays open until the request stream stops reading
     /// (#1330). Best-effort: the response bytes are already flushed to the transport, so a teardown race
     /// that disposes the stream underneath the completion is benign.
     /// </summary>
     /// <param name="streamConnection">The request stream whose write side is ended.</param>
-    private static void CompleteResponseStreamWrites(IConnection streamConnection)
+    private static void CompleteResponseStreamWrites(IMultiplexedStream streamConnection)
     {
         try
         {
@@ -3004,7 +2989,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
     /// <param name="cancellationToken">A token to cancel the write.</param>
     internal async Task WriteInterimResponseAsync(
-        IConnection streamConnection,
+        IMultiplexedStream streamConnection,
         HttpStatusCode statusCode,
         IHttpHeaderCollection? headers,
         CancellationToken cancellationToken)
@@ -3035,14 +3020,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="cancellationToken">The read's token.</param>
     /// <returns>A task that completes once the request stream accepted the <c>100</c>.</returns>
     /// <exception cref="OperationCanceledException">The peer did not take the <c>100</c> at the rate; the exchange was aborted.</exception>
-    internal ValueTask WriteContinueAsync(Http3Context? context, IConnection streamConnection, CancellationToken cancellationToken)
+    internal ValueTask WriteContinueAsync(Http3Context? context, IMultiplexedStream streamConnection, CancellationToken cancellationToken)
         => new(WriteInterimResponseWithinRateAsync(context, streamConnection, HttpStatusCode.Continue, headers: null, cancellationToken));
 
     // Application interims and automatic 100 use the same rate rules. Each gets its own allowance so
     // a final head waiting on its claim does not double-charge the response gate (#1384, #1428).
     private Task WriteInterimResponseWithinRateAsync(
         Http3Context? context,
-        IConnection streamConnection,
+        IMultiplexedStream streamConnection,
         HttpStatusCode statusCode,
         IHttpHeaderCollection? headers,
         CancellationToken cancellationToken)
@@ -3057,7 +3042,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     private async Task WriteInterimResponseCoreAsync(
         Http3Context? context,
-        IConnection streamConnection,
+        IMultiplexedStream streamConnection,
         HttpStatusCode statusCode,
         IHttpHeaderCollection? headers,
         CancellationToken cancellationToken)

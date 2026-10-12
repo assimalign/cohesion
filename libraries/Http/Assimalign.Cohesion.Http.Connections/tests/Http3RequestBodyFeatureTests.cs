@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
@@ -18,6 +19,24 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 [SupportedOSPlatform("macos")]
 public class Http3RequestBodyFeatureTests
 {
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HTTP/3 reset: Root abort carries the code and ends the lifecycle without a feature lookup")]
+    public async Task ResetStream_WithoutDirectionalAbort_ShouldUseRootCodeAndEndLifecycle()
+    {
+        // Arrange
+        await using FeatureLookupCountingConnection stream = new([], hasDirectionalAbort: false);
+        Http3StreamException reason = new(Http3ErrorCode.RequestCancelled, "The exchange was cancelled.");
+
+        // Act
+        Http3ConnectionContext.ResetStream(stream, reason);
+
+        // Assert
+        stream.AbortErrorCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
+        stream.AbortReason.ShouldBeSameAs(reason);
+        stream.State.ShouldBe(ConnectionState.Aborted);
+        stream.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        stream.FeatureAccesses.ShouldBe(0);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - HTTP/3 body: Repeated reads resolve directional abort once, including its absence")]
     [InlineData(true)]
     [InlineData(false)]
@@ -81,8 +100,8 @@ public class Http3RequestBodyFeatureTests
         using MemoryStream payload = new(request);
         PipeReader? input = streamBacked ? PipeReader.Create(payload) : null;
         await using FeatureLookupCountingConnection stream = new(request, hasDirectionalAbort: true, input);
-        Http3RequestStreamReader reader = new(stream.Input,
-            streamBacked ? new TestConnectionInputCompletion { IsInputCompleted = true } : null);
+        stream.IsInputCompleted = streamBacked;
+        Http3RequestStreamReader reader = new(stream.Input, stream);
 
         try
         {
@@ -120,7 +139,8 @@ public class Http3RequestBodyFeatureTests
         byte[] head = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a");
         byte[] remainder = partialTrailer ? [0x01] : HttpProtocolPayloadFactory.CreateHttp3Frame(0, [1]);
         await using FeatureLookupCountingConnection stream = new([.. head, .. remainder], hasDirectionalAbort: true);
-        Http3RequestStreamReader reader = new(stream.Input, new TestConnectionInputCompletion { IsInputCompleted = true });
+        stream.IsInputCompleted = true;
+        Http3RequestStreamReader reader = new(stream.Input, stream);
         (await reader.ReadHeaderSectionAsync(65536, timeout.Token)).ShouldNotBeNull();
         reader.IsEndBuffered().ShouldBeFalse();
         using Http3RequestBodyStream body = CreateBody(connection, stream, reader);

@@ -9,11 +9,10 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 /// <summary>
 /// The server end of a multiplexed connection that records how the HTTP/3 engine closed it. It carries
-/// a close code, as the QUIC driver does (<see cref="IMultiplexedConnectionAbort"/>), so the engine hands
-/// it the RFC 9114 §8.1 code it would put on the wire; the in-memory driver underneath has no such
-/// code. Everything else passes through to the wrapped connection.
+/// a close code through the root, so the engine hands it the RFC 9114 §8.1 code it would put on the
+/// wire. Everything else passes through to the wrapped connection.
 /// </summary>
-internal sealed class CodeRecordingMultiplexedConnection : MultiplexedConnection, IMultiplexedConnectionAbort
+internal sealed class CodeRecordingMultiplexedConnection : MultiplexedConnection
 {
     private readonly MultiplexedConnection _inner;
 
@@ -50,19 +49,20 @@ internal sealed class CodeRecordingMultiplexedConnection : MultiplexedConnection
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
     /// <inheritdoc />
-    public override ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         => _inner.AcceptStreamAsync(cancellationToken);
 
     /// <inheritdoc />
-    public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
 
     /// <inheritdoc />
-    public void Abort(long errorCode, Exception? reason = null)
+    public override void Abort(long errorCode, Exception? reason = null)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
         AbortErrorCode = errorCode;
         AbortReason = reason;
-        _inner.Abort(reason);
+        _inner.Abort(errorCode, reason);
     }
 
     /// <inheritdoc />

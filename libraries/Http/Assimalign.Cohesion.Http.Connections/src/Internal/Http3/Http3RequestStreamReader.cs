@@ -38,14 +38,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class Http3RequestStreamReader
 {
     private readonly PipeReader _input;
-    private readonly IConnectionInputCompletion? _inputCompletion;
+    private readonly IMultiplexedStream? _inputCompletion;
 
     /// <summary>
     /// Initializes a reader over a request stream's input.
     /// </summary>
     /// <param name="input">The request stream's inbound pipe.</param>
     /// <param name="inputCompletion">Optional transport knowledge of a clean input end.</param>
-    public Http3RequestStreamReader(PipeReader input, IConnectionInputCompletion? inputCompletion = null)
+    public Http3RequestStreamReader(PipeReader input, IMultiplexedStream? inputCompletion = null)
     {
         _input = input;
         _inputCompletion = inputCompletion;
@@ -185,7 +185,7 @@ internal sealed class Http3RequestStreamReader
     /// </summary>
     /// <remarks>
     /// <see langword="false"/> means only that the end is not known yet: octets follow, the FIN has not
-    /// arrived, or the input learns of it only when it reads again. The optional connection facet
+    /// arrived, or the input learns of it only when it reads again. The multiplexed stream's completion member
     /// exposes a transport end already observed even when a stream-backed pipe has not read zero
     /// bytes yet. It never overrides unread pipe bytes, cancellation, or a failed read.
     /// </remarks>

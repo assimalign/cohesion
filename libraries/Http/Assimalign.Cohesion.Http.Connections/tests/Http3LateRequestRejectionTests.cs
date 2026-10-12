@@ -42,7 +42,7 @@ public class Http3LateRequestRejectionTests
 
         // Act — the client opens a request after the GOAWAY: stream 4, at the boundary.
         Connection late = await peer.OpenRequestStreamAsync();
-        await late.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/late", "https", "a"));
+        await WriteLateHeadAsync(late, "/late");
         late.Output.Complete();
 
         // Assert — the late request is refused unprocessed, so its client may retry it elsewhere...
@@ -72,7 +72,7 @@ public class Http3LateRequestRejectionTests
         for (int index = 0; index < complete.Length; index++)
         {
             complete[index] = await peer.OpenRequestStreamAsync();
-            await complete[index].Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", $"/late/{index}", "https", "a"));
+            await WriteLateHeadAsync(complete[index], $"/late/{index}");
             complete[index].Output.Complete();
         }
 
@@ -107,12 +107,25 @@ public class Http3LateRequestRejectionTests
 
         // Act
         Connection late = await peer.OpenRequestStreamAsync();
-        await late.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/late", "https", "a"));
+        await WriteLateHeadAsync(late, "/late");
         await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(late));
 
         // Assert — the decoder stream's type (0x03), then the Stream Cancellation for stream 4 and nothing else.
         byte[] expected = [0x03, .. QPackDecoderInstructionEncoder.StreamCancellation(4)];
         (await ReadAtLeastAsync(decoder.Input, expected.Length)).ShouldBe(expected);
+    }
+
+    private static async Task WriteLateHeadAsync(Connection stream, string path)
+    {
+        try
+        {
+            await stream.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", path, "https", "a"));
+        }
+        catch (ConnectionResetException exception)
+        {
+            // The peer may reject immediately after accept, before this write has completed.
+            exception.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestRejected);
+        }
     }
 
     private static async Task<byte[]> ReadAtLeastAsync(PipeReader reader, int count)

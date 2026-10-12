@@ -13,10 +13,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <para>
 /// The first connection error raised on a connection wins: <c>Http3ConnectionContext</c> records it,
 /// stops accepting streams, and aborts the multiplexed connection with the exception as the reason. A
-/// connection that carries a close code
-/// (<see cref="Assimalign.Cohesion.Connections.IMultiplexedConnectionAbort"/>, which the QUIC driver
-/// implements) closes with <see cref="ErrorCode"/>; any other closes with its own default, and the code
-/// travels only with the reason (see docs/DESIGN.md).
+/// connection that carries a close code closes with <see cref="ErrorCode"/> through the multiplexed
+/// root; transports without wire codes still close the connection (see docs/DESIGN.md).
 /// </para>
 /// <para>
 /// Derives from <see cref="IOException"/> so an application reading a request body observes the

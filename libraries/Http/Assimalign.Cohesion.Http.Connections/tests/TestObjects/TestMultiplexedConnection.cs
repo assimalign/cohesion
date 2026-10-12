@@ -16,21 +16,24 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// </summary>
 internal sealed class TestMultiplexedConnection : MultiplexedConnection
 {
-    private readonly Queue<Connection> _pendingStreams;
+    private readonly Queue<MultiplexedStream> _pendingStreams;
     private readonly List<TestConnection> _openedStreams = new();
+    private readonly List<MultiplexedStream> _streams;
+    private readonly Lock _gate = new();
     private readonly CancellationTokenSource _closedSource = new();
     private readonly ConnectionId _id = ConnectionId.New();
     private ConnectionState _state = ConnectionState.Open;
 
-    public TestMultiplexedConnection(params Connection[] streams)
+    public TestMultiplexedConnection(params MultiplexedStream[] streams)
     {
-        _pendingStreams = new Queue<Connection>(streams);
+        _pendingStreams = new Queue<MultiplexedStream>(streams);
+        _streams = new List<MultiplexedStream>(streams);
     }
 
     public bool IsDisposed { get; private set; }
 
     /// <summary>
-    /// The reason passed to the most recent <see cref="Abort"/>, or <see langword="null"/> when the
+    /// The reason passed to the first <see cref="Abort"/>, or <see langword="null"/> when the
     /// connection was never aborted. The HTTP/3 engine aborts with an exception carrying the
     /// connection error code, so tests read the intended RFC 9114 §8 code from here.
     /// </summary>
@@ -65,40 +68,88 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
     public override CancellationToken ConnectionClosed => _closedSource.Token;
 
-    public override void Abort(Exception? reason = null)
+    public override void Abort(long errorCode, Exception? reason = null)
     {
-        AbortReason = reason;
-        _state = ConnectionState.Aborted;
-        _closedSource.Cancel();
-    }
-
-    public override ValueTask DisposeAsync()
-    {
-        IsDisposed = true;
-        _state = ConnectionState.Closed;
-        _closedSource.Cancel();
-        return ValueTask.CompletedTask;
-    }
-
-    public override ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
-    {
-        if (_pendingStreams.Count == 0)
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        MultiplexedStream[] streams;
+        lock (_gate)
         {
-            // No more inbound streams will ever arrive on this double; the
-            // receive loop treats cancellation as connection termination.
-            return ValueTask.FromException<Connection>(new OperationCanceledException(cancellationToken));
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            {
+                return;
+            }
+
+            AbortReason = reason;
+            _state = ConnectionState.Aborted;
+            streams = _streams.ToArray();
         }
 
-        return ValueTask.FromResult(_pendingStreams.Dequeue());
+        _closedSource.Cancel();
+        foreach (MultiplexedStream stream in streams)
+        {
+            stream.Abort(errorCode, reason);
+        }
     }
 
-    public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override void Abort(Exception? reason = null) => Abort(0, reason);
+
+    public override async ValueTask DisposeAsync()
+    {
+        MultiplexedStream[] streams;
+        lock (_gate)
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+
+            IsDisposed = true;
+            if (_state != ConnectionState.Aborted)
+            {
+                _state = ConnectionState.Closed;
+            }
+            streams = _streams.ToArray();
+        }
+
+        _closedSource.Cancel();
+        foreach (MultiplexedStream stream in streams)
+        {
+            await stream.DisposeAsync();
+        }
+    }
+
+    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed || _pendingStreams.Count == 0)
+            {
+                // No more inbound streams will arrive; cancellation terminates the receive loop.
+                return ValueTask.FromException<MultiplexedStream>(new OperationCanceledException(cancellationToken));
+            }
+
+            return ValueTask.FromResult(_pendingStreams.Dequeue());
+        }
+    }
+
+    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
         // Capture the opened outbound stream so tests can inspect what the
         // holder wrote to it (e.g. the server control stream's SETTINGS frame)
         // and observe that it stays open while requests are served.
-        TestConnection stream = new(direction: direction);
-        _openedStreams.Add(stream);
-        return ValueTask.FromResult<Connection>(stream);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            {
+                throw new ConnectionAbortedException("The multiplexed connection is closed.");
+            }
+
+            TestConnection stream = new(direction: direction);
+            _openedStreams.Add(stream);
+            _streams.Add(stream);
+            return ValueTask.FromResult<MultiplexedStream>(stream);
+        }
     }
 }

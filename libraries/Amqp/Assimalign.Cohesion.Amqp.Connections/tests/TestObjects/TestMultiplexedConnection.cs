@@ -14,7 +14,9 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 /// </summary>
 internal sealed class TestMultiplexedConnection : MultiplexedConnection
 {
-    private readonly Queue<Connection> _pendingStreams = new();
+    private readonly Queue<MultiplexedStream> _pendingStreams = new();
+    private readonly List<MultiplexedStream> _streams = new();
+    private readonly Lock _gate = new();
     private readonly CancellationTokenSource _closedSource = new();
     private readonly ConnectionId _id = ConnectionId.New();
     private ConnectionState _state = ConnectionState.Open;
@@ -38,7 +40,14 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
     public bool IsDisposed { get; private set; }
 
-    public void Enqueue(Connection stream) => _pendingStreams.Enqueue(stream);
+    public void Enqueue(MultiplexedStream stream)
+    {
+        lock (_gate)
+        {
+            _pendingStreams.Enqueue(stream);
+            _streams.Add(stream);
+        }
+    }
 
     public override ConnectionId Id => _id;
 
@@ -52,33 +61,84 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
     public override CancellationToken ConnectionClosed => _closedSource.Token;
 
-    public override void Abort(Exception? reason = null)
+    public override void Abort(long errorCode, Exception? reason = null)
     {
-        IsAborted = true;
-        _state = ConnectionState.Aborted;
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        MultiplexedStream[] streams;
+        lock (_gate)
+        {
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            {
+                return;
+            }
+
+            IsAborted = true;
+            _state = ConnectionState.Aborted;
+            streams = _streams.ToArray();
+        }
+
         _closedSource.Cancel();
+        foreach (MultiplexedStream stream in streams)
+        {
+            stream.Abort(errorCode, reason);
+        }
     }
 
-    public override ValueTask DisposeAsync()
+    public override void Abort(Exception? reason = null) => Abort(0, reason);
+
+    public override async ValueTask DisposeAsync()
     {
-        IsDisposed = true;
-        _state = ConnectionState.Closed;
+        MultiplexedStream[] streams;
+        lock (_gate)
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+
+            IsDisposed = true;
+            if (_state != ConnectionState.Aborted)
+            {
+                _state = ConnectionState.Closed;
+            }
+            streams = _streams.ToArray();
+        }
+
         _closedSource.Cancel();
-        return ValueTask.CompletedTask;
+        foreach (MultiplexedStream stream in streams)
+        {
+            await stream.DisposeAsync();
+        }
     }
 
-    public override ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
-        AcceptStreamCount++;
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            {
+                return ValueTask.FromException<MultiplexedStream>(new OperationCanceledException(cancellationToken));
+            }
 
-        return ValueTask.FromResult(_pendingStreams.Dequeue());
+            AcceptStreamCount++;
+            return ValueTask.FromResult(_pendingStreams.Dequeue());
+        }
     }
 
-    public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
-        OpenStreamCount++;
-        LastOpenedDirection = direction;
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            {
+                throw new ConnectionAbortedException("The multiplexed connection is closed.");
+            }
 
-        return ValueTask.FromResult(_pendingStreams.Dequeue());
+            OpenStreamCount++;
+            LastOpenedDirection = direction;
+            return ValueTask.FromResult(_pendingStreams.Dequeue());
+        }
     }
 }

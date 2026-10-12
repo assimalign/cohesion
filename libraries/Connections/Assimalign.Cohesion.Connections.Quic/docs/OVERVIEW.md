@@ -14,12 +14,12 @@ as every other transport.
   accepts inbound QUIC connections.
 - `QuicConnectionFactory` — client-side: dials outbound QUIC connections.
 - `QuicMultiplexedConnection` — one QUIC connection; accepts and opens
-  streams, each surfaced as a `Connection`, and reports its TLS 1.3
+  streams, each surfaced as a `MultiplexedStream`, and reports its TLS 1.3
   handshake (ALPN protocol, cipher suite, peer certificate) through the
   `Tls` feature from `Connections.Tls`. It and its streams carry the caller's
-  QUIC application error codes through the contracts'
-  `IMultiplexedConnectionAbort` (`CONNECTION_CLOSE`) and
-  `DirectionalAbort` feature (`STOP_SENDING`, `RESET_STREAM`).
+  QUIC application error codes through root `Abort(code, reason)` calls: a connection
+  close sends `CONNECTION_CLOSE`, and a whole-stream reset sends `STOP_SENDING` and
+  `RESET_STREAM`. The `DirectionalAbort` feature still ends one direction alone.
 - Options types covering endpoint, TLS/ALPN, stream limits, pipe buffer
   sizes, default QUIC application error codes (defaulting to the
   HTTP/3 codes, matching the default ALPN), and how long disposing a
@@ -31,7 +31,7 @@ they belong to the protocol layer above. See `DESIGN.md` for the
 teardown-ordering guarantee the driver makes to protocols with critical
 unidirectional streams.
 
-Streams optionally expose `IConnectionInputCompletion`: a clean transport end already observed,
+Streams expose root `IsInputCompleted`: a clean transport end already observed,
 without another read. Check the input pipe for buffered bytes as well before treating it as empty.
 
 The connection exposes `connection.StreamLimits.InboundBidirectionalStreamLimit`, a
@@ -74,7 +74,7 @@ await listener.BindAsync(cancellationToken);
 
 // CreateAsync(options, cancellationToken) remains available as construct-and-bind shorthand.
 IMultiplexedConnection connection = await listener.AcceptAsync(cancellationToken);
-IConnection stream = await connection.AcceptStreamAsync(cancellationToken);
+IMultiplexedStream stream = await connection.AcceptStreamAsync(cancellationToken);
 
 // End this side gracefully (FIN). The stream stays readable: the peer may keep sending
 // until it ends its own side.
@@ -90,4 +90,11 @@ if (stream.DirectionalAbort is { } abort)
 }
 
 await stream.Input.CompleteAsync();
+
+// Or reset the whole stream and end its lifecycle with one root call.
+stream.Abort(0x10c); // H3_REQUEST_CANCELLED; already ended directions retain their first signal.
 ```
+
+QUIC codes range from 0 to 2^62 - 1. The first connection abort or disposal chooses its close
+code, including when disposal is still waiting for stream delivery. The new stream return types
+are binary breaks against 10.0.0-preview.1; see DESIGN.md for the migration and accepted breaks.

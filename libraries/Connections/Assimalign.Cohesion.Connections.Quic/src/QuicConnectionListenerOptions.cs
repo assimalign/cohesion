@@ -163,7 +163,7 @@ public sealed class QuicConnectionListenerOptions
     /// The code goes on the wire when the connection closes through
     /// <see cref="IMultiplexedConnection.Abort(Exception)"/> or
     /// <see cref="IAsyncDisposable.DisposeAsync"/>.
-    /// <see cref="IMultiplexedConnectionAbort.Abort(long, Exception)"/> closes with the caller's code
+    /// <see cref="IMultiplexedConnection.Abort(long, Exception)"/> closes with the caller's code
     /// instead; the first abort or disposal decides the close.
     /// </para>
     /// <para>

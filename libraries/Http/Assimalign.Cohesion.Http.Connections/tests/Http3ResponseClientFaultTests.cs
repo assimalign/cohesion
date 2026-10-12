@@ -26,7 +26,7 @@ public class Http3ResponseClientFaultTests
             http3 => http3.Limits.MinResponseDataRate = new HttpMinDataRate(1_000_000, TimeSpan.FromMilliseconds(100)),
             ConfigureInterceptors,
             inner => server = new StallingMultiplexedConnection(inner));
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/stream", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext context = await peer.NextContextAsync();
@@ -62,7 +62,7 @@ public class Http3ResponseClientFaultTests
             http3 => http3.Limits.MinResponseDataRate = gated ? new HttpMinDataRate(1, TimeSpan.FromMinutes(1)) : null,
             ConfigureInterceptors,
             inner => server = new StallingMultiplexedConnection(inner));
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/stream", "https", "a"), timeout.Token);
         await using IHttpContext context = await peer.NextContextAsync();
         IHttpExchangeControl control = GetControl(context);
@@ -108,7 +108,7 @@ public class Http3ResponseClientFaultTests
         // Arrange
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: ConfigureInterceptors);
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/stream", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext context = await peer.NextContextAsync();
@@ -130,7 +130,7 @@ public class Http3ResponseClientFaultTests
         // Arrange
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: ConfigureInterceptors);
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/stream", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext context = await peer.NextContextAsync();
@@ -157,7 +157,7 @@ public class Http3ResponseClientFaultTests
             http3 => http3.Limits.MinResponseDataRate = gated ? new HttpMinDataRate(1, TimeSpan.FromMinutes(1)) : null,
             ConfigureInterceptors,
             inner => server = new StallingMultiplexedConnection(inner));
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/parent-loss", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext context = await peer.NextContextAsync();
@@ -202,7 +202,7 @@ public class Http3ResponseClientFaultTests
             http3 => http3.Limits.MinResponseDataRate = null,
             ConfigureInterceptors,
             inner => server = new StallingMultiplexedConnection(inner));
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/interim-parent-loss", "https", "a"), timeout.Token);
         await using IHttpContext context = await peer.NextContextAsync();
         IHttpExchangeControl control = GetControl(context);
@@ -245,7 +245,7 @@ public class Http3ResponseClientFaultTests
             http3 => http3.Limits.MinResponseDataRate = null,
             ConfigureInterceptors,
             inner => server = new StallingMultiplexedConnection(inner));
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/shutdown", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext context = await peer.NextContextAsync();

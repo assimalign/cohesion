@@ -18,9 +18,10 @@ maintained.
 - `InMemoryMultiplexedConnectionPair.Create(...)`,
   `InMemoryMultiplexedConnectionListener` / `InMemoryMultiplexedConnectionFactory` — the
   multiplexed variant for h2/h3-shaped stream tests, where each opened stream is itself an
-  in-memory `Connection` that can abandon either direction with an application error code
+  in-memory `MultiplexedStream` with whole-stream `Abort(code, reason)` and `IsInputCompleted`.
+  It can also abandon either direction with an application error code
   (`stream.DirectionalAbort`, from `Connections.StreamAbort`); the other end observes the code on a
-  `ConnectionResetException`. Both stream ends register that feature; byte-stream pairs return `null`.
+  `ConnectionResetException`. Both stream ends register that feature; byte-stream pairs have no directional-abort feature.
 - `InMemoryEndPoint` — a name-addressed `EndPoint` for the socketless transport.
 
 Protocol semantics belong to the layers above; this driver only moves bytes.

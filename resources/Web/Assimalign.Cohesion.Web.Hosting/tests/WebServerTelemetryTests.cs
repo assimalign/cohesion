@@ -738,7 +738,7 @@ public class WebServerTelemetryTests
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
 
         // Act
-        Connection stream = await client.SendRequestAsync(
+        MultiplexedStream stream = await client.SendRequestAsync(
             "POST",
             path,
             [("content-length", "100")],
@@ -792,7 +792,7 @@ public class WebServerTelemetryTests
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
 
         // Act
-        Connection stream = await client.SendRequestAsync(
+        MultiplexedStream stream = await client.SendRequestAsync(
             "POST",
             path,
             [],
@@ -849,7 +849,7 @@ public class WebServerTelemetryTests
         await factory.StartAsync(cancellationToken);
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
         await using Connection controlStream = await client.OpenControlStreamAsync(cancellationToken);
-        await using Connection requestStream = await client.SendRequestAsync(
+        await using MultiplexedStream requestStream = await client.SendRequestAsync(
             "POST",
             path,
             [],

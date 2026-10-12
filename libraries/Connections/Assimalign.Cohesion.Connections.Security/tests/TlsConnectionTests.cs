@@ -105,14 +105,14 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
         await using MultiplexedConnection clientLifetime = client;
         await using MultiplexedConnection serverLifetime = server;
-        await using Connection clientStream = await client.OpenStreamAsync(cancellationToken: timeout.Token);
-        await using Connection serverStream = await server.AcceptStreamAsync(timeout.Token);
+        await using MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: timeout.Token);
+        await using MultiplexedStream serverStream = await server.AcceptStreamAsync(timeout.Token);
         (IConnection securedClient, IConnection securedServer) = await UpgradePairAsync(clientStream, serverStream, timeout.Token);
         await using IConnection securedClientLifetime = securedClient;
         await using IConnection securedServerLifetime = securedServer;
         IConnection sender = readAtServer ? securedClient : securedServer;
         IConnection receiver = readAtServer ? securedServer : securedClient;
-        IConnection innerReceiver = readAtServer ? serverStream : clientStream;
+        IMultiplexedStream innerReceiver = readAtServer ? serverStream : clientStream;
         IMultiplexedStreamAbort innerAbort = innerReceiver.DirectionalAbort.ShouldNotBeNull();
         byte[] payload = [1, 2, 3];
         await sender.Output.WriteAsync(payload, timeout.Token);
@@ -128,7 +128,6 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
         hasBufferedPlaintext.ShouldBeTrue();
         buffered.Buffer.ToArray().ShouldBe(payload);
         receiver.Input.AdvanceTo(buffered.Buffer.End);
-        receiver.DirectionalAbort.ShouldBeNull();
         receiver.Features.Get<IMultiplexedStreamAbort>().ShouldBeNull();
         receiver.Features.Get(IMultiplexedStreamAbort.FeatureName).ShouldBeNull();
         receiver.Features.ShouldNotContain(feature => feature.Name == IMultiplexedStreamAbort.FeatureName);

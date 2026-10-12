@@ -12,13 +12,21 @@ namespace Assimalign.Cohesion.Connections.Tests;
 /// </summary>
 internal sealed class TestMultiplexedConnection : MultiplexedConnection
 {
-    private readonly Queue<Connection> _pendingStreams = new();
+    private readonly Queue<MultiplexedStream> _pendingStreams = new();
     private readonly CancellationTokenSource _closedSource = new();
     private readonly ConnectionId _id = ConnectionId.New();
+    private readonly List<MultiplexedStream> _streams = new();
+    private ConnectionState _state = ConnectionState.Open;
 
     public ConnectionDirection? LastOpenedDirection { get; private set; }
 
-    public void Enqueue(Connection stream) => _pendingStreams.Enqueue(stream);
+    public long? LastAbortCode { get; private set; }
+
+    public void Enqueue(MultiplexedStream stream)
+    {
+        _pendingStreams.Enqueue(stream);
+        _streams.Add(stream);
+    }
 
     public override ConnectionId Id => _id;
 
@@ -31,22 +39,48 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
         IsMultiplexed = true
     };
 
-    public override ConnectionState State => ConnectionState.Open;
+    public override ConnectionState State => _state;
 
     public override CancellationToken ConnectionClosed => _closedSource.Token;
 
-    public override void Abort(Exception? reason = null) => _closedSource.Cancel();
+    public override void Abort(Exception? reason = null) => Abort(0, reason);
 
-    public override ValueTask DisposeAsync()
+    public override void Abort(long errorCode, Exception? reason = null)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        if (_state != ConnectionState.Open)
+        {
+            return;
+        }
+
+        LastAbortCode = errorCode;
+        _state = ConnectionState.Aborted;
+        foreach (MultiplexedStream stream in _streams)
+        {
+            stream.Abort(errorCode, reason);
+        }
+
         _closedSource.Cancel();
-        return ValueTask.CompletedTask;
     }
 
-    public override ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask DisposeAsync()
+    {
+        if (_state == ConnectionState.Open)
+        {
+            _state = ConnectionState.Closed;
+            _closedSource.Cancel();
+        }
+
+        foreach (MultiplexedStream stream in _streams)
+        {
+            await stream.DisposeAsync();
+        }
+    }
+
+    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         => ValueTask.FromResult(_pendingStreams.Dequeue());
 
-    public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
         LastOpenedDirection = direction;
 

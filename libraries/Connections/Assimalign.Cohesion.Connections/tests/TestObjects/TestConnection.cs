@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Connections.Tests;
 /// written to <see cref="PeerOutput"/> appear on the connection's <see cref="Input"/>, and bytes the
 /// connection writes to <see cref="Output"/> can be observed on <see cref="PeerInput"/>.
 /// </summary>
-internal sealed class TestConnection : Connection
+internal sealed class TestConnection : MultiplexedStream
 {
     private readonly Connection _self;
     private readonly Connection _peer;
@@ -60,9 +60,20 @@ internal sealed class TestConnection : Connection
 
     public override ConnectionState State => _self.State;
 
+    public override bool IsInputCompleted => false;
+
+    public long? LastAbortCode { get; private set; }
+
     public override CancellationToken ConnectionClosed => _self.ConnectionClosed;
 
     public override void Abort(Exception? reason = null) => _self.Abort(reason);
+
+    public override void Abort(long errorCode, Exception? reason = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        LastAbortCode ??= errorCode;
+        Abort(reason);
+    }
 
     public override ValueTask DisposeAsync() => _self.DisposeAsync();
 }

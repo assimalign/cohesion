@@ -67,7 +67,7 @@ public class Http3CriticalStreamTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(decorate: inner => server = new CodeRecordingMultiplexedConnection(inner));
         Task<bool> receive = peer.MoveNextAsync();
 
-        Connection control = await peer.OpenUnidirectionalStreamAsync();
+        MultiplexedStream control = await peer.OpenUnidirectionalStreamAsync();
         await control.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
             new (long, long)[] { (0x01, 0) },
             ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(0, "u=1"))));

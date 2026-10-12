@@ -6,11 +6,11 @@ namespace Assimalign.Cohesion.Connections;
 /// The exception thrown when a connection is reset by the remote peer.
 /// </summary>
 /// <remarks>
-/// A stream of a multiplexed connection is reset one direction at a time: the peer resets its sending
-/// direction, which fails this end's reads, or stops this end's sending direction, which fails its writes.
-/// When the peer gave a reason in an application error code (see <see cref="IMultiplexedStreamAbort"/>), a
-/// driver that reports the reset through this exception carries the code in
-/// <see cref="ApplicationErrorCode"/>.
+/// A multiplexed stream can fail because the peer reset either stream direction or closed its parent
+/// connection. A sending-direction reset fails this end's reads; stopping this end's sending direction
+/// fails its writes. A parent connection loss fails both directions of its open streams. When the
+/// transport carries an application error code for the reset or connection close, a driver that reports
+/// the failure through this exception carries that code in <see cref="ApplicationErrorCode"/>.
 /// </remarks>
 public sealed class ConnectionResetException : ConnectionException
 {
@@ -44,7 +44,7 @@ public sealed class ConnectionResetException : ConnectionException
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConnectionResetException"/> class with a specified error message
-    /// and the application error code the remote peer reset the stream with.
+    /// and the application error code the remote peer sent with a stream reset or connection close.
     /// </summary>
     /// <param name="message">The message that describes the error.</param>
     /// <param name="applicationErrorCode">The application protocol error code the remote peer sent.</param>
@@ -55,8 +55,8 @@ public sealed class ConnectionResetException : ConnectionException
     }
 
     /// <summary>
-    /// Gets the application protocol error code the remote peer reset or stopped the stream with, or
-    /// <see langword="null"/> when the reset carried none.
+    /// Gets the application protocol error code the remote peer sent when resetting or stopping the
+    /// stream, or closing its parent connection; <see langword="null"/> when the failure carried none.
     /// </summary>
     public long? ApplicationErrorCode { get; }
 }

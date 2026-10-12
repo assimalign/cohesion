@@ -60,16 +60,16 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
 
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
-        public override async ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
+        public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         {
-            Connection stream = await _inner.AcceptStreamAsync(cancellationToken);
+            MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken);
             if (stream.Direction != ConnectionDirection.Bidirectional)
             {
                 return stream;
             }
 
             // The fixture accepts completed, pre-buffered requests only. Copy before presenting a
-            // StreamPipeReader so both cases have identical buffering and differ only in the facet.
+            // StreamPipeReader so both cases have identical buffering and differ only in their completion answer.
             ReadResult read = await stream.Input.ReadAsync(cancellationToken);
             if (!read.IsCompleted)
             {
@@ -81,21 +81,23 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
             return new CompletedInputConnection(stream, payload, _publishCompletion);
         }
 
-        public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+        public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
             => _inner.OpenStreamAsync(direction, cancellationToken);
+
+        public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
 
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
 
         public override ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
-    private sealed class CompletedInputConnection : Connection, IConnectionInputCompletion
+    private sealed class CompletedInputConnection : MultiplexedStream
     {
-        private readonly Connection _inner;
+        private readonly MultiplexedStream _inner;
         private readonly MemoryStream _payload;
         private readonly bool _publishCompletion;
 
-        public CompletedInputConnection(Connection inner, byte[] payload, bool publishCompletion)
+        public CompletedInputConnection(MultiplexedStream inner, byte[] payload, bool publishCompletion)
         {
             _inner = inner;
             _payload = new MemoryStream(payload, writable: false);
@@ -103,7 +105,7 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
             Input = PipeReader.Create(_payload, new StreamPipeReaderOptions(leaveOpen: true));
         }
 
-        public bool IsInputCompleted => _publishCompletion && _payload.Position == _payload.Length;
+        public override bool IsInputCompleted => _publishCompletion && _payload.Position == _payload.Length;
 
         protected override IConnectionFeatureCollection InnerFeatures => _inner.Features;
 
@@ -124,6 +126,8 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
         public override ConnectionState State => _inner.State;
 
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+
+        public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
 
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
 

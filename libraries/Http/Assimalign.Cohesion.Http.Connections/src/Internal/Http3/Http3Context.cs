@@ -26,7 +26,7 @@ internal sealed class Http3Context : TransportHttpContext
     /// </summary>
     /// <remarks>
     /// <see cref="HttpContext.RequestCancelled"/> fires on <paramref name="requestAborted"/> and on the
-    /// request stream's <see cref="IConnection.ConnectionClosed"/>, which the drivers signal when the
+    /// request stream's <see cref="IMultiplexedStream.ConnectionClosed"/>, which the drivers signal when the
     /// client resets the request stream (<c>RESET_STREAM</c>), stops the response
     /// (<c>STOP_SENDING</c>), or the stream is aborted or lost. RFC 9114 §4.1.1 — that is how a client
     /// cancels a request, so the application learns of it as an HTTP/2 <c>RST_STREAM</c> tells it,
@@ -37,7 +37,7 @@ internal sealed class Http3Context : TransportHttpContext
         in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
-        IConnection streamConnection,
+        IMultiplexedStream streamConnection,
         long streamId,
         Http3RequestBodyStream requestBody,
         int featureCapacity,
@@ -62,7 +62,7 @@ internal sealed class Http3Context : TransportHttpContext
     /// The bidirectional QUIC stream this exchange arrived on; the response is written
     /// back to its output.
     /// </summary>
-    public IConnection StreamConnection { get; }
+    public IMultiplexedStream StreamConnection { get; }
 
     /// <summary>
     /// The request stream's wire ID (client-initiated bidirectional: 0, 4, 8, …), derived when the
