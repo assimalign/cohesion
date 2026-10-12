@@ -25,6 +25,17 @@ Dependency direction is one-way: this package → `Web` (seams) + `Http.Forwarde
 consumes already-validated value objects, so the security-sensitive code has one job:
 apply policy.
 
+Diagnostics additionally references `Web.Server` for the request-id feature. The
+feature contracts remain with their owners:
+
+```mermaid
+flowchart LR
+    ForwardedHeaders["Web.ForwardedHeaders"] --> Web["Web"]
+    ForwardedHeaders --> Server["Web.Server"]
+    ForwardedHeaders --> Forwarded["Http.Forwarded"]
+    Forwarded --> Http["Http"]
+```
+
 ## The trust model is explicit, and header selection is part of it
 
 `ForwardedHeadersOptions` carries four inputs, validated and snapshotted at composition
@@ -143,6 +154,47 @@ what the ordering contract protects:
 Plain delegate/feature wiring over BCL `IPAddress`/`IPNetwork` and the #770 value
 objects — no reflection, no runtime codegen, no dynamic serialization
 (`IsAotCompatible=true`).
+
+## Diagnostics
+
+The internal `ForwardedHeadersEventSource` is named
+`Assimalign.Cohesion.Web.ForwardedHeaders`. It reports an interrupted walk once from
+`ForwardedHeadersResolver.ResolveCore`, after the RFC 7239 parse or the selected
+family's walk has supplied its stop reason. Missing or unselected forwarding headers
+and successfully exhausted chains are silent. No request success event is emitted.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `ForwardingStopped` | Verbose | `reason`, `family`, `hopsApplied:int`, `untrustedPeer`, `requestId` |
+
+`reason` is `UntrustedPeer`, `ForwardLimit`, `MalformedFor`, `InvalidProto`,
+`ImplausibleHost`, `UnusableForwardedHeader`, or `AddresslessHop`; `family` is
+`Forwarded` or `X-Forwarded`. The depth-0 `UntrustedPeer` case alone includes the
+transport peer's IP address (without its port). An untrusted intermediate hop is
+header-derived and is never written; all other cases carry an empty `untrustedPeer`.
+Non-IP endpoints are never formatted. The permitted peer address is personal data
+in the receiving sink. Header values, paths, queries, and claimed hosts are never
+written.
+
+`requestId` comes from `IWebRequestIdFeature` in `Web.Server`, with an empty fallback
+for a custom context that omits the feature. It never comes from an ambient activity.
+The request-id read, reason formatting and permitted peer formatting are all inside
+the Verbose `IsEnabled` guard. These events have no keywords and need no throttle.
+
+| Counter | Kind | Exact transition |
+| --- | --- | --- |
+| `untrusted-forwarding` | PollingCounter total | Each walk stopped by `UntrustedPeer` |
+| `malformed-forwarding` | PollingCounter total | Each walk stopped by `MalformedFor`, `InvalidProto`, `ImplausibleHost`, or `UnusableForwardedHeader` |
+
+Counters update with `Interlocked` whether or not a listener is enabled and are
+created lazily when a listener enables the source. `ForwardLimit` and
+`AddresslessHop` are policy/topology stops and increment neither total. The raw-input
+resolver overload used by unit callers follows the same diagnostics path, with an
+empty request id because it has no context.
+
+Compared with `10.0.0-preview.1`, the source and attribution counters are additive.
+There is no public API or wire behavior break: the existing trust decisions, applied
+values, family precedence, and stop points are unchanged.
 
 ## Non-goals
 
