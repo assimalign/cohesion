@@ -192,6 +192,36 @@ public sealed partial class SqlDefinedFunctionTests
         (await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await declared.BuildAsync())).Message.ShouldContain("COHSQLE009");
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted SQL function domain signatures enforce argument and result constraints")]
+    public async Task Open_DomainSignatures_ShouldPreserveArgumentAndResultChecks()
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        var builder = SqlDatabaseEngine.CreateBuilder("domain-signature");
+        builder.Options.StorageStrategy = storage;
+        await using (var first = await builder.BuildAsync())
+        {
+            await using var session = await SessionAsync(first);
+            await ExecuteAsync(session, "CREATE TABLE t (id INT)");
+            await ExecuteAsync(session, "INSERT INTO t VALUES (1)");
+            await ExecuteAsync(session, "CREATE DOMAIN positive AS INT NOT NULL CHECK (VALUE > 0)");
+            await ExecuteAsync(session, "CREATE FUNCTION read_positive(p positive) RETURNS INT RETURN p");
+            await ExecuteAsync(session, "CREATE FUNCTION make_positive(p INT) RETURNS positive RETURN p");
+        }
+        // Act
+        var reopen = SqlDatabaseEngine.CreateBuilder("domain-signature");
+        reopen.Options.StorageStrategy = storage.CaptureDurableImages();
+        await using var engine = await reopen.BuildAsync();
+        var database = await engine.OpenDatabaseAsync("functions");
+        await using var reader = await database.CreateSessionAsync();
+        // Assert
+        (await RowsAsync(reader, "SELECT read_positive(2), make_positive(3) FROM t")).ShouldBe([[2, 3]]);
+        await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(reader, "SELECT read_positive(CAST(-1 AS INT)) FROM t"));
+        await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(reader, "SELECT make_positive(CAST(-1 AS INT)) FROM t"));
+        await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(reader, "SELECT make_positive(NULL) FROM t"));
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "DROP DOMAIN positive"))).Message.ShouldContain("COHSQLD002");
+    }
+
     private sealed class ScriptRow
     {
         public int Id { get; set; }

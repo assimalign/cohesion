@@ -4214,7 +4214,8 @@ One immutable per-database environment merges native and SQL definitions, rebuil
 on open and definition DDL. Namespace collisions, recursive dependencies and declarations weaker
 than their called functions are refused before publication. SQL defaults are volatile and called
 on NULL, while native shorthand keeps its strict default. SQL domain columns use E3's existing
-bounds and check path. Missing native calls produce unresolved bindings: open succeeds but use
+bounds and check path. Function metadata preserves domain names for parameters and results; the
+SQL scalar leaf applies their base bounds and domain checks whenever its body is invoked. Missing native calls produce unresolved bindings: open succeeds but use
 fails, and a declared database fails Build's generation-cached validation. CHECK is Immutable-only.
 CREATE TABLE function-call defaults bind once and run for each omitted value; ADD COLUMN stays
 literal-only because its metadata operation does not materialize missing row tails.

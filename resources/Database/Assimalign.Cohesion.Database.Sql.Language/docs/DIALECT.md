@@ -1690,7 +1690,8 @@ external parameters and recursion are refused. Defaults are VOLATILE and CALLED 
 as in PostgreSQL src/backend/commands/functioncmds.c:1095-1098. STRICT bypasses a body on NULL.
 A function may call only functions whose volatility is at least its own; CHECK, including a
 domain CHECK, admits Immutable functions only. Functions share the engine namespace and E2's
-storage-type overload identity. Iteration 1 has no CREATE OR REPLACE, procedural body, LANGUAGE,
+storage-type overload identity. Domain names in SQL function signatures persist, and their
+bounds and checks apply to arguments and results when the body runs. Iteration 1 has no CREATE OR REPLACE, procedural body, LANGUAGE,
 CASCADE, qualified function name or domain-over-domain, unlike PostgreSQL's broader facilities.
 
 Domains share E3's type namespace and coercion/check path. Columns inherit their domain's

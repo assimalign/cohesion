@@ -61,7 +61,7 @@ internal static class SqlDefinitionBinder
         }
         string body = SqlPersistedExpression.Canonicalize(create.Body, $"Function '{create.Name}'");
         return new SqlCatalogFunction(create.Name, signature, create.Parameters.Select(parameter => parameter.Name).ToArray(),
-            types.Select(type => SqlType.ForStorage(type.Storage).Name).ToArray(), SqlType.ForStorage(result.Storage).Name,
+            types.Select(type => type.Name).ToArray(), result.Name,
             create.Volatility, create.IsStrict, body, dependencies.Order(StringComparer.Ordinal).ToArray(),
             schema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema, schema);
     }

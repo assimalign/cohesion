@@ -12,6 +12,7 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
     private readonly SqlBoundExpression _body;
     private readonly SqlCatalogColumn _result;
     private readonly bool _notNullCheck;
+    private readonly SqlCatalogColumn?[] _domainParameters;
 
     internal SqlExpressionFunction(string name, SqlType[] parameters, SqlType returnType,
         SqlFunctionVolatility volatility, bool strict, SqlBoundExpression body, string? unresolved = null, bool notNullCheck = false)
@@ -22,6 +23,14 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
         _result = new SqlCatalogColumn(name, returnType.Storage);
         _notNullCheck = notNullCheck;
         Unresolved = unresolved;
+        _domainParameters = new SqlCatalogColumn?[parameters.Length];
+        for (int index = 0; index < parameters.Length; index++)
+        {
+            if (parameters[index].IsDomain)
+            {
+                _domainParameters[index] = new SqlCatalogColumn(parameters[index].Name, parameters[index].Storage);
+            }
+        }
     }
 
     internal string? Unresolved { get; }
@@ -37,9 +46,28 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
         var frame = new object?[arguments.Count];
         for (int index = 0; index < frame.Length; index++)
         {
-            frame[index] = arguments[index].ToObject();
+            object? value = arguments[index].ToObject();
+            if (_domainParameters[index] is { } column)
+            {
+                value = SqlPlanExecutor.CoerceForColumn(value, column);
+                CheckDomain(Parameters[index], value, arguments.Context);
+            }
+            frame[index] = value;
         }
         object? result = SqlExpressionEvaluator.ForExecution(null, arguments.Context.CancellationToken).Evaluate(_body, frame);
-        return SqlValue.FromObject(SqlPlanExecutor.CoerceForColumn(result, _result));
+        result = SqlPlanExecutor.CoerceForColumn(result, _result);
+        CheckDomain(ReturnType, result, arguments.Context);
+        return SqlValue.FromObject(result);
+    }
+    private void CheckDomain(SqlType type, object? value, scoped in SqlFunctionContext context)
+    {
+        if (type.IsDomain && type.Check is { } check)
+        {
+            var arguments = new SqlArguments([SqlValue.FromObject(value)], context);
+            if (check.Invoke(in arguments).ToObject() is false)
+            {
+                throw new SqlConstraintViolationException($"A value of SQL function '{Name}' violates domain '{type.Name}'.", type.Name, string.Empty, "DOMAIN");
+            }
+        }
     }
 }
