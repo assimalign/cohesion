@@ -90,10 +90,18 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
             try
             {
                 await next.Invoke(new RequestTimeoutHttpContext(context, feature)).ConfigureAwait(false);
+                if (IsRequestTimeout(context, feature))
+                {
+                    RequestTimeoutEventSource.Log.TimeoutIgnored(context, feature.ArmedTimeout);
+                }
             }
-            catch (OperationCanceledException) when (feature.TimedOut && !context.RequestCancelled.IsCancellationRequested)
+            catch (OperationCanceledException) when (IsRequestTimeout(context, feature))
             {
-                await WriteTimeoutResponseAsync(context, feature.EffectivePolicy ?? _fallbackPolicy).ConfigureAwait(false);
+                RequestTimeoutPolicy timeoutPolicy = feature.EffectivePolicy ?? _fallbackPolicy;
+                bool responseStarted = context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true };
+                RequestTimeoutEventSource.Log.RequestTimedOut(context, feature.ArmedTimeout, responseStarted,
+                    responseStarted ? 0 : (int)timeoutPolicy.StatusCode);
+                await WriteTimeoutResponseAsync(context, timeoutPolicy).ConfigureAwait(false);
             }
         }
         finally
@@ -104,6 +112,11 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
             feature.Dispose();
         }
     }
+
+    private static bool IsRequestTimeout(IHttpContext context, RequestTimeoutFeature feature)
+        => feature.TimedOut && !context.RequestCancelled.IsCancellationRequested &&
+            context.Features.Get<IWebClientFaultFeature>()?.StatusCode is null &&
+            context.Features.Get<IWebResponseClientFaultFeature>()?.ResponseAbortedByClient != true;
 
     // Records that this middleware processed the endpoint, with or without a policy of its own: routing
     // checks every metadata item that names this middleware, including a group-level timeout an

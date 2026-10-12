@@ -133,25 +133,23 @@ naming the endpoint and the middleware instead of running the endpoint unbounded
 - **Debugger suspension still acknowledges.** Enforcement is suspended there, not missing, so an
   endpoint with a timeout runs normally under an attached debugger.
 
-## The timer: one unarmed CTS per exchange, TimeProvider-bound
+## The timer: one TimeProvider-bound timer per exchange
 
-Each governed exchange owns two sources: a timeout source constructed
-`new CancellationTokenSource(Timeout.InfiniteTimeSpan, options.TimeProvider)` and the linked
-source described above. Creating the timeout source *unarmed but with the provider* is
-deliberate:
+Each governed exchange owns one initially unarmed `ITimer` from the configured `TimeProvider`,
+a timeout cancellation source, and a source linking timeout and transport cancellation.
+The timer exists even without a policy because a handler can call `SetTimeout`.
+Arming, disabling, and claiming expiry share a per-exchange lock. The arm records both its
+interval and timestamp. A callback already queued from a previous arm checks the current
+deadline before cancelling work, so it cannot expire a later arm or misattribute its interval.
+Once expiry is claimed the interval is retained, and subsequent re-arms cannot un-cancel it.
 
-- the `(delay, TimeProvider)` constructor is what binds `CancelAfter` to the provider — a
-  bare CTS re-armed later would silently fall back to system timing;
-- the source must exist even when no policy is in effect, because a handler's `SetTimeout` can
-  arm it when neither the endpoint nor the global default has a timeout;
-- the effective policy then arms it once, and disable is `CancelAfter(InfiniteTimeSpan)` — the
-  same one-timer re-arm as every other transition, so there is no timer allocation churn per
-  change.
+Cancellation runs outside the timer lock because it can synchronously invoke application
+callbacks. Disposing the request stops the timer and releases both cancellation sources;
+a callback that races disposal tolerates the disposed timeout source. The timer callback
+raises no events: the middleware reports the outcome when downstream unwinds or completes.
 
-`CancelAfter` after the source has fired is inherently a no-op, which yields the documented
-race semantic of `Disable`/`SetTimeout` (effective only before expiry) — the same race ASP.NET
-documents for `DisableRequestTimeout`. Cost when the middleware is registered but nothing arms:
-two small allocations per request (the timeout source and the linked source).
+This keeps one timer per exchange without allocation churn on `SetTimeout`. Range validation
+matches `CancellationTokenSource.CancelAfter`, including calls made after expiry.
 
 ## Policy and metadata shape
 
@@ -217,3 +215,42 @@ Nothing in the package (or its tests) needs dynamic code.
 - **No 504 after the response has started** — physically impossible; the started path aborts.
 - **No Microsoft.Extensions dependencies, no separate hosting wiring.** The package composes
   purely against the Web root's builder seams and ships to applications via `App.Web`.
+
+## Diagnostics
+
+The internal `RequestTimeoutEventSource` is named
+`Assimalign.Cohesion.Web.RequestTimeouts`. It reports timeout outcomes on the request flow,
+never in the timer callback. It reads `requestId` from `IWebRequestIdFeature` and the route
+from `IWebEndpointFeature` only inside the enabled-event check; it never reads the ambient
+activity, request path, query, headers or body. The contracts-only Web.Server dependency
+supplies correlation and the client-fault markers without a hosting dependency.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `RequestTimedOut` | Warning | `timeoutMilliseconds:double`, `responseStarted:bool`, `statusCode:int`, `routeTemplate`, `suppressedCount:int`, `requestId` |
+| 2 | `TimeoutIgnored` | Verbose | `timeoutMilliseconds:double`, `routeTemplate`, `requestId` |
+
+`timeoutMilliseconds` records the armed interval, including a handler's `SetTimeout` override,
+not elapsed wall time or the original policy. Re-arming after expiry does not change it.
+`RequestTimedOut` reports the selected policy's status (a custom response writer still owns its
+actual response), or zero when the head was already committed and the exchange must abort.
+Warnings are limited to one per second for the process; the next warning reports the number
+suppressed since the preceding warning. No event is raised for successful, unexpired requests.
+
+The exact `PollingCounter` totals `timed-out-requests` and `ignored-timeouts` are maintained
+with or without listeners, including suppressed warnings. A cancelled unwind is counted by the
+first counter; normal completion despite expiry is counted by the second, never both.
+Transport cancellation and either client-fault marker take precedence over the timer. In
+particular a request-body rate fault (408) or response-rate abort remains a transport outcome
+even if its cancellation is wrapped or swallowed while the request timer expires. No request
+timeout event or counter duplicates those rate faults.
+
+Compared with 10.0.0-preview.1, event delivery and counters are additive. The new entries are a
+diagnostic behavior break for applications forwarding the Web provider prefix into configured
+sinks, on program decision 15's terms. The attribution
+correction is a behavior change under program decision 15: a latched client fault now wins
+over a simultaneous application timer even when downstream wraps it in an
+`OperationCanceledException` without cancelling the original transport token. It is no longer
+converted into a timeout response. Existing public interfaces and timeout policy defaults are
+unchanged. A queued callback from an older arm now respects a replacement deadline instead
+of cancelling it early. NativeAOT listeners require `EventSourceSupport=true` in the application.

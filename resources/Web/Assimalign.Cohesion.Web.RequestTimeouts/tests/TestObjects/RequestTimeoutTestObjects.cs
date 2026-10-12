@@ -181,6 +181,8 @@ internal sealed class FakeResponseStreamingFeature : IHttpResponseStreamingFeatu
 /// </summary>
 internal sealed class ManualTimeProvider : TimeProvider
 {
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
     private readonly Lock _gate = new();
     private readonly List<ManualTimer> _timers = new();
     private DateTimeOffset _utcNow = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -213,7 +215,7 @@ internal sealed class ManualTimeProvider : TimeProvider
     }
 
     /// <summary>Advances the clock, firing every timer whose due time elapses.</summary>
-    public void Advance(TimeSpan delta)
+    public void Advance(TimeSpan delta, Action? beforeCallbacks = null)
     {
         List<ManualTimer> due = new();
 
@@ -232,6 +234,7 @@ internal sealed class ManualTimeProvider : TimeProvider
 
         // Fire outside the gate: a callback cancels a CancellationTokenSource, which may run
         // continuations inline and re-enter the provider (e.g. to re-arm or dispose a timer).
+        beforeCallbacks?.Invoke();
         foreach (ManualTimer timer in due)
         {
             timer.Fire();

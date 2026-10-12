@@ -73,9 +73,16 @@ is known when the middleware runs: an endpoint whose metadata carries a timeout 
 
 `Assimalign.Cohesion.Web` (pipeline seams) · `Assimalign.Cohesion.Web.Routing` (published route
 match, endpoint metadata, dispatch acknowledgement) · `Assimalign.Cohesion.Web.ProblemDetails` (timeout payload) ·
-`Assimalign.Cohesion.Http.Streaming` (response-started probe). Per the Web-area dependency rule
+`Assimalign.Cohesion.Http.Streaming` (response-started probe) · `Assimalign.Cohesion.Web.Server` (request id and client-fault contracts). Per the Web-area dependency rule
 it references no hosting module, holds no DI/configuration/logging state, and is delivered to
 applications through the `App.Web` shared framework.
 
 Design rationale — including why expiry does **not** trip the transport cancel while the
 response is writable — lives in [DESIGN.md](DESIGN.md).
+
+## Diagnostics
+
+Enable `Assimalign.Cohesion.Web.RequestTimeouts` for throttled timeout warnings and Verbose
+notifications when handlers complete despite expiry. The source exposes exact timeout and
+ignored-timeout totals and correlates events with the request id. Transport data-rate faults
+remain separate. See [Diagnostics](DESIGN.md#diagnostics) for payloads and counters.
