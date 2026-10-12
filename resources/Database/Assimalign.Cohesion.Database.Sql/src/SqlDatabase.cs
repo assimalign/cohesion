@@ -581,7 +581,8 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <exception cref="DatabaseObjectLockedException">
     /// The engine's builder declared the database with another schema: the declaration owns the
     /// database (owner decision 56 of 2026-10-09), so its schema changes through the declaration.
-    /// Also thrown before changes when an ordinary session DDL statement is already running.
+    /// Also thrown before changes when an ordinary session DDL statement, another apply,
+    /// verification or deferred provisioning worker already owns admission. Contention never waits.
     /// </exception>
     /// <exception cref="SqlSchemaMigrationException">
     /// The schema targets another database, declares what the engine has no DDL for (principals),

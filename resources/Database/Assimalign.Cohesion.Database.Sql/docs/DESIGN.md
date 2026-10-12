@@ -1177,7 +1177,7 @@ or capturing an automatic transaction snapshot, including joins and subqueries. 
 no second waiting graph. The final marker uses the catalog's generation check and retries a
 concurrent unrelated DDL change; it never waits for the global DDL interlock while holding tables.
 
-Index population commits bounded 64-version brackets, releasing the database's apply gate between
+Index population commits bounded 64-version brackets, releasing the coordinator's statement apply gate between
 batches. Counts and scans run on the worker. Unpublished trees never enter a catalog directory,
 including through checkpoints or another table's DDL. Restart discards their in-memory identity
 and rebuilds from scratch; abandoned pages follow ordinary DROP INDEX reclamation (future vacuum),
@@ -1302,7 +1302,14 @@ those identifier forms. The mapper uses the same retained names, so its quoted
 DML binds the objects deployed by this renderer without another naming convention.
 
 Each DDL request remains self-committing under the catalog's established rule.
-An apply holds the database's internal DDL admission interlock from its initial catalog check
+Apply and Verify first attempt the provisioner's semaphore with a zero timeout. Contention throws
+the existing `DatabaseObjectLockedException`, with the database/schema name and `APPLY SCHEMA`
+or `VERIFY SCHEMA` operation, before any catalog work or wait. The same reservation covers a
+deferred migration: Build transfers it to the worker, which releases it only after lock cleanup.
+Even an equal-schema imperative apply is refused while another apply or its worker is active.
+The internal deferred-open path may return the already scheduled target without waiting.
+
+An inline apply holds the database's internal DDL admission interlock from its initial catalog check
 through its final marker, compensation and lock cleanup. Ordinary session DDL is refused with
 `DatabaseObjectLockedException` while it is held; an apply likewise refuses before changing
 anything if ordinary DDL is already running. This fail-fast admission avoids a second waiting
@@ -1333,6 +1340,34 @@ for a destructive multi-statement migration is deliberately not claimed: the
 current catalog has no transaction spanning DDL statements, and irreversible
 data loss cannot be compensated. That kernel seam is recorded as the remaining
 gap rather than hidden behind the content hash.
+
+### Provisioning wait inventory (B2 second review, #1355)
+
+The provisioner's semaphore and the coordinator's physical statement gate have different
+lifetimes. Serializing whole migrations with a waiting semaphore hid a cycle: apply A held
+`a_first` and waited for transaction T's `z_existing`, while T's owner awaited apply B, which
+waited for A's semaphore. Zero-timeout admission removes that edge, including after transfer to
+the worker and throughout compensation. `SqlProvisioningAdmissionTests` observes A's actual
+lock-wait event before B, proves the worker holds its reserved table, and repeatedly checks
+immediate refusal for at least 150 ms and ten attempts, with a ten-second ceiling. T commits
+before A or the paused worker finishes; both migrations then converge and T's row survives.
+
+Every synchronization wait reached by these paths has the following owner and termination rule:
+
+| Wait or retry | Apply, worker and compensation rule |
+|---|---|
+| Provisioner semaphore | Apply and Verify use `WaitAsync(0, token)` and refuse contention. The worker inherits ownership and never reacquires it. Compensation stays inside its owner's reservation. |
+| DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately; nobody waits for a DDL lease. Inline apply keeps the lease through compensation and cleanup; the worker never requests it. |
+| Table, referenced-parent, row and index-key locks | Real waits use `LockManager.AcquireAsync` with a live transaction sequence, so the wait-for graph and cycle detector see them. Apply keeps a read-only owner across its self-committing DDL. Handoff reserves pending tables and FK parents in object-id order before publication; the worker reuses that owner. Caller/worker cancellation and database-offline abandonment also end waits. |
+| Coordinator statement gate | Acquired after transaction-lock pre-acquisition, with cancellation. Its holder performs one physical bracket; the lock manager rejects a request that would wait while that gate is held. Worker index population releases it after each batch of at most 64 versions. Inline work, including the existing DROP TABLE reclamation, can scale with table size; the gate is not a wall-clock deadline. |
+| Catalog, index and storage metadata/page monitors; journal durability | Internal critical sections perform finite local work and do not await SQL transaction locks. Physical page ownership conflicts fail immediately. Group commit waits at most its configured batching window before flushing itself; journal durability failures take the database offline. Synchronous filesystem I/O has no hard completion deadline, so cancellation does not promise an OS-I/O timeout. |
+| Final worker marker retry | An unrelated DDL generation change retries the optimistic comparison/save, checking worker cancellation each iteration. It never waits for the DDL interlock while holding table reservations. Sustained unrelated DDL can delay convergence until cancellation. |
+| Compensation and reservation rollback | Compensation traverses the finite completed-step list in reverse, with `CancellationToken.None` so caller cancellation cannot interrupt cleanup. It retains the live lock owner, or creates a fresh one if handoff already ended that owner. Any reacquisition is still a lock-manager wait, detectable and offline-abandonable, with no extra semaphore/DDL lease wait. The read-only reservation has no row versions to undo; statement cleanup drains its admitted physical work before rollback. |
+| Worker build/queue triggers and stop join | `_ready` and `_signal` observe engine cancellation; build completion needs no lock held by the worker. Database disposal cancels the migration, executes an unclaimed queued migration's cleanup or joins the claimed migration's completion before closing storage. The join inherits the cleanup/I/O limits above. |
+
+PostgreSQL makes the same distinction between internal lightweight locks without deadlock
+detection and transaction locks with detection (`src/backend/storage/lmgr/README:20-35` in the
+reference clone). This is a behavioral reference; no implementation was copied.
 
 ### Object ownership and the schema package
 

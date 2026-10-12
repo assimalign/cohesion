@@ -48,7 +48,12 @@ internal sealed partial class SqlSchemaProvisioner
         {
             return deferredResult;
         }
-        await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // The worker retains this gate after handoff. Never queue outside the lock
+        // manager: a caller may own a transaction the current migration needs.
+        if (!await _applyGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            throw new DatabaseObjectLockedException(schema.Name, schema.Name, "APPLY SCHEMA");
+        }
         TransactionContext? locks = null;
         IDisposable? ddl = null;
         bool transferred = false;
@@ -208,15 +213,19 @@ internal sealed partial class SqlSchemaProvisioner
     /// hash and generation match the declaration and the current catalog generation.
     /// </summary>
     /// <param name="schema">The declared schema.</param>
-    /// <param name="cancellationToken">Observed while the apply gate is awaited.</param>
+    /// <param name="cancellationToken">Observed before the nonblocking admission check.</param>
     /// <returns>The result, always already applied.</returns>
+    /// <exception cref="DatabaseObjectLockedException">An apply, verification or deferred migration is already active.</exception>
     /// <exception cref="SqlSchemaMigrationException">The database drifted (<c>COHSQLP003</c>).</exception>
     internal async ValueTask<SqlSchemaMigrationResult> VerifyAsync(
         SqlCompiledSchema schema,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(schema);
-        await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (!await _applyGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            throw new DatabaseObjectLockedException(schema.Name, schema.Name, "VERIFY SCHEMA");
+        }
         try
         {
             ValidateSupportedSchema(schema);
