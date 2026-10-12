@@ -2,6 +2,7 @@ name: Connections
 on:
   push:
     paths:
+      - "build/TestSupport/**"
       - "libraries/Connections/**"
       - "!libraries/Connections/**/*.slnx"
       - "!libraries/Connections/**/*.md"

@@ -2,6 +2,7 @@ name: DependencyInjection
 on:
   push:
     paths:
+      - "build/TestSupport/**"
       - "libraries/DependencyInjection/**"
       - "!libraries/DependencyInjection/**/*.slnx"
       - "!libraries/DependencyInjection/**/*.md"
