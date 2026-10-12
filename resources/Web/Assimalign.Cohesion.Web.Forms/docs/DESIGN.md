@@ -103,8 +103,50 @@ redesign, and is deliberately not built until a consumer needs it.
   is via installing a different `IHttpFormFeature`, not service location.
 - **References.** The Web root and `Http.Forms`, plus `Web.ProblemDetails` for
   the rejection payload (feature to feature, which the Web dependency rule
-  allows) and `Http.Streaming` for the committed-head check. All four are
+  allows), `Http.Streaming` for the committed-head check, and the contracts-only
+  `Web.Server` for request correlation. All five are
   already App.Web members, and none is a `Hosting*` library.
+
+## Diagnostics
+
+The internal `WebFormsEventSource`, in namespace `Assimalign.Cohesion.Web.Internal`,
+uses provider name `Assimalign.Cohesion.Web.Forms`. Enable it with `dotnet-trace`
+or the EventSource log forwarder. It reports rejected parses only; a successful
+form read emits no event and increments no counter.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `FormLimitExceeded` | Verbose | `limit`, `requestId` |
+| 2 | `FormMalformed` | Verbose | `exceptionType`, `requestId` |
+| 3 | `RejectionAborted` | Warning | `statusCode:int`, `suppressedCount:int`, `requestId` |
+
+`form-limit-rejections` and `malformed-forms` are exact process-wide totals,
+incremented once in their respective middleware catches, including when no
+listener is enabled or the rejection must abort the exchange. Their polling
+counters are created on first enable. `RejectionAborted` is limited to one
+warning per second; the next warning includes the number suppressed in that
+interval. It adds no second rejection count.
+
+`limit` is the name of `HttpFormLimitExceededException.Limit`, introduced by
+#1435, never its message. A custom feature can put request content in that
+message, and the legacy constructor reports `Unspecified`. `FormMalformed`
+writes the exception type only because malformed multipart exceptions can echo
+header text. No event writes form keys or values, paths, headers, cookies, or
+exception messages. The configured-only messages at all seven original parser
+throw sites and the new multipart-section-count site are pinned by tests, but
+message hygiene does not depend on those messages remaining safe.
+
+Every event reads `requestId` from `IWebRequestIdFeature` only inside its enabled
+check; an absent feature produces an empty string. No event reads the ambient
+activity. The primitive payloads and library implementation remain trimming-
+and NativeAOT-safe; a NativeAOT consumer needs `EventSourceSupport=true` for
+delivery.
+
+Compared with 10.0.0-preview.1, this adds operator events and attribution
+counters. This is a diagnostic behavior break under program decision 15:
+applications forwarding the Web provider prefix can receive these new entries
+in configured sinks. Public form APIs and rejection status/body behavior do
+not change.
 
 ## Non-goals
 

@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 254 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 730 |
+| Declared project references | 731 |
 | Declared shared-source links | 18 |
 
 ## Ambiguous project names
@@ -1051,7 +1051,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Web.Cors` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.Diagnostics` | `Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Logging`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.ErrorHandling` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
-| `Assimalign.Cohesion.Web.Forms` | `Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails` | — | — | — |
+| `Assimalign.Cohesion.Web.Forms` | `Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.ForwardedHeaders` | `Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | — | — |
 | `Assimalign.Cohesion.Web.Health` | `Assimalign.Cohesion.Web` | — | — | — |
 | `Assimalign.Cohesion.Web.HostFiltering` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | — | — |
@@ -1104,8 +1104,8 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Hosting.Telemetry` | 19 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.IdentityModel` | 19 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, … |
 | `Assimalign.Cohesion.Database.Storage` | 18 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Blob.Storage, … |
+| `Assimalign.Cohesion.Web.Server` | 18 | Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Authentication.Bearer, Assimalign.Cohesion.Web.Authentication.Certificate, Assimalign.Cohesion.Web.Authentication.Cookie, … |
 | `Assimalign.Cohesion.FileSystem` | 17 | Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, Assimalign.Cohesion.Configuration.Ini.Tests, Assimalign.Cohesion.Configuration.Json.Tests, … |
-| `Assimalign.Cohesion.Web.Server` | 17 | Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Authentication.Bearer, Assimalign.Cohesion.Web.Authentication.Certificate, Assimalign.Cohesion.Web.Authentication.Cookie, … |
 | `Assimalign.Cohesion.Database.Types` | 15 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Documents.Catalog, Assimalign.Cohesion.Database.Execution, Assimalign.Cohesion.Database.Graph.Catalog, … |
 
 ## Harnesses

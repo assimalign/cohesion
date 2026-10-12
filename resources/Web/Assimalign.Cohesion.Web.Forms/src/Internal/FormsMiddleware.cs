@@ -55,13 +55,15 @@ internal sealed class FormsMiddleware : IWebApplicationMiddleware
         {
             await feature.ReadFormAsync(context.RequestCancelled).ConfigureAwait(false);
         }
-        catch (InvalidDataException exception) when (exception.InnerException is HttpFormLimitExceededException)
+        catch (InvalidDataException exception) when (exception.InnerException is HttpFormLimitExceededException limit)
         {
+            WebFormsEventSource.Log.FormLimitExceeded(limit, context);
             // The client must send less: RFC 9110 §15.5.14.
             rejection = HttpStatusCode.RequestEntityTooLarge;
         }
-        catch (InvalidDataException)
+        catch (InvalidDataException exception)
         {
+            WebFormsEventSource.Log.FormMalformed(exception, context);
             rejection = HttpStatusCode.BadRequest;
         }
 
@@ -83,6 +85,7 @@ internal sealed class FormsMiddleware : IWebApplicationMiddleware
         // instead, so the rest of the pipeline still does not run.
         if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
         {
+            WebFormsEventSource.Log.RejectionAborted(status, context);
             await context.CancelAsync().ConfigureAwait(false);
             return;
         }

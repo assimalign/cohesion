@@ -332,7 +332,7 @@ public class UseFormsMiddlewareTests
     /// A response-streaming feature reporting a committed head, as the streaming package would after a
     /// streamed write by a middleware ahead of <c>UseForms</c>.
     /// </summary>
-    private sealed class StartedResponseStreamingFeature : IHttpResponseStreamingFeature
+    internal sealed class StartedResponseStreamingFeature : IHttpResponseStreamingFeature
     {
         public string Name => nameof(IHttpResponseStreamingFeature);
         public bool HasStarted => true;
@@ -342,7 +342,7 @@ public class UseFormsMiddlewareTests
         public ValueTask CompleteAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
-    private sealed class TestHttpContext : IHttpContext
+    internal sealed class TestHttpContext : IHttpContext
     {
         private readonly TestHttpResponse _response;
 

@@ -86,6 +86,7 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 | `Assimalign.Cohesion.Web.WebSockets` | HandshakeRejected, WebSocketOpened, WebSocketClosed, DrainCloseFailed (all Verbose) | `current-websockets`, `total-websockets`, `rejected-handshakes` | [WebSockets DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Compression` | Request decompression refused (Verbose); decompressed size exceeded or rejection aborted after response commit (Warning, throttled) | `decompression-limit-rejections` | [Compression DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Compression/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.RateLimiting` | Rejected global or endpoint policy (Verbose); rejection after response commit (Warning, throttled); partition keys are never written | `rejected-requests` | [RateLimiting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.RateLimiting/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Forms` | Form limit or malformed input (Verbose); rejection after response commit (Warning, throttled); configured limit names and exception types only | `form-limit-rejections`, `malformed-forms` | [Forms DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Forms/docs/DESIGN.md#diagnostics) |
 
 Deliberately not instrumented: `Connections.InMemory` (a test driver), `Connections.Security` (TLS
 handshakes are already reported by the runtime's `System.Net.Security` source, and a handshake that
