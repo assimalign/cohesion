@@ -771,6 +771,7 @@
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Connections/docs/">
 		<File Path="Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md" />
+		<File Path="Http/Assimalign.Cohesion.Http.Connections/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Connections/examples/">
 		<File Path="Http/Assimalign.Cohesion.Http.Connections/examples/README.md" />

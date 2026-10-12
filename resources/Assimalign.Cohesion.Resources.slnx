@@ -1432,6 +1432,7 @@
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Routing/docs/">
 		<File Path="Web/Assimalign.Cohesion.Web.Routing/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Routing/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Routing/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />

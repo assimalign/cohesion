@@ -143,6 +143,8 @@ In request handlers, resolve the application's generator with `context.GetLinkGe
 
 ## Design
 
+Start with the [overview](docs/OVERVIEW.md) for package scope, dependencies and pipeline usage.
+
 See [docs/DESIGN.md](docs/DESIGN.md) for the matcher pipeline, the precedence scheme, the
 405-vs-404 model, the HEAD→GET fallback, AOT posture, and the routing features delivered by
 sibling issues (metadata, groups, link generation, source-gen binding).

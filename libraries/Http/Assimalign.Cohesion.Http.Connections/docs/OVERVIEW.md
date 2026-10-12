@@ -1,7 +1,40 @@
-# HTTP connections
+# Assimalign.Cohesion.Http.Connections — Overview
 
-The transport adapts connection listeners to HTTP/1.1, HTTP/2 and HTTP/3 exchanges.
-Configure registrations and shared policies through `HttpConnectionListenerOptions`.
+Adapts Cohesion connection listeners into HTTP/1.1, HTTP/2 and HTTP/3 server exchanges. A host
+receives `IHttpContext` requests and sends responses through the same contracts on every protocol.
+This is the L1 transport implementation used by the Web runtime.
+
+## Scope
+
+The package owns HTTP framing, HPACK/QPACK, multiplexed stream handling, request and response body
+streaming, protocol limits, timeouts, and graceful connection shutdown. Listener options select
+protocols and configure their limits. Generic exchange interceptors let HTTP feature packages add
+behavior such as streaming, protocol upgrades and extended CONNECT.
+
+TLS is composed onto the underlying listener before registration. The transport publishes the
+negotiated handshake through the connection's `ITlsConnectionInfo` facet; `Http.Tls` provides the
+application accessor. Routing, authentication, form parsing and session policy belong to consumers.
+
+## Dependencies
+
+- `Assimalign.Cohesion.Http` supplies the request, response, context and interception contracts.
+- `Assimalign.Cohesion.Connections` supplies stream and multiplexed connection-listener contracts.
+
+Concrete TCP, TLS and QUIC listeners are supplied by the composition root. This package references
+neither their implementations nor Web hosting. See the [Http area map](../../README.md).
+
+## Usage
+
+Create a listener with `HttpConnectionListener.Create` and register the already-composed transport
+through `UseHttp1`, `UseHttp2`, `UseHttp1AndHttp2` or `UseHttp3`. Stream protocols accept an
+`IConnectionListener`; HTTP/3 accepts an `IMultiplexedConnectionListener`. The dual HTTP/1.1 and
+HTTP/2 registration requires TLS and chooses the protocol through ALPN.
+
+A custom host binds the listener, accepts HTTP connections, opens their contexts, receives
+exchanges, and finalizes each exchange exactly once with `SendAsync`. HTTP/1.1 exchanges run
+sequentially; HTTP/2 and HTTP/3 permit concurrent exchanges. Web applications normally let
+`Web.Hosting` own this lifecycle. Per-version callbacks configure limits; shared policies and
+interceptors live on `HttpConnectionListenerOptions`.
 
 Applications may assign any status code from 100 through 599. An unregistered
 final code such as 299 is sent with an empty HTTP/1.1 reason phrase; HTTP/2 and
@@ -19,4 +52,5 @@ suppresses only the automatic header. StaticFiles keeps Last-Modified and date v
 it uses a valid response Date, or one clock read when Date is absent, invalid, or repeated,
 without adding or replacing the header.
 
-See [DESIGN.md](DESIGN.md) for protocol behavior, limits and interception.
+See [DESIGN.md](DESIGN.md) for listener composition examples, the host contract, protocol behavior,
+limits, interception and resource ownership.

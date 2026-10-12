@@ -7,6 +7,7 @@ defined in `Assimalign.Cohesion.Http`.
 
 ## Status
 
+Start with the [overview](docs/OVERVIEW.md) for purpose, dependencies and usage.
 The design record is [`docs/DESIGN.md`](docs/DESIGN.md). Per-version
 completeness lives in the L01.01.11 backlog under feature parents
 `.06`/`.07`/`.08` (HTTP/2) and `.09`/`.10` (HTTP/3).

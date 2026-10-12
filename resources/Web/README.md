@@ -239,3 +239,5 @@ its permitted closure. `Web.Hosting` discovers generated registrations through t
 `Hosting.Resources` `ResourceRuntime`.
 
 Per-project documentation lives in each project's `docs/OVERVIEW.md` and `docs/DESIGN.md`.
+Start with the [Routing overview](Assimalign.Cohesion.Web.Routing/docs/OVERVIEW.md) for route-table
+registration, endpoint selection and pipeline ordering.

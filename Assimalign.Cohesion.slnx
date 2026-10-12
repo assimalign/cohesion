@@ -873,6 +873,7 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Connections/docs/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md" />
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Connections/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Connections/examples/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Connections/examples/README.md" />
@@ -2626,6 +2627,7 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Routing/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Routing/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />
