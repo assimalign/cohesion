@@ -13,6 +13,8 @@ map and the dependency rule. The full reference graph for every Cohesion assembl
 [docs/resources/Web/MIDDLEWARE_ORDER.md](../../docs/resources/Web/MIDDLEWARE_ORDER.md). Decisions that span
 more than one package (such as how a rewrite changes the request) are in
 [docs/resources/Web/DECISIONS.md](../../docs/resources/Web/DECISIONS.md).
+The [diagnostic signal ownership table](../../docs/resources/Web/DESIGN.md#diagnostic-signal-ownership)
+maps request spans, metrics, operator events and access logs to their Web or transport owner.
 
 ## The dependency rule
 

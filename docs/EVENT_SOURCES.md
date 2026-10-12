@@ -49,8 +49,9 @@ builders do not. No provider or filter rule is added. To select other sources, r
 so concurrent entry points can duplicate events; use payload server IDs for attribution. To forward into a factory you
 did not build, `loggerFactory.ForwardEventSources()` returns a forwarder that you dispose yourself.
 
-By default every source named `Assimalign.Cohesion.*` is forwarded; a runtime source is added by
-prefix (`new EventSourceForwardingOptions { Sources = { "System.Net.Security" } }`). The package's
+Calling `AddEventSourceForwarding()` without options selects every source named
+`Assimalign.Cohesion.*`; the Web entry-point default selects the narrower names above. A runtime
+source is added by prefix (`new EventSourceForwardingOptions { Sources = { "System.Net.Security" } }`). The package's
 [DESIGN.md](../libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/DESIGN.md) has the level
 mapping, the entry shape, and the failure model.
 
@@ -69,6 +70,10 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 
 ## Cohesion event sources
 
+The Web catalog contains 22 sources, including `Web.Authentication.Certificate`, with one row per
+instrumented assembly. The [Web signal ownership table](resources/Web/DESIGN.md#diagnostic-signal-ownership)
+explains when to use an event, a request span, a metric, or the HTTP access log.
+
 | Event source (= assembly) | Events | Counters | Reference |
 | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Connections` | Upgrade failed: a layered listener (a TLS listener, for example) closed a connection whose upgrade failed or timed out, and kept accepting | `current-upgrades`, `failed-upgrades` | [Connections DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections/docs/DESIGN.md#the-layered-listeners-event-source) |
@@ -80,45 +85,50 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 | `Assimalign.Cohesion.Hosting.Resources` | Shared control-plane contributor failures and command outcomes: applied, unknown kind (501), conflict (409), handler failure. Only registered kinds are written; refusals/failures are throttled. HTTP surface events belong to Web.Hosting.Resources | `contributor-failures`, `commands-applied`, `unknown-command-kinds`, `command-conflicts`, `command-handler-failures` | [Hosting.Resources DESIGN.md](../libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Http.Connections` | Transport rejections, HTTP/2 and HTTP/3 connection errors and stream resets, slow-reader aborts and client-caused response aborts (Warning, throttled per event with `suppressedCount`) | `rejected-requests`, `connection-errors`, `stream-resets`, `response-rate-aborts`, `response-aborts` | [Http.Connections DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Http.Sessions` | Store load/commit failures (type only, throttled) | `store-load-failures`, `store-commit-failures` | [Design](../libraries/Http/Assimalign.Cohesion.Http.Sessions/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Hosting` | Server lifecycle and failures, peer-ended connections (Verbose), refused response heads and telemetry listener failures (throttled), completion callback and isolation failures; process-unique serverId | `connection-faults`, `connection-cap-waits`, `refused-response-heads` | [Hosting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#diagnostics-147-1398) |
-| `Assimalign.Cohesion.Web.Hosting.Resources` | Every area's shared HTTP control plane: throttled credential/loopback refusal and malformed-command events, stop accepted. Non-Web resource processes require a tool or their own forwarder; contributor failures are producer-owned below | `rejected-credentials` | [Web.Hosting.Resources DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.ErrorHandling` | Application pipeline fault (Error), expected fault (Verbose), error-handler failure (Error), diagnostic-callback failure (Warning), peer-abandoned response (Verbose); client-caused and cancelled exchanges excluded from application-fault reporting | `total-faults`, `faults-per-second`, `aborted-responses` | [ErrorHandling DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Authentication.Bearer` | TokenRejected (Verbose): bounded rejection reason, algorithm/key id and request correlation; no token or claims | `rejected-tokens` | [Bearer DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Authentication.Cookie` | TicketRejected (Verbose): bounded reason and sanitized unprotect exception metadata with request correlation | `rejected-tickets` | [Cookie DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Authentication.Certificate` | CertificateRejected (Verbose): NoCertificate on a required challenge or ValidationFailed from application mapping; no certificate identifiers. TLS trust/validity failures occur before HTTP and are unavailable to this handler | `rejected-certificates` | [Certificate DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authentication.Certificate/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Authorization` | RequestDenied (Verbose): challenge/forbid outcome, route template, policy source, failed requirement type, schemes and request correlation | `challenged-requests`, `forbidden-requests` | [Authorization DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authorization/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Antiforgery` | RequestRejected and sanitized TokenUnprotectFailed (Verbose); RejectionAborted (Warning, at most once a second with suppressedCount); FormMalformed has no exception text | `rejected-requests` | [Antiforgery DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Antiforgery/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Cors` | Refused preflights and pass-through causes, with bounded origin and rejected header name (Verbose) | `rejected-preflights` | [Cors DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Cors/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.SecurityHeaders` | Security policy staging skipped by read-only headers (Warning, throttled); excludes disabled endpoints and protocol takeovers | `unprotected-responses` | [SecurityHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.HostFiltering` | Rejected effective host with bounded host component, reason and request id (Verbose) | `rejected-requests` | [HostFiltering DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.HostFiltering/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.ForwardedHeaders` | Forwarding stop reason, family and applied depth (Verbose); transport peer IP only for an untrusted peer at depth zero | `untrusted-forwarding`, `malformed-forwarding` | [ForwardedHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.RateLimiting` | Rejected global or endpoint policy (Verbose); rejection after response commit (Warning, throttled); partition keys are never written | `rejected-requests` | [RateLimiting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.RateLimiting/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.RequestTimeouts` | Timeout enforced (Warning, throttled) or ignored by downstream work (Verbose); armed interval and request correlation | `timed-out-requests`, `ignored-timeouts` | [RequestTimeouts DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Authentication.Bearer` | TokenRejected (Verbose): bounded rejection reason, algorithm/key id and request correlation; no token or claims | `rejected-tokens` | [Bearer DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Authentication.Certificate` | CertificateRejected (Verbose): NoCertificate on a required challenge or ValidationFailed from application mapping; no certificate identifiers. TLS trust/validity failures occur before HTTP and are unavailable to this handler | `rejected-certificates` | [Certificate DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authentication.Certificate/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Authentication.Cookie` | TicketRejected (Verbose): bounded reason and sanitized unprotect exception metadata with request correlation | `rejected-tickets` | [Cookie DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Authorization` | RequestDenied (Verbose): challenge/forbid outcome, route template, policy source, failed requirement type, schemes and request correlation | `challenged-requests`, `forbidden-requests` | [Authorization DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Authorization/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Caching` | ResponseNotStored (Verbose); EntryDeclined (Warning, throttled); no cache keys or tags | `declined-entries`; hit/miss counters omitted after benchmarking | [Caching DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Caching/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Compression` | Request decompression refused (Verbose); decompressed size exceeded or rejection aborted after response commit (Warning, throttled) | `decompression-limit-rejections` | [Compression DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Compression/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.StaticFiles` | WebRootMounted; WebRootUnavailable; TraversalRejected (Verbose); MountLookupFailed (Warning, type only, throttled) | `traversal-rejections`, `mount-lookup-failures` | [StaticFiles DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.StaticFiles/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Sessions` | SessionOrphaned (Verbose), SessionStateLost (modified orphans only, Warning, throttled); store failures belong to Http.Sessions | `orphaned-sessions`, `lost-sessions` | [Sessions DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Sessions/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Forms` | Form limit or malformed input (Verbose); rejection after response commit (Warning, throttled); configured limit names and exception types only | `form-limit-rejections`, `malformed-forms` | [Forms DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Forms/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.WebSockets` | HandshakeRejected, WebSocketOpened, WebSocketClosed, DrainCloseFailed (all Verbose) | `current-websockets`, `total-websockets`, `rejected-handshakes` | [WebSockets DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Cors` | Refused preflights and pass-through causes, with bounded origin and rejected header name (Verbose) | `rejected-preflights` | [Cors DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Cors/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Diagnostics` | Access-log file opened; write/flush/close failed (Error), retention failed, HTTP log entry dropped, client-address resolver failed (Warning); failures throttled | `failed-access-log-writes`, `dropped-http-log-entries` | [Diagnostics DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Diagnostics/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.ErrorHandling` | Application pipeline fault (Error), expected fault (Verbose), error-handler failure (Error), diagnostic-callback failure (Warning), peer-abandoned response (Verbose); client-caused and cancelled exchanges excluded from application-fault reporting | `total-faults`, `faults-per-second`, `aborted-responses` | [ErrorHandling DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Forms` | Form limit or malformed input (Verbose); rejection after response commit (Warning, throttled); configured limit names and exception types only | `form-limit-rejections`, `malformed-forms` | [Forms DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Forms/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.ForwardedHeaders` | Forwarding stop reason, family and applied depth (Verbose); transport peer IP only for an untrusted peer at depth zero | `untrusted-forwarding`, `malformed-forwarding` | [ForwardedHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Health` | Health worsened (Warning), improved (Informational), thrown or timed-out check (Verbose); includes adapted Hosting.Health contributors | `failed-checks` | [Health DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Health/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.HostFiltering` | Rejected effective host with bounded host component, reason and request id (Verbose) | `rejected-requests` | [HostFiltering DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.HostFiltering/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Hosting.Resources` | Every area's shared HTTP control plane: throttled credential/loopback refusal and malformed-command events, stop accepted. Non-Web resource processes require a tool or their own forwarder; contributor failures are producer-owned below | `rejected-credentials` | [Web.Hosting.Resources DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Hosting` | Server lifecycle and failures, peer-ended connections (Verbose), refused response heads and telemetry listener failures (throttled), completion callback and isolation failures; process-unique serverId | `connection-faults`, `connection-cap-waits`, `refused-response-heads` | [Hosting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#diagnostics-147-1398) |
+| `Assimalign.Cohesion.Web.RateLimiting` | Rejected global or endpoint policy (Verbose); rejection after response commit (Warning, throttled); partition keys are never written | `rejected-requests` | [RateLimiting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.RateLimiting/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.RequestTimeouts` | Timeout enforced (Warning, throttled) or ignored by downstream work (Verbose); armed interval and request correlation | `timed-out-requests`, `ignored-timeouts` | [RequestTimeouts DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.SecurityHeaders` | Security policy staging skipped by read-only headers (Warning, throttled); excludes disabled endpoints and protocol takeovers | `unprotected-responses` | [SecurityHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Sessions` | SessionOrphaned (Verbose), SessionStateLost (modified orphans only, Warning, throttled); store failures belong to Http.Sessions | `orphaned-sessions`, `lost-sessions` | [Sessions DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Sessions/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.StaticFiles` | WebRootMounted; WebRootUnavailable; TraversalRejected (Verbose); MountLookupFailed (Warning, type only, throttled) | `traversal-rejections`, `mount-lookup-failures` | [StaticFiles DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.StaticFiles/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.WebSockets` | HandshakeRejected, WebSocketOpened, WebSocketClosed, DrainCloseFailed (all Verbose) | `current-websockets`, `total-websockets`, `rejected-handshakes` | [WebSockets DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/DESIGN.md#diagnostics) |
 
-Deliberately not instrumented: `Connections.InMemory` (a test driver), `Connections.Security` (TLS
+Deliberately not instrumented: `Connections.InMemory` (a test driver) and `Connections.Security` (TLS
 handshakes are already reported by the runtime's `System.Net.Security` source, and a handshake that
 fails on a TLS-layered listener is reported by `Assimalign.Cohesion.Connections`, which owns the
 listener that closes the connection).
 
+HTTP transport rejections and protocol errors belong to `Assimalign.Cohesion.Http.Connections`
+(#1300), including requests rejected before Web dispatch and therefore absent from a Web request
+span. Its Meter and EventSource complement Web.Hosting's request signals; connection lifecycle
+and connection counts remain with the Connections drivers.
+
 ### Web assemblies deliberately left uninstrumented
 
-The Web scope deliberately leaves these 16 Web assemblies without an event source, plus the
-framework producer shells. Each row records the reason from
-[Web event-source scope §6](programs/WEB_EVENT_SOURCES_SCOPE.md#6-no-source-and-why); assemblies
-scheduled to gain sources are not part of this list.
+These 16 Web assemblies deliberately have no event source, alongside the framework producer
+shells. Each row records the reason from
+[Web event-source scope §6](programs/WEB_EVENT_SOURCES_SCOPE.md#6-no-source-and-why).
+`Web.Authentication.Certificate` is instrumented and appears in the catalog above.
 
 | Assembly or framework project | Why it has no source |
 | --- | --- |
 | `Assimalign.Cohesion.Web` | Contracts and pure pipeline helpers have no runtime state, loop or swallowed failure; the root must not claim every Web package's signals. |
-| `Assimalign.Cohesion.Web.Server` | Contracts only; Web.Hosting implements and reports them, and #1300 owns the client-fault latch. |
+| `Assimalign.Cohesion.Web.Server` | Contracts only; Web.Hosting implements the server features, and Http.Connections publishes transport client faults through those contracts. |
 | `Assimalign.Cohesion.Web.Hosting.Health` | A stateless adapter whose runtime failure throws; Web.Health reports contributor faults and timeouts. |
 | `Assimalign.Cohesion.Web.Testing` | A shipped test harness, like Connections.InMemory, rather than a runtime component; it receives no access to internal sources. |
 | `Assimalign.Cohesion.Web.ApplicationModel` | Invalid declarative plans throw; runtime control-plane outcomes belong to Hosting.Resources. |
@@ -146,8 +156,13 @@ sources only.
 
 | Assembly (same-named `ActivitySource` and/or `Meter`) | Traces | Metrics | Reference |
 | --- | --- | --- | --- |
-| `Assimalign.Cohesion.Web.Hosting` | One `Server` span per HTTP request, parented to the caller's `traceparent` | `http.server.request.duration`, `http.server.active_requests` | [Web.Hosting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#server-telemetry-1064) |
+| `Assimalign.Cohesion.Web.Hosting` | One `Server` span per HTTP request, parented to the caller's `traceparent` | `http.server.request.duration`, `http.server.active_requests` | [Request telemetry](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#server-telemetry-1064); [same-named EventSource for server diagnostics](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#diagnostics-147-1398) |
 | `Assimalign.Cohesion.Http.Connections` | None | `cohesion.http.server.rejected_requests`, `cohesion.http.server.protocol_errors`, `cohesion.http.server.response_rate_aborts`, `cohesion.http.server.response_aborts` | [Http.Connections DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#meter-instruments) |
+
+Web event sources report operator events and exact attribution counters, rather than duplicating
+request counts or spans with per-request start/stop events. The [Web signal ownership table](resources/Web/DESIGN.md#diagnostic-signal-ownership)
+also distinguishes transport rejections from requests that reached Web middleware. EventSource
+forwarding carries events into configured sinks; it does not forward counters or Meter instruments.
 
 ## Not yet conforming
 
