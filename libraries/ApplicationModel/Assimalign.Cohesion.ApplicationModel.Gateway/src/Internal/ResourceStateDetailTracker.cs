@@ -1,14 +1,16 @@
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
-// The public state contract exposes details through events. Keep that contract intact,
-// with a locked snapshot for the built-in store whose waiters may finish before its event.
+// Observe lifecycle and detail together through the public event contract. A foreign
+// manager's lifecycle-only waiter cannot identify which detail belongs to its result.
 internal sealed class ResourceStateDetailTracker : IDisposable
 {
     private readonly IApplicationResourceStateManager _state;
-    private readonly ConcurrentDictionary<ResourceId, ResourceStateChangedEventArgs> _observations = new();
+    private readonly InMemoryResourceStateManager _observations = new();
 
     public ResourceStateDetailTracker(IApplicationResourceStateManager state)
     {
@@ -16,34 +18,17 @@ internal sealed class ResourceStateDetailTracker : IDisposable
         _state.StateChanged += OnStateChanged;
     }
 
-    public string? GetDetail(ResourceId id) => TryReadDetail(_state, id, out string? detail)
-        ? detail
-        : _observations.TryGetValue(id, out ResourceStateChangedEventArgs? observation)
-            ? observation.Detail
-            : null;
+    public ResourceStateObservation GetObservation(ResourceId id) => _observations.GetObservation(id);
 
-    internal static bool TryReadDetail(
-        IApplicationResourceStateManager state,
+    public Task<ResourceStateObservation> WaitForObservationAsync(
         ResourceId id,
-        out string? detail)
-    {
-        if (state is InMemoryResourceStateManager memory)
-        {
-            detail = memory.GetDetail(id);
-            return true;
-        }
-
-        if (state is ApplicationScopedResourceStateManager scoped)
-        {
-            return scoped.TryGetDetail(id, out detail);
-        }
-
-        detail = null;
-        return false;
-    }
+        IReadOnlySet<ResourceLifecycle> terminals,
+        TimeSpan budget,
+        CancellationToken cancellationToken = default) =>
+        _observations.WaitForObservationAsync(id, terminals, budget, cancellationToken);
 
     public void Dispose() => _state.StateChanged -= OnStateChanged;
 
     private void OnStateChanged(object? sender, ResourceStateChangedEventArgs args) =>
-        _observations[args.Resource] = args;
+        _observations.SetState(args.Resource, args.Current, args.Detail);
 }

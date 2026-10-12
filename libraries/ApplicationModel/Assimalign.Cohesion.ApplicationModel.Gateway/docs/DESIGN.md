@@ -79,7 +79,7 @@ Kubernetes — is the *same* algorithm with different hooks, so it is written on
    compile the immutable plan plus artifact, inputs, and observed dependencies, and call
    `ReconcileAsync`. A controller may set `Skipped`; its dependents become `Skipped` while
    independent resources continue.
-6. **Gate once from the plan**: call `WaitForStateAsync` with
+6. **Gate once from the plan**: wait for a lifecycle-and-detail observation with
    `plan.Workload.Gate.Terminals` and a per-resource budget, then admit the resource exactly when
    `Gate.Satisfying` contains the reached state. Long-running kinds satisfy on `Running`; a Job
    satisfies on `Stopped`. `Degraded` is observational and never re-gates an admitted dependent.
@@ -97,13 +97,21 @@ state comparison. Deployment, StatefulSet, and DaemonSet plans terminate on
 by the `cohesion-platforms` rule 2 amendment; that sibling repository is not edited here.
 
 A rejected readiness gate throws an `InvalidOperationException` naming the observed state and
-the last state detail of the gated resource and every currently Failed resource, qualified by
-application and resource name. This includes startup exceptions and readiness-budget expiry,
-so a caller does not need access to the in-memory state to learn why reconciliation failed.
-Details are tracked through the existing `StateChanged` contract for custom state managers;
-the built-in store and its application-scoped views expose internal locked reads, because a
-readiness waiter can finish before the corresponding event is delivered. No public state or
-gateway contract is widened for diagnostics.
+detail of the observation that ended its wait, plus the latest observation of every other Failed
+resource, qualified by application and resource name. This includes startup exceptions and
+readiness-budget expiry, so a caller does not need access to the in-memory state to learn why
+reconciliation failed. A later Starting or Failed update cannot replace the gated observation's
+detail, and a null failure detail never inherits an earlier state's text.
+
+Each application subscribes to the existing `StateChanged` contract before realization and keeps
+lifecycle and detail together in an internal observation store. The readiness waiter receives
+that immutable pair directly; diagnostics never join a lifecycle-only wait result to a separate
+detail read. This same event path applies to built-in, scoped, and foreign state managers,
+including forwarding wrappers whose readiness waiters complete before their events arrive.
+Event delivery is part of the readiness budget and caller cancellation abandons the observation
+wait. The tracker detaches when the session ends. The reference store supplies the internal paired
+snapshot/wait machinery while its public `WaitForStateAsync` still returns only the lifecycle.
+No public state or gateway contract is widened for diagnostics.
 
 `LocalPlanController` keeps compilation pure:
 `Compile(plan, artifact, inputs, observedDependencies, options)` only produces the local desired
@@ -688,8 +696,12 @@ registration uses its long name. Discovery skips these tests outside Windows or 
 file system cannot create the fixture; successful-launch tests also skip when that volume has no
 usable short name. A per-gateway internal resolver seam forces the no-short-name result without
 changing the volume, and portable unit tests cover absent/unchanged/too-long results and the
-259/260-character boundary. Reconcile tests cover multiple failures, latest details, and equal
-resource names in separate applications.
+259/260-character boundary. Process tests compare direct `Process.Start` with probes for quoted
+and unquoted short absolute, relative, and PATH commands, including empty arguments, embedded
+quotes, spaces, and trailing backslashes. Quoted short and long resource launches also retain
+their working directories. Reconcile tests cover multiple failures, latest details, equal resource
+names in separate applications, a forwarding manager with an earlier subscriber holding its
+Failed event, and later updates that must not change an already completed failure observation.
 Item #968 tests additionally cover literal/parameter/store resolution, typed certificate
 unavailability, fresh audience-bound ES256 credentials, per-application persisted trust keys,
 bounded developer tokens, digest enforcement for `AddContainer`, and parameter CLI precedence.

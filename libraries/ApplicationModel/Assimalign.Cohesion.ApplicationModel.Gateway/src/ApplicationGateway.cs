@@ -1124,13 +1124,15 @@ public abstract partial class ApplicationGateway :
                     $"'{plan.Resource}'.");
             }
 
-            ResourceLifecycle reached = await state
-                .WaitForStateAsync(
+            ResourceStateDetailTracker observations = GetApplicationObservations(model);
+            ResourceStateObservation observation = await observations
+                .WaitForObservationAsync(
                     descriptor.Resource.Id,
                     terminals,
                     budget,
                     cancellationToken)
                 .ConfigureAwait(false);
+            ResourceLifecycle reached = observation.State;
 
             if (Contains(plan.Workload.Gate.Satisfying, reached))
             {
@@ -1150,14 +1152,16 @@ public abstract partial class ApplicationGateway :
 
             if (!terminals.Contains(reached))
             {
-                state.SetState(
-                    descriptor.Resource.Id,
-                    ResourceLifecycle.Failed,
+                observation = new ResourceStateObservation(ResourceLifecycle.Failed,
                     $"Resource '{descriptor.Resource.Name}' exceeded its readiness budget of " +
                     $"'{budget}' while observed as '{reached}'.");
+                state.SetState(
+                    descriptor.Resource.Id,
+                    observation.State,
+                    observation.Detail);
             }
 
-            string failureDetails = DescribeFailedResources(item);
+            string failureDetails = DescribeFailedResources(item, observation);
             MarkDependentsBlocked(item);
             throw new InvalidOperationException(
                 $"Resource '{descriptor.Resource.Name}' did not reach Running or another state " +
@@ -1167,21 +1171,36 @@ public abstract partial class ApplicationGateway :
         }
     }
 
-    private string DescribeFailedResources(ModelResource gatedResource)
+    private ResourceStateDetailTracker GetApplicationObservations(IApplicationModel model)
+    {
+        foreach (ApplicationStateView view in _applicationStates)
+        {
+            if (ReferenceEquals(view.Model, model))
+            {
+                return view.Details;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Application '{model.Name}' is not part of the active gateway '{Name}' session.");
+    }
+
+    private string DescribeFailedResources(ModelResource gatedResource, ResourceStateObservation terminal)
     {
         var details = new StringBuilder();
         foreach (ApplicationStateView view in _applicationStates)
         {
             foreach (IApplicationResource resource in view.Model.Resources)
             {
-                if (view.State.GetState(resource.Id) != ResourceLifecycle.Failed
-                    && (view.Model.Name != gatedResource.Model.Name
-                        || resource.Id != gatedResource.Descriptor.Resource.Id))
+                bool gated = view.Model.Name == gatedResource.Model.Name
+                    && resource.Id == gatedResource.Descriptor.Resource.Id;
+                ResourceStateObservation observation = gated ? terminal : view.Details.GetObservation(resource.Id);
+                if (!gated && observation.State != ResourceLifecycle.Failed)
                 {
                     continue;
                 }
 
-                string? detail = view.Details.GetDetail(resource.Id);
+                string? detail = observation.Detail;
                 details.Append($" Resource '{view.Model.Name}/{resource.Name}' last state detail: ");
                 details.Append(string.IsNullOrWhiteSpace(detail) ? "(none reported)." : detail);
             }
