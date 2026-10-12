@@ -1679,7 +1679,9 @@ above it hides by name.
   because a derived type can re-implement `IEnumerable<IHttpFeature>`. That path
   now uses a plain loop, removing the LINQ iterator; any allocation in the
   implementation's own enumerator remains. Exact-type checks preserve custom
-  enumeration order and disposal. A universal allocation guarantee would need
+  enumeration order and disposal. The fallback selects the non-generic
+  `IEnumerable` enumerator, as `OfType` did, even when an implementation gives
+  its generic enumerator a different order. A universal allocation guarantee would need
   an optional public lookup seam; #1337 leaves that boundary question open and
   adds no public interface member.
 - **Still `O(n)`.** The scan covers typically fewer than ten features. A caller

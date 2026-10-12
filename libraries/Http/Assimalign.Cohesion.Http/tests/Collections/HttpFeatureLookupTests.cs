@@ -171,6 +171,56 @@ public class HttpFeatureLookupTests
         resolved.ShouldBeSameAs(features.OfType<ISampleFeature>().First());
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - Get: Custom collections retain LINQ's non-generic enumeration precedence")]
+    public void Get_DifferentEnumerationOrders_ShouldUseNonGenericOrder()
+    {
+        // Arrange
+        IHttpFeatureCollection features = new SplitEnumeratorFeatureCollection();
+        SampleFeature genericFirst = new("generic");
+        SampleFeature nonGenericFirst = new("nonGeneric");
+        features.Set(genericFirst);
+        features.Set(nonGenericFirst);
+
+        // Act
+        ISampleFeature? resolved = features.Get<ISampleFeature>();
+
+        // Assert
+        resolved.ShouldBeSameAs(nonGenericFirst);
+        resolved.ShouldBeSameAs(features.OfType<ISampleFeature>().First());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - Set: Custom collections remove the first non-generic enumeration match")]
+    public void Set_DifferentEnumerationOrders_ShouldRemoveNonGenericFirstMatch()
+    {
+        // Arrange
+        IHttpFeatureCollection features = new SplitEnumeratorFeatureCollection();
+        SampleFeature genericFirst = new("generic");
+        features.Set(genericFirst);
+        features.Set(new SampleFeature("nonGeneric"));
+
+        // Act
+        features.Set<ISampleFeature>(null);
+
+        // Assert
+        features.Get("nonGeneric").ShouldBeNull();
+        features.Get("generic").ShouldBeSameAs(genericFirst);
+    }
+
+    private sealed class SplitEnumeratorFeatureCollection : HttpFeatureCollection, IEnumerable<IHttpFeature>
+    {
+        IEnumerator<IHttpFeature> IEnumerable<IHttpFeature>.GetEnumerator()
+        {
+            yield return Get("generic")!;
+            yield return Get("nonGeneric")!;
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            yield return Get("nonGeneric");
+            yield return Get("generic");
+        }
+    }
+
     private sealed class CustomFeatureCollection : HttpFeatureCollection, IEnumerable<IHttpFeature>
     {
         private readonly IHttpFeature _visible;

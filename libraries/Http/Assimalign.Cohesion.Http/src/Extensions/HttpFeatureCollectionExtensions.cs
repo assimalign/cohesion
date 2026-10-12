@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -83,7 +84,8 @@ public static class HttpFeatureCollectionExtensions
             return ((HttpFeatureCollection)features).GetFeature<TFeature>();
         }
 
-        foreach (IHttpFeature feature in features)
+        // OfType used the non-generic enumerator. A custom collection may give it a different order.
+        foreach (object? feature in (IEnumerable)features)
         {
             if (feature is TFeature match)
             {
