@@ -80,9 +80,10 @@ context.Features.Get<IResponseCompressionFeature>()?.Disable();
 
 Enable the `Assimalign.Cohesion.Web.Compression` EventSource to observe decompression limits and
 aborted rejections at Warning, or unsupported and malformed coded bodies at Verbose. The
-`decompression-limit-rejections` counter counts each rejected exchange even when warning events
-are throttled. Events include the request id and recognized coding tokens, never raw header values
-or body content. See [DESIGN.md](DESIGN.md#diagnostics) for payloads and throttling.
+`decompression-limit-rejections` counter counts each exchange rejected for exceeding the
+decompressed-size limit, even when warning events are throttled. Events include the request id and
+recognized coding tokens, never raw header values or body content. See [DESIGN.md](DESIGN.md#diagnostics)
+for payloads and throttling.
 
 ## Dependencies
 
