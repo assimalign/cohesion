@@ -243,22 +243,36 @@ public class HttpResponseInterceptorAllocationTests
         }
     }
 
-    private sealed class JoiningInterceptor(IHttpExchangeInterceptor response) : HttpExchangeInterceptor
+    private sealed class JoiningInterceptor : HttpExchangeInterceptor
     {
+        private readonly IHttpExchangeInterceptor _response;
+
+        public JoiningInterceptor(IHttpExchangeInterceptor response)
+        {
+            _response = response;
+        }
+
         public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
 
         public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             if (context.CanHaveBody)
             {
-                context.AddResponseInterceptor(response);
+                context.AddResponseInterceptor(_response);
             }
         }
     }
 
-    private sealed class ResponseInterceptor(HttpInterceptorScopes scopes) : HttpExchangeInterceptor
+    private sealed class ResponseInterceptor : HttpExchangeInterceptor
     {
-        public override HttpInterceptorScopes Scopes => scopes;
+        private readonly HttpInterceptorScopes _scopes;
+
+        public ResponseInterceptor(HttpInterceptorScopes scopes)
+        {
+            _scopes = scopes;
+        }
+
+        public override HttpInterceptorScopes Scopes => _scopes;
 
         public int Responses { get; private set; }
 
