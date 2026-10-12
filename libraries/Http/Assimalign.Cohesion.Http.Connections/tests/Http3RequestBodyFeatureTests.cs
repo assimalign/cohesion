@@ -27,7 +27,7 @@ public class Http3RequestBodyFeatureTests
         Http3StreamException reason = new(Http3ErrorCode.RequestCancelled, "The exchange was cancelled.");
 
         // Act
-        Http3ConnectionContext.ResetStream(stream, reason);
+        Http3ConnectionContext.ResetStream(stream, reason, ConnectionId.New(), streamId: 0);
 
         // Assert
         stream.AbortErrorCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);

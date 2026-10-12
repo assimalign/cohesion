@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
+
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
@@ -27,7 +29,27 @@ internal abstract class TransportHttpContext : HttpContext
     internal bool ResponseAbortedByClient => Volatile.Read(ref _responseAbortedByClient) != 0;
 
     /// <summary>Publishes the response outcome before cancellation can release a pending writer.</summary>
-    internal void LatchResponseAbortedByClient() => Interlocked.Exchange(ref _responseAbortedByClient, 1);
+    internal void LatchResponseAbortedByClient()
+    {
+        if (Interlocked.Exchange(ref _responseAbortedByClient, 1) != 0)
+        {
+            return;
+        }
+        if (this is Http2Context http2)
+        {
+            // HTTP/2 can latch the stream before an exchange exists; share its one-shot report.
+            http2.Stream.ReportResponseAbortedByClient();
+        }
+        else
+        {
+            HttpTransportEventSource.Log.ResponseAbortedByClient(
+                DiagnosticConnectionId, Version == HttpVersion.Http30 ? "3" : "1.1",
+                this is Http3Context http3 ? http3.StreamId : -1);
+        }
+    }
+
+    internal ConnectionId DiagnosticConnectionId =>
+        ConnectionInfo is HttpTransportConnectionInfo info ? info.ConnectionId : default;
 
     /// <summary>Cancels a response abandoned by its peer and reports its transport origin.</summary>
     internal OperationCanceledException AbortResponseForPeer(Exception reason)

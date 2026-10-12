@@ -957,6 +957,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
+        HttpTransportEventSource.Log.ConnectionError(_connection.Id, "3", (long)error.ErrorCode);
         MarkLocalConnectionClose();
         _teardownSource.Cancel();
 
@@ -982,7 +983,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             _ = TrySendStreamCancellationAsync(requestStreamId);
         }
 
-        ResetStream(streamConnection, reason);
+        ResetStream(streamConnection, reason, _connection.Id, requestStreamId);
     }
 
     /// <summary>
@@ -994,9 +995,25 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     /// <param name="streamConnection">The request stream.</param>
     /// <param name="reason">The stream error, carrying the code.</param>
-    internal static void ResetStream(IMultiplexedStream streamConnection, Http3StreamException reason)
+    /// <param name="connectionId">The parent multiplexed connection's identifier.</param>
+    /// <param name="streamId">The request stream's wire ID.</param>
+    internal static void ResetStream(IMultiplexedStream streamConnection, Http3StreamException reason, ConnectionId connectionId, long streamId)
     {
+        // A body read from a request interceptor can reset the stream before its exception reaches
+        // the head reader. The root already ended its lifecycle; do not count its second decision.
+        if (streamConnection.State is ConnectionState.Aborted or ConnectionState.Closed)
+        {
+            return;
+        }
+
+        HttpTransportEventSource.Log.StreamReset(connectionId, "3", streamId, (long)reason.ErrorCode);
         streamConnection.Abort((long)reason.ErrorCode, reason);
+    }
+
+    /// <summary>Reports the transport's first decision to reject one request.</summary>
+    internal void ReportRequestRejected(long streamId, HttpStatusCode statusCode)
+    {
+        HttpTransportEventSource.Log.RequestRejected(_connection.Id, "3", streamId, statusCode.Value);
     }
 
     /// <summary>
@@ -2105,7 +2122,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // longer be answered, so it is reset.
         catch (Exception exception)
         {
-            ResetStream(streamConnection, new Http3StreamException(Http3ErrorCode.InternalError, "The request stream failed unexpectedly.", exception));
+            ResetStream(streamConnection, new Http3StreamException(Http3ErrorCode.InternalError, "The request stream failed unexpectedly.", exception), _connection.Id, requestStreamId);
             _readyContexts.Writer.TryComplete(exception);
         }
         finally
@@ -2299,7 +2316,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             solicitContinue: expectsContinue && !endBuffered);
         requestHead = requestHead with { Body = body };
 
-        HttpConnectionInfo connectionInfo = HttpTlsConnectionInfo.Create(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint, _tls);
+        HttpConnectionInfo connectionInfo = HttpTlsConnectionInfo.Create(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint, _tls, _connection.Id);
 
         // Like HTTP/2's frame pump, run the CPU-only parse hooks inline. A hook with long-running
         // work must offload it explicitly; registering a synchronous feature must not schedule
@@ -2324,8 +2341,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 canHaveBody,
                 _featureCapacity).ConfigureAwait(false);
         }
-        catch (HttpRequestRejectedException)
+        catch (HttpRequestRejectedException exception)
         {
+            if (body.ClientFaultStatusCode is null)
+            {
+                ReportRequestRejected(requestStreamId, exception.StatusCode);
+            }
+
             // A request-parse interceptor refused this request before it was dispatched (the pipeline
             // already disposed the partial body-wrapper chain and hook-attached features). RFC 9114
             // §4.1.1 — the server refused it without application processing, so the stream is reset with
@@ -2882,6 +2904,12 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         HttpStatusCode statusCode,
         CancellationToken cancellationToken)
     {
+        // Body rejections already reported the first client-fault latch; a rejected head has none.
+        if (requestBody.ClientFaultStatusCode is null)
+        {
+            ReportRequestRejected(requestStreamId, statusCode);
+        }
+
         try
         {
             Stream stream = streamConnection.AsStream();
@@ -3261,6 +3289,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         if (!requestBody.IsReset)
         {
+            HttpTransportEventSource.Log.ResponseRateAborted(_connection.Id, "3", context.StreamId);
             bool abandonsReading = !requestBody.IsCompleted;
             requestBody.MarkReset();
 

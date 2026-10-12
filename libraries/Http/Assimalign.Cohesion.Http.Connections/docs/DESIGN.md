@@ -1587,25 +1587,105 @@ component that ran the handshake knows which it was, so it decides.
 
 ## Diagnostics
 
-This package raises no events and has no event source. Until #1039 it carried an empty
-placeholder, `HttpTransportEventSource`: the right name, but no singleton and no events. It was
-deleted rather than filled, because what an HTTP-level source could report is either reported
-elsewhere already or needs a design of its own:
+The internal sealed `HttpTransportEventSource` and its BCL `Meter` are both named exactly
+`Assimalign.Cohesion.Http.Connections` (#1300, decisions 31 and 49). This name is final: #1399's
+Web default forwarder enables this exact source, not the `Assimalign.Cohesion.Connections.`
+driver prefix. Subscribe with `EventListener` / `MeterListener`, an OpenTelemetry meter
+subscription, or the .NET diagnostic tools. NativeAOT applications need
+`EventSourceSupport=true` for events; transport behavior and metrics do not depend on event delivery.
 
-| What an operator wants | Where it comes from |
+### Events and attribution
+
+All five events are Warning, without keywords. Each event id is emitted at most once per second
+across the process; its next emission carries the number suppressed since the preceding emission.
+`suppressedCount` saturates at `Int32.MaxValue`; independent occurrence counters remain exact.
+Disabled events do not advance the throttle. A quiet interval does not emit a synthetic summary.
+
+| Id | Event | Payload (in order) |
+| --- | --- | --- |
+| 1 | `RequestRejected` | `connectionId:string, protocol:string, streamId:long, statusCode:int, suppressedCount:int` |
+| 2 | `ConnectionError` | `connectionId:string, protocol:string, errorCode:long, suppressedCount:int` |
+| 3 | `StreamReset` | `connectionId:string, protocol:string, streamId:long, errorCode:long, suppressedCount:int` |
+| 4 | `ResponseRateAborted` | `connectionId:string, protocol:string, streamId:long, suppressedCount:int` |
+| 5 | `ResponseAbortedByClient` | `connectionId:string, protocol:string, streamId:long, suppressedCount:int` |
+
+`protocol` is `1.1`, `2` or `3`; `streamId=-1` means that no request stream applies
+(HTTP/1.1 or an HTTP/2 connection-output stall). IDs identify the driver's connection and the
+multiplexed request stream. These transport events can precede an HTTP exchange and never depend
+on Web.Server's request-id feature or `Activity.Current`. They report no target, path, query,
+header name or value, body, exception message, peer text, route, or peer address.
+
+The raising sites describe decisions, not successful wire delivery:
+
+- HTTP/1.1 reports a pre-dispatch answer before its best-effort error write, and reports a body's
+  first 400/408/413/431 fault at the latch. A fault caught by an interceptor before the context
+  exists is reported when that context attaches. Final send and repeated reads do not recount it.
+- HTTP/2 reports a first rejection at its stream fault latch or transport response claim, whichever
+  wins. Non-`NO_ERROR` GOAWAY and RST_STREAM decisions report their numeric RFC 9113 codes;
+  only the first connection-error decision counts. Flood guards therefore expose
+  `ENHANCE_YOUR_CALM`. Graceful close and successful unread-body cleanup are not errors.
+- HTTP/3 reports connection errors exactly at `AbortConnection` and whole-stream resets exactly
+  at `ResetStream`, including critical-stream errors and numeric RFC 9114/QPACK codes. Those
+  methods use the multiplexed root coded abort members; no driver raises HTTP events. Request
+  fault latches and pre-dispatch answers report once. An interceptor refusal reports its rejection
+  status even when HTTP/3 resets the stream instead of writing that status.
+- Minimum request-body rates report their 408 outcomes; slow-response enforcement reports its
+  rate abort and the client's response-abort outcome. The latter's first latch also covers peer
+  loss/reset while a response is outstanding (#1432). The two counters intentionally measure
+  different facts: request-attributed rate-aborts are the reason-specific subset. HTTP/2 can
+  additionally report a connection-output rate abort with no active response (for example a
+  stalled SETTINGS write); that abort has `streamId=-1` and need not increment response-aborts.
+  Cancellation by the application is not a client-abort
+  outcome; normal keep-alive expiry is not a rejected request.
+
+Each backing count is updated with Interlocked, even with no listener. Five lazy
+`IncrementingPollingCounter` instances publish rates per second from those exact totals:
+`rejected-requests`, `connection-errors`, `stream-resets`, `response-rate-aborts`, and
+`response-aborts`. They are created only on the first EventSource enable command. Internal
+read-only total properties support delta assertions; there are no connection gauges here.
+
+### Meter instruments
+
+The [OpenTelemetry HTTP metrics conventions](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/)
+define request duration, active requests and body sizes, but no rejection, protocol-error or
+response-abort count. These four custom `Counter<long>` instruments therefore use a Cohesion
+prefix. Their attribute names reuse the semantic conventions where applicable.
+
+| Instrument | Unit | Tags |
+| --- | --- | --- |
+| `cohesion.http.server.rejected_requests` | `{request}` | `network.protocol.version:string`, `cohesion.http.rejection.status_code:int` |
+| `cohesion.http.server.protocol_errors` | `{error}` | `network.protocol.version:string`, `error.type:string`, `cohesion.http.error.scope:string` |
+| `cohesion.http.server.response_rate_aborts` | `{abort}` | `network.protocol.version:string` |
+| `cohesion.http.server.response_aborts` | `{response}` | `network.protocol.version:string` |
+
+`error.type` is the server-selected protocol code in invariant decimal notation; interpret it
+with the version. `cohesion.http.error.scope` is `connection` or `stream`. No connection or
+request identifier becomes a metric tag. Rejection statuses include 400, 408, 413, 414, 421, 431
+and 501, plus explicit request-interceptor refusal statuses. After dispatch, a rejection code
+records the client-fault outcome even when a response already started and cannot be replaced.
+That is why the status tag is custom: `http.response.status_code` would incorrectly claim that
+the rejection status was sent on the wire, including interceptor refusals handled by a reset.
+Meter observations are exact while subscribed and independent of EventSource throttling.
+
+The disabled reporting path allocates nothing after initialization: string conversion and event
+payload construction sit inside `IsEnabled`, metric tag boxing and error-code formatting inside
+`Instrument.Enabled`. Tests measure all five reporting methods with neither listener attached,
+and verify real protocol decisions under both listeners by delta and connection/stream identity.
+
+| What an operator wants | Owner |
 | --- | --- |
-| Per-request latency, status, route, errors and trace context | The Web server's `ActivitySource` and `Meter`, `Assimalign.Cohesion.Web.Hosting` (#1064). The host sees the whole exchange and how its pipeline ended; the transport sees neither. |
-| Connection lifetimes and counts | Each connection driver's event source (`Assimalign.Cohesion.Connections.Tcp`, `.Quic`, `.NamedPipes`). An HTTP/1.1 or HTTP/2 connection is one driver connection and an HTTP/3 connection is one QUIC connection, so an HTTP-level `Opened`/`Closed` pair and a second `current-connections` counter would count the same connections twice under two names. |
-| TLS handshakes | The runtime's `System.Net.Security` source. A handshake that failed or timed out, and the connection closed for it: `Assimalign.Cohesion.Connections` (`UpgradeFailed`) for TCP endpoints, `Assimalign.Cohesion.Connections.Quic` (`HandshakeFailed`) for HTTP/3. |
-| Requests this package answers itself before dispatch (400, 408, 413, 414, 421, 431, 501), and protocol errors (HTTP/2 `GOAWAY` and `RST_STREAM` codes, the flood guards' `ENHANCE_YOUR_CALM`, HTTP/3 error codes) | Not reported yet. |
+| Per-request spans, latency, route and pipeline outcome | Web.Hosting's `ActivitySource` and `Meter`; application responses are not counted here. |
+| Driver connection lifetimes and counts | Each Connections driver's EventSource. |
+| TLS handshakes | Runtime `System.Net.Security`, plus the listener/QUIC driver's failures. |
+| Transport rejections, client-fault outcomes and protocol codes | This source and Meter; Web sources never report them. |
 
-The last row is the remaining gap, and filling a placeholder would not close it. It needs an
-error vocabulary per protocol, a choice between events and metric instruments (Kestrel reports the
-same conditions as an `error.type` on its connection-duration metric), and hooks in all three
-transports. If that work lands as events, it adds a source that follows
-`.claude/rules/event-source.md`, named `Assimalign.Cohesion.Http.Connections`. Until then the rule
-applies as written: an assembly that raises nothing has no event source, so no empty provider
-advertises a name that tools can enable and that never reports anything.
+### Compatibility with 10.0.0-preview.1
+
+Preview.1 contained only an empty event-source placeholder and emitted none of these diagnostics.
+This adds opt-in events and metrics without public API or wire-behavior changes. A consumer already
+forwarding the assembly prefix can now receive throttled Warning entries: that operational behavior
+change is recorded against preview.1 on decision 15's terms. No logging dependency, framework member,
+or public contract is added.
 
 ## HTTP/1.1 server limits and timeouts
 

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -144,6 +145,10 @@ internal sealed class Http2Stream
     // answered or reset, so whoever observes either finds it. The frame pump (413, a malformed body) and
     // the body reader (408) race for it, so it is taken with Interlocked.
     private ClientFault? _clientFault;
+    private readonly ConnectionId _connectionId;
+    private int _requestRejectionReported;
+    private int _responseAbortReported;
+    private int _responseRateAbortReported;
 
     // RFC 9113 §8.1 — the request's trailer section: a second field block, opened by a HEADERS frame
     // that carries END_STREAM once the head is in, and closed by END_HEADERS. It accumulates in
@@ -194,9 +199,10 @@ internal sealed class Http2Stream
     /// </summary>
     public bool ReceiveReclaimed { get; set; }
 
-    public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow, int maxHeaderBlockSize)
+    public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow, int maxHeaderBlockSize, ConnectionId connectionId = default)
     {
         StreamId = streamId;
+        _connectionId = connectionId;
         InitialReceiveWindow = initialReceiveWindow;
         _headerBlock = new MemoryStream();
         _maxHeaderBlockSize = maxHeaderBlockSize;
@@ -368,6 +374,34 @@ internal sealed class Http2Stream
         if (Volatile.Read(ref _responseOwner) == responseOwnerApplication && !_responseCompleted && !_reset)
         {
             _responseAbortedByClient = true;
+            ReportResponseAbortedByClient();
+        }
+    }
+
+    /// <summary>Reports the exchange's client-caused response abort once across both latches.</summary>
+    internal void ReportResponseAbortedByClient()
+    {
+        if (Interlocked.Exchange(ref _responseAbortReported, 1) == 0)
+        {
+            HttpTransportEventSource.Log.ResponseAbortedByClient(_connectionId, "2", StreamId);
+        }
+    }
+
+    /// <summary>Reports the response's minimum-rate abort once across credit and output stalls.</summary>
+    internal void ReportResponseRateAborted()
+    {
+        if (Interlocked.Exchange(ref _responseRateAbortReported, 1) == 0)
+        {
+            HttpTransportEventSource.Log.ResponseRateAborted(_connectionId, "2", StreamId);
+        }
+    }
+
+    /// <summary>Reports the first request rejection, whether it is answered or reset.</summary>
+    internal void ReportRequestRejected(HttpStatusCode statusCode)
+    {
+        if (Interlocked.Exchange(ref _requestRejectionReported, 1) == 0)
+        {
+            HttpTransportEventSource.Log.RequestRejected(_connectionId, "2", StreamId, statusCode.Value);
         }
     }
 
@@ -438,7 +472,12 @@ internal sealed class Http2Stream
     {
         ClientFault fault = new(statusCode, failure);
 
-        return (Interlocked.CompareExchange(ref _clientFault, fault, null) ?? fault).Failure;
+        ClientFault? previous = Interlocked.CompareExchange(ref _clientFault, fault, null);
+        if (previous is null)
+        {
+            ReportRequestRejected(statusCode);
+        }
+        return (previous ?? fault).Failure;
     }
 
     /// <summary>

@@ -29,10 +29,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// closes, so code that keeps it beyond the exchange copies it first.
 /// </para>
 /// </remarks>
-internal sealed class HttpTlsConnectionInfo : HttpConnectionInfo, ITlsConnectionInfo
+internal sealed class HttpTlsConnectionInfo : HttpTransportConnectionInfo, ITlsConnectionInfo
 {
-    private HttpTlsConnectionInfo(EndPoint? localEndPoint, EndPoint? remoteEndPoint, ITlsConnectionInfo tls)
-        : base(localEndPoint, remoteEndPoint)
+    private HttpTlsConnectionInfo(EndPoint? localEndPoint, EndPoint? remoteEndPoint, ITlsConnectionInfo tls, ConnectionId connectionId)
+        : base(localEndPoint, remoteEndPoint, connectionId)
     {
         ApplicationProtocol = tls.ApplicationProtocol;
         TlsProtocol = tls.TlsProtocol;
@@ -63,11 +63,12 @@ internal sealed class HttpTlsConnectionInfo : HttpConnectionInfo, ITlsConnection
     /// <param name="localEndPoint">The local endpoint of the connection or stream.</param>
     /// <param name="remoteEndPoint">The remote endpoint of the connection or stream.</param>
     /// <param name="tls">The handshake facet of the accepted connection, or <see langword="null"/>.</param>
+    /// <param name="connectionId">The driver identity used only for internal diagnostics.</param>
     /// <returns>The connection info.</returns>
-    public static HttpConnectionInfo Create(EndPoint? localEndPoint, EndPoint? remoteEndPoint, ITlsConnectionInfo? tls)
+    public static HttpConnectionInfo Create(EndPoint? localEndPoint, EndPoint? remoteEndPoint, ITlsConnectionInfo? tls, ConnectionId connectionId = default)
     {
         return tls is null
-            ? new HttpConnectionInfo(localEndPoint, remoteEndPoint)
-            : new HttpTlsConnectionInfo(localEndPoint, remoteEndPoint, tls);
+            ? new HttpTransportConnectionInfo(localEndPoint, remoteEndPoint, connectionId)
+            : new HttpTlsConnectionInfo(localEndPoint, remoteEndPoint, tls, connectionId);
     }
 }

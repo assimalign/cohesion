@@ -175,6 +175,11 @@ internal sealed class Http1RequestBodyStream : Stream
     {
         _owner = owner;
         _connectionToken = owner.RequestCancelled;
+        // A request interceptor can read and catch a rejection before this context is constructed.
+        if (IsMalformed || RejectedStatusCode is not null)
+        {
+            ReportRejection(IsMalformed ? HttpStatusCode.BadRequest : RejectedStatusCode!.Value);
+        }
     }
 
     /// <summary>
@@ -467,6 +472,7 @@ internal sealed class Http1RequestBodyStream : Stream
         catch (InvalidDataException)
         {
             IsMalformed = true;
+            ReportRejection(HttpStatusCode.BadRequest);
             throw;
         }
         finally
@@ -919,8 +925,20 @@ internal sealed class Http1RequestBodyStream : Stream
     /// </summary>
     private Http1LimitExceededException Reject(HttpStatusCode statusCode, string message)
     {
-        RejectedStatusCode ??= statusCode;
+        if (RejectedStatusCode is null)
+        {
+            RejectedStatusCode = statusCode;
+            ReportRejection(statusCode);
+        }
         return new Http1LimitExceededException(statusCode, message);
+    }
+
+    private void ReportRejection(HttpStatusCode statusCode)
+    {
+        if (_owner is { } owner)
+        {
+            HttpTransportEventSource.Log.RequestRejected(owner.DiagnosticConnectionId, "1.1", -1, (int)statusCode);
+        }
     }
 
     /// <summary>

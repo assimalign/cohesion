@@ -233,6 +233,14 @@ internal sealed partial class Http2ConnectionContext
     private Exception FailOutputStall(Http2Context? response)
     {
         _outputStalled = true;
+        if (response is null)
+        {
+            HttpTransportEventSource.Log.ResponseRateAborted(Connection.Id, "2", -1);
+        }
+        else
+        {
+            response.Stream.ReportResponseRateAborted();
+        }
         response?.LatchResponseAbortedByClient();
         LatchResponsesAbortedByClient();
         Connection.Abort(new IOException("The peer stopped reading the connection below the configured minimum response data rate."));

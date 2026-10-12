@@ -55,3 +55,11 @@ without adding or replacing the header.
 
 See [DESIGN.md](DESIGN.md) for listener composition examples, the host contract, protocol behavior,
 limits, interception and resource ownership.
+
+## Diagnostics
+
+Enable the EventSource and Meter named `Assimalign.Cohesion.Http.Connections` to observe transport
+rejections, protocol error codes, slow-reader aborts and client-caused response aborts. Events are
+throttled and omit request text; metrics count every observed decision. See [Diagnostics](DESIGN.md#diagnostics)
+for event payloads, instrument names, units and tags. Application request spans and duration remain
+with the Web host.

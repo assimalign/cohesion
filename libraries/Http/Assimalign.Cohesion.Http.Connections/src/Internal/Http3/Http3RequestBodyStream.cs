@@ -1027,7 +1027,10 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// </summary>
     private void LatchClientFault(HttpStatusCode statusCode)
     {
-        Interlocked.CompareExchange(ref _clientFaultStatusCode, statusCode.Value, 0);
+        if (Interlocked.CompareExchange(ref _clientFaultStatusCode, statusCode.Value, 0) == 0)
+        {
+            _connection.ReportRequestRejected(_streamId, statusCode);
+        }
     }
 
     private void EndRead()

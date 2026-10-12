@@ -192,7 +192,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             {
                 http1Context.Response.StatusCode = rejectedStatus;
                 http1Context.MarkFinalResponseStarted();
-                await TryWriteErrorResponseAsync(rejectedStatus, cancellationToken).ConfigureAwait(false);
+                await TryWriteErrorResponseAsync(rejectedStatus, cancellationToken, reportRejection: false).ConfigureAwait(false);
                 return;
             }
         }
@@ -303,6 +303,10 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     internal static OperationCanceledException FailSlowResponse(IConnection connection, Http1Context context)
     {
         context.KeepAlive = false;
+        if (!context.ResponseAbortedByClient)
+        {
+            HttpTransportEventSource.Log.ResponseRateAborted(connection.Id, "1.1", -1);
+        }
         context.LatchResponseAbortedByClient();
         connection.Abort(new IOException("The peer did not read the response at the configured minimum data rate."));
         return context.AbortSlowResponse();
@@ -491,8 +495,12 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     /// Best-effort write of a minimal error response to the connection stream. Any I/O failure is
     /// swallowed: the peer may already be gone, and the connection is being closed regardless.
     /// </summary>
-    private async Task TryWriteErrorResponseAsync(HttpStatusCode statusCode, CancellationToken cancellationToken)
+    private async Task TryWriteErrorResponseAsync(HttpStatusCode statusCode, CancellationToken cancellationToken, bool reportRejection = true)
     {
+        if (reportRejection)
+        {
+            HttpTransportEventSource.Log.RequestRejected(Connection.Id, "1.1", -1, (int)statusCode);
+        }
         try
         {
             await Http1MessageWriter.WriteErrorResponseAsync(Stream, statusCode, cancellationToken, _responseHeaderPolicy.GetDateHeader()).ConfigureAwait(false);

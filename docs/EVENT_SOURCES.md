@@ -73,6 +73,7 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 | `Assimalign.Cohesion.Connections.Udp` | Datagram connection opened (bind or connect)/closed | `current-connections`, `total-connections` | [Udp DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Udp/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.DependencyInjection` | Provider built; call site built, service resolved, scope disposed, provider descriptors, resolver compiled (Verbose); resolver compilation failed | none | [DependencyInjection DESIGN.md](../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Hosting.Resources` | Shared control-plane contributor failures and command outcomes: applied, unknown kind (501), conflict (409), handler failure. Only registered kinds are written; refusals/failures are throttled. HTTP surface events belong to Web.Hosting.Resources | `contributor-failures`, `commands-applied`, `unknown-command-kinds`, `command-conflicts`, `command-handler-failures` | [Hosting.Resources DESIGN.md](../libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Http.Connections` | Transport rejections, HTTP/2 and HTTP/3 connection errors and stream resets, slow-reader aborts and client-caused response aborts (Warning, throttled per event with `suppressedCount`) | `rejected-requests`, `connection-errors`, `stream-resets`, `response-rate-aborts`, `response-aborts` | [Http.Connections DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Http.Sessions` | Store load/commit failures (type only, throttled) | `store-load-failures`, `store-commit-failures` | [Design](../libraries/Http/Assimalign.Cohesion.Http.Sessions/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | Every area's shared HTTP control plane: throttled credential/loopback refusal and malformed-command events, stop accepted. Non-Web resource processes require a tool or their own forwarder; contributor failures are producer-owned below | `rejected-credentials` | [Web.Hosting.Resources DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.ErrorHandling` | Application pipeline fault (Error), expected fault (Verbose), error-handler failure (Error), diagnostic-callback failure (Warning), peer-abandoned response (Verbose); client-caused and cancelled exchanges excluded from application-fault reporting | `total-faults`, `faults-per-second`, `aborted-responses` | [ErrorHandling DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics) |
@@ -99,10 +100,7 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 Deliberately not instrumented: `Connections.InMemory` (a test driver), `Connections.Security` (TLS
 handshakes are already reported by the runtime's `System.Net.Security` source, and a handshake that
 fails on a TLS-layered listener is reported by `Assimalign.Cohesion.Connections`, which owns the
-listener that closes the connection), and
-`Http.Connections` (requests are traced and measured by the Web server below, and connections are
-counted by the drivers above; its empty placeholder source was deleted, see its
-[DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#diagnostics)).
+listener that closes the connection).
 
 ### Web assemblies deliberately left uninstrumented
 
@@ -140,9 +138,10 @@ process with an `ActivityListener` and a `MeterListener` (an OpenTelemetry SDK r
 names); out of process, `dotnet-counters` reads a meter by name. The forwarder above handles event
 sources only.
 
-| Assembly (= `ActivitySource` and `Meter`) | Traces | Metrics | Reference |
+| Assembly (same-named `ActivitySource` and/or `Meter`) | Traces | Metrics | Reference |
 | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Web.Hosting` | One `Server` span per HTTP request, parented to the caller's `traceparent` | `http.server.request.duration`, `http.server.active_requests` | [Web.Hosting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#server-telemetry-1064) |
+| `Assimalign.Cohesion.Http.Connections` | None | `cohesion.http.server.rejected_requests`, `cohesion.http.server.protocol_errors`, `cohesion.http.server.response_rate_aborts`, `cohesion.http.server.response_aborts` | [Http.Connections DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#meter-instruments) |
 
 ## Not yet conforming
 

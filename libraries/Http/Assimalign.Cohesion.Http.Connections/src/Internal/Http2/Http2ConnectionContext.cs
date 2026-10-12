@@ -151,6 +151,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // the one-shot claim, and _gracefulGoAwayWritten completes once that write has finished or failed,
     // so the teardown can wait for it before it completes the connection output.
     private int _gracefulGoAwayClaimed;
+    private int _connectionErrorReported;
     private readonly TaskCompletionSource _gracefulGoAwayWritten = new(TaskCreationOptions.RunContinuationsAsynchronously);
     // RFC 9113 §6.8 — the number of dispatched request exchanges whose
     // response has not yet been sent (nor whose stream has been reset or
@@ -1476,6 +1477,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         // The reset below fires RequestCancelled before AbortSlowResponse returns. Publish the reason
         // first so a handler woken by that token can already classify its response (#1432).
         context.LatchResponseAbortedByClient();
+        context.Stream.ReportResponseRateAborted();
         using CancellationTokenSource writeWindow = new(_abandonedResetWriteWindow);
 
         if (!connectionStalled)
@@ -2358,6 +2360,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         }
         catch (HttpRequestRejectedException rejection)
         {
+            stream.ReportRequestRejected(rejection.StatusCode);
             // A request-parse interceptor refused this request (the pipeline already disposed the
             // partial body-wrapper chain and hook-attached features before surfacing). RFC 9113
             // §5.4.2 — reset the single stream rather than writing the h1-style status response;
@@ -2436,6 +2439,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// </summary>
     private async Task AnswerRequestBodyRejectionAsync(Http2Stream stream, HttpStatusCode statusCode, bool claimed, CancellationToken cancellationToken)
     {
+        stream.ReportRequestRejected(stream.ClientFaultStatusCode ?? statusCode);
         if (claimed)
         {
             await WriteRequestBodyRejectionAsync(stream, statusCode, cancellationToken).ConfigureAwait(false);
@@ -2517,7 +2521,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 streamId,
                 initialSendWindow: _remoteSettings.InitialWindowSize,
                 initialReceiveWindow: _localSettings.InitialWindowSize,
-                maxHeaderBlockSize: _http2Limits.MaxRequestHeaderListSize);
+                maxHeaderBlockSize: _http2Limits.MaxRequestHeaderListSize,
+                connectionId: Connection.Id);
             _streams.Add(streamId, stream);
 
             // #1085 — a connection that carries a stream is not idle.
@@ -3465,6 +3470,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             return;
         }
 
+        if (errorCode != Http2ErrorCode.NoError)
+        {
+            HttpTransportEventSource.Log.StreamReset(Connection.Id, "2", streamId, (long)errorCode);
+        }
         Http2Stream? stream = await RemoveStreamAsync(streamId, writeToken, resetByServer: true).ConfigureAwait(false);
 
         if (stream is not null)
@@ -3494,6 +3503,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// </summary>
     private async Task EmitGoAwayAsync(Http2ErrorCode errorCode, CancellationToken cancellationToken)
     {
+        if (errorCode != Http2ErrorCode.NoError && Interlocked.Exchange(ref _connectionErrorReported, 1) == 0)
+        {
+            HttpTransportEventSource.Log.ConnectionError(Connection.Id, "2", (long)errorCode);
+        }
+
         try
         {
             // Snapshot under the stream-table lock: during a graceful close the
