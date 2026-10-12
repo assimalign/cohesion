@@ -70,3 +70,11 @@ For an out-of-process deployment, pass a distributed store adapter — everythin
 ```csharp
 app.UseSessions(new MyDistributedSessionStore(...), options => options.IdleTimeout = TimeSpan.FromMinutes(30));
 ```
+
+## Stored-session modification tracking
+
+`IHttpStoredSession.IsModified` reports whether the built-in session needs a payload write.
+It returns `true` by default for custom implementations that do not track changes, so existing
+stores keep committing. Read-only built-in sessions still refresh their idle timeout.
+Store failures can be observed through the `Assimalign.Cohesion.Http.Sessions` EventSource;
+see the [design](DESIGN.md#store-failure-ownership-1436) for payload and ownership details.

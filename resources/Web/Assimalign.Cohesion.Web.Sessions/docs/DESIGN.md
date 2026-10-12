@@ -194,3 +194,16 @@ the percent-encoded form included, register it. `tests/SessionCookieNameTests.cs
 cookie-name check: null, empty, whitespace, separators, control and non-ASCII characters fail before
 registration, and names containing all token punctuation pass. The errors name the option, preserve the
 cookie constructor's exception, and do not echo the value.
+
+## Store failure ownership (#1436)
+
+`Assimalign.Cohesion.Http.Sessions` owns store load and commit failure reporting through
+its internal same-named EventSource. Web.Sessions deliberately does not repeat those reports.
+The HTTP source reports exception types only because store messages can contain session ids
+or values. It also reports failures of the idle refresh performed instead of an unchanged
+payload commit. The original exception continues to propagate to the caller.
+
+`IHttpStoredSession.IsModified` now exposes the built-in modification flag. Its default
+interface implementation returns `true`, preserving custom implementations that commit every
+time. Built-in sessions keep skipping unchanged payload writes while renewing the idle window;
+this property does not change read-only expiration behavior.

@@ -85,8 +85,7 @@ and delivers the new identifier to the client.
 
 This contract is public because middleware and other HTTP hosts legitimately
 compose store-backed sessions without owning their framing or buffering logic.
-It replaces shipped-library friend access while keeping modification tracking
-and serialization implementation details internal. The interfaces and extension
+It replaces shipped-library friend access while keeping serialization implementation details internal. The interfaces and extension
 retain the existing `Assimalign.Cohesion.Http` family namespace, a scoped deviation
 from the namespace-matches-assembly rule. Instances are per exchange and are not
 thread-safe; store concurrency remains last-commit-wins.
@@ -166,3 +165,34 @@ length-prefixed binary (`HttpSessionSerializer`). The clock is a
   offered at this seam.
 - **Rich typed accessors beyond int/string.** Other scalar types can layer on
   as additional extensions following the same encoding discipline.
+
+## Diagnostics
+
+The internal `HttpSessionEventSource` is named `Assimalign.Cohesion.Http.Sessions`.
+It observes the store-backed session's load and commit boundary, including idle refresh,
+and rethrows the original failure. Requested cancellation is not reported as a failure.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | StoreLoadFailed | Error | exceptionType, suppressedCount:int |
+| 2 | StoreCommitFailed | Error | exceptionType, suppressedCount:int |
+
+Both events are throttled independently to one per second. The lazy PollingCounters
+`store-load-failures` and `store-commit-failures` count every failure, even with no listener
+or when a report is suppressed. Exception messages are deliberately omitted: an arbitrary
+store can embed the bearer session id or session data in its message. This stricter payload
+choice follows #1436's no-session-data requirement. No session identifier, key, value, or
+serialized frame is written.
+
+Http.Sessions owns these reports so bare HTTP hosts receive them too. Web.Sessions does
+not report the same failures again. A custom replacement session that does not use
+`CreateSession` owns its own store operations and diagnostics.
+
+## Compatibility since 10.0.0-preview.1 (#1436)
+
+Owner decision 55 adds only `IHttpStoredSession.IsModified`, with a default implementation
+returning `true`. Existing custom implementations continue compiling and committing on
+every call. The built-in store-backed session overrides it with its existing mutation flag;
+an unchanged session skips payload persistence, retaining its existing idle refresh.
+This is additive, with no change to session lifetime or persistence semantics. Failure events
+and exact counters are newly observable; exceptions still propagate unchanged.

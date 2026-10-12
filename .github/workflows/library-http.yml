@@ -2,6 +2,7 @@ name: Http
 on:
   push:
     paths:
+      - 'build/TestSupport/**'
       - "libraries/Http/**"
       - "!libraries/Http/**/*.slnx"
       - "!libraries/Http/**/*.md"
