@@ -1,6 +1,6 @@
 # Database event sources: plan of record
 
-**Status:** batches B1-B5 and the integration pass implemented 2026-10-08, with the section 9 recommendations applied; Q1-Q4 still await owner confirmation, Q5 and `SessionFaulted`'s message were decided on 2026-10-09; section 5 records batch D part 1 (#1349) after the redesign; health and provisioning await decision 49a, and Hosting event 10 landed through the owner-approved shared Host failure hook (#1441) ·
+**Status:** batches B1-B5 and the integration pass implemented 2026-10-08, with the section 9 recommendations applied; Q1-Q4 still await owner confirmation, Q5 and `SessionFaulted`'s message were decided on 2026-10-09; section 5 records batch D parts 1 and 2 (#1349 complete) after B2/49a, and Hosting event 10 landed through the owner-approved shared Host failure hook (#1441) ·
 **Created:** 2026-10-08 · **Owner:** Chase Crawford
 **Request:** the owner's request of 2026-10-08, "Event Source Tracing: add extensive EventSource
 tracing to all the Database projects … follow the EventSource pattern within the repository and
@@ -415,15 +415,14 @@ Graph adds one statement event for its wire path (§4.1, "Re-entry"):
 |---|---|---|---|---|
 | 12 | StatementParseFailed | Error | sessionId, database, code (an offline refusal's model code; empty otherwise), exceptionType | inside the two parse delegates the server passes to `ExecuteStatementAsync` (`GraphDatabaseServerSession.cs:341-344`), which catch `DatabaseException` and `DatabaseTypeException` only, write and rethrow, and for an empty statement, which the root never sees either; the delegate runs at `GraphDatabaseSession.cs:133`, before the root call. Only the wire path passes these delegates, so the in-process text path, which root event 28 reports, is not doubled; never a message (D8) |
 
-## 5. Batch D after the redesign — part 1 (#1349)
+## 5. Batch D after the redesign — #1349 complete
 
 **Implemented 2026-10-11:** the non-provisioning paths below, on base `e2830a17d`.
 B1/B3 composition, E1-E3 typed expressions/functions/domains/casts, and P7 have landed.
 The references in this section replace every former "today" location; they refer to this change.
-Hosting 1-6 and Sql server 1-9 remain unchanged. **Reserved for part 2:** Hosting **16-17**
-(HealthDegraded/HealthRestored) and Sql **13-15** (ProvisioningStart/Stop/Failed), plus whatever
-new IDs decision 49a assigns to deferred migration. No provisioning or health implementation
-is edited here.
+Hosting 1-6 and Sql server 1-9 remain unchanged. Part 1 reserved Hosting 16-17 and Sql
+13-15. **Part 2 implemented 2026-10-12**, on `95d3a7d56` after B2/49a: these five events
+and Sql 18-21 below complete #1349. Sql 17, retired by B2, is never reused.
 
 ### Database.Hosting
 
@@ -438,7 +437,7 @@ is edited here.
 | 13 | ResourceCommandHandled | Informational | kind, key, operation (Execute/Delete) | `Internal/DatabaseResourceCommandHandler.cs:38`, `:113`, including handled idempotent deliveries |
 | 14 | ResourceCommandRejected | Warning | kind, key, operation, exceptionType | `Internal/DatabaseResourceCommandHandler.cs:43`, `:118`, domain refusal or malformed JSON; no payload or message (D8) |
 | 15 | AdminEndpointFailed | Error | endpoint, operation (Start/Stop/Dispose), exceptionType, exceptionMessage | `Internal/DatabaseAdminEndpointService.cs:105`, `:118`, `:137`, `:154`; endpoint is scheme/authority only |
-| 16-17 | HealthDegraded / HealthRestored | reserved | — | Part 2 after the concurrent health rewrite; `DatabaseApplicationContext.CheckAsync` remains untouched |
+| 16-17 | HealthDegraded / HealthRestored | Warning / Informational | hostId, engineName, database, reason, cause, operation, objectName, position, stepCount, rowsProcessed, totalRows | Part 2: `Internal/DatabaseHealthTrace.cs`, once per observed condition transition, outside its observation gate |
 
 Start/stop timestamps are read only with the Informational source enabled; attaching during an
 operation produces zero duration. No counters were added. Command kind/key identifiers are cut
@@ -476,9 +475,74 @@ service-stop failure during rollback remains a shared Hosting follow-up (its DES
 | 10 | StatementPlanned | Verbose / Statements (0x2) | database, accessPath, recordsExamined | `SqlDatabaseSession.cs:250`, after a planned request completes (success or failure), so existing metrics carry actual work; `Internal/SqlQueryExecutor.cs` marks successful planning |
 | 11 | StatementTooComplex | Warning | database, depth | `SqlQueryRequest.cs:107` (session text parse), `SqlDatabaseSession.cs:219` (stack exhaustion), `:302` (typed diagnostics), `:316` (typed nesting refusal) |
 | 12 | DdlSelfCommitted | Verbose / Statements | database, commandType | `SqlDatabaseSession.cs:254`, once if the existing metrics record at least one durable catalog self-commit, including a later failure |
-| 13-15 | ProvisioningStart / ProvisioningStop / ProvisioningFailed | reserved | — | Part 2 after 49a; see current paths below |
+| 13-15 | ProvisioningStart / ProvisioningStop / ProvisioningFailed | Informational / Informational / Error | engineName, database, schema; schemaHash/mode/count on Start, count/outcome/duration on Stop; position/kind/code/exceptionType on Failed | Part 2: admitted Apply/Verify in `Internal/SqlSchemaProvisioner.cs`; one same-flow pair including skips |
 | 16 | ExtensionRegistered | Verbose | kind, name | `Functions/SqlFunctionCollection.cs:103` (Scalar/Aggregate); `Functions/SqlTypeCollection.cs:56`, `:92`, `:130`, `:167` (Type/Cast, including declared domains); every accepted registry insertion, built-ins included |
 | 17 | IndexRegistrationsSaved *(retired at the B2 merge)* | Verbose | database, count | Landed in part 1 at the registration backstop; B2 (#1355) then made index registration publish atomically with its description and removed the backstop, so the id is retired and never reused |
+| 18 | DeferredStepBound | Informational | engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows | `SqlSchemaProvisioner.Deferred.cs`, worker enters a step |
+| 19 | DeferredStepProgress | Verbose | same as 18 | First executor callback, then at most once per second per step |
+| 20 | DeferredStepCompleted | Informational | same as 18, outcome, durationMilliseconds | Once per entered step, including Error/Cancelled |
+| 21 | DeferredStepFailed | Error | same as 18, code, exceptionType | Actual worker failure; no exception message |
+
+**Part 2 decisions.** The O(1) skip writes Start/Stop (`Skipped`), accepting two Informational
+records per Build for an explicit outcome; it still walks no catalog and computes no hash.
+Start's count is -1 before planning; Stop's is the rendered count, or zero for skip/verify.
+Outcomes are Applied, Skipped, Deferred, Verified, Error and Cancelled. No Stop without a
+written Start. The accepted call owns its activity; handoff closes before scheduling the worker.
+Worker step names are Bound/Completed so no activity is transferred between Build and worker.
+Unknown row counts are -1, and the completion always carries the last exact progress, independent
+of throttling. Failure position zero denotes a non-step stage; worker finalization failure does
+not repeat the last successful step. Messages from operation failures are never written.
+
+Health uses an enabled-only, per-application observer over existing root inventory/progress.
+It reports once per observed reason/offline-cause transition, even with concurrent polls;
+progress-only changes stay silent. Offline outranks provisioning, pending reopen stays offline,
+and disappearance is not restoration. Restoration includes the last observed condition.
+This cannot see a transition wholly between polls; adding an event subscription or public
+forwarder solely for tracing was rejected. Listeners run outside the observer's gate, so health
+reentry is safe; concurrent event delivery may reorder already-recorded transitions.
+
+Disabled real-path comparison against the archived base `95d3a7d56` (same probe, .NET 10.0.401,
+Windows arm64, tiering off, 100 warmups and minimum of three 100-operation rounds):
+
+| Path | Debug base / traced (bytes) | Release base / traced (bytes) |
+|---|---|---|
+| O(1) apply skip | 560 / 560 | 32 / 32 |
+| Verify | 120 / 120 | 0 / 0 |
+| Inline CHECK add/drop, 130 rows | 181464 / 181464 | 173192 / 173192 |
+| Deferred CHECK plus removal, 130 rows | 216568 / 216568 | 206992 / 206992 |
+
+The first pass found an 8-byte Debug regression per Apply/Verify from the added catch local.
+Removing the redundant cached-hash local and moving Verify difference formatting into a
+synchronous helper restored the original machine sizes. Complete operations are measured
+individually to exclude periodic catalog/collection growth from the minimum; both sides use
+the same work and settings. The probe and logs remain in `_out/provisioning-tracing`.
+Hosting's paired real health/core test requires zero additional bytes in both configurations.
+
+**Part 2 validation (2026-10-12).** Both configurations passed with zero failed or skipped
+cases; counts below are per configuration, with SQL tiered compilation disabled:
+
+| Suite | Debug passed | Release passed |
+|---|---|---|
+| Database | 186 | 186 |
+| Database.Hosting | 104 | 104 |
+| Database.Sql | 1994 | 1994 |
+| Database.Sql.Catalog | 68 | 68 |
+| Database.Testing | 5 | 5 |
+| Database.Client | 69 | 69 |
+| Database.Sql.Client | 349 | 349 |
+| Database.KeyValuePair.Client | 20 | 20 |
+| Database.Embedded | 4 | 4 |
+
+Build tasks were built in both configurations. After the last source change,
+`pwsh installer/scripts/Install-Local.ps1 -Configuration Release -SkipLibraries` succeeded,
+then Database.Testing passed against the fresh local packages. Both SQL NativeAOT harnesses
+(AotSample and Benchmarks) published in Release for win-arm64 with no IL2xxx/IL3xxx warnings;
+the native sample passed 18/18 checks. The broader managed builds still report existing
+DependencyInjection/Configuration trim/AOT warnings, also reproduced from the archived base.
+Logs, allocation probes and TRX results are under `_out/provisioning-tracing`.
+
+No counters were added. Project Diagnostics sections record exact payloads, lock contexts,
+late-listener behavior and tests; they are the durable catalog.
 
 Depth is the parser's deepest reached nesting level, or the typed AST's recorded depth; **-1**
 means a runtime stack guard failed without a usable depth. Access paths and extension names are
@@ -554,9 +618,10 @@ Diagnostics subsection in `docs/resources/Database/DESIGN.md` listing every Data
 | **B4 — Wire and clients** | `Database.Protocol`, `Database.Security`, `Database.Client`, `Database.Sql.Client`, `Database.KeyValuePair.Client`, `Database.Graph.Client`, `Database.Blob.Client` | 28 (2 + 3 + 8 + 4 + 4 + 3 + 4) | `ProtocolFrameReader.cs`, `ProtocolFrameWriter.cs`; `DatabaseAuthenticator.cs`; `DatabaseConnection.cs`, `DatabaseClient.cs`, `Internal/DatabaseDownloadStream.cs`; `SqlConnection.cs`; `KeyValueConnection.cs`; `GraphConnection.cs`; `BlobConnection.cs`; a new event source and a test-only `InternalsVisibleTo` in each of the seven (none has one today); their tests and DESIGN.md; `docs/EVENT_SOURCES.md`. |
 | **B5 — Model servers and recovery** | `Database.Sql` (server only), `Database.KeyValuePair`, `Database.Graph`, `Database.Blob`, `Database.Documents` | 45 (9 + 9 + 12 + 13 + 2) | `Server/*DatabaseServer.cs` and `Internal/*DatabaseServerSession.cs` of Sql, KeyValuePair, Graph and Blob; `Internal/BlobGuardedStream.cs`; `GraphDatabase.cs`; `DocumentDatabase.cs`; a new event source in each of the five; their tests and DESIGN.md; `docs/EVENT_SOURCES.md`. Not `SqlDatabaseSession.cs`, `SqlDatabase.cs` or any Sql planner, executor or provisioner file (§5). |
 | **D part 1 — Non-provisioning, implemented 2026-10-11** | `Database.Hosting`, `Database.Sql`, root gap and `Database.Sql.Schema` decision | 14 wired (9 + 5), including Hosting 10 through #1441 | §5; existing source tests and Diagnostics docs. No provisioning/health edits. |
-| **D part 2 — After 49a** | `Database.Hosting`, `Database.Sql` | 5 reserved (2 + 3), plus deferred-migration events | Hosting 16-17; Sql 13-15. |
+| **D part 2 — Implemented 2026-10-12** | `Database.Hosting`, `Database.Sql` | 9 (2 + 7) | Hosting 16-17; Sql 13-15 and 18-21. #1349 complete; Sql 17 retired. |
 
-Totals: **147** new events in B1-B5, **19** after the redesign, **166** new; 9 exist. 17 sources,
+Totals: **147** new events in B1-B5; D added **23**, of which Sql 17 is now retired,
+leaving **22** active D additions; 9 pre-existing events. **178** active events overall. 17 sources,
 of which 15 are new.
 
 Every batch:
@@ -612,6 +677,7 @@ collection:
      GQL syntax error over the Graph wire (event 12 once, root event 28 not at all) and the same
      text in process (root event 28 once, event 12 not at all).
    - **D part 1:** real application build/start/stop and repeated no-op transitions; failed owned-engine disposal; handled/rejected Execute and Delete commands with bounded identifiers; occupied admin port; SQL indexed SELECT final metrics, real DDL self-commit, text/typed nesting refusals and execution stack failure; accepted built-in and custom typed registry entries and rejected duplicates; changed/unchanged index registration persistence. A failed application start writes Hosting 10 once after rollback, preserving the original failure.
+   - **D part 2:** real inline Apply/Skip/Verify, coded failure and cancellation; real deferred CHECK success/failure/cancellation, exact payload names, bounded progress over more than one second; real deferred health with concurrent polls, listener reentry, offline precedence, and reopening; no event 0 or retired Sql 17.
    - **D root gap:** base, typed and collation SQL create paths each report success and duplicate failure once; a create listener re-enters on the same and another thread without inheriting the collation or holding the registry lock.
    - **B1 re-entry:** a Graph and a Documents text statement in process write exactly one
      `StatementStart`/`StatementStop` pair each.
