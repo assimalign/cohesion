@@ -116,9 +116,10 @@ public class SqlCatalogTests
         scratch.OwningSchema.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: legacy records remain ad-hoc")]
-    public void LegacyRecords_WithoutOwnershipSuffix_ShouldRemainAdhoc()
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: legacy records are refused without format 10 function identities")]
+    public void Open_LegacyRecordsWithoutOwnershipSuffix_ShouldRefuseMissingFunctionIdentities()
     {
+        // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "legacy-catalog");
         var table = new DatabaseKeyWriter();
         table.AppendInt32(1).AppendInt64(1).AppendString("dbo", Collation.Binary)
@@ -136,14 +137,8 @@ public class SqlCatalogTests
             transaction.Commit();
         }
 
-        SqlCatalog catalog = SqlCatalog.Open(storage);
-
-        catalog.TryGetTable("dbo", "legacy", out var loadedTable).ShouldBeTrue();
-        loadedTable.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
-        loadedTable.OwningSchema.ShouldBeNull();
-        catalog.TryGetIndex(1, "ix_legacy_id", out var loadedIndex).ShouldBeTrue();
-        loadedIndex.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
-        loadedIndex.OwningSchema.ShouldBeNull();
+        // Act / Assert
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("missing format 10 function-call identities");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: inconsistent metadata is rejected")]

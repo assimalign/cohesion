@@ -15,6 +15,23 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDatabaseEventSourceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - A declared script reports its checksum once and never its SQL body")]
+    public async Task Provisioning_Script_ShouldReportAppliedOnce()
+    {
+        // Arrange
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Informational);
+        var builder = SqlDatabaseEngine.CreateBuilder(UniqueEngineName());
+        builder.AddDatabase("traced", database => database.Script("001", "CREATE FUNCTION answer() RETURNS INT RETURN 42"));
+        // Act
+        await using var engine = await builder.BuildAsync();
+        await engine.DeclaredDatabases.Single().ProvisionAsync(engine, CancellationToken.None);
+        // Assert
+        var applied = NewEvent(recorder, 22, "ScriptApplied", ["engineName", "database", "script", "hash"]);
+        applied.Payload!.Take(3).ShouldBe([engine.Name, "traced", "001"]);
+        ((string)applied.Payload![3]!).Length.ShouldBe(64);
+        recorder.Events.Count(entry => entry.EventId == 22).ShouldBe(1);
+    }
+
     private static readonly string[] _provisioningStartPayload = ["engineName", "database", "schema", "schemaHash", "mode", "stepCount"];
     private static readonly string[] _provisioningStopPayload = ["engineName", "database", "schema", "schemaHash", "stepCount", "outcome", "durationMilliseconds"];
     private static readonly string[] _deferredPayload = ["engineName", "database", "table", "objectName", "kind", "position", "stepCount", "rowsProcessed", "totalRows"];

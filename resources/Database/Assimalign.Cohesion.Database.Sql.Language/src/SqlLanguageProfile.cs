@@ -12,6 +12,7 @@ public static class SqlLanguageProfile
         // DML
         "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
         "SET", "VALUES", "INTO", "RETURNING",
+        "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
         "CREATE", "DROP", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
         "ADD", "COLUMN",

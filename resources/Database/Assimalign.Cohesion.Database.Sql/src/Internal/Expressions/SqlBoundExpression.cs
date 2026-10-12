@@ -92,4 +92,10 @@ internal enum SqlBoundExpressionKind : byte
 
     /// <summary><see cref="SqlBoundFailure"/>: a node whose evaluation fails, as it did before binding existed.</summary>
     Failure,
+
+    /// <summary>A row-independent column DEFAULT expression.</summary>
+    Default,
+
+    /// <summary><see cref="SqlBoundDomainArgument"/>: domain coercion before a function's STRICT dispatch.</summary>
+    DomainArgument,
 }

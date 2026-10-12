@@ -33,6 +33,10 @@ internal sealed class SqlBoundCall : SqlBoundExpression
         FirstTarget = targets is { Length: > 0 } ? targets[0] : DatabaseType.Null;
         Collation = collation;
         Database = database;
+        if (function is SqlExpressionFunction expression && collation.IsFixed)
+        {
+            expression.PrepareBody(collation.Resolve(null));
+        }
     }
 
     /// <summary>Gets the overload the call resolved to.</summary>

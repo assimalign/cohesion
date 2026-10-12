@@ -57,8 +57,8 @@ public sealed class SqlCatalogDomainTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Domains: a table record of extension version 3 (format 6) loads with no domain, so the format gate refuses its database")]
-    public void TableRecord_ExtensionVersionThree_ShouldLoadWithoutDomains()
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Domains: legacy records are refused without format 10 function identities")]
+    public void TableRecord_ExtensionVersionThree_ShouldRefuseMissingFunctionIdentities()
     {
         // Arrange: a table record as data-storage format 6 wrote it.
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "format-six");
@@ -68,12 +68,8 @@ public sealed class SqlCatalogDomainTests
             .AppendInt32(0);                        // no dropped columns
         Insert(storage, record.ToArray());
 
-        // Act
-        SqlCatalog catalog = SqlCatalog.Open(storage);
-
-        // Assert
-        catalog.TryGetTable("dbo", "legacy", out var table).ShouldBeTrue();
-        table.Columns.Select(column => column.DomainName).ShouldBe([null, null]);
+        // Act / Assert
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("missing format 10 function-call identities");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Domains: a persisted blank domain name is refused at load")]

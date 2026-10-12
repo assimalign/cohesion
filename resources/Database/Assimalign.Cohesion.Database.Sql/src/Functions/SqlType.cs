@@ -54,6 +54,19 @@ public sealed class SqlType : IEquatable<SqlType>
         Check = check;
     }
 
+    internal string? DefaultLiteral { get; private set; }
+    internal bool IsNotNull { get; private set; }
+    internal bool IsSqlDefined { get; private set; }
+
+    internal static SqlType CreateSqlDomain(string name, SqlType baseType, SqlScalarFunction? check, string? defaultLiteral, bool notNull)
+    {
+        var domain = CreateDomainCore(name, baseType, check, sqlDefined: true);
+        domain.DefaultLiteral = defaultLiteral;
+        domain.IsNotNull = notNull;
+        domain.IsSqlDefined = true;
+        return domain;
+    }
+
     /// <summary>Gets the type's SQL name, as a diagnostic or a signature shows it.</summary>
     public string Name { get; }
 
@@ -233,10 +246,14 @@ public sealed class SqlType : IEquatable<SqlType>
     /// </code>
     /// </example>
     public static SqlType CreateDomain(string name, SqlType baseType, SqlScalarFunction? check = null)
+        => CreateDomainCore(name, baseType, check, sqlDefined: false);
+
+    private static SqlType CreateDomainCore(string name, SqlType baseType, SqlScalarFunction? check, bool sqlDefined)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(baseType);
-        SqlTypeRules.ValidateDomainName(name);
+        if (sqlDefined) { SqlTypeRules.ValidateSqlDomainName(name); }
+        else { SqlTypeRules.ValidateDomainName(name); }
         if (baseType.IsPseudo)
         {
             throw new ArgumentException(

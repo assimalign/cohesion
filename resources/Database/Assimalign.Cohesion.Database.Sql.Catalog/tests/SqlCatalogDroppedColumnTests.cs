@@ -76,25 +76,18 @@ public sealed class SqlCatalogDroppedColumnTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Dropped columns: a table record written before the layout extension loads with no dropped column")]
-    public void TableRecord_ExtensionVersionTwo_ShouldLoadWithoutDroppedColumns()
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Dropped columns: legacy records are refused without format 10 function identities")]
+    public void TableRecord_ExtensionVersionTwo_ShouldRefuseMissingFunctionIdentities()
     {
-        // Arrange: a table record as data-storage format 5 wrote it (extension version 2),
-        // so the engine's format gate, not a decode error, refuses such a database.
+        // Arrange: a table record as data-storage format 5 wrote it (extension version 2).
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "format-five");
         var record = TableRecordPrefix(1, "dbo", "legacy", ("id", false), ("note", true))
             .AppendInt32(2).AppendInt32(0)          // extension version 2, no constraints
             .AppendInt32(-1).AppendInt32(-1);       // no collation overrides
         Insert(storage, record.ToArray());
 
-        // Act
-        SqlCatalog catalog = SqlCatalog.Open(storage);
-
-        // Assert
-        catalog.TryGetTable("dbo", "legacy", out var table).ShouldBeTrue();
-        table.Columns.Select(column => column.Name).ShouldBe(["id", "note"]);
-        table.DroppedColumnOrdinals.ShouldBeEmpty();
-        table.PhysicalColumnCount.ShouldBe(2);
+        // Act / Assert
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("missing format 10 function-call identities");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Dropped columns: a persisted layout that cannot describe the table is refused at load")]
@@ -107,11 +100,13 @@ public sealed class SqlCatalogDroppedColumnTests
         // Arrange: the dropped count, then the ordinals, after two live columns.
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "damaged");
         var record = TableRecordPrefix(1, "dbo", "damaged", ("id", false), ("note", true))
-            .AppendInt32(3).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
+            .AppendInt32(4).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
         foreach (int value in persisted)
         {
             record.AppendInt32(value);
         }
+        // Complete the current format: no column domains and no function calls in either default.
+        record.AppendNull().AppendNull().AppendInt32(0).AppendInt32(0);
 
         Insert(storage, record.ToArray());
 

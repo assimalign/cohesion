@@ -47,7 +47,7 @@ internal static class Program
     private static readonly object?[][] _aggregates = [[20000L, 150.0, "Ada Lovelace,Grace Hopper", 2L]];
 
     private static readonly object?[][] _registered =
-        [["clamp"], ["describe"], ["in_range"], ["is_missing"], ["join_names"], ["median"], ["or_none"], ["product"], ["scaled"], ["slugify"]];
+        [["clamp"], ["describe"], ["in_range"], ["is_missing"], ["join_names"], ["median"], ["or_none"], ["product"], ["scaled"], ["slugify"], ["sql_increment"]];
 
     // E3: a domain column, an application's casts to and from the cents domain (the inner CAST tells
     // the outer one its source is cents), a built-in cast from text to DATE, and an application's cast
@@ -152,6 +152,11 @@ internal static class Program
             new Dictionary<string, object?> { ["first"] = Token(1), ["second"] = Token(2) },
             CancellationToken.None);
 
+        await session.ExecuteAsync("CREATE FUNCTION sql_increment(p INT) RETURNS INT IMMUTABLE RETURN p + 1");
+        await session.ExecuteAsync("CREATE DOMAIN sql_positive AS INT CHECK (VALUE > 0)");
+        await session.ExecuteAsync("CREATE TABLE sql_defined (n sql_positive DEFAULT sql_increment(2))");
+        await session.ExecuteAsync("INSERT INTO sql_defined VALUES (sql_increment(3))");
+        Check("in process: SQL function and domain", await RowsAsync(session, "SELECT sql_increment(n) FROM sql_defined"), [[5]]);
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, Projection), _projection);
         Check("in process: typed and hand-written aggregates", await RowsAsync(session, Aggregates), _aggregates);
         Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, Registered), _registered);

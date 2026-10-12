@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+
+using Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Storage;
@@ -77,7 +80,10 @@ internal sealed partial class SqlPlanExecutor
             // A deleted historical version can predate a NOT NULL addition
             // to a currently empty table. Nullability validates live rows at
             // DDL/DML time, never changes the visibility of historical rows.
-            values[ordinal] = defaults[ordinal] is { } bound ? DefaultValue(bound) : null;
+            // Only literal defaults can be introduced by ADD COLUMN. A missing function-default
+            // tail belongs to an invisible version written after a trailing drop, never a value
+            // INSERT omitted. Do not run application code while decoding such a version.
+            values[ordinal] = defaults[ordinal] is { Kind: not SqlBoundExpressionKind.Default } bound ? DefaultValue(bound) : null;
         }
 
         return values;
@@ -148,6 +154,48 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="column">The column.</param>
     /// <param name="defaultValue">The value text of the column's DEFAULT literal (<see cref="SqlPersistedExpression.LoadDefaultValue"/>).</param>
     /// <returns>The bound DEFAULT.</returns>
+    internal static SqlBoundExpression BindDefaultExpression(SqlCatalogColumn column, string subject,
+        SqlFunctionEnvironment functions, Collation collation, bool declaring = false)
+    {
+        var expression = SqlPersistedExpression.Load(column.DefaultLiteral!, subject);
+        if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
+        {
+            return new SqlBoundConstant(null);
+        }
+        if (SqlPersistedExpression.IsDefaultLiteral(expression))
+        {
+            string value = SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral!, subject);
+            if (declaring)
+            {
+                return new SqlBoundConstant(ResolveDefault(column, value));
+            }
+            return BindDefault(column, value);
+        }
+        var scope = new SqlExpressionEvaluator([], null, defaultCollation: collation, functions: functions);
+        SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
+        try
+        {
+            SqlPersistedExpression.Bind(expression, scope);
+            if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
+            {
+                throw new DatabaseException($"The recorded function signatures {string.Join(", ", column.DefaultFunctionCalls)} do not resolve.");
+            }
+            if (declaring)
+            {
+                SqlPlanner.ValidateExpression(expression, scope);
+            }
+            return new SqlBoundDefault(scope.Bind(expression), column);
+        }
+        catch (DatabaseException failure) when (!declaring && SqlDefinitionBinder.HasUnavailableCall(expression, scope))
+        {
+            return new SqlBoundDefault(new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition(subject, column.DefaultLiteral!, failure.Message))), column);
+        }
+        catch (DatabaseException failure) when (!declaring)
+        {
+            throw new DatabaseException($"{subject} cannot be loaded: {failure.Message} {SqlPersistedExpression.DamagedCatalogHint}", failure);
+        }
+    }
+
     internal static SqlBoundExpression BindDefault(SqlCatalogColumn column, string defaultValue)
     {
         try
@@ -167,11 +215,11 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>The value a bound DEFAULT supplies: its converted constant, or its conversion failure raised again.</summary>
     /// <param name="bound">The bound DEFAULT (<see cref="BindDefault"/>).</param>
     /// <returns>The value.</returns>
-    private static object? DefaultValue(SqlBoundExpression bound)
+    private static object? DefaultValue(SqlBoundExpression bound, CancellationToken cancellationToken = default)
     {
         object? value = bound.Kind == SqlBoundExpressionKind.Constant
             ? ((SqlBoundConstant)bound).Value
-            : ((SqlBoundFailure)bound).Raise();
+            : SqlExpressionEvaluator.ForExecution(null, cancellationToken).Evaluate(bound, []);
         return value is byte[] bytes ? bytes.Clone() : value;
     }
 

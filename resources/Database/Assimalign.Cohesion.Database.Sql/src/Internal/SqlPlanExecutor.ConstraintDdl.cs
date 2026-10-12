@@ -23,8 +23,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (column.DefaultLiteral is not null)
             {
-                ResolveDefault(column, SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
-                    $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'"));
+                BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, declaring: true);
             }
         }
 
@@ -35,9 +34,25 @@ internal sealed partial class SqlPlanExecutor
         constraints = BindConstraints(provisional, plan.Constraints);
         // Durable, but not a self-commit the session counts (#1272): the reservation persists only
         // the object-id counter, and the table stays invisible until the publish.
-        var table = await _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
+        var table = await (statement.ScriptReceipt is null ? _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-            statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
+            statement.ProvisioningSchema, cancellationToken) : _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
+            statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+            statement.ProvisioningSchema, statement.ScriptReceipt, cancellationToken)).ConfigureAwait(false);
+        SqlCatalogScriptPublication? publication = null;
+        if (statement.ScriptReceipt is { } expected)
+        {
+            // Reservation advances exactly one generation and preserves the completed prefix.
+            // Derive that expected state instead of accepting a fresh snapshot that could include
+            // an intervening publication through the public catalog API.
+            var previous = expected.Previous!;
+            ulong reservedGeneration = checked(expected.ExpectedGeneration + 1);
+            var reserved = new SqlCatalogScript(previous.Name, previous.ContentHash, previous.StatementCount,
+                previous.CompletedStatements, previous.BaseGeneration, reservedGeneration, previous.SchemaHash,
+                previous.Objects, previous.StatementObjects, previous.StatementParameterTypes);
+            publication = new SqlCatalogScriptPublication(expected.Name, expected.ContentHash, expected.StatementCount,
+                reserved, reservedGeneration, expected.SchemaHash, expected.ExpectedObject);
+        }
 
         // Lock before publication, and retain the apply's owner through its final marker
         // or compensation. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
@@ -48,7 +63,7 @@ internal sealed partial class SqlPlanExecutor
         // Bind the persisted definitions of the version about to be published, from their
         // stored text, so no write to the new table ever parses them.
         _definitions.Get(table);
-        await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false).ConfigureAwait(false);
+        await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false, publication).ConfigureAwait(false);
     }
 
     private async Task LockReferencedTablesAsync(IReadOnlyList<SqlCatalogConstraint> constraints, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -73,8 +88,9 @@ internal sealed partial class SqlPlanExecutor
     // publish. A crash can leak unpublished tree pages, but cannot expose a table
     // whose declared uniqueness has no enforcing index.
     private async Task PublishConstrainedTableAsync(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions,
-        SqlStatementContext statement, CancellationToken cancellationToken, bool replaceExisting)
+        SqlStatementContext statement, CancellationToken cancellationToken, bool replaceExisting, SqlCatalogScriptPublication? publication = null)
     {
+        publication ??= statement.ScriptReceipt;
         var indexes = new List<SqlCatalogIndex>();
         bool primaryCreated = false;
         for (int i = 0; i < definitions.Count; i++)
@@ -159,8 +175,9 @@ internal sealed partial class SqlPlanExecutor
                     }, durable: true, cancellationToken).ConfigureAwait(false);
                 }
             }
-            await SelfCommitAsync(statement, _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),
-                replaceExisting, cancellationToken)).ConfigureAwait(false);
+            await SelfCommitAsync(statement, (publication is null ? _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),
+                replaceExisting, cancellationToken) : _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),
+                replaceExisting, publication, cancellationToken))).ConfigureAwait(false);
         }
         catch
         {
@@ -192,7 +209,7 @@ internal sealed partial class SqlPlanExecutor
         constraints = BindConstraints(plan.Table, [plan.Constraint]);
         var primary = plan.Constraint.Kind == SqlConstraintKind.PrimaryKey ? plan.Constraint.Columns : plan.Table.PrimaryKeyColumns;
         var columns = plan.Table.Columns.Select(column => primary.Contains(column.Name, StringComparer.OrdinalIgnoreCase)
-            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName) : column).ToArray();
+            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls) : column).ToArray();
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
             plan.Table.DroppedColumnOrdinals);
@@ -230,8 +247,11 @@ internal sealed partial class SqlPlanExecutor
         // until every default and existing-row constraint has been checked.
         if (plan.Column.DefaultLiteral is not null)
         {
-            ResolveDefault(plan.Column, SqlPersistedExpression.LoadDefaultValue(plan.Column.DefaultLiteral,
-                $"DEFAULT of column '{plan.Column.Name}' on table '{plan.Schema}.{plan.Name}'"));
+            if (!SqlPersistedExpression.IsDefaultLiteral(SqlPersistedExpression.Load(plan.Column.DefaultLiteral, "ADD COLUMN DEFAULT")))
+            {
+                throw SqlDefinitionBinder.Refuse("ADD COLUMN requires a literal DEFAULT; expression defaults require row materialization, which this metadata-only addition does not perform.");
+            }
+            BindDefaultExpression(plan.Column, $"DEFAULT of column '{plan.Column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, declaring: true);
         }
 
         var columns = table.Columns.Append(plan.Column).ToArray();
@@ -258,7 +278,7 @@ internal sealed partial class SqlPlanExecutor
             // value is one immutable literal, so validate it once instead of scanning rows.
             var definition = _definitions.Get(replacement);
             var row = new object?[columns.Length];
-            row[^1] = definition.DefaultValues[^1] is { } literal ? DefaultValue(literal) : null;
+            row[^1] = definition.DefaultValues[^1] is { } literal ? DefaultValue(literal, cancellationToken) : null;
             try
             {
                 CheckDomains(definition, row, ExecutionEvaluator(null, cancellationToken), [columns.Length - 1]);
@@ -273,7 +293,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             _definitions.Adopt(await SelfCommitAsync(statement,
-                _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken)).ConfigureAwait(false), replacement);
+                (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement);
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
         // Backfill is logical: missing trailing fields resolve from the immutable
@@ -303,7 +323,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The catalog publishes its own copy of the replacement definition, built from the
             // same column and constraint instances, so it adopts the replacement's bindings.
-            _definitions.Adopt(await SelfCommitAsync(statement, _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken)).ConfigureAwait(false),
+            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false),
                 replacement);
         }
         else
@@ -321,8 +341,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The new version no longer carries the constraint, so the dropped predicate is
             // never evaluated again; it keeps the other bindings of the version it came from.
-            _definitions.Adopt(await SelfCommitAsync(statement, _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName,
-                cancellationToken)).ConfigureAwait(false), plan.Table);
+            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, cancellationToken) : _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), plan.Table);
         }
         else if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.ConstraintName, out var index) && index.IsUnique)
         {
@@ -405,8 +424,8 @@ internal sealed partial class SqlPlanExecutor
 
             try
             {
-                SqlPersistedExpression.Bind(check.Predicate,
-                    new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation, functions: _definitions.Functions));
+                _ = BindPersistedCheck(check.Predicate, new SqlCatalogTable(0, table.Schema, table.Name, columns),
+                    _catalog.DefaultCollation, _definitions.Functions, check.Constraint.CheckFunctionCalls);
             }
             catch (DatabaseException exception)
             {

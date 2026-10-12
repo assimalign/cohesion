@@ -83,6 +83,14 @@ shared storage, with DDL flowing through the relational catalog
   and the application's alike. A typed schema names a domain with `table.Column(selector,
   "email")`, and `schema.Type<T>(t => t.Decimal(p, s))` declares one. See DESIGN.md, "Types,
   domains and casts (E3)".
+- **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
+  bound expression evaluator and scalar ABI as registered functions. SQL domains share type
+  resolution and write enforcement with registered domains. Canonical definitions, dependencies,
+  ownership and script receipts persist in catalog format 10. A builder's named scripts run
+  inline after its typed schema, in declaration order, and resume at committed statement
+  boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
+  an unchanged script-set hash and catalog generation skip reconciliation in constant time.
+  See DESIGN.md, "SQL-defined functions, domains and declared scripts (E4)".
 - **Typed rows** — rows encode with the shared self-describing tuple codec,
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).

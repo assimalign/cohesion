@@ -406,6 +406,23 @@ internal sealed class SqlDatabaseEventSource : EventSource
         }
     }
 
+    /// <summary>Reports a completed declared script without logging its SQL body.</summary>
+    /// <param name="database">The provisioned database.</param>
+    /// <param name="name">The stable script name.</param>
+    /// <param name="hash">The body SHA-256.</param>
+    [NonEvent]
+    public void ScriptApplied(SqlDatabase database, string name, string hash)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ScriptApplied(database.Engine.Name, database.Name.ToString(), Bound(name, MaxNameLength), hash);
+        }
+    }
+
+    [Event(22, Level = EventLevel.Informational, Message = "Applied declared script {0}/{1}/{2} ({3}).")]
+    private void ScriptApplied(string engineName, string database, string script, string hash)
+        => WriteEvent(22, engineName, database, script, hash);
+
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
         => WriteEvent(1, engineName, sessionId, activeSessions);

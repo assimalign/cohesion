@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
@@ -30,6 +31,7 @@ public sealed class SqlDatabaseBuilder
     private SqlProvisioningMode _provisioning = SqlProvisioningMode.Apply;
     private SqlSchema? _schema;
     private bool _runMigrationsInline;
+    internal List<(string Name, string Sql)> Scripts { get; } = [];
 
     /// <summary>Initializes the declaration of one database of an engine builder.</summary>
     /// <param name="engine">The engine builder the database belongs to.</param>
@@ -157,6 +159,26 @@ public sealed class SqlDatabaseBuilder
 
         ThrowIfSchemaDeclared();
         _schema = schema;
+        return this;
+    }
+
+    /// <summary>Declares a forward-only script, executed in declaration order after the typed schema.</summary>
+    /// <param name="name">A stable, case-sensitive name, at most 128 characters.</param>
+    /// <param name="sql">The exact SQL body whose UTF-8 SHA-256 is persisted.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentException">The name or SQL is blank, or the name is duplicated or too long.</exception>
+    /// <exception cref="InvalidOperationException">The engine builder's build has begun.</exception>
+    /// <remarks>Scripts run inline. Each statement and its receipt commit together; an interrupted script resumes after its committed prefix. Changing a recorded body is refused with COHSQLS001.</remarks>
+    public SqlDatabaseBuilder Script(string name, string sql)
+    {
+        _engine.EnsureMutable();
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sql);
+        if (name.Length > 128 || Scripts.Exists(script => script.Name == name))
+        {
+            throw new ArgumentException("Script names must be unique and at most 128 characters.", nameof(name));
+        }
+        Scripts.Add((name, sql));
         return this;
     }
 

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
@@ -216,7 +217,7 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
 
     // A cast's identity ignores length, precision and scale, as pg_cast's does: the engine applies them.
     private static string TypeKey(SqlType type)
-        => type.IsDomain ? "D:" + type.Name.ToUpperInvariant() : StorageKey(type.Storage.Type);
+        => type.IsDomain ? SqlObjectIdentity.Domain(type.Name.ToUpperInvariant()) : StorageKey(type.Storage.Type);
 
     private static string StorageKey(DatabaseType type) => "B:" + ((int)type).ToString(CultureInfo.InvariantCulture);
 }

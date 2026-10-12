@@ -251,3 +251,6 @@ internal sealed record SqlCreateIndexPlan(
     bool IfNotExists) : SqlPlan;
 
 internal sealed record SqlDropIndexPlan(SqlCatalogTable Table, string IndexName, bool IfExists) : SqlPlan;
+
+/// <summary>A database-scoped SQL function or domain DDL statement.</summary>
+internal sealed record SqlDefinitionPlan(SqlQueryExpression Expression) : SqlPlan;

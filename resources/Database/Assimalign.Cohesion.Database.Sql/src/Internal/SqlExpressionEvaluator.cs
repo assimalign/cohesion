@@ -209,6 +209,9 @@ internal sealed partial class SqlExpressionEvaluator
         {
             case SqlBoundExpressionKind.Column:
                 return row[((SqlBoundColumn)expression).Ordinal];
+            case SqlBoundExpressionKind.Default:
+                var defaultValue = (SqlBoundDefault)expression;
+                return SqlPlanExecutor.CoerceForColumn(EvaluateCore(defaultValue.Value, row), defaultValue.Column);
             case SqlBoundExpressionKind.Constant:
                 return ((SqlBoundConstant)expression).Value;
             case SqlBoundExpressionKind.Binary:
@@ -240,6 +243,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return EvaluateCase((SqlBoundCase)expression, row);
             case SqlBoundExpressionKind.Cast:
                 return EvaluateCast((SqlBoundCast)expression, row);
+            case SqlBoundExpressionKind.DomainArgument:
+                return EvaluateDomainArgument((SqlBoundDomainArgument)expression, row);
             case SqlBoundExpressionKind.Subquery:
                 return SqlSubqueryValues.Get(_subqueryValues, ((SqlBoundSubquery)expression).Slot)[0];
             case SqlBoundExpressionKind.Failure:
@@ -251,6 +256,10 @@ internal sealed partial class SqlExpressionEvaluator
 
     /// <summary>Returns the shared box of a Boolean result.</summary>
     private static object Box(bool value) => value ? True : False;
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object? EvaluateDomainArgument(SqlBoundDomainArgument argument, object?[] row)
+        => argument.Coerce(EvaluateCore(argument.Operand, row), _subqueryValues, _cancellationToken);
 
     internal int ResolveColumn(SqlColumnReferenceExpression column)
     {

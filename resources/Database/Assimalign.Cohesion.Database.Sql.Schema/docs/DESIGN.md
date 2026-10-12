@@ -251,3 +251,11 @@ reporting, so they do not warrant a separate source. Database.Sql owns schema ap
 lifecycle events; SDK compilation reports through MSBuild's task log. This decision accounts for
 runtime compilation and file helpers, rather than treating this package as build-time only or
 I/O-free.
+
+## E4 scripts
+
+SqlDatabaseBuilder.Script belongs to the database declaration after typed apply. SqlCompiledSchema
+stays v4 and typed defaults remain literal-only. Script history has its own ordered-set digest
+and catalog-generation marker, so unchanged reconciliation hashes nothing. Script-created tables
+and indexes are excluded from typed snapshot reconstruction; deleting script code undoes nothing.
+See Database.Sql's E4 section for recovery and the inline-execution/SDK owner-review decisions.

@@ -179,3 +179,10 @@ The package has no public interface left and no `Abstractions/` folder
   nothing. Before the P5 review a stale `SqlConnection` ran its commands on whichever caller had
   rented the session next, and a second dispose returned that caller's rental
   (`SqlClientTests.QueryAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException`).
+
+## E4 SQL definitions
+
+Function/domain DDL and calls use the existing statement transport and server environment without
+client ABI or wire-format changes. Dependency/admission refusals retain leading COHSQLD codes in
+execution-failure messages and leave connections usable. SqlDomainWireTests exercises SQL-defined
+functions in SELECT, WHERE, CHECK and DEFAULT alongside SQL domain enforcement.

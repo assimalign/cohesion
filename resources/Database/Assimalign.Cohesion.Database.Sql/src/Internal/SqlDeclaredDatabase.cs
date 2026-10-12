@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// it refuses to drop one (owner decision 56 of 2026-10-09), and each records the outcome of its
 /// provisioning for this assembly's tests.
 /// </remarks>
-internal sealed class SqlDeclaredDatabase
+internal sealed partial class SqlDeclaredDatabase
 {
     private SqlSchemaMigrationResult? _result;
 
@@ -143,12 +143,18 @@ internal sealed class SqlDeclaredDatabase
             }
         }
 
+        var scripts = declaration.Scripts.ConvertAll(script => new SqlDeclaredScript(script.Name, script.Sql, parserOptions));
+        ValidateScriptOwnership(compiled, scripts);
         return new SqlDeclaredDatabase(
             declaration.Name,
             collation,
             declaration.Provisioning,
             compiled,
-            declaration.RunMigrationsInline);
+            declaration.RunMigrationsInline || scripts.Count > 0)
+        {
+            _scripts = scripts.AsReadOnly(),
+            _scriptHash = SqlDeclaredScript.Hash(scripts),
+        };
     }
 
     /// <summary>
@@ -178,12 +184,15 @@ internal sealed class SqlDeclaredDatabase
                 "persisted in it and cannot change: declare the collation the database has, or move its data to a new database.");
         }
 
+        await ValidateScriptsAsync(database, cancellationToken).ConfigureAwait(false);
         if (Schema is not null)
         {
             _result = Mode == SqlProvisioningMode.Verify
                 ? await database.VerifySchemaAsync(Schema, cancellationToken).ConfigureAwait(false)
                 : await database.SchemaProvisioner.ApplyAsync(Schema, cancellationToken, !RunMigrationsInline).ConfigureAwait(false);
         }
+
+        await ApplyScriptsAsync(database, cancellationToken).ConfigureAwait(false);
 
         // Step 6 (owner decision 65): every persisted definition binds to the engine's catalog. A
         // CHECK that calls a function this engine does not register opens, and fails each write;

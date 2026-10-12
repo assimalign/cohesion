@@ -21,7 +21,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// </exception>
     internal SqlFunction? ResolveFunction(SqlFunctionCallExpression call)
     {
-        if (!_functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
+        if (!TryGetCallOverloads(call, out var overloads))
         {
             return null;
         }
@@ -29,6 +29,33 @@ internal sealed partial class SqlExpressionEvaluator
         // A call typed earlier as another call's argument resolved the same way; one that failed
         // there resolves again, so the failure is raised here.
         return TryGetTypedCall(call, out var typed) && typed.Function is { } function ? function : Resolve(call, overloads);
+    }
+
+    internal void PinFunction(SqlFunctionCallExpression call, string identity)
+    {
+        var functions = new List<SqlFunction>();
+        foreach (var candidate in _functions.Catalog.GetOverloads(call.FunctionName))
+        {
+            if (SqlDefinitionBinder.Key(candidate).Equals(identity, StringComparison.OrdinalIgnoreCase))
+            {
+                functions.Add(candidate);
+            }
+        }
+        var typing = _typing ??= new SqlTypingMemory(null);
+        (typing.RecordedCalls ??= new(ReferenceEqualityComparer.Instance)).Add(call, (identity, functions.ToArray()));
+    }
+
+    internal string? RecordedIdentity(SqlFunctionCallExpression call)
+        => _typing?.RecordedCalls is { } calls && calls.TryGetValue(call, out var recorded) ? recorded.Identity : null;
+
+    private bool TryGetCallOverloads(SqlFunctionCallExpression call, out SqlFunction[] overloads)
+    {
+        if (_typing?.RecordedCalls is { } calls && calls.TryGetValue(call, out var recorded))
+        {
+            overloads = recorded.Functions;
+            return overloads.Length != 0;
+        }
+        return _functions.Catalog.TryGetOverloads(call.FunctionName, out overloads!);
     }
 
     /// <summary>
@@ -238,7 +265,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         typed = default;
-        if (_functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
+        if (TryGetCallOverloads(call, out var overloads))
         {
             var arguments = call.Arguments;
             Span<DatabaseType> types = arguments.Count <= 16 ? stackalloc DatabaseType[arguments.Count] : new DatabaseType[arguments.Count];
@@ -341,6 +368,8 @@ internal sealed partial class SqlExpressionEvaluator
     private sealed class SqlTypingMemory
     {
         private int _subquerySlots;
+
+        internal Dictionary<SqlFunctionCallExpression, (string Identity, SqlFunction[] Functions)>? RecordedCalls { get; set; }
 
         internal SqlTypingMemory(SqlExpressionEvaluator? slotScope) => SlotScope = slotScope;
 

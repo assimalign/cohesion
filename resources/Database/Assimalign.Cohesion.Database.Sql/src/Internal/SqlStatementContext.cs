@@ -23,7 +23,8 @@ internal readonly struct SqlStatementContext
         string databaseName = "",
         SqlCatalogSnapshot? catalogSnapshot = null,
         TransactionSequence? ddlLockOwner = null,
-        Action<long, long?>? provisioningProgress = null)
+        Action<long, long?>? provisioningProgress = null,
+        SqlCatalogScriptPublication? scriptReceipt = null)
     {
         Transaction = transaction;
         Coordinator = coordinator;
@@ -34,6 +35,7 @@ internal readonly struct SqlStatementContext
         CatalogSnapshot = catalogSnapshot;
         DdlLockOwner = ddlLockOwner ?? transaction.Sequence;
         ProvisioningProgress = provisioningProgress;
+        ScriptReceipt = scriptReceipt;
     }
 
     /// <summary>
@@ -46,6 +48,9 @@ internal readonly struct SqlStatementContext
     internal TransactionSequence DdlLockOwner { get; }
 
     internal Action<long, long?>? ProvisioningProgress { get; }
+
+    /// <summary>Gets the receipt published only by this statement's explicit commit.</summary>
+    internal SqlCatalogScriptPublication? ScriptReceipt { get; }
 
     /// <summary>
     /// Gets the database's transaction coordinator.

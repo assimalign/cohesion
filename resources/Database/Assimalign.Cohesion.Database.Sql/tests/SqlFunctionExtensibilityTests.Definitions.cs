@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -207,7 +208,7 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// <param name="reason">The reason the failure gives.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored CHECK over a function whose result type changed opens and refuses writes with COHSQLE009")]
     [InlineData("text", "is_email(email)", "is_email(TEXT)", "which this engine registers returning TEXT, where the CHECK needs BOOLEAN")]
-    [InlineData("anyelement", "is_email(email)", "is_email(TEXT)", "which this engine registers returning TEXT, where the CHECK needs BOOLEAN")]
+    [InlineData("anyelement", "is_email(email)", "is_email(TEXT)", "whose recorded identity 'IS_EMAIL(TEXT)' this engine does not register")]
     [InlineData("score-text", "score(email) < 100", "score(TEXT)",
         "which this engine registers returning TEXT, where the CHECK needs a value that compares with INTEGER")]
     public async Task Open_StoredCheckWhoseFunctionChangedItsResult_ShouldOpenAndRefuseWrites(string change, string check, string signature, string reason)
@@ -320,7 +321,10 @@ public sealed partial class SqlFunctionExtensibilityTests
                     shop.Catalog.TryGetTable("dbo", "customers", out var table).ShouldBeTrue();
                     var replaced = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, table.Columns.ToArray(), table.PrimaryKeyColumns,
                         table.Owner, table.OwningSchema,
-                        [new SqlCatalogConstraint("ck_email", SqlCatalogConstraintKind.Check, [], checkExpression: predicate)]);
+                        [new SqlCatalogConstraint("ck_email", SqlCatalogConstraintKind.Check, [], checkExpression: predicate,
+                            checkFunctionCalls: [predicate.StartsWith("ABS", StringComparison.Ordinal)
+                                ? "F:" + SqlDefinitionBinder.Signature("ABS", [SqlType.BigInt, SqlType.Integer])
+                                : "F:" + SqlDefinitionBinder.Signature("UPPER", [SqlType.Text, SqlType.Text])])]);
                     await shop.Catalog.PublishTableAsync(replaced, [], shop.Catalog.GetIndexRegistrations(), replaceExisting: true);
                 }
             }

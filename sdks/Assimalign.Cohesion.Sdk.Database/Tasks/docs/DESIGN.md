@@ -235,3 +235,13 @@ one-database default and dialect output, and the KeyValuePair compilation and mi
 recorded when its engine build provisioned the database. Packaging remains governed by the
 repository's SDK pack contract; Microsoft.Build host assemblies are excluded from the shipped task
 dependency closure.
+
+## E4 script artifact decision
+
+Iteration 1 keeps declared scripts outside the v4 typed schema. They require runtime statement
+receipts and checksummed history that generated SQL alone cannot establish. The extractor emits
+COHDBSDK110 for SqlDatabaseBuilder.Script, preventing incomplete artifacts. Keep runtime script
+declarations outside SDK-analyzed schema compilation and provision them in an Apply-mode deployment
+before a Verify-mode application starts. A future artifact carrying names, digests and bodies needs
+a corresponding journal-aware migration runner. Typed runtime/SDK document and hash parity remain
+unchanged; this decision requires no schema-document format bump.

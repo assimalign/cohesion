@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
@@ -509,11 +510,13 @@ internal sealed partial class SqlSchemaProvisioner
         return SnapshotCatalog(desired);
     }
 
+    private bool IsScriptObject(string key) => _catalog.Scripts.Any(script => script.Objects.Contains(key, StringComparer.OrdinalIgnoreCase));
+
     private SqlCompiledSchema? SnapshotCatalog(SqlCompiledSchema desired)
     {
         CatalogWalkCount++;
         IReadOnlyList<SqlCatalogTable> catalogTables = _catalog.Tables
-            .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, desired.Name))
+            .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, desired.Name) && !IsScriptObject(SqlObjectIdentity.Table(table.Schema, table.Name)))
             .ToList();
         if (catalogTables.Count == 0 && desired.Types.Count == 0)
         {
@@ -550,7 +553,7 @@ internal sealed partial class SqlSchemaProvisioner
 
             IReadOnlyList<SqlCatalogIndex> catalogIndexes = _catalog.GetIndexes(catalogTable.ObjectId);
             var indexes = catalogIndexes
-                .Where(index => !index.IsPrimaryKey && IsOwnedBy(index.Owner, index.OwningSchema, desired.Name))
+                .Where(index => !index.IsPrimaryKey && IsOwnedBy(index.Owner, index.OwningSchema, desired.Name) && !IsScriptObject(SqlObjectIdentity.Index(catalogTable.Schema, catalogTable.Name, index.Name)))
                 .OrderBy(index => index.Name, StringComparer.Ordinal)
                 .Select(index => new CompiledSchemaIndex(index.Name, index.ColumnNames, index.IsUnique))
                 .ToList();
@@ -615,7 +618,7 @@ internal sealed partial class SqlSchemaProvisioner
     {
         CatalogWalkCount++;
         var ownedTables = _catalog.Tables
-            .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, schema.Name))
+            .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, schema.Name) && !IsScriptObject(SqlObjectIdentity.Table(table.Schema, table.Name)))
             .ToList();
         foreach (CompiledSchemaTable expected in schema.Tables)
         {
@@ -671,7 +674,7 @@ internal sealed partial class SqlSchemaProvisioner
             }
 
             IReadOnlyList<SqlCatalogIndex> actualIndexes = _catalog.GetIndexes(actual.ObjectId)
-                .Where(index => !index.IsPrimaryKey && IsOwnedBy(index.Owner, index.OwningSchema, schema.Name))
+                .Where(index => !index.IsPrimaryKey && IsOwnedBy(index.Owner, index.OwningSchema, schema.Name) && !IsScriptObject(SqlObjectIdentity.Index(actual.Schema, actual.Name, index.Name)))
                 .ToList();
             foreach (CompiledSchemaIndex expectedIndex in expected.Indexes)
             {

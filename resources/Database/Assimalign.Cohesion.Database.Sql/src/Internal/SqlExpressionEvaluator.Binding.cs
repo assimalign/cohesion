@@ -500,9 +500,18 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         var scalar = (SqlScalarFunction)function!;
+        bool fixedArguments = AreFixed(arguments);
+        var callCollation = SqlBoundCollation.Of(collation, default, _defaultCollation);
+        for (int index = 0; index < arguments.Length; index++)
+        {
+            if (scalar.ParameterAt(index) is { IsDomain: true } domain)
+            {
+                arguments[index] = new SqlBoundDomainArgument(arguments[index], domain, scalar.Name, callCollation, _functions.Database);
+            }
+        }
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
-            SqlBoundCollation.Of(collation, default, _defaultCollation), _functions.Database);
-        return scalar.Volatility == SqlFunctionVolatility.Immutable && AreFixed(arguments) ? Fold(bound) : bound;
+            callCollation, _functions.Database);
+        return scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
     }
 
     /// <summary>Whether every argument has a value fixed when the statement was bound: a constant or a parameter.</summary>

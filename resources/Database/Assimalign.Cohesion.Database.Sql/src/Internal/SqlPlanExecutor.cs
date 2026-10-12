@@ -83,6 +83,8 @@ internal sealed partial class SqlPlanExecutor
     {
         switch (plan)
         {
+            case SqlDefinitionPlan definition:
+                return await ExecuteDefinitionAsync(definition, statement, cancellationToken).ConfigureAwait(false);
             case SqlSubqueryPlan subquery:
                 return await ExecuteSubqueryAsync(subquery, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertSelectPlan insertSelect:
@@ -896,7 +898,7 @@ internal sealed partial class SqlPlanExecutor
         // The authoritative step: the catalog checks the drop again under its own lock
         // and commits it. Bind the published version before the statement completes, as
         // every DDL does, so no later write parses its definitions.
-        var updated = await SelfCommitAsync(statement, _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken)).ConfigureAwait(false);
+        var updated = await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken) : _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
         _definitions.Get(updated);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -907,6 +909,10 @@ internal sealed partial class SqlPlanExecutor
         {
             if (plan.IfExists)
             {
+                if (statement.ScriptReceipt is { } publication)
+                {
+                    await SelfCommitAsync(statement, _catalog.DropTableAsync(plan.Schema, plan.Name, publication, cancellationToken)).ConfigureAwait(false);
+                }
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
             }
 
@@ -935,7 +941,7 @@ internal sealed partial class SqlPlanExecutor
         // second, all under the exclusive lock so no writer maintains a ghost.
         var droppedIndexes = _catalog.GetIndexes(table.ObjectId);
 
-        await SelfCommitAsync(statement, _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken)).ConfigureAwait(false);
+        await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken) : _catalog.DropTableAsync(plan.Schema, plan.Name, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
 
         foreach (var metadata in droppedIndexes)
         {
@@ -1078,13 +1084,17 @@ internal sealed partial class SqlPlanExecutor
         // reverse). A crash before this write leaves only orphaned tree pages —
         // a safe leak, never a re-attached index.
         var registrations = PublishedRegistrations([new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique)]);
-        await SelfCommitAsync(statement, _catalog.CreateIndexAsync(
+        await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.CreateIndexAsync(
             new SqlCatalogIndex(
                 plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
                 statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
                 statement.ProvisioningSchema),
-            registrations,
-            cancellationToken)).ConfigureAwait(false);
+            registrations, cancellationToken) : _catalog.CreateIndexAsync(
+            new SqlCatalogIndex(
+                plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
+                statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+                statement.ProvisioningSchema),
+            registrations, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -1102,6 +1112,10 @@ internal sealed partial class SqlPlanExecutor
         {
             if (plan.IfExists)
             {
+                if (statement.ScriptReceipt is { } publication)
+                {
+                    await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, plan.IndexName, [], publication, cancellationToken)).ConfigureAwait(false);
+                }
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
             }
 
@@ -1117,6 +1131,10 @@ internal sealed partial class SqlPlanExecutor
             EnsureSameIdentity(plan.Table, currentTable);
             if (plan.IfExists)
             {
+                if (statement.ScriptReceipt is { } publication)
+                {
+                    await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, plan.IndexName, [], publication, cancellationToken)).ConfigureAwait(false);
+                }
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
             }
 
@@ -1140,7 +1158,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken)).ConfigureAwait(false);
+        await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken) : _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
 
         if (_indexManager.TryGetIndex(plan.Table.ObjectId, metadata.Name, out _))
         {

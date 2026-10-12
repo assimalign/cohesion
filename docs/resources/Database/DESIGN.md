@@ -699,3 +699,11 @@ Everything under `resources/Database/` builds with `IsAotCompatible=true` (area 
 The owner-approved [hosting design](../../programs/DATABASE_HOSTING_DESIGN.md), with its implementation corrections, is now Add intent → one-shot Build → engine access / Run. All five model verbs are deferred and return the application builder. No Use method is introduced. Each model owns a typed engine-builder interface with options and deferred worker/server factories. `DatabaseName` is the root and concrete engine name parameter for create/open/drop/lookup operations.
 
 Hosting snapshots engine-owned servers for start/stop, disposes factory-owned engines, borrows registered instances, and constructs one Configuration / interpreted DependencyInjection provider per application. Services start before servers; servers drain first. Application disposal closes owned products before infrastructure and aggregates cleanup failures. Existing ApplicationModel integration is preserved without adding manifests, control planes or orchestration work. See the Hosting project DESIGN for ownership, configuration precedence and failure rules.
+
+## E4 persisted SQL extensions
+
+Sql.Language owns function/domain grammar; Sql.Catalog owns immutable definitions and script
+receipts; Sql owns binding, execution and provisioning. Each database merges SQL definitions
+with engine registrations. SqlDatabaseBuilder.Script runs forward-only after typed apply, with
+statement-granular recovery and a checksummed generation marker. No assembly-reference or public
+interface boundary changed. SDK v4 stays typed-schema-only (COHDBSDK110 on script extraction).
