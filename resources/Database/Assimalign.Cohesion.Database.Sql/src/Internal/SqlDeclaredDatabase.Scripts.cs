@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -59,6 +61,29 @@ internal sealed partial class SqlDeclaredDatabase
             {
                 throw new SqlSchemaMigrationException($"COHSQLS001: Declared script '{script.Name}' has a different body from its recorded SHA-256. Use a new name for forward-only changes.");
             }
+            if (receipt is not null)
+            {
+                if (receipt.StatementCount != script.Statements.Count || receipt.StatementObjects.Count != receipt.CompletedStatements)
+                {
+                    throw new SqlSchemaMigrationException($"COHSQLS001: Declared script '{script.Name}' has an inconsistent recorded statement count or target list.");
+                }
+                var expected = new string[receipt.CompletedStatements];
+                for (int position = 0; position < receipt.CompletedStatements; position++)
+                {
+                    expected[position] = ScriptTarget(database, script, position, receipt);
+                    if (!string.Equals(receipt.StatementObjects[position], expected[position], StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new SqlSchemaMigrationException($"COHSQLS001: Declared script '{script.Name}', statement {position + 1} targets '{expected[position]}' but its receipt records '{receipt.StatementObjects[position]}'.");
+                    }
+                }
+                var created = Enumerable.Range(0, receipt.CompletedStatements)
+                    .Where(position => script.Statements[position].Statement.SqlExpression is SqlCreateTableExpression or SqlCreateIndexExpression)
+                    .Select(position => expected[position]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!created.SetEquals(receipt.Objects))
+                {
+                    throw new SqlSchemaMigrationException($"COHSQLS001: Declared script '{script.Name}' records object ownership inconsistent with its completed CREATE statements.");
+                }
+            }
             if (Mode == SqlProvisioningMode.Verify && (receipt is null || receipt.CompletedStatements != script.Statements.Count))
             {
                 throw new SqlSchemaMigrationException($"COHSQLS002: Declared script '{script.Name}' is not completely recorded with its checksum.");
@@ -100,19 +125,18 @@ internal sealed partial class SqlDeclaredDatabase
         foreach (var script in _scripts)
         {
             receipts.TryGetValue(script.Name, out var existing);
-            ulong beginning = existing?.BaseGeneration ?? database.Catalog.DdlGeneration;
             int completed = existing?.CompletedStatements ?? 0;
             // Persist the checksum before any effects, including a first DML transaction.
             if (existing is null)
             {
-                await database.Catalog.SaveScriptAsync(new SqlCatalogScript(script.Name, script.ContentHash, script.Statements.Count,
-                    0, beginning, beginning, Schema?.Hash, []), cancellationToken).ConfigureAwait(false);
+                existing = await database.Catalog.BeginScriptAsync(script.Name, script.ContentHash, script.Statements.Count,
+                    Schema?.Hash, cancellationToken).ConfigureAwait(false);
             }
             for (int position = completed; position < script.Statements.Count; position++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var receipt = new SqlCatalogScript(script.Name, script.ContentHash, script.Statements.Count,
-                    position + 1, beginning, database.Catalog.DdlGeneration, Schema?.Hash, script.CreatedObjects(position + 1));
+                var receipt = new SqlCatalogScriptPublication(script.Name, script.ContentHash, script.Statements.Count,
+                    existing, database.Catalog.DdlGeneration, existing!.SchemaHash, ScriptTarget(database, script, position, existing));
                 if (!dataReceipts.Contains((receipt.Name, receipt.ContentHash, receipt.CompletedStatements)))
                 {
                     if (script.Statements[position].Statement.SqlExpression is SqlCreateTableExpression create &&
@@ -133,8 +157,15 @@ internal sealed partial class SqlDeclaredDatabase
                         throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}', statement {position + 1} failed.");
                     }
                 }
-                await database.Catalog.SaveScriptAsync(new SqlCatalogScript(script.Name, script.ContentHash, script.Statements.Count,
-                    position + 1, beginning, database.Catalog.DdlGeneration, Schema?.Hash, script.CreatedObjects(position + 1)), cancellationToken).ConfigureAwait(false);
+                if (receipt.ExpectedObject.Length == 0)
+                {
+                    await database.Catalog.CompleteScriptStatementAsync(receipt, cancellationToken).ConfigureAwait(false);
+                }
+                existing = database.Catalog.Scripts.Single(recorded => recorded.Name == script.Name);
+                if (existing.CompletedStatements != position + 1)
+                {
+                    throw new SqlSchemaMigrationException($"COHSQLS001: Script '{script.Name}', statement {position + 1} did not publish its expected receipt.");
+                }
             }
             if (completed != script.Statements.Count)
             {
@@ -146,5 +177,51 @@ internal sealed partial class SqlDeclaredDatabase
             await database.Catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(Schema.Hash, Schema.CanonicalDocument, database.Catalog.DdlGeneration), cancellationToken).ConfigureAwait(false);
         }
         await database.Catalog.SaveScriptStateAsync(new SqlCatalogScriptState(_scriptHash, database.Catalog.DdlGeneration), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string ScriptTarget(SqlDatabase database, SqlDeclaredScript script, int position, SqlCatalogScript receipt)
+    {
+        bool recorded = position < receipt.CompletedStatements;
+        var expression = script.Statements[position].Statement.SqlExpression;
+        if (expression is SqlAlterTableExpression { Action: SqlAlterDropConstraintAction drop } alter)
+        {
+            string index = "I:" + (alter.Table.SchemaName ?? "dbo") + "." + alter.Table.TableName + "." + drop.ConstraintName;
+            // UNIQUE is represented by an index. For completed statements either this exact
+            // index or the containing table (CHECK/FK) is a legitimate DROP CONSTRAINT target.
+            if (recorded ? string.Equals(receipt.StatementObjects[position], index, StringComparison.OrdinalIgnoreCase)
+                : database.Catalog.TryGetTable(alter.Table.SchemaName ?? "dbo", alter.Table.TableName, out var table) &&
+                  !table.Constraints.Any(constraint => constraint.Name.Equals(drop.ConstraintName, StringComparison.OrdinalIgnoreCase)) &&
+                  database.Catalog.TryGetIndex(table.ObjectId, drop.ConstraintName, out var unique) && unique.IsUnique)
+            {
+                return index;
+            }
+        }
+        return script.ObjectKey(position, Resolve);
+
+        SqlType Resolve(string name, int parameter)
+        {
+            if (SqlTypeCatalog.Standard.Resolve(name, out string? builtinError) is { } builtin && builtinError is null) { return builtin; }
+            // A domain may have been dropped and its CREATE script removed from code. The
+            // catalog captured CREATE's definition or DROP's resolved requested parameter names,
+            // paired with the actual mutation's storage signature, so historical identity needs
+            // no live type registration.
+            if (recorded && parameter < receipt.StatementParameterTypes[position].Count &&
+                string.Equals(receipt.StatementParameterTypes[position][parameter], name, StringComparison.OrdinalIgnoreCase))
+            {
+                string target = receipt.StatementObjects[position];
+                int opening = target.LastIndexOf('(');
+                if (opening >= 0 && target.EndsWith(')'))
+                {
+                    string[] types = target[(opening + 1)..^1].Split(',');
+                    if (parameter < types.Length && int.TryParse(types[parameter], NumberStyles.None, CultureInfo.InvariantCulture, out int storage) &&
+                        storage > (int)DatabaseType.Null && storage <= (int)DatabaseType.JsonBinary)
+                    {
+                        return SqlType.ForStorage(new DatabaseTypeInfo((DatabaseType)storage));
+                    }
+                }
+            }
+            if (database.Definitions.Functions.Types.Resolve(name, out string? error) is { } type && error is null) { return type; }
+            throw new SqlSchemaMigrationException($"COHSQLS001: Script '{script.Name}', statement {position + 1}: cannot resolve type '{name}' while validating its function target.");
+        }
     }
 }

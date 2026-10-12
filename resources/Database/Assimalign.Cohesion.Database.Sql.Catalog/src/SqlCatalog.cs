@@ -323,20 +323,54 @@ public sealed partial class SqlCatalog
     /// <param name="columns">The ordered column definitions.</param>
     /// <param name="primaryKeyColumns">The primary-key column names, when declared.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>The created table with its assigned object identity.</returns>
     /// <exception cref="SqlCatalogException">A table with the name already exists, or the definition is invalid.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
     public ValueTask<SqlCatalogTable> CreateTableAsync(
         string schema,
         string name,
         IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<string>? primaryKeyColumns = null,
-        CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
-        => CreateTableAsync(schema, name, columns, primaryKeyColumns,
-            DatabaseObjectOwner.Adhoc, owningSchema: null, cancellationToken, scriptReceipt: scriptReceipt);
+        CancellationToken cancellationToken = default)
+        => CreateTableCoreAsync(schema, name, columns, primaryKeyColumns, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Creates a table. The definition's object identity is assigned by the catalog.
+    /// </summary>
+    /// <param name="schema">The schema name.</param>
+    /// <param name="name">The table name, unique within the schema.</param>
+    /// <param name="columns">The ordered column definitions.</param>
+    /// <param name="primaryKeyColumns">The primary-key column names, when declared.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The created table with its assigned object identity.</returns>
+    /// <exception cref="SqlCatalogException">A table with the name already exists, or the definition is invalid.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask<SqlCatalogTable> CreateTableAsync(
+        string schema,
+        string name,
+        IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return CreateTableCoreAsync(schema, name, columns, primaryKeyColumns, cancellationToken, publication);
+    }
+
+    private ValueTask<SqlCatalogTable> CreateTableCoreAsync(
+        string schema,
+        string name,
+        IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
+        => CreateTableOwnedCoreAsync(schema, name, columns, primaryKeyColumns,
+            DatabaseObjectOwner.Adhoc, owningSchema: null, constraints: null, publication, cancellationToken);
 
     /// <summary>
     /// Creates a table with its ownership and constraints in one write, for the catalog's tests;
@@ -351,7 +385,20 @@ public sealed partial class SqlCatalog
         DatabaseObjectOwner owner,
         string? owningSchema,
         CancellationToken cancellationToken,
-        IReadOnlyList<SqlCatalogConstraint>? constraints = null, SqlCatalogScript? scriptReceipt = null)
+        IReadOnlyList<SqlCatalogConstraint>? constraints = null)
+        => CreateTableOwnedCoreAsync(schema, name, columns, primaryKeyColumns, owner, owningSchema,
+            constraints, publication: null, cancellationToken);
+
+    private ValueTask<SqlCatalogTable> CreateTableOwnedCoreAsync(
+        string schema,
+        string name,
+        IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns,
+        DatabaseObjectOwner owner,
+        string? owningSchema,
+        IReadOnlyList<SqlCatalogConstraint>? constraints,
+        SqlCatalogScriptPublication? publication,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -371,7 +418,7 @@ public sealed partial class SqlCatalog
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeTable(table));
-                CommitCatalogChange(transaction, checked(_nextObjectId + 1), scriptReceipt);
+                CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, actualObject: "T:" + schema + "." + name, createsObject: true);
                 _tables[(schema, name)] = new TableSlot(table, location);
             }
 
@@ -385,13 +432,44 @@ public sealed partial class SqlCatalog
     /// <param name="schema">The schema name.</param>
     /// <param name="name">The table name.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>A task that completes once the drop is durable.</returns>
     /// <exception cref="SqlCatalogException">The table does not exist, or another table references it.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
-    public ValueTask DropTableAsync(string schema, string name, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+    public ValueTask DropTableAsync(
+        string schema,
+        string name,
+        CancellationToken cancellationToken = default)
+        => DropTableCoreAsync(schema, name, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Drops a table or certifies its absence for one declared script statement.
+    /// </summary>
+    /// <param name="schema">The schema name.</param>
+    /// <param name="name">The table name.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task that completes once the drop or absence receipt is durable. An absence receipt does not advance DDL generation.</returns>
+    /// <exception cref="SqlCatalogException">Another table references it.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask DropTableAsync(
+        string schema,
+        string name,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return DropTableCoreAsync(schema, name, cancellationToken, publication);
+    }
+
+    private ValueTask DropTableCoreAsync(
+        string schema,
+        string name,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -400,6 +478,11 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!_tables.TryGetValue((schema, name), out var slot))
             {
+                if (publication is not null)
+                {
+                    CommitScriptAbsence(publication, "T:" + schema + "." + name);
+                    return default;
+                }
                 throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
             }
 
@@ -450,7 +533,7 @@ public sealed partial class SqlCatalog
                     registrationsLocation = UpsertRecord(transaction, registrationsLocation, EncodeRegistrations(remainingRegistrations));
                 }
 
-                CommitCatalogChange(transaction, scriptReceipt: scriptReceipt);
+                CommitCatalogChange(transaction, publication: publication, actualObject: "T:" + schema + "." + name);
                 _registrationsLocation = registrationsLocation;
             }
 
@@ -479,7 +562,6 @@ public sealed partial class SqlCatalog
     /// <param name="name">The table name.</param>
     /// <param name="column">The column to add.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>The updated table description.</returns>
     /// <exception cref="SqlCatalogException">
     /// The table does not exist or already has the column, or the definition no longer fits
@@ -488,8 +570,50 @@ public sealed partial class SqlCatalog
     /// <exception cref="ArgumentNullException"><paramref name="column"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
-    public ValueTask<SqlCatalogTable> AddColumnAsync(string schema, string name, SqlCatalogColumn column, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+    public ValueTask<SqlCatalogTable> AddColumnAsync(
+        string schema,
+        string name,
+        SqlCatalogColumn column,
+        CancellationToken cancellationToken = default)
+        => AddColumnCoreAsync(schema, name, column, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Adds a column to a table. The column takes the next physical ordinal, after every
+    /// live and dropped one (<see cref="SqlCatalogTable.PhysicalColumnCount"/>), so versions
+    /// stored before the addition read it from their missing tail.
+    /// </summary>
+    /// <param name="schema">The schema name.</param>
+    /// <param name="name">The table name.</param>
+    /// <param name="column">The column to add.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The updated table description.</returns>
+    /// <exception cref="SqlCatalogException">
+    /// The table does not exist or already has the column, or the definition no longer fits
+    /// one catalog record.
+    /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="column"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask<SqlCatalogTable> AddColumnAsync(
+        string schema,
+        string name,
+        SqlCatalogColumn column,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return AddColumnCoreAsync(schema, name, column, cancellationToken, publication);
+    }
+
+    private ValueTask<SqlCatalogTable> AddColumnCoreAsync(
+        string schema,
+        string name,
+        SqlCatalogColumn column,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
     {
         ArgumentNullException.ThrowIfNull(column);
         cancellationToken.ThrowIfCancellationRequested();
@@ -510,7 +634,7 @@ public sealed partial class SqlCatalog
             var columns = slot.Table.Columns.Append(column).ToList();
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
                 slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints, slot.Table.DroppedColumnOrdinals);
-            ReplaceTable(slot, updated, scriptReceipt);
+            ReplaceTable(slot, updated, publication);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }
@@ -525,7 +649,6 @@ public sealed partial class SqlCatalog
     /// <param name="name">The table name.</param>
     /// <param name="columnName">The column to drop.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>The updated table description.</returns>
     /// <exception cref="SqlCatalogException">
     /// The table or column does not exist; the column is part of the primary key, a
@@ -534,8 +657,51 @@ public sealed partial class SqlCatalog
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
-    public ValueTask<SqlCatalogTable> DropColumnAsync(string schema, string name, string columnName, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+    public ValueTask<SqlCatalogTable> DropColumnAsync(
+        string schema,
+        string name,
+        string columnName,
+        CancellationToken cancellationToken = default)
+        => DropColumnCoreAsync(schema, name, columnName, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Drops a column from a table: the column leaves <see cref="SqlCatalogTable.Columns"/>
+    /// and its physical ordinal joins <see cref="SqlCatalogTable.DroppedColumnOrdinals"/>,
+    /// never to be reused. This is the whole of the drop: stored rows keep the column's
+    /// component, which every read skips.
+    /// </summary>
+    /// <param name="schema">The schema name.</param>
+    /// <param name="name">The table name.</param>
+    /// <param name="columnName">The column to drop.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The updated table description.</returns>
+    /// <exception cref="SqlCatalogException">
+    /// The table or column does not exist; the column is part of the primary key, a
+    /// constraint or an index; it is the table's last column; or the definition, which keeps
+    /// every dropped column's physical ordinal, no longer fits one catalog record.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask<SqlCatalogTable> DropColumnAsync(
+        string schema,
+        string name,
+        string columnName,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return DropColumnCoreAsync(schema, name, columnName, cancellationToken, publication);
+    }
+
+    private ValueTask<SqlCatalogTable> DropColumnCoreAsync(
+        string schema,
+        string name,
+        string columnName,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -607,7 +773,7 @@ public sealed partial class SqlCatalog
             int[] dropped = [.. slot.Table.DroppedColumnOrdinals, slot.Table.GetPhysicalOrdinal(ordinal)];
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
                 slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints, dropped);
-            ReplaceTable(slot, updated, scriptReceipt);
+            ReplaceTable(slot, updated, publication);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }
@@ -671,14 +837,50 @@ public sealed partial class SqlCatalog
     /// <param name="index">The index description to persist.</param>
     /// <param name="registrations">A physical registration snapshot containing exactly one registration for the created index, matching its table, name (case-insensitively), and uniqueness, with B-tree kind and a positive root page id. Only that registration is merged into the current directory.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>The created index description.</returns>
     /// <exception cref="SqlCatalogException">The table or a key column does not exist, the index name already exists on the table, or the required matching physical registration is missing, duplicated, or invalid.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="index"/> or <paramref name="registrations"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
-    public ValueTask<SqlCatalogIndex> CreateIndexAsync(SqlCatalogIndex index, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+    public ValueTask<SqlCatalogIndex> CreateIndexAsync(
+        SqlCatalogIndex index,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        CancellationToken cancellationToken = default)
+        => CreateIndexCoreAsync(index, registrations, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Creates an index description and persists the given physical registrations
+    /// in the same self-committing catalog transaction — the schema description and
+    /// the tree registration must never tear apart across a crash (a registration
+    /// without a description is an unused tree; a description without a
+    /// registration would promise uniqueness no tree enforces).
+    /// </summary>
+    /// <param name="index">The index description to persist.</param>
+    /// <param name="registrations">A physical registration snapshot containing exactly one registration for the created index, matching its table, name (case-insensitively), and uniqueness, with B-tree kind and a positive root page id. Only that registration is merged into the current directory.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The created index description.</returns>
+    /// <exception cref="SqlCatalogException">The table or a key column does not exist, the index name already exists on the table, or the required matching physical registration is missing, duplicated, or invalid.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="index"/> or <paramref name="registrations"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask<SqlCatalogIndex> CreateIndexAsync(
+        SqlCatalogIndex index,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return CreateIndexCoreAsync(index, registrations, cancellationToken, publication);
+    }
+
+    private ValueTask<SqlCatalogIndex> CreateIndexCoreAsync(
+        SqlCatalogIndex index,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
     {
         ArgumentNullException.ThrowIfNull(index);
         ArgumentNullException.ThrowIfNull(registrations);
@@ -709,7 +911,7 @@ public sealed partial class SqlCatalog
             {
                 var location = _storage.InsertRow(transaction, EncodeIndex(index));
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
-                CommitCatalogChange(transaction, scriptReceipt: scriptReceipt);
+                CommitCatalogChange(transaction, publication: publication, actualObject: "I:" + table.Schema + "." + table.Name + "." + index.Name, createsObject: true);
                 _registrationsLocation = registrationsLocation;
                 _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, location);
             }
@@ -728,14 +930,53 @@ public sealed partial class SqlCatalog
     /// <param name="name">The index name.</param>
     /// <param name="registrations">The caller's remaining registration snapshot. Unrelated registrations are retained from the current directory instead of this possibly stale snapshot.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>A task that completes once the drop is durable.</returns>
     /// <exception cref="SqlCatalogException">The index does not exist.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
-    public ValueTask DropIndexAsync(ulong tableObjectId, string name, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+    public ValueTask DropIndexAsync(
+        ulong tableObjectId,
+        string name,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        CancellationToken cancellationToken = default)
+        => DropIndexCoreAsync(tableObjectId, name, registrations, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Drops an index description and removes its current physical registration in
+    /// the same self-committing catalog transaction (see
+    /// <see cref="CreateIndexAsync"/> for why the two writes are atomic), or certifies
+    /// the index's absence on an existing table for one declared script statement.
+    /// </summary>
+    /// <param name="tableObjectId">The table's object identity.</param>
+    /// <param name="name">The index name.</param>
+    /// <param name="registrations">The caller's remaining registration snapshot. Unrelated registrations are retained from the current directory instead of this possibly stale snapshot.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task that completes once the drop or absence receipt is durable. An absence receipt does not advance DDL generation.</returns>
+    /// <exception cref="SqlCatalogException">The table does not exist.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask DropIndexAsync(
+        ulong tableObjectId,
+        string name,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return DropIndexCoreAsync(tableObjectId, name, registrations, cancellationToken, publication);
+    }
+
+    private ValueTask DropIndexCoreAsync(
+        ulong tableObjectId,
+        string name,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
     {
         ArgumentNullException.ThrowIfNull(registrations);
         cancellationToken.ThrowIfCancellationRequested();
@@ -745,9 +986,15 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!_indexes.TryGetValue((tableObjectId, name), out var slot))
             {
+                if (publication is not null && FindTableByObjectId(tableObjectId) is { } existingTable)
+                {
+                    CommitScriptAbsence(publication, "I:" + existingTable.Schema + "." + existingTable.Name + "." + name);
+                    return default;
+                }
                 throw new SqlCatalogException($"No index named '{name}' exists on object {tableObjectId}.");
             }
 
+            var table = FindTableByObjectId(tableObjectId)!;
             var remainingRegistrations = _registrations.Where(registration =>
                 registration.ObjectId != tableObjectId ||
                 !string.Equals(registration.Definition.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -755,7 +1002,7 @@ public sealed partial class SqlCatalog
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
-                CommitCatalogChange(transaction, scriptReceipt: scriptReceipt);
+                CommitCatalogChange(transaction, publication: publication, actualObject: "I:" + table.Schema + "." + table.Name + "." + slot.Index.Name);
                 _registrationsLocation = registrationsLocation;
             }
 
@@ -1064,11 +1311,18 @@ public sealed partial class SqlCatalog
 
                 case 12:
                 {
-                    var receipt = System.Text.Json.JsonSerializer.Deserialize(reader.ReadString(out _), SqlCatalogJsonContext.Default.SqlCatalogScript)
-                        ?? throw new SqlCatalogException("Malformed declared script receipt.");
-                    if (!reader.IsAtEnd || !_scripts.TryAdd(receipt.Name, new DefinitionSlot<SqlCatalogScript>(receipt, (unit.PageId, unit.SlotIndex))))
+                    try
                     {
-                        throw new SqlCatalogException("Malformed or duplicate declared script receipt.");
+                        var receipt = JsonSerializer.Deserialize(reader.ReadString(out _), SqlCatalogJsonContext.Default.SqlCatalogScript)
+                            ?? throw new SqlCatalogException("COHSQLS001: Malformed declared script receipt.");
+                        if (!reader.IsAtEnd || !_scripts.TryAdd(receipt.Name, new DefinitionSlot<SqlCatalogScript>(receipt, (unit.PageId, unit.SlotIndex))))
+                        {
+                            throw new SqlCatalogException("COHSQLS001: Malformed or duplicate declared script receipt.");
+                        }
+                    }
+                    catch (Exception failure) when (failure is JsonException or ArgumentException)
+                    {
+                        throw new SqlCatalogException($"COHSQLS001: Malformed declared script receipt: {failure.Message}");
                     }
                     break;
                 }
@@ -1156,14 +1410,14 @@ public sealed partial class SqlCatalog
         return null;
     }
 
-    private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScript? scriptReceipt)
+    private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication)
     {
         byte[] record = EncodeTable(updated);
 
         using (var transaction = _storage.BeginTransaction())
         {
             var location = UpsertRecord(transaction, slot.Location, record);
-            CommitCatalogChange(transaction, scriptReceipt: scriptReceipt);
+            CommitCatalogChange(transaction, publication: publication, actualObject: "T:" + updated.Schema + "." + updated.Name);
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
         }
     }
@@ -1193,33 +1447,30 @@ public sealed partial class SqlCatalog
         }
     }
 
-    private void CommitCatalogChange(StorageTransaction transaction, ulong? nextObjectId = null, SqlCatalogScript? scriptReceipt = null, bool reservationOnly = false)
+    private void CommitCatalogChange(
+        StorageTransaction transaction,
+        ulong? nextObjectId = null,
+        SqlCatalogScriptPublication? publication = null,
+        bool reservationOnly = false,
+        string? actualObject = null,
+        bool createsObject = false,
+        IReadOnlyList<string>? parameterTypes = null)
     {
         if (_ddlGeneration == ulong.MaxValue)
         {
             throw new SqlCatalogException("The catalog DDL generation is exhausted.");
         }
-
-        if (scriptReceipt is { } suppliedReceipt && suppliedReceipt.BaseGeneration > _ddlGeneration)
+        if (publication is not null)
         {
-            throw new SqlCatalogException($"COHSQLS001: Script receipt '{suppliedReceipt.Name}' has an original generation later than the current catalog generation.");
+            ValidateScriptPublication(publication, actualObject!);
         }
-
         ulong generation = _ddlGeneration + 1;
         ulong identity = nextObjectId ?? _nextObjectId;
         var location = PersistCounter(transaction, identity, generation);
         DefinitionSlot<SqlCatalogScript>? script = null;
-        if (scriptReceipt is { } receipt)
+        if (publication is not null)
         {
-            int previous = _scripts.TryGetValue(receipt.Name, out var existing) ? existing.Value.CompletedStatements : 0;
-            if (receipt.CompletedStatements != previous + 1)
-            {
-                throw new SqlCatalogException("COHSQLS001: A statement publication requires the next incomplete script receipt; a completed receipt cannot describe another operation.");
-            }
-            int completed = reservationOnly ? receipt.CompletedStatements - 1 : receipt.CompletedStatements;
-            IReadOnlyList<string> objects = reservationOnly ? existing?.Value.Objects ?? [] : receipt.Objects;
-            script = StageScript(transaction, new SqlCatalogScript(receipt.Name, receipt.ContentHash, receipt.StatementCount,
-                completed, receipt.BaseGeneration, generation, receipt.SchemaHash, objects));
+            script = StageScript(transaction, CreateScriptReceipt(publication, generation, actualObject!, createsObject, reservationOnly, parameterTypes));
         }
         transaction.Commit();
         if (script is not null)
@@ -1720,7 +1971,6 @@ public sealed partial class SqlCatalog
     /// <param name="owner">The table's ownership classification.</param>
     /// <param name="owningSchema">The compiled schema name for schema-owned tables; otherwise null.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>The unpublished table definition with an assigned object identity.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException">A name is empty or whitespace, a constraint is null, or ownership metadata is inconsistent.</exception>
@@ -1731,17 +1981,75 @@ public sealed partial class SqlCatalog
     /// <remarks>
     /// Only the identity counter is persisted. The table remains invisible until
     /// <see cref="PublishTableAsync"/> succeeds; abandoning a reservation never reuses
-    /// its identity. A supplied receipt includes the statement being attempted: the reservation
-    /// advances its generation but keeps the preceding completed prefix. Pass the receipt again
-    /// to the final publication to complete that statement. Callers serialize DDL, and a
-    /// reservation does not lock the name.
+    /// its identity. Callers serialize DDL; a reservation does not lock the name.
     /// </remarks>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
     public ValueTask<SqlCatalogTable> ReserveTableAsync(
-        string schema, string name, IReadOnlyList<SqlCatalogColumn> columns,
-        IReadOnlyList<string>? primaryKeyColumns, IReadOnlyList<SqlCatalogConstraint> constraints,
-        DatabaseObjectOwner owner, string? owningSchema, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+        string schema,
+        string name,
+        IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns,
+        IReadOnlyList<SqlCatalogConstraint> constraints,
+        DatabaseObjectOwner owner,
+        string? owningSchema,
+        CancellationToken cancellationToken = default)
+        => ReserveTableCoreAsync(schema, name, columns, primaryKeyColumns, constraints, owner, owningSchema, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Reserves a durable object identity for a table before its enforcing indexes are built.
+    /// </summary>
+    /// <param name="schema">The SQL namespace.</param>
+    /// <param name="name">The table name.</param>
+    /// <param name="columns">The ordered column definitions.</param>
+    /// <param name="primaryKeyColumns">The primary-key columns, or null for no primary key.</param>
+    /// <param name="constraints">The foreign-key and check definitions.</param>
+    /// <param name="owner">The table's ownership classification.</param>
+    /// <param name="owningSchema">The compiled schema name for schema-owned tables; otherwise null.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The unpublished table definition with an assigned object identity.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">A name is empty or whitespace, a constraint is null, or ownership metadata is inconsistent.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The ownership classification is unsupported.</exception>
+    /// <exception cref="SqlCatalogException">The table exists or its definition is invalid.</exception>
+    /// <exception cref="StorageException">The backing storage cannot persist the metadata change.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <remarks>
+    /// The identity counter and validated receipt are persisted together. The receipt retains
+    /// its preceding completed prefix and object claims, and advances its generation.
+    /// Final publication requires a new expectation with that exact reserved receipt and
+    /// generation. The table remains invisible until
+    /// <see cref="PublishTableAsync"/> succeeds; abandoning a reservation never reuses
+    /// its identity. Callers serialize DDL; a reservation does not lock the name.
+    /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask<SqlCatalogTable> ReserveTableAsync(
+        string schema,
+        string name,
+        IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns,
+        IReadOnlyList<SqlCatalogConstraint> constraints,
+        DatabaseObjectOwner owner,
+        string? owningSchema,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return ReserveTableCoreAsync(schema, name, columns, primaryKeyColumns, constraints, owner, owningSchema, cancellationToken, publication);
+    }
+
+    private ValueTask<SqlCatalogTable> ReserveTableCoreAsync(
+        string schema,
+        string name,
+        IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns,
+        IReadOnlyList<SqlCatalogConstraint> constraints,
+        DatabaseObjectOwner owner,
+        string? owningSchema,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -1761,7 +2069,7 @@ public sealed partial class SqlCatalog
             // Persist the identity before physical trees are created. A crash can
             // leave unused trees, but can never reuse their identity for a table.
             using var transaction = _storage.BeginTransaction();
-            CommitCatalogChange(transaction, checked(_nextObjectId + 1), scriptReceipt, reservationOnly: true);
+            CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, reservationOnly: true, actualObject: "T:" + schema + "." + name);
             return new ValueTask<SqlCatalogTable>(table);
         }
     }
@@ -1775,7 +2083,6 @@ public sealed partial class SqlCatalog
     /// <param name="registrations">A physical registration snapshot containing exactly one registration per new index, matching its table, name (case-insensitively), and uniqueness, with B-tree kind and a positive root page id. Only those registrations are merged into the current directory.</param>
     /// <param name="replaceExisting">Whether the definition replaces an existing table with the same identity.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>A task representing durable publication of all supplied metadata.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="SqlCatalogException">
@@ -1796,11 +2103,65 @@ public sealed partial class SqlCatalog
     /// validation remain the caller's responsibility.
     /// </remarks>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
     public ValueTask PublishTableAsync(
-        SqlCatalogTable table, IReadOnlyList<SqlCatalogIndex> indexes,
-        IReadOnlyList<BTreeIndexRegistration> registrations, bool replaceExisting = false,
-        CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+        SqlCatalogTable table,
+        IReadOnlyList<SqlCatalogIndex> indexes,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        bool replaceExisting = false,
+        CancellationToken cancellationToken = default)
+        => PublishTableCoreAsync(table, indexes, registrations, replaceExisting, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Publishes a table definition and its new index descriptions with the complete physical
+    /// registration set atomically.
+    /// </summary>
+    /// <param name="table">The reserved table, or a replacement definition with the existing table's identity.</param>
+    /// <param name="indexes">New index descriptions whose physical trees have already been committed.</param>
+    /// <param name="registrations">A physical registration snapshot containing exactly one registration per new index, matching its table, name (case-insensitively), and uniqueness, with B-tree kind and a positive root page id. Only those registrations are merged into the current directory.</param>
+    /// <param name="replaceExisting">Whether the definition replaces an existing table with the same identity.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing durable publication of all supplied metadata.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="SqlCatalogException">
+    /// The identity was not reserved; the identity, table definition, or index registrations are
+    /// inconsistent; or the definition does not keep the table's physical column layout.
+    /// </exception>
+    /// <exception cref="DatabaseTypeException">Metadata text contains invalid UTF-16.</exception>
+    /// <exception cref="StorageException">The backing storage cannot persist the metadata change.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <remarks>
+    /// New definitions require a nonzero identity already allocated by this catalog.
+    /// Callers serialize DDL and commit enforcing index trees before publication.
+    /// Existing index descriptions are retained during replacement. A new definition has no
+    /// dropped columns, and a replacement keeps the physical column layout of the definition it
+    /// replaces (<see cref="SqlCatalogTable.DroppedColumnOrdinals"/> unchanged, every existing
+    /// live column in place); it may only append columns, so no stored row is decoded onto
+    /// another column. The catalog owns metadata persistence; physical tree creation and row
+    /// validation remain the caller's responsibility.
+    /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask PublishTableAsync(
+        SqlCatalogTable table,
+        IReadOnlyList<SqlCatalogIndex> indexes,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        bool replaceExisting,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return PublishTableCoreAsync(table, indexes, registrations, replaceExisting, cancellationToken, publication);
+    }
+
+    private ValueTask PublishTableCoreAsync(
+        SqlCatalogTable table,
+        IReadOnlyList<SqlCatalogIndex> indexes,
+        IReadOnlyList<BTreeIndexRegistration> registrations,
+        bool replaceExisting,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(indexes);
@@ -1843,7 +2204,7 @@ public sealed partial class SqlCatalog
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
             var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
-            CommitCatalogChange(transaction, scriptReceipt: scriptReceipt);
+            CommitCatalogChange(transaction, publication: publication, actualObject: "T:" + table.Schema + "." + table.Name, createsObject: !replaceExisting);
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
             {
@@ -1916,7 +2277,7 @@ public sealed partial class SqlCatalog
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema,
                 slot.Table.Constraints.Append(constraint).ToArray(), slot.Table.DroppedColumnOrdinals);
             ValidateConstraints(updated);
-            ReplaceTable(slot, updated, scriptReceipt: null);
+            ReplaceTable(slot, updated, publication: null);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }
@@ -1928,7 +2289,6 @@ public sealed partial class SqlCatalog
     /// <param name="name">The table name.</param>
     /// <param name="constraintName">The constraint name, compared case-insensitively.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <param name="scriptReceipt">The optional statement receipt committed atomically with this operation; never applied to other catalog calls.</param>
     /// <returns>The durably updated table description.</returns>
     /// <exception cref="ArgumentNullException">A required name is null.</exception>
     /// <exception cref="ArgumentException">A required name is empty or whitespace.</exception>
@@ -1936,9 +2296,47 @@ public sealed partial class SqlCatalog
     /// <exception cref="StorageException">The backing storage cannot persist the metadata change.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
-    /// <exception cref="SqlCatalogException">The supplied script receipt is not the next incomplete statement, has changed its checksum, statement count or original generation, or exceeds the record limit.</exception>
     public ValueTask<SqlCatalogTable> DropConstraintAsync(
-        string schema, string name, string constraintName, CancellationToken cancellationToken = default, SqlCatalogScript? scriptReceipt = null)
+        string schema,
+        string name,
+        string constraintName,
+        CancellationToken cancellationToken = default)
+        => DropConstraintCoreAsync(schema, name, constraintName, cancellationToken, publication: null);
+
+    /// <summary>
+    /// Drops a persisted foreign-key or check constraint from a table.
+    /// </summary>
+    /// <param name="schema">The SQL namespace.</param>
+    /// <param name="name">The table name.</param>
+    /// <param name="constraintName">The constraint name, compared case-insensitively.</param>
+    /// <param name="publication">The expected statement target and exact preceding receipt and catalog generation, validated before commit. Claims are derived from this mutation.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The durably updated table description.</returns>
+    /// <exception cref="ArgumentNullException">A required name is null.</exception>
+    /// <exception cref="ArgumentException">A required name is empty or whitespace.</exception>
+    /// <exception cref="SqlCatalogException">The table or constraint does not exist.</exception>
+    /// <exception cref="StorageException">The backing storage cannot persist the metadata change.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="publication"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The target or preceding state does not match, the script identity changed, or the receipt exceeds the record limit.</exception>
+    public ValueTask<SqlCatalogTable> DropConstraintAsync(
+        string schema,
+        string name,
+        string constraintName,
+        SqlCatalogScriptPublication publication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publication);
+        return DropConstraintCoreAsync(schema, name, constraintName, cancellationToken, publication);
+    }
+
+    private ValueTask<SqlCatalogTable> DropConstraintCoreAsync(
+        string schema,
+        string name,
+        string constraintName,
+        CancellationToken cancellationToken,
+        SqlCatalogScriptPublication? publication)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -1956,7 +2354,7 @@ public sealed partial class SqlCatalog
             }
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema, constraints, slot.Table.DroppedColumnOrdinals);
-            ReplaceTable(slot, updated, scriptReceipt);
+            ReplaceTable(slot, updated, publication);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }

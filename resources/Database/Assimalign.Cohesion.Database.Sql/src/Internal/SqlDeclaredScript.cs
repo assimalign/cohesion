@@ -42,12 +42,18 @@ internal sealed class SqlDeclaredScript
             statements.Add(request);
         }
     }
-    internal IReadOnlyList<string> CreatedObjects(int completed) => Statements.Take(completed).Select(ObjectKey).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-    private static string? ObjectKey(SqlQueryRequest request) => request.Statement.SqlExpression switch
+    internal string ObjectKey(int position, Func<string, int, SqlType> resolveType) => Statements[position].Statement.SqlExpression switch
     {
         SqlCreateTableExpression table => "T:" + (table.Table.SchemaName ?? "dbo") + "." + table.Table.TableName,
+        SqlAlterTableExpression table => "T:" + (table.Table.SchemaName ?? "dbo") + "." + table.Table.TableName,
+        SqlDropTableExpression table => "T:" + (table.Table.SchemaName ?? "dbo") + "." + table.Table.TableName,
         SqlCreateIndexExpression index => "I:" + (index.Table.SchemaName ?? "dbo") + "." + index.Table.TableName + "." + index.IndexName,
-        _ => null,
+        SqlDropIndexExpression index => "I:" + (index.Table.SchemaName ?? "dbo") + "." + index.Table.TableName + "." + index.IndexName,
+        SqlCreateFunctionExpression function => "F:" + SqlDefinitionBinder.Signature(function.Name, function.Parameters.Select((parameter, index) => resolveType(parameter.DataType, index))),
+        SqlDropFunctionExpression function => "F:" + SqlDefinitionBinder.Signature(function.Name, function.ParameterTypes.Select(resolveType)),
+        SqlCreateDomainExpression domain => SqlDefinitionBinder.DomainKey(domain.Name),
+        SqlDropDomainExpression domain => SqlDefinitionBinder.DomainKey(domain.Name),
+        _ => string.Empty,
     };
     internal string Name { get; }
     internal string ContentHash { get; }

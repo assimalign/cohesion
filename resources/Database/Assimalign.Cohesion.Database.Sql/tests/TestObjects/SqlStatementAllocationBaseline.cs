@@ -42,7 +42,7 @@ internal sealed class SqlStatementAllocationBaseline
 
     // Mirrors SqlDatabaseSession.ExecuteRequestAsync without its tracing: the same checks and the
     // same receipt parameter and async locals, so Debug's hoisted state machine is the same size.
-    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt = null)
+    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
         _session.Database.ThrowIfOffline();
         var previousMetrics = _session.LastStatementMetrics;
@@ -78,7 +78,7 @@ internal sealed class SqlStatementAllocationBaseline
     private static extern ref SqlQueryParserOptions ParserOptions(SqlDatabaseSession session);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ExecuteStatementAsync")]
-    private static extern ValueTask<QueryResult> ExecuteStatementAsync(SqlDatabaseSession session, QueryRequest request, CancellationToken cancellationToken, SqlCatalogScript? scriptReceipt);
+    private static extern ValueTask<QueryResult> ExecuteStatementAsync(SqlDatabaseSession session, QueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "SelfCommitted")]
     private static extern bool SelfCommitted(SqlDatabaseSession session, QueryRequest request, SqlStatementMetrics? previousMetrics);

@@ -1736,7 +1736,7 @@ expression there would change historical rows on each read. ALTER cannot change 
 | COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition. |
 | COHSQLD002 | A persisted definition or column depends on the object being dropped. |
 | COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
-| COHSQLS001 | A script receipt changes its recorded SHA-256, statement count or origin, or supplies an inconsistent, skipped or reused statement prefix. |
+| COHSQLS001 | A script checksum, identity, completed target or object claim is inconsistent, or publication does not match the actual mutation and exact preceding receipt/generation. |
 | COHSQLS002 | Verify requires a complete receipt with the declared checksum. |
 | COHSQLS003 | Transaction control inside a declared script; the runner owns transactions. |
 | COHSQLS004 | A script statement failed or attempted to adopt an existing table or index. |
@@ -1747,6 +1747,14 @@ case-sensitive, unique and at most 128 characters. Exact UTF-8 bodies are SHA-25
 whitespace changes the checksum. Parsing precedes file I/O and lexical semicolon splitting
 respects strings, quoted names and comments. Deleting a declaration undoes nothing. Each statement
 commits with a receipt; crash recovery resumes after its committed prefix, including DML.
+DDL receipts certify the catalog's actual mutation: its target must match the parsed statement,
+and its preceding receipt and generation must still match before commit. The catalog derives the
+object claims. An IF EXISTS drop of an absent object completes its receipt without advancing
+DDL generation. Outside the unchanged digest/generation O(1) skip, Apply and Verify validate every
+completed statement's target and created-object claims against the declared SQL. Function receipts
+retain the CREATE definition's or bound DROP request's parameter type spellings together with the
+actual signature, so removed or redefined domains do not prevent validation of completed statements.
+An inconsistency is `COHSQLS001`; Verify still requires every declared script to be complete.
 The typed schema exclusively owns its declared tables and indexes. Script ALTER TABLE and DROP
 TABLE against a typed table, and DROP INDEX against a typed index (including its primary key),
 are refused before Build opens or changes the database. Scripts may create and later alter their

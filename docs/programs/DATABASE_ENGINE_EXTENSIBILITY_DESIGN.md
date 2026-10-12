@@ -1361,23 +1361,36 @@ registry with the same provenance and SQL definition rows respect catalog transa
 
 SqlDatabaseBuilder.Script(name, sql) records exact UTF-8 SHA-256 and runs forward-only in declaration
 order after the typed schema. Recovery is **statement-granular**: DDL publication atomically enlists
-its catalog receipt, object-id reservation records only the earlier prefix, and data effects share
-a logical transaction with a receipt in a reserved internal row chain. A crash after data commit
+its catalog-derived receipt after comparing the actual mutation with the parsed statement's
+expected target and exact preceding receipt/generation under the metadata lock. A mismatch is
+COHSQLS001 before commit. Object-id reservation records only the earlier prefix; an IF EXISTS drop
+that verifies absence completes its prefix without advancing generation. Data effects share a
+logical transaction with a receipt in a reserved internal row chain. A crash after data commit
 but before catalog progress resumes without replaying data. Removed declarations undo nothing;
-Verify requires complete matching receipts. Recorded table/index identities keep typed reconciliation
-from treating script-created objects as typed-schema removals. A precomputed ordered script-set
-hash plus the catalog generation gives an O(1) reconciliation skip, alongside B2's typed marker.
+Verify requires complete matching receipts. Outside the O(1) skip, Apply and Verify validate each
+completed target and created-object claim against the declared statement. Function receipts retain
+the CREATE definition's or already-bound DROP request's parameter type spellings paired with the
+actual normalized storage signature; SQL owns type-name resolution, while the catalog validates
+the actual mutation identity and parameter count. Completed statements remain verifiable after
+domains or declarations are removed or redefined. The receipt changes retain unreleased format 10.
+Recorded table/index identities keep typed reconciliation from treating script-created objects as
+typed-schema removals. A precomputed ordered script-set hash plus the catalog generation gives an
+O(1) reconciliation skip, alongside B2's typed marker.
 
 *E4 owner-review choices.* Scripts force their preceding typed migration and their own raw SQL to
 run inline; a populated-table CREATE INDEX therefore increases Build latency instead of using 49a's
 worker. The SDK v4 artifact stays typed-only and COHDBSDK110 refuses an extracted Script call rather
 than emitting an incomplete migration; deploy runtime declarations in Apply mode before Verify
 startup. A future script artifact needs a receipt-aware migration runner, not only generated SQL.
-The catalog exposes concrete definition/receipt operations. The E4 review replaces the public
-ambient BeginScriptStatement switch with optional explicit receipts on publishing operations:
-the catalog commits only the supplied operation's receipt, refuses reuse of a completed prefix,
-and distinguishes ReserveTableAsync from publishing CreateTableAsync. There is no new public
-interface, assembly-access grant or project reference.
+The catalog exposes concrete definition/receipt operations. The second review restores ordinary
+mutation methods' pre-E4 signatures and uses explicit publication overloads with
+SqlCatalogScriptPublication before a final optional CancellationToken, one parameter per line
+with full XML documentation. Publication carries expectations, not caller-supplied object claims
+or an unrestricted progress DTO. ReserveTableAsync remains distinct from publishing
+CreateTableAsync; BeginScriptAsync records identity before effects, and CompleteScriptStatementAsync
+records only successful non-DDL progress. This is an API consistency contract, not a boundary
+against callers controlling catalog storage. There is no new public interface, assembly-access
+grant or project reference.
 A script cannot adopt an existing table/index, even via IF NOT EXISTS. Event 22 ScriptApplied emits
 engine/database/script/hash, never SQL. New refusals are COHSQLD001-003 and COHSQLS001-005.
 
@@ -1421,10 +1434,23 @@ its bounded run encoding preserves the original deep-CHECK assertion within the 
 single-page table record. The review did not run Install-Local.ps1 or Database.Testing, per the
 owner's shared-cache restriction; the main session runs Database.Testing after the merge.
 
+E4 second-review validation: each reported finding was reproduced before its fix. Debug and
+Release each pass SQL 2,079; Language 1,020; Catalog 110; Schema 104; Client 350; Hosting 115;
+root Database 186; SDK Database 100, with zero failures or skips (4,064 tests per configuration).
+SQL runs with DOTNET_TieredCompilation=0. Q8 with declared scripts measures **0.042837 ms/call
+Debug** and **0.000384 ms/call Release** over 1,000 reconciliations with 50 typed tables and zero
+validation walks. Both NativeAOT harnesses publish in Release for win-arm64 without IL2xxx/IL3xxx
+warnings, and the fresh AotSample passes all 19 checks. Regression coverage includes mismatched mutation targets and preceding receipt
+state, cold Apply/Verify receipt validation, dropped SQL/native domain aliases, transitive
+volatility loss and recovery, parameter-domain casts before/after reopen, and return-domain
+widening and NULL handling. Install-Local.ps1 and Database.Testing were not run, as directed by
+the owner of the shared package cache.
+
 Re-derived entry points: Sql/src/SqlDatabaseBuilder.cs:172; Sql.Language/src/SqlQueryParser.Definitions.cs;
 Sql/src/Internal/SqlDefinitionBinder.cs:53; Sql/src/Internal/Functions/SqlExpressionFunction.cs;
-Sql/src/Internal/SqlPlanExecutor.Definitions.cs; Sql/src/Internal/SqlDeclaredDatabase.Scripts.cs:19,93;
-Sql.Catalog/src/SqlCatalog.Definitions.cs; Sql.Catalog/src/SqlCatalog.Scripts.cs. PostgreSQL references
+Sql/src/Internal/SqlPlanExecutor.Definitions.cs; Sql/src/Internal/SqlDeclaredDatabase.Scripts.cs:53,118;
+Sql.Catalog/src/SqlCatalog.Definitions.cs; Sql.Catalog/src/SqlCatalog.Scripts.cs:45,147;
+Sql.Catalog/src/SqlCatalogScriptPublication.cs:7. PostgreSQL references
 were checked against the local clone: functioncmds.c:1095/1098, typecmds.c:700, fmgr.c:238/253.
 
 **P7, re-scoped (decision 72).** The template, SampleHost and cohesion-examples casts leave in B1.

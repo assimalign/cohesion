@@ -497,20 +497,38 @@ bound runtime trees. The format gate refuses older files without an upgrade path
 
 Kind 12 stores SqlCatalogScript: case-sensitive name, exact-body SHA-256, statement count and
 committed prefix, initial/latest DDL generations, typed schema hash and created table/index
-identities. Kind 13 stores the ordered set's digest and reconciled generation. Tuple payloads use
+identities. Each completed statement also records its catalog-derived target (empty for non-DDL)
+and function parameter type spellings, paired with the function's normalized storage signature.
+CREATE FUNCTION takes those spellings from the published definition; DROP FUNCTION receives the
+SQL binder's already-resolved requested spellings as explicit mutation input. SQL owns type-name
+resolution, including native domains; the catalog owns the actual removed function identity and
+validates the parameter count. These records let later Builds validate completed function targets
+after a domain or its declaration has been removed or redefined. Kind 13 stores the ordered set's
+digest and reconciled generation. These changes retain the unreleased format 10. Tuple payloads use
 source-generated System.Text.Json metadata with unknown-member refusal; no reflection serializer.
 Definitions and receipts must fit the existing one-page record bound. The declaration's body stays
 in application code, not the receipt.
 
-Publication methods accept an optional explicit `SqlCatalogScript` receipt. The catalog stages
-it with that operation's metadata and generation in the same transaction. There is no ambient
-receipt switch or disposable scope. The receipt must describe the next incomplete statement;
-reusing a completed receipt for another publication is refused. Only `ReserveTableAsync` marks
-its commit as a reservation and retains the prior prefix; public `CreateTableAsync` publishes
-the table and completes its receipt even though it also advances the identifier counter.
-`SaveScriptAsync` records progress after data/read statements, whose atomic
-DML receipts the engine owns. SaveScriptStateAsync checks generation before saving the O(1)
-marker. No multi-statement catalog transaction was introduced. History is forward-only.
+Ordinary mutation methods retain their pre-E4 signatures. Explicit publication overloads take
+`SqlCatalogScriptPublication` before a final optional CancellationToken, with one parameter per
+line and full XML documentation. This immutable expectation names the statement's intended
+table, index, function signature or domain and supplies the exact preceding receipt and live
+DDL generation. Under the metadata lock, the catalog compares all preceding receipt fields and
+vectors, generation and target with durable state and its actual mutation before committing;
+a mismatch is `COHSQLS001`. The catalog derives every object claim from that mutation and commits
+the new receipt with its metadata. Callers cannot publish a progress DTO or supply object claims.
+This is an API consistency contract, not a boundary against callers controlling catalog storage.
+
+`BeginScriptAsync` records the script identity before effects. `ReserveTableAsync` retains the
+prior prefix while reserving an identifier; publishing `CreateTableAsync` completes the statement.
+An IF EXISTS drop that finds its target absent records that verified absence and completes the
+prefix without advancing DDL generation. `CompleteScriptStatementAsync` accepts only a non-DDL
+expectation after the read or data statement succeeds; the engine owns atomic DML receipts.
+`SaveScriptStateAsync` checks generation before saving the O(1) marker. Except for that skip,
+Apply and Verify validate each completed statement's recorded target against the declared SQL,
+including its retained function type spellings, and validate created table/index ownership;
+inconsistency is `COHSQLS001`. No multi-statement catalog transaction was introduced. History is
+forward-only.
 
 The engine preflights declared scripts against the typed schema before opening files: scripts
 cannot ALTER/DROP typed tables or DROP typed indexes (`COHSQLS005`). Script-created tables may

@@ -17,7 +17,7 @@ internal static class SqlScriptDataReceipt
          new("hash", new DatabaseTypeInfo(DatabaseType.String), false),
          new("position", new DatabaseTypeInfo(DatabaseType.Int32), false)]);
 
-    internal static async ValueTask AppendAsync(SqlDatabase database, TransactionContext transaction, SqlCatalogScript receipt, CancellationToken cancellationToken)
+    internal static async ValueTask AppendAsync(SqlDatabase database, TransactionContext transaction, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
     {
         var record = SqlRowCodec.Encode(_table, [receipt.Name, receipt.ContentHash, receipt.CompletedStatements], transaction.Sequence);
         await database.Coordinator.ApplyStatementAsync(transaction, bracket =>

@@ -24,7 +24,7 @@ internal readonly struct SqlStatementContext
         SqlCatalogSnapshot? catalogSnapshot = null,
         TransactionSequence? ddlLockOwner = null,
         Action<long, long?>? provisioningProgress = null,
-        SqlCatalogScript? scriptReceipt = null)
+        SqlCatalogScriptPublication? scriptReceipt = null)
     {
         Transaction = transaction;
         Coordinator = coordinator;
@@ -50,7 +50,7 @@ internal readonly struct SqlStatementContext
     internal Action<long, long?>? ProvisioningProgress { get; }
 
     /// <summary>Gets the receipt published only by this statement's explicit commit.</summary>
-    internal SqlCatalogScript? ScriptReceipt { get; }
+    internal SqlCatalogScriptPublication? ScriptReceipt { get; }
 
     /// <summary>
     /// Gets the database's transaction coordinator.

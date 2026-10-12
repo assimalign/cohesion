@@ -4269,12 +4269,17 @@ requested normalized name and parameter signature, not every overload sharing th
 an unknown signature is COHSQLD001. No interface, new project reference,
 shipped-to-shipped internal grant or assembly scanning was added.
 
-Scripts use statement-granular recovery. An internal `ExecuteScriptAsync(request, receipt)` call
-carries its receipt through that statement's context to the catalog publication method. No
-ambient receipt or mutable session receipt can attach to an unrelated operation. The catalog
-commits the explicit receipt atomically with the publication and requires the next incomplete
-prefix; a completed receipt cannot publish another operation. Only explicit object-id reservations
-advance the generation without completing a statement; direct catalog table creation completes it. Data
+Scripts use statement-granular recovery. An internal `ExecuteScriptAsync(request, publication)`
+call carries the statement's expected object, exact preceding receipt and observed catalog
+generation through its context. Ordinary catalog mutations retain their pre-E4 signatures;
+explicit publication overloads take `SqlCatalogScriptPublication` before the final optional
+CancellationToken. Under its metadata lock, the catalog compares the expectation with the actual
+mutation and durable preceding state, derives the object claims itself, and atomically commits
+metadata and the next receipt. A mismatched target or preceding receipt/generation is
+`COHSQLS001` before commit. `BeginScriptAsync` records the checksum before effects. Explicit
+object-id reservations advance the generation without completing a statement; direct catalog
+table creation completes it. An IF EXISTS drop verifies absence and completes its receipt
+without advancing DDL generation. Data
 statements add an MVCC receipt in the same logical transaction, in a reserved internal chain
 (owner ulong.MaxValue, which the checked catalog allocator cannot hand out), never exposed as a SQL table. If data commits before catalog progress,
 recovery finds that receipt and advances without replay. The ordinary row recovery protocol
@@ -4282,8 +4287,16 @@ handles these versions. The cold reconciliation path reads the committed receipt
 
 The ordered script-set digest is computed before I/O. A matching digest plus DDL generation
 skips reconciliation in O(1), without parsing, hashing, receipt scans or catalog walks. Verify
-requires complete checksum-matching receipts and executes nothing. Script-created table/index
-identities keep typed reconciliation from dropping raw-owned objects. A continuous receipt
+requires complete checksum-matching receipts and executes nothing. Outside the O(1) skip, Apply
+and Verify compare every completed statement's recorded target with its declared SQL and refuse
+inconsistent target or created-object claims with `COHSQLS001`. Function receipts retain parameter
+type spellings paired with the actual normalized storage signature: CREATE takes them from the
+published definition; DROP takes the SQL binder's already-resolved requested spellings as explicit
+mutation input. SQL owns name-to-type resolution, including native domains, while the catalog
+validates the actual numeric identity and parameter count. Completed function targets remain
+verifiable after a domain or its declaration is removed or redefined. The receipt changes retain
+unreleased catalog format 10. Script-created table/index identities keep typed reconciliation
+from dropping raw-owned objects. A continuous receipt
 generation chain repairs the typed marker after a crash between typed apply and script completion.
 The typed schema exclusively owns its declared objects. Before any database is opened, declaration
 compilation refuses script ALTER TABLE/DROP TABLE of a typed table and DROP INDEX of a typed index,
