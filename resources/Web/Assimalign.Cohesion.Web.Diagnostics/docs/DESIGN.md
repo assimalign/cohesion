@@ -264,6 +264,56 @@ numeric/date rendering goes through invariant `TryFormat` into stack buffers. Bo
 decodes UTF-8 into a string only at emission. The package carries the repo-wide
 `IsAotCompatible=true` with nothing to suppress.
 
+## Diagnostics
+
+The internal `HttpLoggingEventSource`, named `Assimalign.Cohesion.Web.Diagnostics`, reports the
+package's own sink and log-construction failures. The HTTP access log remains the package's
+`ILogger` product. No request paths, headers, bodies or trace/span data are copied into these
+operator events; the existing request-feature correlation and request-view capture are unchanged.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | AccessLogFileOpened | Informational | path, sequence:int, existingBytes:long |
+| 2 | AccessLogWriteFailed | Error | operation (Write, Flush, Close), exceptionType, exceptionMessage, suppressedCount:int |
+| 3 | AccessLogRetentionFailed | Warning | exceptionType, exceptionMessage, suppressedCount:int |
+| 4 | HttpLogEntryDropped | Warning | exceptionType, suppressedCount:int |
+| 5 | ClientAddressResolverFailed | Warning | exceptionType, suppressedCount:int |
+
+Event 1's `path` is the operator-configured local access-log file, never a request URL. File
+failures include the exception type and Message, never a stack trace. Application-delegate
+failures in events 4 and 5 include only the type: their messages can echo request input.
+
+Every Warning/Error is throttled to one event per second per event id across this process.
+`suppressedCount` reports enabled attempts suppressed since the previous emission. Write, Flush
+and Close share event 2's throttle. The lazy PollingCounters remain exact with listeners disabled
+and while events are suppressed:
+
+- `failed-access-log-writes`: one increment for each `W3CAccessLogWriter.Write` call that throws,
+  including immediate flush failure or a failing close during rolling. Standalone explicit/timer
+  flush and close operations do not increment it.
+- `dropped-http-log-entries`: one increment each time the middleware's guarded `Emit` fails.
+  A resolver failure falls back to the effective client address and does not itself drop an entry.
+
+The first counter counts calls, **not lost entries**. With buffering, a successful Write can lose
+its output on a later flush or close. `StreamWriter` can discard a buffer before the underlying
+write fails, so retrying cannot guarantee recovery; flush and close failures are Error events.
+Retention remains best effort and Warning. Write and explicit Flush preserve their exceptions;
+`CompositeLogger` continues isolating a provider's Write failure. Timer and close-flush failures
+remain swallowed; a failing disposal still propagates, after clearing the closed writer state.
+
+All writer events are emitted after leaving the writer's lock, including failures collected during
+rolling, retention and disposal. Listeners run synchronously, so raising inside that lock could
+deadlock a forwarding sink. `W3CAccessLogProvider` accepts only `http.event = "exchange"` entries;
+forwarded Web.Diagnostics events never enter its file and cannot recursively fail the access sink.
+
+**Logger category overlap.** The source's category `Assimalign.Cohesion.Web.Diagnostics` is a
+prefix of the HTTP log's default `Assimalign.Cohesion.Web.Diagnostics.HttpLogging`. A filter rule
+on the source category also tunes the HTTP log. No default category filter is added.
+
+**Behavior change from 10.0.0-preview.1 (#1407, decision 15).** Previously silent file, retention,
+entry-construction and resolver failures are now visible to enabled listeners and configured
+forwarding sinks, with the payload rules above. No public API or HTTP access-log format changes.
+
 ## Non-goals
 
 - **No general-purpose file logging provider.** The W3C writer renders HTTP exchanges only. A
@@ -274,7 +324,8 @@ decodes UTF-8 into a string only at emission. The package carries the repo-wide
   convention and never re-parses forwarding headers.
 - **No error handling.** The middleware observes exceptions and rethrows; status-code pages and
   the exception boundary are #881 (over the #864 `OnError` hook).
-- **No push/export telemetry.** OTLP export, metrics, and `EventSource` counters are the
-  OpenTelemetry epic (#317). The attribute contract is the handoff point.
+- **No push/export telemetry.** OTLP export and per-feature Meter instruments belong to the
+  OpenTelemetry epic (#317). The attribute contract is the handoff point; the internal EventSource
+  above owns operator events and exact sink-failure attribution counters.
 - **No per-request configuration surface.** Everything is builder-time; the only per-request
   variance is the endpoint metadata override, itself attached at map time.

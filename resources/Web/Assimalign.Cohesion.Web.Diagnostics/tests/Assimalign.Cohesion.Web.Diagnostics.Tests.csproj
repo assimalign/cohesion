@@ -15,6 +15,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Logging.EventSource" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Compression" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Diagnostics" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
@@ -24,5 +25,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
 </Project>

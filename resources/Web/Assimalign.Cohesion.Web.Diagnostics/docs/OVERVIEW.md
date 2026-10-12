@@ -91,4 +91,16 @@ configured level, without the exception, whose `http.response.status` is the `40
 `431` the transport answered with. On HTTP/2 and HTTP/3 a malformed body resets the stream instead of
 drawing a status, and is logged as the `400` the transport reports for it (#1378).
 
+## Sink diagnostics
+
+Observe `Assimalign.Cohesion.Web.Diagnostics` through `dotnet-trace`, `dotnet-counters`, or the
+event-source logging forwarder for file-open events and throttled sink, retention, entry-building
+and client-address-resolver failures. `failed-access-log-writes` counts failed Write calls,
+not lost buffered entries; `dropped-http-log-entries` counts failed entry emission.
+
+The source category is a prefix of the HTTP log's default category,
+`Assimalign.Cohesion.Web.Diagnostics.HttpLogging`, so a category filter on the source also
+affects HTTP entries. Forwarded diagnostics are excluded from the W3C file by its exchange-only
+filter. See [Diagnostics](DESIGN.md#diagnostics) for payload and failure semantics.
+
 See [DESIGN.md](DESIGN.md) for the architecture and the decisions behind it.

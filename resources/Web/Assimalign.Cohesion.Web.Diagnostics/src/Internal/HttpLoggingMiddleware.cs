@@ -138,11 +138,12 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
                 {
                     Emit(exchangeLogger, context, effective, elapsed, requestCapture, responseCapture, exception);
                 }
-                catch
+                catch (Exception failure)
                 {
                     // The access log must never fail an exchange (or mask the application's own
                     // exception while it unwinds). Sink failures are already isolated by the
                     // logging pipeline; this guards the attribute-building path itself.
+                    HttpLoggingEventSource.Log.EntryDropped(failure);
                 }
             }
 
@@ -408,9 +409,10 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
             {
                 return resolver(context);
             }
-            catch
+            catch (Exception exception)
             {
                 // A faulting resolver must not fail the exchange; fall back to the effective client.
+                HttpLoggingEventSource.Log.AddressResolverFailed(exception);
             }
         }
 
