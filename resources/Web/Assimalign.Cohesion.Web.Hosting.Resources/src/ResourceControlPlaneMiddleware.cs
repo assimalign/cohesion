@@ -3,7 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Security.Cryptography;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -25,6 +25,14 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources;
 // entry shared with UseResourceControlPlane, without a runtime-module dependency.
 public static class ResourceControlPlaneMiddleware
 {
+    // Direct callers and composed pipelines share one verifier per resource invocation.
+    // Weak keys allow completed invocations to be collected; Lazy serializes initialization.
+    private static readonly ConditionalWeakTable<ResourceContext, Lazy<BootstrapTokenVerifier>> _verifiers = new();
+
+    private static BootstrapTokenVerifier GetVerifier(ResourceContext resource) =>
+        _verifiers.GetValue(resource, static context => new Lazy<BootstrapTokenVerifier>(
+            () => new BootstrapTokenVerifier(context), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+
     private const string HealthJsonContentType = "application/health+json; charset=utf-8";
     private const string HealthPath = "/healthz";
     private const string CohesionHealthPath = "/cohesion/v1/healthz";
@@ -256,7 +264,7 @@ public static class ResourceControlPlaneMiddleware
             {
                 throw new InvalidOperationException("A gateway-managed resource requires an ambient resource name.");
             }
-            _ = new BootstrapTokenVerifier(resourceContext);
+            _ = GetVerifier(resourceContext);
         }
     }
 
@@ -524,7 +532,7 @@ public static class ResourceControlPlaneMiddleware
         }
 
         return presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase)
-            ? new BootstrapTokenVerifier(resource).Validate(presentation.Credential, presentation.ExpectedAudience, presentation.Now)
+            ? GetVerifier(resource).Validate(presentation.Credential, presentation.ExpectedAudience, presentation.Now)
             : new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
     }
 }
