@@ -104,9 +104,10 @@ public sealed partial class SqlDatabaseEventSourceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - DeferredStep: real migration reports bounded progress and exactly one outcome")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task DeferredStep_RealCheck_ShouldReportLifecycleOnce(bool fail)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task DeferredStep_RealCheck_ShouldReportLifecycleOnce(bool fail, bool pauseBetweenCallbacks)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -120,6 +121,16 @@ public sealed partial class SqlDatabaseEventSourceTests
             await session.ExecuteAsync("INSERT INTO items (Id) VALUES " + string.Join(",", Enumerable.Range(1, 130).Select(value => $"({value})")), cancellationToken: timeout.Token);
         }
         database.SchemaProvisioner.BeforeDeferredStep = (_, token) => { entered.TrySetResult(); release.Wait(token); };
+        int callbacks = 0;
+        database.SchemaProvisioner.DeferredProgress = (_, _) =>
+        {
+            if (Interlocked.Increment(ref callbacks) == 1 && pauseBetweenCallbacks)
+            {
+                // A scheduler pause after the first callback legitimately permits another event.
+                timeout.Token.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(1100));
+                timeout.Token.ThrowIfCancellationRequested();
+            }
+        };
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
 
         // Act
@@ -143,9 +154,18 @@ public sealed partial class SqlDatabaseEventSourceTests
         var bound = NewEvent(recorder, 18, "DeferredStepBound", _deferredPayload);
         bound.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "AddConstraint", 1, 1]);
         bound.Level.ShouldBe(EventLevel.Informational);
-        var progress = NewEvent(recorder, 19, "DeferredStepProgress", _deferredPayload);
-        progress.Level.ShouldBe(EventLevel.Verbose);
-        progress.Payload![8].ShouldBe(130L);
+        callbacks.ShouldBeGreaterThanOrEqualTo(130);
+        var progress = recorder.Events.Where(entry => entry.EventId == 19).ToArray();
+        progress.ShouldNotBeEmpty();
+        foreach (var entry in progress)
+        {
+            entry.EventName.ShouldBe("DeferredStepProgress");
+            entry.PayloadNames.ShouldBe(_deferredPayload);
+            entry.Level.ShouldBe(EventLevel.Verbose);
+            entry.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "AddConstraint", 1, 1]);
+            ((long)entry.Payload![7]!).ShouldBeInRange(0, 130);
+            entry.Payload[8].ShouldBe(130L);
+        }
         var completed = NewEvent(recorder, 20, "DeferredStepCompleted", [.. _deferredPayload, "outcome", "durationMilliseconds"]);
         completed.Payload![9].ShouldBe(fail ? "Error" : "Applied");
         completed.Payload[8].ShouldBe(130L);
@@ -164,6 +184,117 @@ public sealed partial class SqlDatabaseEventSourceTests
             recorder.Events.ShouldNotContain(entry => entry.EventId == 21);
         }
         recorder.Events.ShouldNotContain(entry => entry.EventId == 17);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - DeferredStep: a listener attached during a real step sees remaining progress and completion")]
+    [InlineData(false, "Applied")]
+    [InlineData(true, "Applied")]
+    [InlineData(false, "Error")]
+    [InlineData(false, "Cancelled")]
+    public async Task DeferredStep_ListenerAttachedDuringStep_ShouldReportRemainingLifecycle(bool attachAfterProgress, string outcome)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("traced", timeout.Token);
+        await database.ApplySchemaAsync(TraceSchema(false).Compile(), timeout.Token);
+        await using (var session = await database.CreateSessionAsync(timeout.Token))
+        {
+            await session.ExecuteAsync("INSERT INTO items (Id) VALUES " + string.Join(",", Enumerable.Range(1, 130).Select(value => $"({value})")), cancellationToken: timeout.Token);
+        }
+        int callbacks = 0;
+        database.SchemaProvisioner.DeferredProgress = (_, _) => Interlocked.Increment(ref callbacks);
+        if (attachAfterProgress)
+        {
+            database.SchemaProvisioner.StepApplied = _ => { entered.TrySetResult(); release.Wait(timeout.Token); };
+        }
+        else
+        {
+            database.SchemaProvisioner.BeforeDeferredStep = (_, token) => { entered.TrySetResult(); release.Wait(token); };
+        }
+        SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
+        EventSourceRecorder? recorder = null;
+
+        // Act
+        try
+        {
+            try
+            {
+                await database.SchemaProvisioner.ApplyAsync(TraceSchema(true, outcome == "Error").Compile(), timeout.Token, deferDataScalingSteps: true);
+                await entered.Task.WaitAsync(timeout.Token);
+                recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+                if (outcome == "Cancelled")
+                {
+                    await database.SchemaProvisioner.StopDeferredAsync();
+                }
+            }
+            finally
+            {
+                release.Set();
+            }
+            while (database.SchemaProvisioner.Deferred is not null)
+            {
+                await Task.Delay(1, timeout.Token);
+            }
+
+            // Assert
+            if (outcome == "Cancelled")
+            {
+                callbacks.ShouldBe(0);
+                database.Provisioning.ShouldNotBeNull();
+            }
+            else
+            {
+                callbacks.ShouldBeGreaterThanOrEqualTo(130);
+            }
+            database.IsOffline.ShouldBe(outcome == "Error");
+            recorder.ShouldNotBeNull();
+            recorder.Events.ShouldNotContain(entry => entry.EventId == 13 || entry.EventId == 14 || entry.EventId == 18);
+            if (!attachAfterProgress && outcome != "Cancelled")
+            {
+                var progress = recorder.Events.Where(entry => entry.EventId == 19).ToArray();
+                progress.ShouldNotBeEmpty();
+                foreach (var entry in progress)
+                {
+                    entry.EventName.ShouldBe("DeferredStepProgress");
+                    entry.PayloadNames.ShouldBe(_deferredPayload);
+                    entry.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "AddConstraint", 1, 1]);
+                    entry.Payload![8].ShouldBe(130L);
+                }
+            }
+            var completed = NewEvent(recorder, 20, "DeferredStepCompleted", [.. _deferredPayload, "outcome", "durationMilliseconds"]);
+            completed.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "AddConstraint", 1, 1]);
+            completed.Payload![9].ShouldBe(outcome);
+            completed.Payload[10].ShouldBe(0d);
+            if (outcome == "Applied")
+            {
+                database.Provisioning.ShouldBeNull();
+                completed.Payload[7].ShouldBe(130L);
+                completed.Payload[8].ShouldBe(130L);
+            }
+            else
+            {
+                var progress = database.Provisioning.ShouldNotBeNull();
+                completed.Payload[7].ShouldBe(progress.RowsProcessed ?? -1);
+                completed.Payload[8].ShouldBe(progress.TotalRows ?? -1);
+            }
+            if (outcome == "Error")
+            {
+                var failed = NewEvent(recorder, 21, "DeferredStepFailed", [.. _deferredPayload, "code", "exceptionType"]);
+                failed.Payload!.Take(9).ShouldBe(completed.Payload.Take(9));
+                failed.Payload![9].ShouldBe("COHSQLP004");
+            }
+            else
+            {
+                recorder.Events.ShouldNotContain(entry => entry.EventId == 21);
+            }
+        }
+        finally
+        {
+            recorder?.Dispose();
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - DeferredStep: cancellation closes its lifetime without a failure")]

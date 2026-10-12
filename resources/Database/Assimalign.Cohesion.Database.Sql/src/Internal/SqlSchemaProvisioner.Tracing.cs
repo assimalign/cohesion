@@ -10,7 +10,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlSchemaProvisioner
 {
     // Apply/Verify own the admission gate throughout this trace. The deferred trace
-    // belongs to the single claimed worker, after ownership was transferred.
+    // belongs to the single claimed worker, after ownership was transferred. Both
+    // owners retain the executing step so a listener can attach after entry.
     private SqlMigrationScriptStep? _executingStep;
     private SqlProvisioningTrace? _trace;
     private SqlProvisioningTrace? _deferredTrace;
@@ -131,21 +132,36 @@ internal sealed partial class SqlSchemaProvisioner
         }
     }
 
-    private void BeginDeferredTrace(SqlDeferredMigration migration, SqlCatalogMigrationStep step)
+    private void BeginDeferredTrace(SqlDeferredMigration migration, int index)
     {
+        _executingStep = migration.Steps[index];
         if (SqlDatabaseEventSource.Log.IsEnabled())
         {
-            _deferredTrace = new SqlProvisioningTrace(migration.Schema)
-            {
-                Kind = step.Kind, Table = step.Table, ObjectName = step.ObjectName,
-                Position = step.Position, StepCount = migration.Intent.StepCount, RowsProcessed = 0,
-            };
+            _deferredTrace = CreateDeferredTrace(migration, migration.Intent.Steps[index]);
+            _deferredTrace.RowsProcessed = 0;
+            _deferredTrace.TotalRows = -1;
             _deferredTrace.Started = SqlDatabaseEventSource.Log.DeferredStepBound(_database, _deferredTrace);
         }
     }
 
-    private void TraceDeferredProgress(long? processed, long? total)
+    private SqlProvisioningTrace CreateDeferredTrace(SqlDeferredMigration migration, SqlCatalogMigrationStep step)
     {
+        var progress = _database.Provisioning;
+        return new SqlProvisioningTrace(migration.Schema)
+        {
+            Kind = step.Kind, Table = step.Table, ObjectName = step.ObjectName,
+            Position = step.Position, StepCount = migration.Intent.StepCount,
+            RowsProcessed = progress?.RowsProcessed ?? -1,
+            TotalRows = progress?.TotalRows ?? -1,
+        };
+    }
+
+    private void TraceDeferredProgress(SqlDeferredMigration migration, SqlCatalogMigrationStep step, long? processed, long? total)
+    {
+        if (_deferredTrace is null && SqlDatabaseEventSource.Log.IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            _deferredTrace = CreateDeferredTrace(migration, step);
+        }
         if (_deferredTrace is not { } trace)
         {
             return;
@@ -160,8 +176,19 @@ internal sealed partial class SqlSchemaProvisioner
         }
     }
 
-    private void EndDeferredTrace(string outcome)
+    private void EndDeferredTrace(SqlDeferredMigration migration, int index, string outcome)
     {
+        // The existing step reference distinguishes cancellation before entry and
+        // finalization after completion from an entered step whose Bound was missed.
+        if (_executingStep is null)
+        {
+            return;
+        }
+        if (_deferredTrace is null && SqlDatabaseEventSource.Log.IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            _deferredTrace = CreateDeferredTrace(migration, migration.Intent.Steps[index]);
+        }
+        _executingStep = null;
         if (_deferredTrace is { } trace)
         {
             _deferredTrace = null;

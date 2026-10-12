@@ -4082,7 +4082,12 @@ has no step lifetime. A marker failure after all steps uses kind `Finalize`, pos
 and does not report the last successful step twice. Tables/objects/schema names are bounded to
 256 characters plus an ellipsis. Positions/counts reuse the durable intent's original numbering;
 unknown row counts are -1. Completed carries the latest exact progress even when no progress
-event was due. Its duration is zero if the informational event was disabled at entry.
+event was due. A listener attached after entry receives subsequent enabled progress and
+completion events, using the existing migration intent, current step and root progress snapshot.
+Bound is not replayed; completion duration is zero when the informational event was disabled at
+entry. This also covers attachment after the last row callback, and failure or cancellation
+before any callback. Cancellation before step entry and finalization after a completed step
+never synthesize another completion.
 
 Progress writes the first executor callback, then at most one callback per second per step,
 using a monotonic timestamp. It never starts a timer or schedules work; a fast large table
@@ -4102,8 +4107,10 @@ with 130 rows, including reservation, scheduling, worker execution, cleanup and 
 The worker is claimed synchronously before the build-ready signal, using existing internal
 entry points; no shipped measurement switch or visibility change was added. Probe and logs are
 under `_out/provisioning-tracing`. The source tests also check zero allocation for 10,000 disabled
-writes, real success/failure/cancellation payloads, no event 0 or 17, and throttling over more
-than one second of real row callbacks.
+writes, real success/failure/cancellation payloads, late listener attachment, no event 0 or 17,
+and throttling over more than one second of real row callbacks. Lifecycle coverage accepts one
+or more progress events and validates each payload; scheduling delays can legitimately permit
+another event, so only the dedicated throttle test asserts timing.
 
 Behavioral references only (no implementation copied): PostgreSQL's command progress records
 operation/target separately from mutable counters (`src/backend/utils/activity/backend_progress.c:20-57`),
