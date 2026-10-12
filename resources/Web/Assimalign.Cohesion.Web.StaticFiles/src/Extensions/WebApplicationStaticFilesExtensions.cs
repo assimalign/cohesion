@@ -51,7 +51,7 @@ public static class WebApplicationStaticFilesExtensions
 
             return builder.Use((IWebApplicationContext context, WebApplicationMiddleware next) =>
             {
-                StaticFilesMiddleware? middleware = WebRootStaticFiles.TryCreate(context, options);
+                StaticFilesMiddleware? middleware = WebRootStaticFiles.TryCreate(context, options, "UseStaticFiles");
 
                 return middleware is null ? next : httpContext => middleware.InvokeAsync(httpContext, next);
             });

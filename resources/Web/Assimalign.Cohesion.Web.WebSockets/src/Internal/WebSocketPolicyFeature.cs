@@ -19,13 +19,15 @@ namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 /// </remarks>
 internal sealed class WebSocketPolicyFeature : IHttpWebSocketFeature
 {
+    private readonly IHttpContext _context;
     private readonly IHttpWebSocketFeature _inner;
     private readonly WebSocketPolicy _policy;
     private readonly IWebServerDrainFeature? _drain;
-    private DrainAwareWebSocket? _accepted;
+    private WebSocket? _accepted;
 
-    public WebSocketPolicyFeature(IHttpWebSocketFeature inner, WebSocketPolicy policy, IWebServerDrainFeature? drain)
+    public WebSocketPolicyFeature(IHttpContext context, IHttpWebSocketFeature inner, WebSocketPolicy policy, IWebServerDrainFeature? drain)
     {
+        _context = context;
         _inner = inner;
         _policy = policy;
         _drain = drain;
@@ -50,16 +52,18 @@ internal sealed class WebSocketPolicyFeature : IHttpWebSocketFeature
     {
         WebSocket socket = await _inner.AcceptWebSocketAsync(_policy.Apply(options), cancellationToken).ConfigureAwait(false);
 
-        // A custom server may not publish a drain signal; its sockets then end when it ends them.
-        if (_drain is null)
+        // Lifetime accounting belongs to the exchange even when a custom server has no drain
+        // signal. A failed accept never reaches this transition.
+        if (_inner is not WebSocketPolicyFeature)
         {
-            return socket;
+            WebSocketEventSource.Log.WebSocketOpened(_context, socket);
         }
-
-        DrainAwareWebSocket drainAware = new(socket, _drain.Draining);
-        _accepted = drainAware;
-
-        return drainAware;
+        // The inner policy already attached the drain. Wrapping twice could misattribute the
+        // outer drain's close as an application close at the inner lifetime owner.
+        _accepted = _inner is WebSocketPolicyFeature || _drain is null
+            ? socket
+            : new DrainAwareWebSocket(_context, socket, _drain.Draining);
+        return _accepted;
     }
 
     /// <inheritdoc />
@@ -74,6 +78,22 @@ internal sealed class WebSocketPolicyFeature : IHttpWebSocketFeature
     /// </summary>
     public void Release()
     {
-        _accepted?.ReleaseDrain();
+        WebSocket? accepted = Interlocked.Exchange(ref _accepted, null);
+        if (accepted is null)
+        {
+            return;
+        }
+
+        bool closedByDrain = false;
+        if (accepted is DrainAwareWebSocket drainAware)
+        {
+            drainAware.ReleaseDrain();
+            closedByDrain = drainAware.ClosedByDrain;
+        }
+
+        if (_inner is not WebSocketPolicyFeature)
+        {
+            WebSocketEventSource.Log.WebSocketClosed(_context, accepted, closedByDrain);
+        }
     }
 }

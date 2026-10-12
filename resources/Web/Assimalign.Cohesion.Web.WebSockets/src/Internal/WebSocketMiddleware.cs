@@ -36,14 +36,16 @@ internal sealed class WebSocketMiddleware : IWebApplicationMiddleware
                 // RFC 6455 §4.2.1: a server that speaks WebSockets refuses a broken handshake rather
                 // than serving the request as an ordinary one.
                 webSockets.RejectHandshake();
+                WebSocketEventSource.Log.HandshakeRejected(context, webSockets.HandshakeStatus);
                 return Task.CompletedTask;
         }
 
         // Cross-site WebSocket hijacking: a page on another site would otherwise open a socket that
         // carries the user's cookies.
-        if (!_policy.IsOriginAllowed(context))
+        if (!_policy.IsOriginAllowed(context, out string reason, out string? normalizedOrigin))
         {
             context.Response.StatusCode = HttpStatusCode.Forbidden;
+            WebSocketEventSource.Log.HandshakeRejected(context, reason, normalizedOrigin);
             return Task.CompletedTask;
         }
 
@@ -52,7 +54,7 @@ internal sealed class WebSocketMiddleware : IWebApplicationMiddleware
 
     private async Task InvokeWithPolicyAsync(IHttpContext context, IHttpWebSocketFeature webSockets, WebApplicationMiddleware next)
     {
-        WebSocketPolicyFeature feature = new(webSockets, _policy, context.Features.Get<IWebServerDrainFeature>());
+        WebSocketPolicyFeature feature = new(context, webSockets, _policy, context.Features.Get<IWebServerDrainFeature>());
         context.Features.Set(feature);
 
         try

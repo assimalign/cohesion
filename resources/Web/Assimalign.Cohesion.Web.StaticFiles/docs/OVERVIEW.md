@@ -7,6 +7,14 @@ negotiation — composed from the shared `Assimalign.Cohesion.Http` protocol pri
 than re-deriving any RFC semantics locally. Handlers get the same behavior for a file or a stream
 of their own through the `SendFileAsync` and `WriteStreamAsync` response helpers.
 
+## Diagnostics
+
+The `Assimalign.Cohesion.Web.StaticFiles` EventSource reports web-root mounts once when the pipeline
+is built, including branches and fallback routes. It also reports traversal rejections and throttled
+mount lookup failures, with exact `traversal-rejections` and `mount-lookup-failures` counters. Configured
+root/prefix identifiers may be reported; request paths and exception messages are never written.
+See [Diagnostics in the design](DESIGN.md#diagnostics) for events and payloads.
+
 ## Scope
 
 - **Content root = an `IFileSystem` mount.** Any implementation works: `PhysicalFileSystem`,

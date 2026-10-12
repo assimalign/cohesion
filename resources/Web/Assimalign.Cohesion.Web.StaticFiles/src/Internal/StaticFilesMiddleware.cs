@@ -96,6 +96,7 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         // for what the transports decode.
         if (StaticFilePath.HasUnsafeSegments(remainder))
         {
+            StaticFilesEventSource.Log.TraversalRejected(context, "UnsafeSegment", _prefix);
             context.Response.StatusCode = HttpStatusCode.NotFound;
             return;
         }
@@ -115,6 +116,7 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         {
             // Second defense layer: FileSystemPath rejects interior dot segments and illegal
             // path characters outright. Anything it refuses is not a servable file.
+            StaticFilesEventSource.Log.TraversalRejected(context, "InvalidPath", _prefix);
             context.Response.StatusCode = HttpStatusCode.NotFound;
             return;
         }
@@ -207,7 +209,7 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
     }
 
     private bool TryGetInfo(FileSystemPath path, [NotNullWhen(true)] out IFileSystemInfo? info)
-        => StaticFilePath.TryGetInfo(_fileSystem, path, out info);
+        => StaticFilePath.TryGetInfo(_fileSystem, path, out info, _prefix);
 
     private bool TryResolveDefaultDocument(string directory, [NotNullWhen(true)] out IFileSystemFile? document, out string documentName)
     {

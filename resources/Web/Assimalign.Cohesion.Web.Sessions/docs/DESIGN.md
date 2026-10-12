@@ -207,3 +207,26 @@ payload commit. The original exception continues to propagate to the caller.
 interface implementation returns `true`, preserving custom implementations that commit every
 time. Built-in sessions keep skipping unchanged payload writes while renewing the idle window;
 this property does not change read-only expiration behavior.
+
+## Diagnostics
+
+The internal `WebSessionEventSource` is named `Assimalign.Cohesion.Web.Sessions`.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | SessionOrphaned | Verbose | reason (`ResponseStarted`), requestId |
+
+`orphaned-sessions` is an exact PollingCounter total, incremented once at the middleware's
+post-pipeline orphan check, even when nobody listens. Reading `context.Session` materializes
+an empty new session, so a cookieless read after the head commits is an orphan without lost
+state. It emits Verbose once and no Warning. No session id, cookie, key, or value is written.
+The request id comes from `IWebRequestIdFeature` inside the enabled check.
+
+The original scope deferred a modified-orphan Warning until `IHttpStoredSession.IsModified`
+existed. #1436 now supplies that prerequisite, but this task deliberately retains the requested
+Verbose-only policy, including modified orphans; `SessionStateLost` and `lost-sessions` remain
+future scope. Http.Sessions owns load/commit failures (see above), with no duplicate report here.
+
+Since 10.0.0-preview.1, diagnostics become observable but cookie and persistence behavior are
+unchanged. The new contracts-only Web.Server dependency provides request correlation and adds
+no hosting dependency or framework member.

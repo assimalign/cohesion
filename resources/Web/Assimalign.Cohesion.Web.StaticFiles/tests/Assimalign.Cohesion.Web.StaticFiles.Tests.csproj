@@ -4,6 +4,7 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.StaticFiles" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />

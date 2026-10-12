@@ -235,6 +235,11 @@ The package takes a `Web.Routing` reference for this (a feature-to-feature refer
 the Web dependency rule). Register `UseStaticFiles()` ahead of `UseRouting()`, so an existing asset is
 served before routing, and the fallback answers only what remains.
 
+The route is registered when `MapFallbackToFile` is called, and a composition-time component resolves
+its web-root mount when the containing pipeline is built. This matches `UseStaticFiles` and makes
+both mount diagnostics report once per registration per pipeline build, including nested branches.
+The fallback handler uses that composed mount; requests never repeat the mount lookup or its event.
+
 ## Response helpers: `SendFileAsync` and `WriteStreamAsync` (#1061)
 
 Before #1061 only the middleware could answer with a file under conditional and range rules; a
@@ -381,6 +386,42 @@ not a concrete media type or carries a control character, an unreadable stream, 
 entity-tag. Everything the request controls is a status code instead: the path overload answers
 `404` for an unsafe, missing, or directory path, and preconditions and ranges produce `304`, `412`,
 or `416`. Cancellation surfaces as `OperationCanceledException` from the copy.
+
+## Diagnostics
+
+The internal `StaticFilesEventSource` is named `Assimalign.Cohesion.Web.StaticFiles`. It adds no public
+diagnostics API, logging dependency, or metrics instruments. The contracts-only `Web.Server` reference
+supplies `IWebRequestIdFeature` for rejected-request correlation; no ambient activity is read.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | WebRootMounted | Informational | webRoot, prefix |
+| 2 | WebRootUnavailable | Warning | webRoot (empty when unset), consumer |
+| 3 | TraversalRejected | Verbose | reason, prefix, requestId |
+| 4 | MountLookupFailed | Warning | prefix, exceptionType, suppressedCount:int |
+
+`WebRootMounted` and `WebRootUnavailable` describe each web-root registration at pipeline build,
+including a `UseStaticFiles` inside `Map` / `UseWhen` branches and a `MapFallbackToFile` route. They are
+never repeated for requests. The consumer is `UseStaticFiles` or `MapFallbackToFile`. An explicit
+`IFileSystem` mount has no application web root and does not raise these two web-root events.
+
+The root and prefix are application-configured mount identifiers permitted by the source's scope;
+the prefix is normalized to empty for the site root and otherwise has no trailing slash. No requested
+path, query, header value, file contents, or exception message is written. `TraversalRejected` carries
+`UnsafeSegment` or `InvalidPath` plus the request feature's id, or an empty id if a custom server omits
+that feature. `MountLookupFailed` reports only the exception type because `FileSystemException.Message`
+can contain the client's path. The shared catch covers middleware and `SendFileAsync` path lookups;
+the latter has no configured request prefix and reports an empty prefix.
+
+`MountLookupFailed` is throttled to one report per second across the source. Its `suppressedCount`
+reports earlier suppressed failures. The lazy PollingCounters `traversal-rejections` and
+`mount-lookup-failures` count every rejection or caught lookup failure with `Interlocked`, including
+when no listener is enabled and when an event is suppressed. There are no per-request success events or gauges.
+
+Compared with 10.0.0-preview.1, this adds operator visibility without changing request status or
+file-serving semantics. `MapFallbackToFile`, introduced after preview.1, now resolves its mount during
+pipeline build rather than route registration; changes to directory availability between those steps
+are therefore observed at build. Date selection, its clock fallback, and validators remain unchanged.
 
 ## Non-goals
 

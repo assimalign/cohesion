@@ -270,7 +270,7 @@ data object (value types, strings, one `byte[]`), so the in-memory store holds i
 - **Size accounting.** The store sets `MemoryCacheOptions.SizeLimit` and declares each entry's `Size`
   (`OutputCacheEntry.Size` = body bytes + captured header text + a floor). The foundation enforces the
   cumulative limit with its priority/LRU capacity eviction; an entry larger than the whole limit is
-  declined and the store drops it silently rather than surfacing a fault to the request path. This is the
+  declined and the store reports a throttled diagnostic without surfacing a fault to the request path. This is the
   **total** cap; the **per-entry** cap (`OutputCacheOptions.MaximumBodySize`) is enforced earlier by the
   buffering middleware.
 - **Time-to-live.** Entries use absolute expiration (`AbsoluteExpirationRelativeToNow`), not a sliding
@@ -337,6 +337,82 @@ No reflection, no dynamic serialization, no runtime code generation. The stored 
 directly by the in-memory store; keys are built with a `StringBuilder`; the endpoint is a typed feature
 read from the exchange, and metadata resolution is the router's reflection-free `is`-test seam.
 Registration is dependency-free — options and the store are captured at builder time.
+
+## Diagnostics
+
+The internal `OutputCacheEventSource` uses the assembly name
+`Assimalign.Cohesion.Web.Caching`. It has no logger dependency, public diagnostics API or Meter.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `ResponseNotStored` | Verbose | `reason`, `routeTemplate`, `requestId` |
+| 2 | `EntryDeclined` | Warning | `entryBytes:long`, `sizeLimitBytes:long`, `suppressedCount:int` |
+
+Reasons are `BodyOverCap`, `StatusNotCacheable`, `SetCookie`, `CacheControlForbids`, `VaryStar`,
+`NoFreshness` and `DecidedBeforeRouting`. `IsResponseCacheable` returns the response eligibility
+reason. Except for the late-routing decision, these events run inside the successful-completion
+callback, so the final head after response-starting callbacks decides the reason. Failed callbacks,
+cancelled exchanges and failed transmission never run that callback and emit no cache decision.
+There is no successful-response event. Request ids come from `IWebRequestIdFeature`, including
+when an unrelated ambient activity exists. A custom server without that feature reports an empty id.
+Routes come only from `IWebEndpointFeature.RouteTemplate`, never the request path.
+
+`EntryDeclined` reports at most once per second across the process. Its next report carries the
+number suppressed while listening; the `declined-entries` PollingCounter counts every decline even
+when no listener is attached. No cache key, query, tag name, header, body or exception message is
+written. Counters are created lazily when a listener enables the source.
+
+The opt-in `OutputCacheCounterBenchmarkTests` measures hit/miss attribution counters against a
+conservative **1% median throughput cost and zero extra allocated bytes per operation** budget for
+both serial and four-worker cacheable GET workloads. The issue did not specify a numeric budget;
+this is the implementation assumption. The harness exercises the real output-cache middleware,
+including key construction, a 64-byte response, Age on hits, and successful-completion storage on
+misses. A deterministic in-memory store returns a representation or a miss to keep paths separate;
+it isolates middleware attribution costs from backend variability. Each batch warms up first,
+then takes nine samples of 100,000 operations per worker. Dedicated workers synchronize before
+timing; context creation, worker startup and the barrier are outside timing. Per-thread allocation
+measurements include every operation. No listener is enabled. `DOTNET_TieredCompilation=0` removes
+tiered-JIT promotion from the measurement; initial exploratory runs with it enabled were discarded.
+
+The repeatable runner measures baseline/candidate/baseline/candidate, builds the real production
+variants, and restores both source files byte-for-byte in `finally`:
+
+```powershell
+pwsh -NoProfile -File resources/Web/Assimalign.Cohesion.Web.Caching/tests/Measure-OutputCacheCounters.ps1
+```
+
+The baseline removes only the two middleware calls to `OutputCacheEventSource.Log.CacheHit()` and
+`CacheMiss()`; the candidate invokes them on the serve and no-servable-entry branches respectively.
+Each method increments its own shared `long` with `Interlocked.Increment`, without a listener guard.
+Both variants use the same harness and completion path. The opt-in test can also be run directly in
+Release with `COHESION_CACHE_COUNTER_BENCHMARK=1`, a descriptive
+`COHESION_CACHE_COUNTER_VARIANT`, and the filter `FullyQualifiedName~OutputCacheCounterBenchmarkTests`.
+Ordinary test runs leave the benchmark disabled.
+
+**Measured 2026-10-12:** Windows ARM64, Snapdragon X2 Elite (12 logical processors), SDK 10.0.401,
+.NET 10.0.12, Release. Two repeated runs per variant gave these median nanoseconds per operation;
+the sequence was candidate/baseline/candidate/baseline. Lower is better.
+
+| Path | Workers | Baseline 1 | Candidate 1 | Baseline 2 | Candidate 2 | Bytes/op, both |
+| --- | --- | --- | --- | --- | --- | --- |
+| Hit | 1 | 983.753 | 1008.088 | 1007.944 | 862.867 | 424 |
+| Miss | 1 | 1629.712 | 1539.301 | 1584.049 | 1100.369 | 1208 |
+| Hit | 4 | 284.771 | 359.140 | 336.739 | 288.867 | 424 |
+| Miss | 4 | 562.299 | 563.002 | 585.665 | 542.712 | 1208 |
+
+The four-worker hit's median of the two run medians rose from 310.755 to 324.004 ns/op (**4.26%**),
+above the 1% budget, with no allocation change. Unrelated builds on the shared machine cause visible
+run-to-run noise (including reversed differences); this is not a claim of a precise 4.26% production
+regression. The measurements do not establish that the pair fits the budget, so the conservative
+decision is to **drop both `cache-hits` and `cache-misses`**. Neither their fields nor their hot-path
+increments ship. `declined-entries` remains exact. The runner reconstructs the measured prototype
+for future evaluation without adding a shipped switch or public API.
+
+**Preview.1 compatibility and advisory triage (#1405):** diagnostics are additive; caching decisions
+and public contracts are unchanged. The released tag already swallowed oversized-entry failures and
+had no rejection diagnostics. An unauthenticated client can reach cacheable endpoints configured by
+the application, but the missing events are an observability gap with no independent security impact;
+no advisory, CWE or severity applies. No cache key or tag payload is introduced by this change.
 
 ## Non-goals
 

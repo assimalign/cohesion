@@ -252,6 +252,62 @@ the middleware and the endpoint, and a `WebSocket` subclass that forwards to the
 NativeAOT guard publishes the middleware and a `MapWebSocket` endpoint, and runs its echo over
 HTTP/1.1 and over HTTP/2, its `400` for a plain `GET`, and a refused cross-site handshake.
 
+## Diagnostics
+
+The internal `WebSocketEventSource` is named `Assimalign.Cohesion.Web.WebSockets`. It reports
+the policy's rejections and accepted socket lifetimes; it adds no public diagnostics API and
+does not depend on logging. All events are Verbose because a socket belongs to one request.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `HandshakeRejected` | Verbose | `reason`, `origin`, `routeTemplate`, `requestId` |
+| 2 | `WebSocketOpened` | Verbose | `requestId`, `subProtocol` |
+| 3 | `WebSocketClosed` | Verbose | `requestId`, `closeStatus:int`, `closedByDrain:bool` |
+| 4 | `DrainCloseFailed` | Verbose | `requestId`, `exceptionType`, `exceptionMessage` |
+
+Protocol rejection reasons are the handshake status names (`Invalid`, `UnsupportedVersion`,
+and `None` for a plain request to `MapWebSocket`). Origin policy reasons are `OriginMultiple`,
+`OriginUnparseable`, and `OriginNotAllowed`. Only `OriginNotAllowed` includes an origin: the
+already normalized `scheme://host[:port]`, truncated to 256 characters inside `IsEnabled` and
+treated as untrusted text. No request path, query, raw Origin field, cookie, or message body is
+written. The application's selected subprotocol is bounded to 128 characters at Verbose.
+Drain-close failures retain the exception type and `Message`, following the standard rule for
+exceptions outside the type-only carve-outs; they do not write a stack trace.
+
+`requestId` comes from `IWebRequestIdFeature`, and `routeTemplate` comes from
+`IWebEndpointFeature`. Missing features yield empty strings. Their reads, exception formatting,
+status formatting, and payload truncation happen only while the event is enabled. Ambient
+activities never supply correlation.
+
+Three lazily created `PollingCounter`s retain exact backing values even without a listener:
+
+| Counter | Kind | Transition |
+| --- | --- | --- |
+| `current-websockets` | Gauge | Successful accept adds one; the middleware's final release removes one. |
+| `total-websockets` | Total | Successful accept adds one; failed accepts add nothing. |
+| `rejected-handshakes` | Total | Each policy or socket-endpoint rejection adds one. |
+
+The accepted socket is tracked independently of the optional server drain feature. Release
+atomically exchanges that socket with null, so repeated release, an aborted/disposed socket,
+and a throwing handler cannot decrement twice. The gauge describes accepted exchanges until
+their pipeline ends; it returns to its previous value for custom servers without a drain
+signal as well. Nested `UseWebSockets` policies retain their behavior, with the innermost policy
+alone reporting the socket lifetime so counters and events are not duplicated.
+`closeStatus` is `-1` if no close code is available, and `closedByDrain` records
+whether the drain won ownership of the close output. A failed drain write is reported once by
+the existing catch and remains best effort.
+
+The source's tests cover real loopback close handshakes with and without drain, failure and
+abort paths, request correlation, normalized origin payloads, listener-free counters, strict
+manifest generation, and counter publication. The linked recorder is the repository's shared
+test-only `build/TestSupport/EventSourceRecorder.cs`.
+
+### Compatibility with 10.0.0-preview.1
+
+This package did not exist in the `v10.0.0-preview.1` tree. Diagnostics add no public members or
+wire behavior changes; no preview.1 compatibility break or security advisory applies to this
+package's addition under #1405.
+
 ## Non-goals
 
 - **Per-endpoint origin policies.** One policy per pipeline, like ASP.NET Core's. An endpoint that

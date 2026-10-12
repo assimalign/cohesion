@@ -26,7 +26,8 @@ public static class StaticFilesFallbackExtensions
         /// The file is served by the static-files machinery (content type, validators, conditional GET,
         /// precompressed siblings) with <paramref name="configure"/>'s options. A missing file, or an
         /// application without a web root, answers 404. Register <c>UseStaticFiles()</c> before
-        /// <c>UseRouting()</c> so existing assets are served first.
+        /// <c>UseRouting()</c> so existing assets are served first. The web-root mount is resolved
+        /// when the application's pipeline is built, as it is for <c>UseStaticFiles()</c>.
         /// </remarks>
         /// <param name="filePath">The file to serve, relative to the web root (for example <c>index.html</c>).</param>
         /// <param name="configure">Configures the options the file is served with; <see cref="StaticFilesOptions.RequestPath"/> is ignored.</param>
@@ -71,7 +72,14 @@ public static class StaticFilesFallbackExtensions
                 ?? throw new InvalidOperationException(
                     "No router builder was registered. Call builder.Services.AddRouting() before mapping a fallback.");
 
-            StaticFilesMiddleware? middleware = WebRootStaticFiles.TryCreate(builder.Context, options);
+            // Resolve the mount with the containing pipeline, including its lifecycle diagnostic.
+            // The route is registered now; its handler runs only after composition has completed.
+            StaticFilesMiddleware? middleware = null;
+            builder.Use((IWebApplicationContext context, WebApplicationMiddleware next) =>
+            {
+                middleware = WebRootStaticFiles.TryCreate(context, options, "MapFallbackToFile");
+                return next;
+            });
 
             return routes.MapFallback(pattern, new RouterRouteHandler(context => middleware is null
                 ? NotFoundAsync(context)

@@ -27,6 +27,8 @@ the middleware runs unchanged over any `IHttpSessionStore`, defaulting to the in
 
 ## Dependencies
 
+- `Assimalign.Cohesion.Web.Server` — request-id correlation for orphan diagnostics.
+
 - `Assimalign.Cohesion.Web` — the pipeline builder and middleware abstractions the verb and middleware build on.
 - `Assimalign.Cohesion.Http` — the HTTP context, feature collection, and transport-derived scheme.
 - `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveScheme` read behind the `Secure` decision, which

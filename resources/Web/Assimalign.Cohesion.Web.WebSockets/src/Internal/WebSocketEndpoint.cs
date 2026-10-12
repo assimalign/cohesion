@@ -55,6 +55,7 @@ internal sealed class WebSocketEndpoint
         if (webSockets.HandshakeStatus == HttpWebSocketHandshakeStatus.None)
         {
             context.Response.StatusCode = HttpStatusCode.BadRequest;
+            WebSocketEventSource.Log.HandshakeRejected(context, HttpWebSocketHandshakeStatus.None);
             return Task.CompletedTask;
         }
 

@@ -194,8 +194,9 @@ internal static class StaticFilePath
     /// <param name="fileSystem">The mount to look in.</param>
     /// <param name="path">The parsed, gate-checked path.</param>
     /// <param name="info">When this method returns <see langword="true"/>, the file or directory found.</param>
+    /// <param name="prefix">The configured mount prefix; empty for response helpers without a mount prefix.</param>
     /// <returns><see langword="true"/> when the mount holds an entry at <paramref name="path"/>.</returns>
-    public static bool TryGetInfo(IFileSystem fileSystem, FileSystemPath path, [NotNullWhen(true)] out IFileSystemInfo? info)
+    public static bool TryGetInfo(IFileSystem fileSystem, FileSystemPath path, [NotNullWhen(true)] out IFileSystemInfo? info, string prefix = "")
     {
         info = null;
 
@@ -220,10 +221,11 @@ internal static class StaticFilePath
             info = fileSystem.GetInfo(mountPath);
             return true;
         }
-        catch (FileSystemException)
+        catch (FileSystemException exception)
         {
             // A lookup race (deleted between Exists and GetInfo) or a mount-specific refusal:
             // either way the path is not servable.
+            StaticFilesEventSource.Log.MountLookupFailed(prefix, exception);
             return false;
         }
     }

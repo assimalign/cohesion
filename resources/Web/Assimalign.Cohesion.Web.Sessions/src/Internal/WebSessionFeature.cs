@@ -116,6 +116,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         // with orphaned entries until the idle timeout reaps them.
         if (_orphanedNewSession)
         {
+            WebSessionEventSource.Log.SessionOrphaned(_context);
             return;
         }
 

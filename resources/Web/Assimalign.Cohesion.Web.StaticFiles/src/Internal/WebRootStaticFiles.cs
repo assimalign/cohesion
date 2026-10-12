@@ -17,11 +17,13 @@ internal static class WebRootStaticFiles
     /// </summary>
     /// <param name="context">The application context.</param>
     /// <param name="options">The validated options.</param>
+    /// <param name="consumer">The composition verb requesting the mount.</param>
     /// <returns>The middleware, or <see langword="null"/>.</returns>
-    public static StaticFilesMiddleware? TryCreate(IWebApplicationContext context, StaticFilesOptions options)
+    public static StaticFilesMiddleware? TryCreate(IWebApplicationContext context, StaticFilesOptions options, string consumer)
     {
         if (context.WebRootPath is not { IsEmpty: false } webRoot || !Directory.Exists(webRoot.ToString()))
         {
+            StaticFilesEventSource.Log.WebRootUnavailable(context.WebRootPath, consumer);
             return null;
         }
 
@@ -32,6 +34,8 @@ internal static class WebRootStaticFiles
             Name = "StaticFiles",
         });
 
-        return new StaticFilesMiddleware(fileSystem, options);
+        StaticFilesMiddleware middleware = new(fileSystem, options);
+        StaticFilesEventSource.Log.WebRootMounted(webRoot, options.RequestPath);
+        return middleware;
     }
 }

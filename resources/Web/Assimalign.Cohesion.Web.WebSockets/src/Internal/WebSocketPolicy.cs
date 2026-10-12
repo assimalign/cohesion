@@ -49,9 +49,13 @@ internal sealed class WebSocketPolicy
     /// or its <c>Origin</c> is the request's own origin or an allowed one.
     /// </summary>
     /// <param name="context">The exchange carrying the handshake.</param>
+    /// <param name="reason">The bounded rejection reason, or an empty string when allowed.</param>
+    /// <param name="normalizedOrigin">The normalized origin only when it was parsed but disallowed.</param>
     /// <returns><see langword="false"/> when the handshake must be refused with <c>403</c>.</returns>
-    public bool IsOriginAllowed(IHttpContext context)
+    public bool IsOriginAllowed(IHttpContext context, out string reason, out string? normalizedOrigin)
     {
+        reason = string.Empty;
+        normalizedOrigin = null;
         if (_allowAnyOrigin
             || !context.Request.Headers.TryGetValue(HttpHeaderKey.Origin, out HttpHeaderValue value)
             || HttpHeaderValue.IsNullOrEmpty(value))
@@ -62,6 +66,7 @@ internal sealed class WebSocketPolicy
         // A browser sends exactly one Origin; several are not a browser's handshake to trust.
         if (value.Count != 1 || value[0] is not string origin)
         {
+            reason = "OriginMultiple";
             return false;
         }
 
@@ -69,11 +74,19 @@ internal sealed class WebSocketPolicy
         // parse, so they are refused.
         if (!WebSocketOrigin.TryNormalize(origin.Trim(), out string? serialized))
         {
+            reason = "OriginUnparseable";
             return false;
         }
 
-        return _allowedOrigins.Contains(serialized)
-            || (WebSocketOrigin.TryGetRequestOrigin(context, out string? own) && string.Equals(own, serialized, StringComparison.Ordinal));
+        if (_allowedOrigins.Contains(serialized)
+            || (WebSocketOrigin.TryGetRequestOrigin(context, out string? own) && string.Equals(own, serialized, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        reason = "OriginNotAllowed";
+        normalizedOrigin = serialized;
+        return false;
     }
 
     /// <summary>

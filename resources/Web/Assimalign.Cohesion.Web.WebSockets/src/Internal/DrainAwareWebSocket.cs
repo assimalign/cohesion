@@ -4,6 +4,8 @@ using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Http;
+
 namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 
 /// <summary>
@@ -36,12 +38,14 @@ internal sealed class DrainAwareWebSocket : WebSocket
     private const int drainOwner = 2;
 
     private readonly WebSocket _inner;
+    private readonly IHttpContext _context;
     private readonly TaskCompletionSource _drainCloseSent = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenRegistration _drainRegistration;
     private int _closeOwner;
 
-    public DrainAwareWebSocket(WebSocket inner, CancellationToken draining)
+    public DrainAwareWebSocket(IHttpContext context, WebSocket inner, CancellationToken draining)
     {
+        _context = context;
         _inner = inner;
 
         // A drain that already began runs the callback here, before the registration is assigned;
@@ -60,6 +64,8 @@ internal sealed class DrainAwareWebSocket : WebSocket
 
     /// <inheritdoc />
     public override string? SubProtocol => _inner.SubProtocol;
+
+    internal bool ClosedByDrain => Volatile.Read(ref _closeOwner) == drainOwner;
 
     /// <summary>
     /// Stops watching the drain. Called when the exchange that accepted the socket completes: the
@@ -160,6 +166,7 @@ internal sealed class DrainAwareWebSocket : WebSocket
         }
         catch (Exception exception) when (exception is WebSocketException or IOException or ObjectDisposedException or OperationCanceledException)
         {
+            WebSocketEventSource.Log.DrainCloseFailed(_context, exception);
             // The socket was already failing, aborted or disposed: there is no close to send, and the
             // application learns of the failure from its own next call.
         }

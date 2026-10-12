@@ -148,6 +148,7 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         {
             // Registered ahead of UseRouting: the endpoint surfaced only after the decision, and the
             // metadata the entry would have ignored may opt the endpoint out or name another policy.
+            OutputCacheEventSource.Log.ResponseNotStored(context, OutputCacheSkipReason.DecidedBeforeRouting);
             return;
         }
 
@@ -216,11 +217,13 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
     {
         if (buffer.IsCapExceeded || buffer.CapturedBytes is not { } body)
         {
+            OutputCacheEventSource.Log.ResponseNotStored(context, OutputCacheSkipReason.BodyOverCap);
             return;
         }
 
-        if (!IsResponseCacheable(context, policy))
+        if (IsResponseCacheable(context, policy) is { } reason)
         {
+            OutputCacheEventSource.Log.ResponseNotStored(context, reason);
             return;
         }
 
@@ -228,12 +231,14 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         if (varyStar)
         {
             // Vary: * marks the response uncacheable (RFC 9111 §4.1).
+            OutputCacheEventSource.Log.ResponseNotStored(context, OutputCacheSkipReason.VaryStar);
             return;
         }
 
         TimeSpan ttl = ComputeTimeToLive(context.Response, policy);
         if (ttl <= TimeSpan.Zero)
         {
+            OutputCacheEventSource.Log.ResponseNotStored(context, OutputCacheSkipReason.NoFreshness);
             return;
         }
 
@@ -293,7 +298,7 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         return _options.BasePolicy;
     }
 
-    private bool IsResponseCacheable(IHttpContext context, OutputCachePolicy policy)
+    private static OutputCacheSkipReason? IsResponseCacheable(IHttpContext context, OutputCachePolicy policy)
     {
         IHttpResponse response = context.Response;
 
@@ -301,13 +306,13 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         // are deliberately excluded (documented in DESIGN.md).
         if (response.StatusCode.Value != HttpStatusCode.Ok.Value)
         {
-            return false;
+            return OutputCacheSkipReason.StatusNotCacheable;
         }
 
         // An authenticated response (Set-Cookie) is not shared across clients unless the policy opts in.
         if (!policy.CacheAuthenticated && response.Headers.ContainsKey(HttpHeaderKey.SetCookie))
         {
-            return false;
+            return OutputCacheSkipReason.SetCookie;
         }
 
         if (policy.HonorResponseCacheControl
@@ -318,11 +323,11 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
             // this cache does not perform, so it is treated conservatively as non-storable.
             if (cacheControl.NoStore || cacheControl.Private || cacheControl.NoCache)
             {
-                return false;
+                return OutputCacheSkipReason.CacheControlForbids;
             }
         }
 
-        return true;
+        return null;
     }
 
     private TimeSpan ComputeTimeToLive(IHttpResponse response, OutputCachePolicy policy)
