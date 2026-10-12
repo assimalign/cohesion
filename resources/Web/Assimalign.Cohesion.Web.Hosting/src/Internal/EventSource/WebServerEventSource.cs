@@ -262,7 +262,7 @@ internal sealed class WebServerEventSource : EventSource
 
     [Event(6, Level = EventLevel.Informational, Message = "Server {0} draining {1} connections and {2} exchanges")]
     private void ServerDraining(long serverId, int connections, int exchanges)
-        => WriteEvent(6, serverId, connections, exchanges);
+        => WriteEvent(6, new EventSourcePrimitive[] { serverId, connections, exchanges });
 
     [Event(7, Level = EventLevel.Warning, Message = "Server {0} drain timed out with {1} connections and {2} exchanges after {3} ms")]
     private void DrainTimedOut(long serverId, int connections, int exchanges, double elapsedMilliseconds)
@@ -290,7 +290,7 @@ internal sealed class WebServerEventSource : EventSource
 
     [Event(13, Level = EventLevel.Verbose, Message = "Server {0} reached its connection cap {1}")]
     private void ConnectionCapReached(long serverId, int maxConcurrentConnections)
-        => WriteEvent(13, serverId, maxConcurrentConnections);
+        => WriteEvent(13, new EventSourcePrimitive[] { serverId, maxConcurrentConnections });
 
     [Event(14, Level = EventLevel.Warning, Message = "Resource {0} control plane disabled; observed endpoints: {1}")]
     private void ControlPlaneDisabled(string resourceName, string observedEndpoints)

@@ -312,18 +312,27 @@ public sealed class WebServerEventSourceAcceptanceTests
         TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         FakeHttpConnection connection = new(new FakeHttpConnectionContext([new FakeHttpContext()]));
+        FakeHttpConnectionListener listener = new(connection);
         WebApplicationServer server = new(new WebApplicationServerOptions
         {
             Pipeline = new FakePipeline(async (_, _) => { entered.TrySetResult(); await release.Task; }),
-            Listener = new FakeHttpConnectionListener(connection),
+            Listener = listener,
         });
         using CancellationTokenSource budget = new();
+        using CancellationTokenSource timeout = new(_timeout);
 
         // Act
         try
         {
             await server.StartAsync(CancellationToken.None);
             await entered.Task.WaitAsync(_timeout);
+            // The pipeline can enter before its connection task is tracked. The next accept
+            // proves registration has completed before the aborted drain snapshots that task.
+            while (listener.AcceptCount != 2)
+            {
+                await Task.Delay(10, timeout.Token);
+            }
+
             Task stop = server.StopAsync(budget.Token);
             budget.Cancel();
             await stop.WaitAsync(_timeout);
