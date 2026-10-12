@@ -39,7 +39,7 @@ public class DatabaseHostingEventSourceCollection
 /// The source declares no counters: the reopen attempts are on the application's health.
 /// </remarks>
 [Collection(nameof(DatabaseHostingEventSourceCollection))]
-public sealed class DatabaseHostingEventSourceTests
+public sealed partial class DatabaseHostingEventSourceTests
 {
     private const string App = "app";
 

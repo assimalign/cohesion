@@ -1201,8 +1201,7 @@ such incomplete publication is refused before any catalog write.
 
 `DatabaseInstance.Provisioning` carries immutable model-neutral observations: kind, table,
 position/total, pending/running, counted rows and optional failure code. Hosting reports Degraded
-until completion, then Healthy; offline takes precedence over provisioning. No EventSource
-events were added for this worker (see Diagnostics).
+until completion, then Healthy; offline takes precedence over provisioning. The SQL event source reports each deferred step and throttled progress (see Diagnostics).
 
 Build and BuildAsync accept cancellation. Hosting passes the caller's application Build token
 through `IDatabaseApplicationContext.BuildCancellationToken`; the host's runtime shutdown lifecycle
@@ -4014,15 +4013,15 @@ cancelled collation create whose first-chance exception callback creates a defau
 The callback regression failed with one match for `'a'` after inserting `'A'` under the former
 thread-local handoff, and now finds zero.
 
-Batch D (#1349) should add provisioning start, bounded progress, end and failure events, with
-engine/database identity, operation kind, table/object, original position/total, processed/total
-rows when countable, elapsed time, and the coded failure. Decision 49a adds no events; the root
-health observation is available while D is pending.
+Batch D part 2 (#1349, complete) instruments the B2/49a provisioning paths below. The
+existing root provisioning observation remains the health contract; there is no public diagnostic
+surface, new assembly reference or new counter.
 
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Sql` (`src/Internal/EventSource/SqlDatabaseEventSource.cs`;
-database event-sources plan, batches B5 and D part 1). It reports the wire server and its sessions,
-statement access paths, complexity refusals, DDL self-commits, extension registration and index-registration persistence. A
+database event-sources plan, batches B5 and D). It reports the wire server and its sessions,
+statement access paths, complexity refusals, DDL self-commits, extension registration, schema
+provisioning and deferred migration work. A
 statement's outcome, the engine, its databases and its workers are the root source's
 (`Assimalign.Cohesion.Database`); kernel transactions, locks and storage are the Transactions and
 Storage sources'. The Key-value, Graph and Blob servers write events 1-9 with the same ids, names
@@ -4046,12 +4045,77 @@ bounded peer-sent names) are in the area's
 | 10 | `StatementPlanned` | Verbose | `Statements` | `database`, `accessPath` (cut to 256 characters), `recordsExamined` |
 | 11 | `StatementTooComplex` | Warning | — | `database`, `depth` (-1 when an execution stack backstop has no measured depth) |
 | 12 | `DdlSelfCommitted` | Verbose | `Statements` | `database`, `commandType` |
+| 13 | `ProvisioningStart` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `mode` (`Apply`/`Verify`), `stepCount` (-1 before planning) |
+| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Error`, `Cancelled`), `durationMilliseconds` |
+| 15 | `ProvisioningFailed` | Error | — | `engineName`, `database`, `schema`, `position`, `kind`, `code`, `exceptionType` (no message) |
 | 16 | `ExtensionRegistered` | Verbose | — | `kind` (`Scalar`, `Aggregate`, `Type`, `Cast`), `name` (cut to 256 characters per identifier; a cast is `source -> target`) |
 | 17 | *(retired)* | — | — | `IndexRegistrationsSaved` reported a separate registration save; B2 publishes an index's registration atomically with its description (#1355), so the id is retired, never reused |
+| 18 | `DeferredStepBound` | Informational | — | `engineName`, `database`, `table`, `objectName`, `kind`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
+| 19 | `DeferredStepProgress` | Verbose | — | same as 18 |
+| 20 | `DeferredStepCompleted` | Informational | — | same as 18, `outcome` (`Applied`, `Error`, `Cancelled`), `durationMilliseconds` |
+| 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (`COHSQLP004`), `exceptionType` (no message) |
 
-Batch D part 1 (#1349) adds statement detail and typed extension registration. Ids **13-15**
-remain reserved for `ProvisioningStart`, `ProvisioningStop` and `ProvisioningFailed` after
-provisioning hardening (decision 49a). `Sessions = 0x1`; `Statements = 0x2`.
+`Sessions = 0x1`; `Statements = 0x2`. Provisioning has no keyword. Id 17 stays retired.
+
+Each admitted Apply/Verify owns its Start/Stop on the same async flow, including the O(1)
+already-applied skip. **Decision:** use the Informational pair with `Skipped`, accepting two
+small events per repeated Build so a trace has one explicit outcome for every admitted call.
+The skip still performs no catalog walk, serialization or hashing. Start precedes planning, so
+its count is -1; Stop carries the rendered execution-step count (zero for skip/verify, -1 if
+planning failed). A handoff stops with `Deferred` before the worker is scheduled. Admission
+refusals and a repeated internal request for an already scheduled target are not new operations.
+Cancellation closes the pair without a failure event. Stop is written only if Start was written.
+A listener attached after entry can see a failure without an unmatched Stop.
+
+Failures carry a code assigned at the known operation boundary and an exception type, never
+exception text, SQL, literals or values. Position zero denotes validation, planning, handoff or
+finalization rather than a DDL step; `Unknown` with an empty code is possible for a listener
+attached after an unclassified operation began. An inline step reports the original exception
+under compensation's wrapper. Failure capture never writes from an exception filter; the
+finally reports after inline table-lock cleanup and DDL lease disposal, while admission is still
+reserved. Synchronous listeners must not block waiting for that same admission reservation.
+
+The worker reports Bound when it enters a step, and Completed once for each entered step,
+including failure or cancellation. These are explicit lifetime names, so the Build/worker
+handoff does not create a cross-flow activity. Pending work cancelled before any step begins
+has no step lifetime. A marker failure after all steps uses kind `Finalize`, position zero,
+and does not report the last successful step twice. Tables/objects/schema names are bounded to
+256 characters plus an ellipsis. Positions/counts reuse the durable intent's original numbering;
+unknown row counts are -1. Completed carries the latest exact progress even when no progress
+event was due. A listener attached after entry receives subsequent enabled progress and
+completion events, using the existing migration intent, current step and root progress snapshot.
+Bound is not replayed; completion duration is zero when the informational event was disabled at
+entry. This also covers attachment after the last row callback, and failure or cancellation
+before any callback. Cancellation before step entry and finalization after a completed step
+never synthesize another completion.
+
+Progress writes the first executor callback, then at most one callback per second per step,
+using a monotonic timestamp. It never starts a timer or schedules work; a fast large table
+therefore emits one progress event. Only enabled Verbose tracing reads the throttle clock.
+Step events/progress run while the worker owns its reserved table locks; callbacks can also
+occur inside an executor's physical bracket. Listeners must not wait for work on those tables.
+No deferred-step gauge is added: the existing root observation owns pending/running state,
+and these events intentionally observe entered steps rather than counting durable pending intent.
+
+Tracing state is allocated only when enabled. Reporting locals live in synchronous helpers;
+Apply reuses the schema's cached hash instead of hoisting a duplicate reference, and Verify's
+difference formatting is synchronous. This keeps the Debug async machine sizes unchanged.
+The real-path allocation comparison uses an archived `95d3a7d56` baseline and the same probe
+on each tree: 100 warmups, three 100-operation rounds, minimum complete-operation allocation,
+tiered compilation off. It covers skip, verify, inline CHECK add/drop and a real deferred CHECK
+with 130 rows, including reservation, scheduling, worker execution, cleanup and final marker.
+The worker is claimed synchronously before the build-ready signal, using existing internal
+entry points; no shipped measurement switch or visibility change was added. Probe and logs are
+under `_out/provisioning-tracing`. The source tests also check zero allocation for 10,000 disabled
+writes, real success/failure/cancellation payloads, late listener attachment, no event 0 or 17,
+and throttling over more than one second of real row callbacks. Lifecycle coverage accepts one
+or more progress events and validates each payload; scheduling delays can legitimately permit
+another event, so only the dedicated throttle test asserts timing.
+
+Behavioral references only (no implementation copied): PostgreSQL's command progress records
+operation/target separately from mutable counters (`src/backend/utils/activity/backend_progress.c:20-57`),
+and Neo4j distinguishes population, online and failed index states
+(`community/kernel-api/src/main/java/org/neo4j/internal/kernel/api/InternalIndexState.java:25-43`).
 
 `StatementPlanned` is written once when execution leaves a successfully planned statement,
 including execution failure: only then are the existing `SqlStatementMetrics` access path and

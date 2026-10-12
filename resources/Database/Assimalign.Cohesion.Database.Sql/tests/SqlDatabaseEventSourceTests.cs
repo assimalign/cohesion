@@ -40,7 +40,7 @@ public class SqlDatabaseEventSourceCollection
 /// against their own sources.
 /// </summary>
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
-public sealed class SqlDatabaseEventSourceTests
+public sealed partial class SqlDatabaseEventSourceTests
 {
     private static readonly string[] SessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
 
