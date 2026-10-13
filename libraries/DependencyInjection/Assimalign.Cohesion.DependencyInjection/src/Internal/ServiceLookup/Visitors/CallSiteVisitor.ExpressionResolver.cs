@@ -272,7 +272,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
     {
         if (scope != _scopeParameter)
         {
-            throw new NotSupportedException(ErrorMessages.GetCaptureDisposableNotSupported);
+            throw new NotSupportedException(ErrorMessages.DisposableCaptureScopeInvalid);
         }
         return _captureDisposable;
     }

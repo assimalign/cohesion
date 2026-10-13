@@ -124,23 +124,23 @@
     <value>Multiple constructors accepting all given argument types have been found in type '{0}'. There should only be one applicable constructor.</value>
     <comment>{0} = service type</comment>
   </data>
-  <data name="ArityOfOpenGenericServiceNotEqualArityOfOpenGenericImplementation" xml:space="preserve">
+  <data name="OpenGenericArityMismatch" xml:space="preserve">
     <value>Arity of open generic service type '{0}' does not equal arity of open generic implementation type '{1}'.</value>
   </data>
-  <data name="AsyncDisposableServiceDispose" xml:space="preserve">
+  <data name="SynchronousDisposalNotSupported" xml:space="preserve">
     <value>'{0}' type only implements IAsyncDisposable. Use DisposeAsync to dispose the container.</value>
   </data>
   <data name="CallSiteTypeNotSupported" xml:space="preserve">
     <value>Call site type {0} is not supported</value>
   </data>
-  <data name="CannotCreateAbstractClasses" xml:space="preserve">
+  <data name="AbstractTypeActivationNotSupported" xml:space="preserve">
     <value>Instances of abstract classes cannot be created.</value>
   </data>
-  <data name="CannotResolveService" xml:space="preserve">
+  <data name="ServiceDependencyUnresolved" xml:space="preserve">
     <value>Unable to resolve service for type '{0}' while attempting to activate '{1}'.</value>
     <comment>{0} = service which cannot be resolved, {1} = service being activated</comment>
   </data>
-  <data name="CannotResolveService1" xml:space="preserve">
+  <data name="ConstructorDependencyUnresolved" xml:space="preserve">
     <value>Unable to resolve service for type '{0}' while attempting to activate '{1}'.</value>
     <comment>{0} = service which cannot be resolved, {1} = service being activated</comment>
   </data>
@@ -148,38 +148,38 @@
     <value>A circular dependency was detected for the service of type '{0}'.</value>
     <comment>{0} = service type with circular dependency</comment>
   </data>
-  <data name="ConstantCantBeConvertedToServiceType" xml:space="preserve">
+  <data name="ServiceConstantTypeIncompatible" xml:space="preserve">
     <value>Constant value of type '{0}' can't be converted to service type '{1}'</value>
   </data>
-  <data name="CtorNotLocated" xml:space="preserve">
+  <data name="ApplicableConstructorMissing" xml:space="preserve">
     <value>A suitable constructor for type '{0}' could not be located. Ensure the type is concrete and all parameters of a public constructor are either registered as services or passed as arguments. Also ensure no extraneous arguments are provided.</value>
     <comment>{0} = instance type</comment>
   </data>
-  <data name="DirectScopedResolvedFromRootException" xml:space="preserve">
+  <data name="RootScopedServiceResolution" xml:space="preserve">
     <value>Cannot resolve {1} service '{0}' from root provider.</value>
   </data>
-  <data name="GetCaptureDisposableNotSupported" xml:space="preserve">
+  <data name="DisposableCaptureScopeInvalid" xml:space="preserve">
     <value>GetCaptureDisposable call is supported only for main scope</value>
   </data>
-  <data name="ImplementationTypeCantBeConvertedToServiceType" xml:space="preserve">
+  <data name="ServiceImplementationTypeIncompatible" xml:space="preserve">
     <value>Implementation type '{0}' can't be converted to service type '{1}'</value>
   </data>
   <data name="InvalidServiceDescriptor" xml:space="preserve">
     <value>Invalid service descriptor</value>
   </data>
-  <data name="MarkedCtorMissingArgumentTypes" xml:space="preserve">
+  <data name="MarkedConstructorArgumentsMissing" xml:space="preserve">
     <value>Constructor marked with {0} does not accept all given argument types.</value>
     <comment>{0} = attribute used with ActivatorUtilities</comment>
   </data>
-  <data name="MultipleCtorsFound" xml:space="preserve">
+  <data name="ConstructorArgumentMatchAmbiguous" xml:space="preserve">
     <value>Multiple constructors accepting all given argument types have been found in type '{0}'. There should only be one applicable constructor.</value>
     <comment>{0} = instance type</comment>
   </data>
-  <data name="MultipleCtorsFoundWithBestLength" xml:space="preserve">
+  <data name="ConstructorLengthMatchAmbiguous" xml:space="preserve">
     <value>Multiple constructors for type '{0}' were found with length {1}.</value>
     <comment>{0} = instance type, {1} = best length</comment>
   </data>
-  <data name="MultipleCtorsMarkedWithAttribute" xml:space="preserve">
+  <data name="MarkedConstructorAmbiguous" xml:space="preserve">
     <value>Multiple constructors were marked with {0}.</value>
     <comment>{0} = attribute used with ActivatorUtilities</comment>
   </data>
@@ -187,46 +187,46 @@
     <value>A suitable constructor for type '{0}' could not be located. Ensure the type is concrete and services are registered for all parameters of a public constructor.</value>
     <comment>{0} = service type</comment>
   </data>
-  <data name="NoConstructorMatch1" xml:space="preserve">
+  <data name="ServiceConstructorMatchMissing" xml:space="preserve">
     <value>A suitable constructor for type '{0}' could not be located. Ensure the type is concrete and services are registered for all parameters of a public constructor.</value>
     <comment>{0} = service type</comment>
   </data>
-  <data name="NoServiceRegistered" xml:space="preserve">
+  <data name="ServiceNotRegistered" xml:space="preserve">
     <value>No service for type '{0}' has been registered.</value>
     <comment>{0} = service type</comment>
   </data>
-  <data name="OpenGenericServiceRequiresOpenGenericImplementation" xml:space="preserve">
+  <data name="OpenGenericImplementationRequired" xml:space="preserve">
     <value>Open generic service type '{0}' requires registering an open generic implementation type.</value>
   </data>
   <data name="ScopedInSingletonException" xml:space="preserve">
     <value>Cannot consume {2} service '{0}' from {3} '{1}'.</value>
   </data>
-  <data name="ScopedResolvedFromRootException" xml:space="preserve">
+  <data name="RootScopedDependencyResolution" xml:space="preserve">
     <value>Cannot resolve '{0}' from root provider because it requires {2} service '{1}'.</value>
   </data>
   <data name="ServiceCollectionReadOnly" xml:space="preserve">
     <value>The service collection cannot be modified because it is read-only.</value>
   </data>
-  <data name="ServiceDescriptorNotExist" xml:space="preserve">
+  <data name="ServiceDescriptorMissing" xml:space="preserve">
     <value>Requested service descriptor doesn't exist.</value>
   </data>
-  <data name="TrimmingAnnotationsDoNotMatch" xml:space="preserve">
+  <data name="GenericTrimmingAnnotationsMismatch" xml:space="preserve">
     <value>Generic implementation type '{0}' has a DynamicallyAccessedMembers attribute applied to a generic argument type, but the service type '{1}' doesn't have a matching DynamicallyAccessedMembers attribute on its generic argument type.</value>
   </data>
-  <data name="TrimmingAnnotationsDoNotMatch_NewConstraint" xml:space="preserve">
+  <data name="GenericConstructorConstraintMismatch" xml:space="preserve">
     <value>Generic implementation type '{0}' has a DefaultConstructorConstraint ('new()' constraint), but the generic service type '{1}' doesn't.</value>
   </data>
-  <data name="TryAddIndistinguishableTypeToEnumerable" xml:space="preserve">
+  <data name="EnumerableImplementationAmbiguous" xml:space="preserve">
     <value>Implementation type cannot be '{0}' because it is indistinguishable from other services registered for '{1}'.</value>
     <comment>{0} = implementation type, {1} = service type</comment>
   </data>
-  <data name="TypeCannotBeActivated" xml:space="preserve">
+  <data name="ImplementationTypeActivationFailed" xml:space="preserve">
     <value>Cannot instantiate implementation type '{0}' for service type '{1}'.</value>
   </data>
-  <data name="UnableToActivateTypeException" xml:space="preserve">
+  <data name="ConstructorActivationFailed" xml:space="preserve">
     <value>No constructor for type '{0}' can be instantiated using services from the service container and default values.</value>
   </data>
-  <data name="UnableToResolveService" xml:space="preserve">
+  <data name="ActivationDependencyUnresolved" xml:space="preserve">
     <value>Unable to resolve service for type '{0}' while attempting to activate '{1}'.</value>
     <comment>{0} = service type, {1} = required by</comment>
   </data>

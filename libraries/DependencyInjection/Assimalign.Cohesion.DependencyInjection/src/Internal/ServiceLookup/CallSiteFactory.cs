@@ -694,7 +694,7 @@ internal sealed class CallSiteFactory : IServiceLookup
                 }
             }
 
-            throw new InvalidOperationException(ErrorMessages.ServiceDescriptorNotExist);
+            throw new InvalidOperationException(ErrorMessages.ServiceDescriptorMissing);
         }
 
         public ServiceDescriptorCacheItem Add(ServiceDescriptor descriptor)

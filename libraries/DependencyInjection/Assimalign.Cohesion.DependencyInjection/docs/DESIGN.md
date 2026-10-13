@@ -261,4 +261,5 @@ root namespace by MSBuild's GenerateResource task through
 `build/Targets/Build.ErrorMessages.targets`. The generated source stays under
 `obj/`; no checked-in designer or Visual Studio custom tool is required. Ordinary
 `dotnet build`, CI and NativeAOT publication use the same embedded resources.
-Existing message text is preserved.
+Existing message text is preserved. Resource names describe failures in short PascalCase
+noun phrases of at most 40 characters (#1471); callers use the renamed internal accessors.
