@@ -32,6 +32,8 @@ internal sealed class FakeHttpConnectionListener : ConnectionListener<IHttpConne
     private int _disposeCount;
     private int _bindCount;
     private int _acceptCount;
+    private int _endPointsReadCount;
+    private IReadOnlyList<EndPoint> _endPoints = [];
 
     public FakeHttpConnectionListener(params IHttpConnection[] connections)
     {
@@ -50,6 +52,8 @@ internal sealed class FakeHttpConnectionListener : ConnectionListener<IHttpConne
 
     public int AcceptCount => Volatile.Read(ref _acceptCount);
 
+    public int EndPointsReadCount => Volatile.Read(ref _endPointsReadCount);
+
     public Func<CancellationToken, ValueTask>? BindHandler { get; init; }
 
     public Func<ValueTask>? DisposeHandler { get; init; }
@@ -62,7 +66,15 @@ internal sealed class FakeHttpConnectionListener : ConnectionListener<IHttpConne
 
     public override ListenerId Id { get; } = ListenerId.New();
 
-    public IReadOnlyList<EndPoint> EndPoints { get; init; } = [];
+    public IReadOnlyList<EndPoint> EndPoints
+    {
+        get
+        {
+            Interlocked.Increment(ref _endPointsReadCount);
+            return _endPoints;
+        }
+        init => _endPoints = value;
+    }
 
     public HttpProtocol Protocols => HttpProtocol.Http11;
 

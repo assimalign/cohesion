@@ -26,6 +26,34 @@ public sealed class WebServerEventSourceTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - EventSource: Disabled server diagnostics do not read listener endpoints")]
+    public async Task StartAsync_WithDisabledDiagnostics_ShouldNotReadEndPoints()
+    {
+        // Arrange
+        WebServerEventSource.Log.IsEnabled().ShouldBeFalse();
+        FakeHttpConnectionListener listener = new();
+        WebApplicationServer server = new(new WebApplicationServerOptions
+        {
+            Pipeline = new FakePipeline(),
+            Listener = listener,
+        });
+        using CancellationTokenSource timeout = new(_timeout);
+
+        // Act
+        try
+        {
+            await server.StartAsync(timeout.Token);
+
+            // Assert
+            listener.BindCount.ShouldBe(1);
+            listener.EndPointsReadCount.ShouldBe(0);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None).WaitAsync(_timeout);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - EventSource: A raw HTTP listener registration reports its bound endpoint")]
     public async Task StartAsync_WithRawHttpRegistration_ShouldReportBoundEndPoint()
     {

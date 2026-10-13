@@ -198,7 +198,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 return;
             }
 
-            WebServerEventSource.Log.ServerBound(ServerId, _listener.Protocols, _listener.EndPoints, MaxConcurrentConnections ?? 0);
+            WebServerEventSource.Log.ServerBound(ServerId, _listener, MaxConcurrentConnections ?? 0);
             CancellationToken drainingToken = _drain.Draining;
             _acceptLoop = Task.Run(() => AcceptLoopAsync(drainingToken));
         }

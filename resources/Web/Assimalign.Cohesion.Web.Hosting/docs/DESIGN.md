@@ -929,6 +929,8 @@ feature reads for payloads happen only while the corresponding event level is en
 | 18 | StopAccepted | Informational | resourceName, requestId, deferred:bool |
 
 `endPoints` comma-joins `IHttpConnectionListener.EndPoints` after binding completes.
+The internal `ServerBound` wrapper reads `EndPoints` only inside its Informational
+`IsEnabled` branch, so disabled diagnostics do not allocate an endpoint snapshot.
 The transport listener supplies its actual endpoint, so TCP, TLS and QUIC port-zero
 binds report the operating system's assigned port. The HTTP listener aggregates
 all registrations, including raw `UseServer(Action<HttpConnectionListenerOptions>)`
