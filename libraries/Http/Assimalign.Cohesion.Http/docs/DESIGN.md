@@ -2056,7 +2056,7 @@ built without re-deriving method semantics from the RFC.
 
 ### Antiforgery: QUERY is spec-safe but stays token-required
 
-The one deliberately non-mechanical decision. `HttpAntiforgeryService.IsSafeMethod`
+The one deliberately non-mechanical decision. `HttpAntiforgery.IsSafeMethod`
 exempts only the **bodiless** safe methods (GET/HEAD/OPTIONS/TRACE) from token
 validation. QUERY is spec-safe and idempotent — `HttpMethod.IsSafe` reports `true`
 — but it **carries a request body**, so its CSRF exposure parallels POST: a

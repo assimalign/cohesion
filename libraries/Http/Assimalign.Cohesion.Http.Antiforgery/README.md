@@ -21,7 +21,7 @@ consumers (clients, proxies, edge caches) should not reference this package.
 | Type | Role |
 | --- | --- |
 | `IHttpAntiforgery` | The antiforgery service contract. |
-| `HttpAntiforgery` | Static factory: `HttpAntiforgery.Create(...)`. |
+| `HttpAntiforgery` | Public sealed implementation of `IHttpAntiforgery`, created with `HttpAntiforgery.Create(...)`. |
 | `HttpAntiforgeryOptions` | Cookie/form/header names, cookie attributes, HMAC key. |
 | `HttpAntiforgeryTokenSet` | The cookie + request token pair returned to callers. |
 | `IHttpAntiforgeryFeature` | Carries the service on an `IHttpContext`. |
@@ -36,7 +36,9 @@ exchange (sealing tokens with a purpose-bound data-protection protector when
 given a provider), and `UseAntiforgery` validates protected endpoints.
 
 Outside the Web pipeline, create one service per application (it is stateless
-and shareable). The default protector signs with a per-process random key,
+and shareable). Both `Create` overloads return `HttpAntiforgery`; its constructor
+is private, and callers can continue using the `IHttpAntiforgery` contract.
+The default protector signs with a per-process random key,
 which is for development only: tokens die on restart and instances reject each
 other's tokens. Deployed applications set `Protector` to a persisted, rotating
 key ring.

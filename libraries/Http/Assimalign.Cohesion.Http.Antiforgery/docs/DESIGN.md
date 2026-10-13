@@ -91,13 +91,18 @@ antiforgery and every other protected artifact.
 ## Service shape: stateless singleton over a passed-in context
 
 `IHttpAntiforgery` methods each take the `IHttpContext` they operate on, so
-the implementation (`HttpAntiforgeryService`) is stateless aside from its
-options + engine and is safe to share across requests. `HttpAntiforgery.Create`
-is the public factory; the internal service stays hidden behind the
-interface (interface-first). The `IHttpAntiforgeryFeature` carries the shared
-service on a context so downstream handlers resolve the *same* configured
-service — and therefore the same signing key — via
-`context.Antiforgery` / `context.RequireAntiforgery`.
+the public sealed implementation, `HttpAntiforgery`, is stateless aside from
+its options + engine and is safe to share across requests. Its constructor is
+private: the static `Create(Action<HttpAntiforgeryOptions>? configure = null)`
+and `Create(HttpAntiforgeryOptions options)` overloads both return
+`HttpAntiforgery` after the existing option validation. The implementation and
+factories share one public type, as owner decision 59 (#1464) requires;
+`IHttpAntiforgery` remains the contract for consumers and custom implementations.
+Token helpers remain internal, and nested helpers remain private.
+
+The `IHttpAntiforgeryFeature` carries the shared service on a context so
+downstream handlers resolve the *same* configured service — and therefore the
+same signing key — via `context.Antiforgery` / `context.RequireAntiforgery`.
 
 Every `IHttpAntiforgeryFeature` reports `nameof(IHttpAntiforgeryFeature)` as its
 feature name. The feature collection is name-keyed, so an exchange carries at
@@ -193,7 +198,18 @@ token must not be cached or a shared cache could serve one user's token to
 another; `X-Frame-Options` reduces clickjacking that could drive token
 submission.
 
-## Breaking behavior since 10.0.0-preview.1
+## Breaking changes since 10.0.0-preview.1
+
+The `v10.0.0-preview.1` tag shipped `HttpAntiforgery` as a public static
+factory whose two `Create` overloads returned `IHttpAntiforgery`. Since #1464,
+it is the public sealed implementation of that interface, and both overloads
+return `HttpAntiforgery`. Replacing the static class with the sealed class and
+changing the factory return signatures is a **binary-breaking change**, accepted
+during previews on decision 15's terms and sanctioned by decision 59. Consumers
+compiled against the old factory must rebuild against the updated package.
+Existing `HttpAntiforgery.Create(...)` source call sites remain compatible,
+including assignments to `IHttpAntiforgery`; the parameters, validation, token
+format, and request behavior are unchanged.
 
 In 10.0.0-preview.1, `HttpAntiforgery.Create` accepted an invalid
 `CookieName`; `HttpCookie` rejected it only when a request stored a cookie

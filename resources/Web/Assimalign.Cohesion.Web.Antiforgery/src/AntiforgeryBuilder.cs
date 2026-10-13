@@ -117,7 +117,7 @@ public sealed class AntiforgeryBuilder
                 _dataProtectionProvider.CreateProtector(purpose, purposeVersion));
         }
 
-        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(snapshot);
+        HttpAntiforgery antiforgery = HttpAntiforgery.Create(snapshot);
         return new AntiforgeryFeature(antiforgery, snapshot);
     }
 

@@ -125,7 +125,7 @@ the returned value when every occurrence is needed. Four or more urlencoded
 occurrences now parse successfully instead of throwing.
 
 **Consumer audit.** Generated `[FromForm]` scalar bindings read the first value.
-`HttpAntiforgeryService` uses the first form token and retains its existing
+`HttpAntiforgery` uses the first form token and retains its existing
 header fallback when that first value is empty. IdentityHub's
 `IdentityEndpointService` selects the first `grant_type`, `client_id`,
 `client_secret`, `audience`/`resource`, `user_code`, `device_code`, and

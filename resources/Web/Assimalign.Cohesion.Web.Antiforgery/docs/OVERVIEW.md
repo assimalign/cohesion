@@ -8,8 +8,9 @@ reimplements token cryptography; it chooses the protector the engine seals token
 
 ## Scope
 
-- **`builder.Services.AddAntiforgery(...)`** (builder time) creates the application's `IHttpAntiforgery`
-  service and registers it as an application feature, an `IHttpFeature` singleton, so every exchange
+- **`builder.Services.AddAntiforgery(...)`** (builder time) creates the application's public sealed
+  `HttpAntiforgery` service through `HttpAntiforgery.Create(options)` and exposes it through
+  `IHttpAntiforgery`. It registers an application feature, an `IHttpFeature` singleton, so every exchange
   carries it and a handler mints tokens with `context.RequireAntiforgery.GetAndStoreTokens(context)`.
   The verb is a component integration the application's compilation receives (owner decision 34,
   #1380); this package takes no dependency-injection reference.

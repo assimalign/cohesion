@@ -62,7 +62,7 @@ flowchart LR
 | Package | Role |
 | --- | --- |
 | `Assimalign.Cohesion.Web.Antiforgery` | This package: registration, protector selection, middleware, metadata, verbs |
-| `Assimalign.Cohesion.Http.Antiforgery` | The token engine: `IHttpAntiforgery`, `HttpAntiforgeryOptions`, the protector seam, `context.Antiforgery` |
+| `Assimalign.Cohesion.Http.Antiforgery` | The public sealed `HttpAntiforgery` implementation of `IHttpAntiforgery`, its options, the protector seam, `context.Antiforgery` |
 | `Assimalign.Cohesion.Security.DataProtection` | The rotating, purpose-bound key ring the production protector derives from |
 | `Assimalign.Cohesion.Web.Routing` | The published endpoint and its metadata, the acknowledgement, `IRouterConventionBuilder` |
 | `Assimalign.Cohesion.Web.ProblemDetails` | The `application/problem+json` rejection |
@@ -215,9 +215,11 @@ overloads, `AddAntiforgery(configure)` and `AddAntiforgery(dataProtectionProvide
 hidden `AntiforgeryComponents` type.
 
 `AntiforgeryBuilder` owns the `HttpAntiforgeryOptions` and exposes them as `Options`, as
-`AuthenticationBuilder` does. `Build` selects the protector, creates the service with
-`HttpAntiforgery.Create(options)`, and the verb registers it as an `IHttpFeature` singleton (an
-`IHttpAntiforgeryFeature`), the only lifetime `Web.Hosting` accepts (decision 35). The service reads its
+`AuthenticationBuilder` does. `Build` selects the protector and creates the public sealed
+`HttpAntiforgery` through `HttpAntiforgery.Create(options)`; its private constructor needs no
+cross-assembly access. The feature exposes the service as `IHttpAntiforgery`, and the verb registers
+the feature as an `IHttpFeature` singleton (an `IHttpAntiforgeryFeature`), the only lifetime
+`Web.Hosting` accepts (decision 35). The service reads its
 options on every request, so `Build` hands it a snapshot, as `ValidationBuilder` does: a copy of `Options`,
 the key bytes included, carrying the selected protector. `Build` never writes to `Options`, so a change
 made afterward, or a later `UseDataProtection` call, reaches only a later `Build`, never a registered
@@ -324,6 +326,13 @@ The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md
 | Key repository unreadable while a token is issued, or another infrastructure fault | Propagates |
 
 ## Breaking behavior since 10.0.0-preview.1
+
+The #1464 API shape change makes `HttpAntiforgery` the public sealed implementation and changes
+both `Create` return types from `IHttpAntiforgery` to `HttpAntiforgery`. Web composition continues
+using the same factory call and interface contract, with unchanged registration and request behavior.
+Rebuild compiled consumers of the former static factory; the binary break against preview.1 is
+recorded on decision 15's terms in
+[Http.Antiforgery's design](../../../../libraries/Http/Assimalign.Cohesion.Http.Antiforgery/docs/DESIGN.md#breaking-changes-since-1000-preview1).
 
 The underlying `Http.Antiforgery` service in 10.0.0-preview.1 accepted an invalid `CookieName` at
 creation and failed only when a request stored a cookie token. Since #1416 it rejects that name during
