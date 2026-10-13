@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Net;
@@ -62,7 +63,7 @@ public sealed class NamedPipeConnectionFactory : DuplexConnectionFactory
         if (endPoint is not NamedPipeEndPoint namedPipeEndPoint)
         {
             throw new NotSupportedException(
-                $"The named-pipe factory can only connect to a {nameof(NamedPipeEndPoint)}.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointTypeUnsupported, nameof(NamedPipeEndPoint)));
         }
 
         PipeOptions pipeOptions = PipeOptions.Asynchronous;

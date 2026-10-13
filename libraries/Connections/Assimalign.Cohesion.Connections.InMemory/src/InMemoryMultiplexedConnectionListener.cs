@@ -19,6 +19,9 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// </remarks>
 public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectionListener
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _listenerDisposedMessage = ErrorMessages.MultiplexedListenerDisposed;
+
     private readonly Channel<MultiplexedConnection> _inbound = Channel.CreateUnbounded<MultiplexedConnection>(
         new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
 
@@ -74,7 +77,7 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
         }
         catch (ChannelClosedException)
         {
-            throw new OperationCanceledException("The in-memory multiplexed listener has been disposed.", cancellationToken);
+            throw new OperationCanceledException(_listenerDisposedMessage, cancellationToken);
         }
     }
 
@@ -130,6 +133,6 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
         _ = client.DisposeAsync();
         _ = server.DisposeAsync();
 
-        throw new ConnectionAbortedException("The in-memory multiplexed listener has been disposed and is no longer accepting connections.");
+        throw new ConnectionAbortedException(ErrorMessages.MultiplexedListenerNoLongerAcceptingConnections);
     }
 }

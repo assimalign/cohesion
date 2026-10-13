@@ -82,7 +82,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
 
             if (!QuicListener.IsSupported)
             {
-                throw new PlatformNotSupportedException("QUIC is not supported on the current platform.");
+                throw new PlatformNotSupportedException(ErrorMessages.QuicUnsupported);
             }
 
             ValidateServerAuthenticationOptions(_options);
@@ -267,13 +267,13 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
             options.ServerAuthenticationOptions.ServerCertificateContext is null &&
             options.ServerAuthenticationOptions.ServerCertificateSelectionCallback is null)
         {
-            throw new InvalidOperationException("A server certificate is required for QUIC server authentication.");
+            throw new InvalidOperationException(ErrorMessages.ServerCertificateRequired);
         }
 
         if (options.ServerAuthenticationOptions.ApplicationProtocols is null ||
             options.ServerAuthenticationOptions.ApplicationProtocols.Count == 0)
         {
-            throw new InvalidOperationException("At least one application protocol is required for QUIC server authentication.");
+            throw new InvalidOperationException(ErrorMessages.ApplicationProtocolRequired);
         }
     }
 }

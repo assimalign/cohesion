@@ -14,11 +14,14 @@ namespace Assimalign.Cohesion.Connections;
 /// </remarks>
 public sealed class ConnectionResetException : ConnectionException
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _defaultMessage = ErrorMessages.ConnectionResetByPeer;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ConnectionResetException"/> class.
     /// </summary>
     public ConnectionResetException()
-        : base("The connection was reset by the remote peer.")
+        : base(_defaultMessage)
     {
     }
 

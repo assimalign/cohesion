@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -45,7 +46,7 @@ internal sealed class UdpDatagramConnection : DatagramConnection
         {
             AddressFamily.InterNetwork => new IPEndPoint(IPAddress.Any, 0),
             AddressFamily.InterNetworkV6 => new IPEndPoint(IPAddress.IPv6Any, 0),
-            _ => throw new NotSupportedException($"The UDP datagram connection only supports IPv4 and IPv6 sockets; address family '{socket.AddressFamily}' is not supported.")
+            _ => throw new NotSupportedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatagramSocketAddressFamilyUnsupported, socket.AddressFamily))
         };
 
         UdpConnectionEventSource.Log.ConnectionOpened(_id, localEndPoint, remoteEndPoint);

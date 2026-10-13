@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
 using System.Net.Quic;
 using System.Net.Security;
@@ -80,7 +81,7 @@ public sealed class QuicConnectionListenerOptions
         {
             if (value < TimeSpan.Zero && value != Timeout.InfiniteTimeSpan)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "A non-negative timeout or Timeout.InfiniteTimeSpan is required.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.TimeoutInvalid);
             }
 
             _handshakeTimeout = value;
@@ -240,7 +241,7 @@ public sealed class QuicConnectionListenerOptions
         if (timeout != Timeout.InfiniteTimeSpan
             && (timeout < TimeSpan.Zero || timeout.TotalMilliseconds > int.MaxValue))
         {
-            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "A non-negative timeout of at most int.MaxValue milliseconds, or Timeout.InfiniteTimeSpan, is required.");
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, ErrorMessages.CloseDeliveryTimeoutInvalid);
         }
     }
 
@@ -251,7 +252,7 @@ public sealed class QuicConnectionListenerOptions
 
         if (errorCode < minErrorCode || errorCode > maxErrorCode)
         {
-            throw new ArgumentOutOfRangeException(nameof(errorCode), errorCode, $"A value between 0x{minErrorCode:x} and 0x{maxErrorCode:x} is required.");
+            throw new ArgumentOutOfRangeException(nameof(errorCode), errorCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.ErrorCodeOutOfRange, minErrorCode, maxErrorCode));
         }
     }
 }

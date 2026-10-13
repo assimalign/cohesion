@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
 using System.Threading;
 using System.Threading.Channels;
@@ -20,6 +21,10 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// </remarks>
 internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _connectionClosedMessage = ErrorMessages.MultiplexedConnectionClosed;
+    private static readonly string _connectionClosedWithErrorCodeMessage = ErrorMessages.MultiplexedConnectionClosedWithErrorCode;
+
     private readonly Channel<MultiplexedConnectionStream> _inboundStreams = Channel.CreateUnbounded<MultiplexedConnectionStream>(
         new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
 
@@ -89,7 +94,7 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
             {
                 if (_closeReason is not null)
                 {
-                    throw new OperationCanceledException("The in-memory multiplexed connection has been closed.", cancellationToken);
+                    throw new OperationCanceledException(_connectionClosedMessage, cancellationToken);
                 }
             }
             return stream;
@@ -97,7 +102,7 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
         catch (ChannelClosedException)
         {
             // No further inbound streams will arrive; the connection has closed.
-            throw new OperationCanceledException("The in-memory multiplexed connection has been closed.", cancellationToken);
+            throw new OperationCanceledException(_connectionClosedMessage, cancellationToken);
         }
     }
 
@@ -107,7 +112,7 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
         if (direction == ConnectionDirection.ReadOnly)
         {
             throw new ArgumentException(
-                "A peer cannot open a read-only stream; only the remote side would be able to write to it.",
+                ErrorMessages.ReadOnlyStreamCannotBeOpened,
                 nameof(direction));
         }
 
@@ -185,7 +190,7 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
             if (_closeReason is null)
             {
                 ConnectionResetException loss = new(
-                    $"The multiplexed connection closed with application error code 0x{errorCode:x}.", errorCode);
+                    string.Format(CultureInfo.CurrentCulture, _connectionClosedWithErrorCodeMessage, errorCode), errorCode);
                 _closeReason = loss;
                 _peer._closeReason = loss;
                 _state = disposing ? ConnectionState.Closed : ConnectionState.Aborted;

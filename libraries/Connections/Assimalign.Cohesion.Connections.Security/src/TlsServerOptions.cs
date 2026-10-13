@@ -132,9 +132,7 @@ public sealed class TlsServerOptions
         if (current is not null && !ReferenceEquals(current, _clientCertificateValidator))
         {
             throw new InvalidOperationException(
-                "The authentication options already carry a RemoteCertificateValidationCallback. Configure the " +
-                "client-certificate policy either through RequireClientCertificate/AllowClientCertificate or " +
-                "through AuthenticationOptions, not both.");
+                ErrorMessages.ClientCertificatePolicyAlreadyConfigured);
         }
 
         RemoteCertificateValidationCallback validator = (_, certificate, chain, errors) =>

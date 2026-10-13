@@ -18,6 +18,9 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// </remarks>
 public sealed class InMemoryConnectionListener : DuplexConnectionListener
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _listenerDisposedMessage = ErrorMessages.ListenerDisposed;
+
     private readonly Channel<DuplexConnection> _inbound = Channel.CreateUnbounded<DuplexConnection>(
         new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
 
@@ -74,7 +77,7 @@ public sealed class InMemoryConnectionListener : DuplexConnectionListener
         catch (ChannelClosedException)
         {
             // The listener was disposed while an accept was pending or before one arrived.
-            throw new OperationCanceledException("The in-memory listener has been disposed.", cancellationToken);
+            throw new OperationCanceledException(_listenerDisposedMessage, cancellationToken);
         }
     }
 
@@ -130,6 +133,6 @@ public sealed class InMemoryConnectionListener : DuplexConnectionListener
         _ = client.DisposeAsync();
         _ = server.DisposeAsync();
 
-        throw new ConnectionAbortedException("The in-memory listener has been disposed and is no longer accepting connections.");
+        throw new ConnectionAbortedException(ErrorMessages.ListenerNoLongerAcceptingConnections);
     }
 }

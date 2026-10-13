@@ -62,6 +62,9 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 [SupportedOSPlatform("macos")]
 internal sealed class QuicStreamConnection : MultiplexedConnectionStream, IMultiplexedStreamAbort
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _streamReadingAbortedMessage = ErrorMessages.StreamReadingAborted;
+
     // RFC 9000 §16 — an application error code is a variable-length integer.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
 
@@ -126,7 +129,7 @@ internal sealed class QuicStreamConnection : MultiplexedConnectionStream, IMulti
             (true, true) => ConnectionDirection.Bidirectional,
             (true, false) => ConnectionDirection.ReadOnly,
             (false, true) => ConnectionDirection.WriteOnly,
-            (false, false) => throw new ArgumentException("The QUIC stream is neither readable nor writable.", nameof(stream))
+            (false, false) => throw new ArgumentException(ErrorMessages.StreamNeitherReadableNorWritable, nameof(stream))
         };
 
         _stream = stream;
@@ -512,7 +515,7 @@ internal sealed class QuicStreamConnection : MultiplexedConnectionStream, IMulti
     // The exception a read reports after this end aborted its receiving direction: the one QuicStream
     // raises for a read the abort overtakes.
     private static QuicException ReadAborted()
-        => new(QuicError.OperationAborted, null, "Reading was aborted on this end of the stream.");
+        => new(QuicError.OperationAborted, null, _streamReadingAbortedMessage);
 
     /// <summary>
     /// The readable stream's <see cref="Input"/>: a <see cref="PipeReader"/> over the QUIC stream that fails

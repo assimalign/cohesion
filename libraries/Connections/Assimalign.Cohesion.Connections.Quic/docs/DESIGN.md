@@ -539,3 +539,14 @@ and `MultiplexedConnectionStream`.
 Every connection shares root lifecycle and features. Accepted connections stay in the live set
 until their closed token fires; listener disposal never closes handed-out connections.
 Only the code that accepted a connection reads or writes it.
+
+## Exception message resources (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared MSBuild targets generate
+an internal `ErrorMessages` accessor in the project's root namespace during CLI and CI builds;
+its embedded resources are available under NativeAOT. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ...)`, preserving the existing text and arguments.
+EventSource templates and payload handling keep their existing behavior. This changes no public
+API or exception text relative to 10.0.0-preview.1.
+
+The local read-aborted message is cached in a `static readonly` field for stream cancellation.

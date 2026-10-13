@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipelines;
 using System.Net;
@@ -48,6 +49,11 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// </remarks>
 internal sealed class InMemoryConnection : DuplexConnection
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _peerStoppedReadingStreamMessage = ErrorMessages.PeerStoppedReadingStream;
+    private static readonly string _peerResetStreamMessage = ErrorMessages.PeerResetStream;
+    private static readonly string _streamReadingAbortedMessage = ErrorMessages.StreamReadingAborted;
+
     // RFC 9000 §16 — the codes the QUIC driver accepts, so a test over this driver fails where QUIC would.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
 
@@ -400,7 +406,7 @@ internal sealed class InMemoryConnection : DuplexConnection
         try
         {
             _input.Complete(new ConnectionResetException(
-                $"The peer stopped reading the stream with application error code 0x{errorCode:x}.",
+                string.Format(CultureInfo.CurrentCulture, _peerStoppedReadingStreamMessage, errorCode),
                 errorCode));
         }
         catch (InvalidOperationException)
@@ -433,7 +439,7 @@ internal sealed class InMemoryConnection : DuplexConnection
         try
         {
             _outputInner.Complete(new ConnectionResetException(
-                $"The peer reset the stream with application error code 0x{errorCode:x}.",
+                string.Format(CultureInfo.CurrentCulture, _peerResetStreamMessage, errorCode),
                 errorCode));
         }
         catch (InvalidOperationException)
@@ -454,7 +460,7 @@ internal sealed class InMemoryConnection : DuplexConnection
     }
 
     private static ConnectionAbortedException ReadAborted()
-        => new("Reading was aborted on this end of the stream.");
+        => new(_streamReadingAbortedMessage);
 
     private void CheckConnectionLoss()
     {
@@ -925,7 +931,7 @@ internal sealed class InMemoryConnection : DuplexConnection
         public static ThrowingPipeWriter Instance { get; } = new();
 
         private static InvalidOperationException Fail()
-            => new("Cannot write to the output of a read-only connection.");
+            => new(ErrorMessages.ReadOnlyConnectionCannotWrite);
 
         public override void Advance(int bytes) => throw Fail();
 

@@ -59,7 +59,7 @@ public sealed class QuicConnectionFactory : MultiplexedConnectionFactory
 
         if (!QuicConnection.IsSupported)
         {
-            throw new PlatformNotSupportedException("QUIC is not supported on the current platform.");
+            throw new PlatformNotSupportedException(ErrorMessages.QuicUnsupported);
         }
 
         var connectionOptions = new QuicClientConnectionOptions

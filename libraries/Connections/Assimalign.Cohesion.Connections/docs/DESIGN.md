@@ -813,3 +813,15 @@ process started).
 - An upgrade canceled because its listener is being disposed is not a failure and is not reported.
 - Every upgrade the pump starts reports its start and its end exactly once, which keeps
   `current-upgrades` exact.
+
+## Exception message resources (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared MSBuild targets generate
+an internal `ErrorMessages` accessor in the project's root namespace during CLI and CI builds;
+its embedded resources are available under NativeAOT. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ...)`, preserving the existing text and arguments.
+EventSource templates and payload handling keep their existing behavior. This changes no public
+API or exception text relative to 10.0.0-preview.1.
+
+The default abort and reset messages are cached once in their exception types, since driver
+teardown can construct those exceptions as cancellation reasons.

@@ -24,6 +24,9 @@ namespace Assimalign.Cohesion.Connections.NamedPipes;
 /// </remarks>
 public sealed class NamedPipeConnectionListener : DuplexConnectionListener
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _listenerDisposedMessage = ErrorMessages.ListenerDisposed;
+
     private readonly NamedPipeConnectionListenerOptions _options;
     private readonly NamedPipeEndPoint _endPoint;
     private readonly ListenerId _listenerId = ListenerId.New();
@@ -49,13 +52,13 @@ public sealed class NamedPipeConnectionListener : DuplexConnectionListener
 
         if (options.EndPoint is null)
         {
-            throw new ArgumentException("A named-pipe listener requires an endpoint.", nameof(options));
+            throw new ArgumentException(ErrorMessages.ListenerEndpointRequired, nameof(options));
         }
 
         if (!options.EndPoint.IsLocal)
         {
             throw new ArgumentException(
-                "A named-pipe listener can only bind a pipe on the local host ('.').",
+                ErrorMessages.ListenerRequiresLocalHost,
                 nameof(options));
         }
 
@@ -119,7 +122,7 @@ public sealed class NamedPipeConnectionListener : DuplexConnectionListener
 
                 if (_acceptPending)
                 {
-                    throw new InvalidOperationException("Only one named-pipe accept operation may be pending at a time.");
+                    throw new InvalidOperationException(ErrorMessages.AcceptAlreadyPending);
                 }
 
                 server = _pendingStream ?? CreateServerStream();
@@ -175,7 +178,7 @@ public sealed class NamedPipeConnectionListener : DuplexConnectionListener
         }
 
         throw new OperationCanceledException(
-            "The named-pipe listener has been disposed.",
+            _listenerDisposedMessage,
             cancellationToken);
     }
 
