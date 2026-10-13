@@ -653,7 +653,7 @@ The equality guard in core Http pins existing behavior and passes with the fix r
 
 The allocation guard isolates its test-only `MeasurementContext` construction behind a
 `NoInlining` factory (#1462). Release IL leaves the ending counter subtraction on the
-evaluation stack. The [.NET 10 JIT importer](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/importer.cpp#L8317-L8325)
+evaluation stack. The [.NET 10 JIT importer](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/importer.cpp#L9054-L9063)
 can emit the raw allocation for a following `newobj` before spilling that expression.
 On x64, this places the 128-byte context allocation ahead of the preceding
 `GC.GetAllocatedBytesForCurrentThread` counter, even though the constructor stays afterward.
