@@ -25,8 +25,8 @@ runtime module by decision 57 (2026-10-13):
 > (COHRES004) or Web hosting-family integration (COHRES001).**
 > `Web.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself, keeping its
 > `.Hosting.Health` and `.Hosting.Resources` public namespaces. No separate Web hosting-family
-> package exists. A future integration package must stay out of every framework that carries
-> the module. The module may reference any Web library except `Web.Testing`,
+> package exists. A future integration package is only for an integration that must not land in
+> every framework that carries the module. The module may reference any Web library except `Web.Testing`,
 > `Web.ApplicationModel`, `Web.ApplicationModel.Orchestration`, the `App.Web` producers, and test, example, sample, and fixture
 > projects (COHRES002, relaxed by owner decision 2026-10-09; before that, only the Web root and
 > its own hosting family).
@@ -139,7 +139,8 @@ await app.RunAsync();
 
 A new `Assimalign.Cohesion.Web.<Feature>` project (precedents: `Web.Routing`, `Web.Server`) is not
 done until all of these are updated. A future `Web.Hosting.<Suffix>` integration must first meet
-decision 57's framework-exclusion condition; no separate Web hosting-family package exists today.
+decision 57's condition (it must not land in every framework that carries `Web.Hosting`); no
+separate Web hosting-family package exists today.
 The working checklist also lives in `.claude/rules/web-area.md`:
 
 1. **csproj** — references per the dependency rule; builder verbs ship in the package itself:

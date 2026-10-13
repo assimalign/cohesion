@@ -26,9 +26,9 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   2026-10-13). Its public integrations live in `src/Health/` and `src/Resources/`, keeping the
   `Assimalign.Cohesion.Web.Hosting.Health` and `.Resources` namespaces. No separate Web
   hosting-family package exists. A future `Web.Hosting.<Suffix>` package is permitted only for
-  an integration that must stay out of every framework carrying `Web.Hosting`; it retains the
-  family constraints in `resource-areas.md`. Roots and features may reference neither the
-  hosting module or family (COHRES001) nor shared Hosting libraries (COHRES004).
+  an integration that must not land in every framework carrying `Web.Hosting`; it retains the
+  family constraints in `resource-areas.md`. Roots and features may not reference the hosting
+  module, its family (COHRES001) or shared Hosting libraries (COHRES004).
 - **`Web.Hosting` references a Web library only when the runtime itself needs it** — runtime
   machinery it composes, such as a router it drives or a server package. COHRES002 permits any
   Web library but the exclusions above. Applications still get the whole family through the
@@ -129,8 +129,9 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
 
 A new `resources/Web/Assimalign.Cohesion.Web.<Feature>/` project (precedents: `Web.Routing`,
 `Web.Server`) is not done until all of these are updated (each has bitten before). A future
-`Web.Hosting.<Suffix>` integration must meet decision 57's framework-exclusion condition first;
-no current Web package is a precedent for a separate hosting-family package:
+`Web.Hosting.<Suffix>` integration must first meet decision 57's condition (it must not land in
+every framework carrying `Web.Hosting`); no current Web package is a precedent for a separate
+hosting-family package:
 
 1. **csproj** — references per the dependency rule above; `CohesionProjectReference` only. A
    package that registers an `IHttpFeature` declares its `builder.Services.Add<Feature>` verb as a
@@ -144,8 +145,9 @@ no current Web package is a precedent for a separate hosting-family package:
    lists don't already carry. Validate with
    `dotnet pack resources/Web/Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj`
    (its collection target hard-fails on unresolvable assemblies). Exclusions from the list are
-   documented in that file's comment. A separate hosting-family integration remains outside
-   every framework carrying `Web.Hosting` (decision 57). **If `Web.Hosting` references the new library**, its closure
+   documented in that file's comment. A separate hosting-family integration joins only the
+   frameworks that need it, never every framework carrying `Web.Hosting` (decision 57).
+   **If `Web.Hosting` references the new library**, its closure
    also becomes a `CohesionFrameworkPrivateAssembly` in every other area's
    `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (all 17 carry
    `Web.Hosting` privately); pack each of those producers too.

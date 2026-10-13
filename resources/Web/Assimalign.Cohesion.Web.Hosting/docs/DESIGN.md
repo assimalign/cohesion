@@ -2232,7 +2232,7 @@ Web.Hosting integrates Hosting.Health and Hosting.Resources itself (owner decisi
 2026-10-13). The public members retain their `.Hosting.Health` and `.Hosting.Resources`
 namespaces under `src/Health/` and `src/Resources/`. No separate Web hosting-family package
 exists. A future `<Area>.Hosting.<Suffix>` package is permitted only for an integration that
-must stay out of every framework carrying the module, with the existing COHRES001 family
+must not land in every framework carrying the module, with the existing COHRES001 family
 constraints. The runtime's resolved closure includes neither Web.ApplicationModel nor
 Web.ApplicationModel.Orchestration.
 

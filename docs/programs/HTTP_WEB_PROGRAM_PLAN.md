@@ -1495,7 +1495,7 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
     - **Order:** #1452, then #1453, then #1300 (session 7), which instruments the code both change.
 57. **The Web hosting module absorbs its hosting integrations, and the server engine moves to Web.Server (owner, 2026-10-13; #1456, from the Stage 14 review).**
     - **(a) Roll-up (#1457).** `Web.Hosting.Health` and `Web.Hosting.Resources` roll into `Web.Hosting`. Their public members keep their namespaces, under `src/Health/` and `src/Resources/`.
-      - The rules change: an area's `<Area>.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself. A separate `<Area>.Hosting.<Suffix>` package stays permitted only for an integration that must stay out of every framework that carries the module.
+      - The rules change: an area's `<Area>.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself. A separate `<Area>.Hosting.<Suffix>` package stays permitted only for an integration that must not land in every framework that carries the module.
       - The split predated the ApplicationModel integration, and every consumer of `Web.Hosting.Resources` also took `Web.Hosting`.
       - `IWebApplicationLifetime` (#1412) is deleted. It existed only because the control plane could not reference `Web.Hosting`, which settles part of Stage 14's first review question.
       - `Web.Health` joins the 16 area frameworks that lacked it. The release inventory loses two packages that shipped in preview.1.

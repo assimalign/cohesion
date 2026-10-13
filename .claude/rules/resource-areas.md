@@ -338,13 +338,13 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   `Assimalign.Cohesion.<Area>.Hosting.Resources`. The precedent is `Web.Hosting` (owner
   decision 57, 2026-10-13).
   A separate `Assimalign.Cohesion.<Area>.Hosting.<Suffix>` package is permitted only for an
-  integration that must stay out of every framework that carries the runtime module; no area
-  has one today. Such a package keeps the hosting-family constraints: it may reference the base
-  Hosting library and siblings, the area root, features, other hosting-family integrations,
-  and other areas' packages. It may never reference its own exact `<Area>.Hosting` module,
-  and roots and features may not reference it (COHRES001). The exact module may consume
+  integration that must not land in every framework that carries the runtime module, so it stays
+  opt-in; no area has one today. Such a package keeps the hosting-family constraints: it may
+  reference the base Hosting library and siblings, the area root, features, other hosting-family
+  integrations, and other areas' packages. It may never reference its own exact `<Area>.Hosting`
+  module, and roots and features may not reference it (COHRES001). The exact module may consume
   hosting-family packages under the generic guard, but doing so brings their closure into every
-  framework that carries the module and defeats that package's required exclusion.
+  framework that carries the module, which is the cost the separate package exists to avoid.
 - **The application builder seam:** the area root provides `I<Area>ApplicationBuilder` (and the
   `I<Area>Application` it builds); the hosting module implements them and exposes the creation
   entry point (`<Area>Application.CreateBuilder(string[] args)` — every resource is a `Program.cs` executable;
