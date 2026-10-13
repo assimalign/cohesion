@@ -4,6 +4,7 @@ on:
     paths:
       - "analyzers/**"
       - "build/**"
+      - "libraries/ObjectMapping/**"
       - "libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/**"
       - "libraries/Http/Assimalign.Cohesion.Http.ClientFactory/**"
       # Owner decision 34 (#1380): the Web feature packages declare the builder.Services.Add<Feature>
@@ -30,6 +31,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
             "Assimalign.Cohesion.SourceGeneration.OpenApi",
+            "Assimalign.Cohesion.SourceGeneration.ObjectMapping",
             "Assimalign.Cohesion.SourceGeneration",
             "Assimalign.Cohesion.SourceGeneration.ComponentModel",
             "Assimalign.Cohesion.SourceGeneration.Database",

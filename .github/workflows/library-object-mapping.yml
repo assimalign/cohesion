@@ -5,6 +5,8 @@ on:
       - "libraries/ObjectMapping/**"
       - "!libraries/ObjectMapping/**/*.slnx"
       - "!libraries/ObjectMapping/**/*.md"
+      - "analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/**"
+      - "!analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/**/*.md"
       - ".github/workflows/library-object-mapping.yml" # When Pipeline File Changes
 permissions:
   contents: read

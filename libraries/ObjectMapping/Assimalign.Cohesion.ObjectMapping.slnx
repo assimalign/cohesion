@@ -28,4 +28,15 @@
 	<Folder Name="/ObjectMapping/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
+	<Folder Name="/ObjectMapping/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/" />
+	<Folder Name="/ObjectMapping/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/src/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/src/Assimalign.Cohesion.SourceGeneration.ObjectMapping.csproj" />
+	</Folder>
+	<Folder Name="/ObjectMapping/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/tests/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/tests/Assimalign.Cohesion.SourceGeneration.ObjectMapping.Tests.csproj" />
+	</Folder>
+	<Folder Name="/ObjectMapping/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/">
+		<File Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/DESIGN.md" />
+		<File Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/OVERVIEW.md" />
+	</Folder>
 </Solution>

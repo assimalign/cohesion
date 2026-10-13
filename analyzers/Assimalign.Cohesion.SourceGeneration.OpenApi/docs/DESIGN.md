@@ -222,7 +222,7 @@ The generator ships inside the `Assimalign.Cohesion.OpenApi.Attributes` package.
 `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.OpenApi" />`, which runs the
 generator in the Attributes compile (it finds no annotations there and emits nothing) and packs the DLL
 at `analyzers/dotnet/cs/` in the Attributes `.nupkg`. This is the precedent the repository already set
-for an ordinary NuGet library: `ObjectMapping` carries `SourceGeneration` and `Core` carries
+for an ordinary NuGet library: `ObjectMapping` carries `SourceGeneration.ObjectMapping` and `Core` carries
 `SourceGeneration.ComponentModel` the same way.
 
 Attributes is the carrier for two reasons:

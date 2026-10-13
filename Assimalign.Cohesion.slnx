@@ -3393,4 +3393,15 @@
 		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/Assimalign.Cohesion.LogSpace.SinkHost.csproj" />
 		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/" />
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/src/">
+		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/src/Assimalign.Cohesion.SourceGeneration.ObjectMapping.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/tests/">
+		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/tests/Assimalign.Cohesion.SourceGeneration.ObjectMapping.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/">
+		<File Path="analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/DESIGN.md" />
+		<File Path="analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/OVERVIEW.md" />
+	</Folder>
 </Solution>

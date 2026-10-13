@@ -58,4 +58,15 @@
   <Folder Name="/Assimalign.Cohesion.SourceGeneration.OpenApi/docs/">
     <File Path="Assimalign.Cohesion.SourceGeneration.OpenApi/docs/DESIGN.md" />
   </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.ObjectMapping/" />
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.ObjectMapping/src/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.ObjectMapping/src/Assimalign.Cohesion.SourceGeneration.ObjectMapping.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.ObjectMapping/tests/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.ObjectMapping/tests/Assimalign.Cohesion.SourceGeneration.ObjectMapping.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/">
+    <File Path="Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/DESIGN.md" />
+    <File Path="Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/OVERVIEW.md" />
+  </Folder>
 </Solution>

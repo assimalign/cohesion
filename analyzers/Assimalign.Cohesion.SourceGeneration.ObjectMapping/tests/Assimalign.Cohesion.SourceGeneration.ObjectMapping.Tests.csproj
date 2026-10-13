@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.SourceGeneration.ObjectMapping.Tests</RootNamespace>
+		<!-- Override the analyzers-area netstandard2.0 default: a test host must be executable. -->
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<IsRoslynComponent>false</IsRoslynComponent>
+		<EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+		<IncludeBuildOutput>true</IncludeBuildOutput>
+		<IsPackable>false</IsPackable>
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.SourceGeneration.ObjectMapping" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectMapping" />
+	</ItemGroup>
+</Project>

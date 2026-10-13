@@ -106,7 +106,7 @@ Mapping actions are built from two paths:
    directly to `MapperActionMember`. No `Expression.Compile()` and no reflection
    run at map time. Profiles expose `TryConfigureGenerated`, which the base
    constructor prefers over the reflection-based `Configure`; the
-   `Assimalign.Cohesion.SourceGeneration` incremental generator emits an override
+   `Assimalign.Cohesion.SourceGeneration.ObjectMapping` incremental generator emits an override
    of it for eligible profiles (see below).
 2. **Reflection fallback path.** The expression-based `MapMember(t => t.X, s => s.Y)`,
    `MapMemberTypes`, and `MapMemberEnumerables` overloads compile expression trees,
@@ -115,7 +115,14 @@ Mapping actions are built from two paths:
    `[RequiresUnreferencedCode]` so callers are warned under trim/AOT analysis. They
    exist so any profile keeps working even when the generator does not cover it.
 
-### Source generator (`analyzers/Core/Assimalign.Cohesion.SourceGeneration`)
+### Source generator (`analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping`)
+
+The generator lives in its own ObjectMapping-area project under owner decision 59
+(2026-10-13). The library bundles this analyzer in its package; in-repository consumers name
+`Assimalign.Cohesion.SourceGeneration.ObjectMapping`. Its generated API, source hints,
+interceptor namespace and mapping behavior are unchanged by the project move. See the
+[generator design](../../../../analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/DESIGN.md)
+for the compiler component's ownership and verification.
 
 The incremental generator recognizes top-level, non-generic, `partial`,
 class-based `MapperProfile<TTarget, TSource>` definitions whose `Configure` body is

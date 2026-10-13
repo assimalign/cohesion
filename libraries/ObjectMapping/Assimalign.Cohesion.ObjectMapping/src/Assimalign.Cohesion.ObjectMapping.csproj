@@ -17,7 +17,7 @@
 			pick it up automatically via PackageReference. See
 			build/Targets/Build.References.Projects.targets for the resolver.
 		-->
-		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ObjectMapping" />
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Update="Properties\Resources.Designer.cs">

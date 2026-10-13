@@ -9,7 +9,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
-namespace Assimalign.Cohesion.SourceGeneration;
+namespace Assimalign.Cohesion.SourceGeneration.ObjectMapping;
 
 /// <summary>
 /// Emits AOT-safe mapping configuration for the object mapper. Two entry points are covered:
