@@ -38,14 +38,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class Http3RequestStreamReader
 {
     private readonly PipeReader _input;
-    private readonly IMultiplexedStream? _inputCompletion;
+    private readonly IMultiplexedConnectionStream? _inputCompletion;
 
     /// <summary>
     /// Initializes a reader over a request stream's input.
     /// </summary>
     /// <param name="input">The request stream's inbound pipe.</param>
     /// <param name="inputCompletion">Optional transport knowledge of a clean input end.</param>
-    public Http3RequestStreamReader(PipeReader input, IMultiplexedStream? inputCompletion = null)
+    public Http3RequestStreamReader(PipeReader input, IMultiplexedConnectionStream? inputCompletion = null)
     {
         _input = input;
         _inputCompletion = inputCompletion;

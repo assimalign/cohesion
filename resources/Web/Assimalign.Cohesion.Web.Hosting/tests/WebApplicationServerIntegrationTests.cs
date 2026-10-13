@@ -128,7 +128,7 @@ public class WebApplicationServerIntegrationTests
 
         try
         {
-            await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+            await using IDuplexConnection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
             Stream stream = client.AsStream();
 
             // Act
@@ -193,7 +193,7 @@ public class WebApplicationServerIntegrationTests
 
         try
         {
-            await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+            await using IDuplexConnection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
             Stream stream = client.AsStream();
 
             // Act

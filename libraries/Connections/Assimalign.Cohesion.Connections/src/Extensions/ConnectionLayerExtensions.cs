@@ -14,17 +14,17 @@ using Assimalign.Cohesion.Connections.Internal;
 /// </remarks>
 public static class ConnectionLayerExtensions
 {
-    extension(IConnectionListener listener)
+    extension(IDuplexConnectionListener listener)
     {
         /// <summary>
         /// Returns a listener that applies the supplied layer to every accepted connection, upgrading each
         /// connection on its own task and holding at most 512 connections at a time.
         /// </summary>
         /// <param name="layer">The layer to apply.</param>
-        /// <returns>The layered <see cref="IConnectionListener"/>.</returns>
+        /// <returns>The layered <see cref="IDuplexConnectionListener"/>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="layer"/> is <see langword="null"/>.</exception>
         /// <remarks>See <see cref="Use(IConnectionLayer, int)"/>.</remarks>
-        public IConnectionListener Use(IConnectionLayer layer)
+        public IDuplexConnectionListener Use(IConnectionLayer layer)
         {
             ArgumentNullException.ThrowIfNull(listener);
             ArgumentNullException.ThrowIfNull(layer);
@@ -41,12 +41,12 @@ public static class ConnectionLayerExtensions
         /// <param name="maxConcurrentUpgrades">
         /// The most connections the layered listener holds at once. A connection counts from the moment the
         /// layered listener accepts it from <paramref name="listener"/> until
-        /// <see cref="IConnectionListener.AcceptAsync(System.Threading.CancellationToken)"/> returns it or
+        /// <see cref="IDuplexConnectionListener.AcceptAsync(System.Threading.CancellationToken)"/> returns it or
         /// its upgrade fails. At the limit the layered listener stops accepting from
         /// <paramref name="listener"/>, so further peers wait in that listener's own backlog.
         /// <see cref="Use(IConnectionLayer)"/> uses 512.
         /// </param>
-        /// <returns>The layered <see cref="IConnectionListener"/>.</returns>
+        /// <returns>The layered <see cref="IDuplexConnectionListener"/>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="layer"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentOutOfRangeException">
         /// Thrown when <paramref name="maxConcurrentUpgrades"/> is less than 1.
@@ -54,9 +54,9 @@ public static class ConnectionLayerExtensions
         /// <remarks>
         /// <para>
         /// The layered listener accepts connections from <paramref name="listener"/> on its own loop, which
-        /// the first <see cref="IConnectionListener.AcceptAsync(System.Threading.CancellationToken)"/>
+        /// the first <see cref="IDuplexConnectionListener.AcceptAsync(System.Threading.CancellationToken)"/>
         /// starts, and runs each connection's
-        /// <see cref="IConnectionLayer.UpgradeAsync(IConnection, System.Threading.CancellationToken)"/> on
+        /// <see cref="IConnectionLayer.UpgradeAsync(IDuplexConnection, System.Threading.CancellationToken)"/> on
         /// its own task. <c>AcceptAsync</c> returns connections whose upgrade has completed, in the order
         /// they complete, so a peer that is slow, silent, or rejected holds up only its own connection.
         /// </para>
@@ -70,7 +70,7 @@ public static class ConnectionLayerExtensions
         /// connection it has not returned.
         /// </para>
         /// </remarks>
-        public IConnectionListener Use(IConnectionLayer layer, int maxConcurrentUpgrades)
+        public IDuplexConnectionListener Use(IConnectionLayer layer, int maxConcurrentUpgrades)
         {
             ArgumentNullException.ThrowIfNull(listener);
             ArgumentNullException.ThrowIfNull(layer);
@@ -80,15 +80,15 @@ public static class ConnectionLayerExtensions
         }
     }
 
-    extension(IConnectionFactory factory)
+    extension(IDuplexConnectionFactory factory)
     {
         /// <summary>
         /// Returns a factory that applies the supplied layer to every established connection.
         /// </summary>
         /// <param name="layer">The layer to apply.</param>
-        /// <returns>The layered <see cref="IConnectionFactory"/>.</returns>
+        /// <returns>The layered <see cref="IDuplexConnectionFactory"/>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="layer"/> is <see langword="null"/>.</exception>
-        public IConnectionFactory Use(IConnectionLayer layer)
+        public IDuplexConnectionFactory Use(IConnectionLayer layer)
         {
             ArgumentNullException.ThrowIfNull(factory);
             ArgumentNullException.ThrowIfNull(layer);

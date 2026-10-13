@@ -437,7 +437,7 @@ public class HttpResponseDataRateTests
             http3 => http3.Limits.MinResponseDataRate = _rate,
             static options => AddRequestLimits(options),
             inner => server = new StallingMultiplexedConnection(inner));
-        (Connection request, IHttpContext context) = await OpenHttp3RequestAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await OpenHttp3RequestAsync(peer);
         server!.RequestStreams.Single().Writer.Stall();
         context.Response.Body = new MemoryStream(new byte[64 * 1024]);
 
@@ -462,7 +462,7 @@ public class HttpResponseDataRateTests
             http3 => http3.Limits.MinResponseDataRate = _rate,
             static options => AddRequestLimits(options),
             inner => server = new StallingMultiplexedConnection(inner));
-        (Connection request, IHttpContext context) = await OpenHttp3RequestAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await OpenHttp3RequestAsync(peer);
         StallingPipeWriter writer = server!.RequestStreams.Single().Writer;
         writer.Stall();
         context.Response.Body = new MemoryStream(new byte[256 * 1024]);
@@ -490,7 +490,7 @@ public class HttpResponseDataRateTests
             http3 => http3.Limits.MinResponseDataRate = _rate,
             static options => AddRequestLimits(options, streaming: true),
             inner => server = new StallingMultiplexedConnection(inner));
-        (Connection request, IHttpContext context) = await OpenHttp3RequestAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await OpenHttp3RequestAsync(peer);
         server!.RequestStreams.Single().Writer.Stall();
 
         // Act
@@ -512,7 +512,7 @@ public class HttpResponseDataRateTests
             http3 => http3.Limits.MinResponseDataRate = _rate,
             static options => AddRequestLimits(options),
             inner => server = new StallingMultiplexedConnection(inner));
-        (Connection request, IHttpContext context) = await OpenHttp3RequestAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await OpenHttp3RequestAsync(peer);
         StallingPipeWriter writer = server!.RequestStreams.Single().Writer;
         writer.Stall();
         context.MinResponseDataRate!.MinDataRate.ShouldBeSameAs(_rate);
@@ -545,7 +545,7 @@ public class HttpResponseDataRateTests
             http3 => http3.Limits.MinResponseDataRate = _rate,
             static options => AddRequestLimits(options),
             inner => server = new StallingMultiplexedConnection(inner));
-        (Connection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
         server!.RequestStreams.Single().Writer.Stall();
 
         // Act
@@ -581,7 +581,7 @@ public class HttpResponseDataRateTests
             http3 => http3.Limits.MinResponseDataRate = rate,
             static options => AddRequestLimits(options, streaming: true),
             inner => server = new StallingMultiplexedConnection(inner));
-        (Connection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
         StallingPipeWriter writer = server!.RequestStreams.Single().Writer;
         writer.Stall();
 
@@ -614,7 +614,7 @@ public class HttpResponseDataRateTests
             http3 => http3.Limits.MinResponseDataRate = _rate,
             static options => AddRequestLimits(options),
             inner => server = new StallingMultiplexedConnection(inner));
-        (Connection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
         StallingPipeWriter writer = server!.RequestStreams.Single().Writer;
         writer.Stall();
         context.MinResponseDataRate!.MinDataRate = null;
@@ -638,10 +638,10 @@ public class HttpResponseDataRateTests
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
     }
 
-    private static async Task<(Connection Request, IHttpContext Context)> OpenHttp3UploadAsync(Http3InMemoryPeer peer)
+    private static async Task<(IDuplexConnection Request, IHttpContext Context)> OpenHttp3UploadAsync(Http3InMemoryPeer peer)
     {
         // RFC 9110 §10.1.1 — the client declares the expectation and withholds the content until solicited.
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
         IHttpContext context = await peer.NextContextAsync();
@@ -654,9 +654,9 @@ public class HttpResponseDataRateTests
         return await reader.ReadToEndAsync();
     }
 
-    private static async Task<(Connection Request, IHttpContext Context)> OpenHttp3RequestAsync(Http3InMemoryPeer peer)
+    private static async Task<(IDuplexConnection Request, IHttpContext Context)> OpenHttp3RequestAsync(Http3InMemoryPeer peer)
     {
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/large", "https", "a"));
         request.Output.Complete();
         IHttpContext context = await peer.NextContextAsync();
@@ -741,7 +741,7 @@ public class HttpResponseDataRateTests
             options.UseHttp1(new TestConnectionListener(transport), http1 => http1.Limits.MinResponseDataRate = rate);
 
             HttpConnectionListener listener = new(options);
-            IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync()).OpenAsync();
+            IHttpConnectionContext connection = await (await listener.AcceptAsync()).OpenAsync();
             IAsyncEnumerator<IHttpContext> receive = connection.ReceiveAsync().GetAsyncEnumerator();
             (await receive.MoveNextAsync().AsTask().WaitAsync(_timeout)).ShouldBeTrue();
 

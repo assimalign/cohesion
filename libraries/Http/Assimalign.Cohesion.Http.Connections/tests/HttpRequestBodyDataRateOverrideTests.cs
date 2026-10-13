@@ -34,7 +34,7 @@ public class HttpRequestBodyDataRateOverrideTests
         // Arrange
         TestConnection connection = new(Encoding.ASCII.GetBytes("POST /stream HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4\r\n\r\n"), completeInput: false);
         await using HttpConnectionListener listener = CreateHttp1Listener(connection, _rate);
-        await using IAsyncEnumerator<IHttpContext> receive = (await (await listener.AcceptOrListenAsync()).OpenAsync()).ReceiveAsync().GetAsyncEnumerator();
+        await using IAsyncEnumerator<IHttpContext> receive = (await (await listener.AcceptAsync()).OpenAsync()).ReceiveAsync().GetAsyncEnumerator();
         (await receive.MoveNextAsync()).ShouldBeTrue();
         IHttpContext context = receive.Current;
         context.MinRequestBodyDataRate!.MinDataRate.ShouldBeSameAs(_rate);
@@ -56,7 +56,7 @@ public class HttpRequestBodyDataRateOverrideTests
         // Arrange
         TestConnection connection = new(Encoding.ASCII.GetBytes("POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4\r\n\r\n"), completeInput: false);
         await using HttpConnectionListener listener = CreateHttp1Listener(connection, _rate);
-        await using IAsyncEnumerator<IHttpContext> receive = (await (await listener.AcceptOrListenAsync()).OpenAsync()).ReceiveAsync().GetAsyncEnumerator();
+        await using IAsyncEnumerator<IHttpContext> receive = (await (await listener.AcceptAsync()).OpenAsync()).ReceiveAsync().GetAsyncEnumerator();
         (await receive.MoveNextAsync()).ShouldBeTrue();
         IHttpContext context = receive.Current;
 
@@ -71,7 +71,7 @@ public class HttpRequestBodyDataRateOverrideTests
         // 50 ms: 20 B/s against 100 B/s. Each octet extends the allowance by 10 ms; each gap spends 50.
         TestConnection connection = new(Encoding.ASCII.GetBytes("POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 100\r\n\r\na"), completeInput: false);
         await using HttpConnectionListener listener = CreateHttp1Listener(connection, _rate);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> receive = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await receive.MoveNextAsync()).ShouldBeTrue();
         IHttpContext context = receive.Current;
@@ -96,7 +96,7 @@ public class HttpRequestBodyDataRateOverrideTests
         // Arrange — the listener holds bodies to no rate; this request sets one for itself.
         TestConnection connection = new(Encoding.ASCII.GetBytes("POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4\r\n\r\n"), completeInput: false);
         await using HttpConnectionListener listener = CreateHttp1Listener(connection, rate: null);
-        await using IAsyncEnumerator<IHttpContext> receive = (await (await listener.AcceptOrListenAsync()).OpenAsync()).ReceiveAsync().GetAsyncEnumerator();
+        await using IAsyncEnumerator<IHttpContext> receive = (await (await listener.AcceptAsync()).OpenAsync()).ReceiveAsync().GetAsyncEnumerator();
         (await receive.MoveNextAsync()).ShouldBeTrue();
         IHttpContext context = receive.Current;
         context.MinRequestBodyDataRate!.MinDataRate.ShouldBeNull();
@@ -114,7 +114,7 @@ public class HttpRequestBodyDataRateOverrideTests
         // Arrange
         TestConnection connection = new(HttpProtocolPayloadFactory.CreateHttp1Request("POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4\r\n\r\nping"));
         await using HttpConnectionListener listener = CreateHttp1Listener(connection, _rate);
-        await using IAsyncEnumerator<IHttpContext> receive = (await (await listener.AcceptOrListenAsync()).OpenAsync()).ReceiveAsync().GetAsyncEnumerator();
+        await using IAsyncEnumerator<IHttpContext> receive = (await (await listener.AcceptAsync()).OpenAsync()).ReceiveAsync().GetAsyncEnumerator();
         (await receive.MoveNextAsync()).ShouldBeTrue();
         IHttpContext context = receive.Current;
         IHttpMinRequestBodyDataRateFeature feature = context.MinRequestBodyDataRate!;
@@ -241,7 +241,7 @@ public class HttpRequestBodyDataRateOverrideTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate, AddRequestLimits);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/stream", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
         context.MinRequestBodyDataRate!.MinDataRate.ShouldBeSameAs(_rate);
@@ -263,7 +263,7 @@ public class HttpRequestBodyDataRateOverrideTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate, AddRequestLimits);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
 
@@ -281,7 +281,7 @@ public class HttpRequestBodyDataRateOverrideTests
         // Arrange — the rate comes from the parse context, and the peer delivers one-octet DATA frames every
         // 50 ms: 20 B/s against 100 B/s.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate, AddRequestLimits);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("a")));
         IHttpContext context = await peer.NextContextAsync();
@@ -312,7 +312,7 @@ public class HttpRequestBodyDataRateOverrideTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate, AddRequestLimits);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("ping")));
         IHttpContext context = await peer.NextContextAsync();

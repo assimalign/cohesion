@@ -118,7 +118,7 @@ public class WebApplicationServerRequestBodyLimitTests
 
         try
         {
-            await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+            await using IDuplexConnection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
             Stream stream = client.AsStream();
 
             await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken);

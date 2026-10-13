@@ -1,11 +1,12 @@
 using System;
 using System.IO.Pipelines;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
 internal sealed class SocketPipeOptionsContext : IDisposable
 {
-    private bool _isDisposed;
+    private int _references = 1;
 
     public SocketPipeOptionsContext(
         PipeOptionsContext pipeOptions,
@@ -24,14 +25,18 @@ internal sealed class SocketPipeOptionsContext : IDisposable
     public PipeScheduler SenderScheduler { get; }
     public int BlockSize => PipeOptions.BlockSize;
 
+    // The listener and each handed-out connection own one reference to the shared pool.
+    public SocketPipeOptionsContext Retain()
+    {
+        Interlocked.Increment(ref _references);
+        return this;
+    }
+
     public void Dispose()
     {
-        if (_isDisposed)
+        if (Interlocked.Decrement(ref _references) == 0)
         {
-            return;
+            PipeOptions.Dispose();
         }
-
-        _isDisposed = true;
-        PipeOptions.Dispose();
     }
 }

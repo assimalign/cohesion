@@ -28,3 +28,5 @@ replaces all values for that key. `HttpQuery.Create(query)` encodes every
 occurrence for a redirect or rewritten URL. Collection `Count` counts keys.
 These behaviors replace preview.1's last-value parsing; see the compatibility
 and caller audit in DESIGN before upgrading code that sends duplicate keys.
+
+Transport integrations distinguish the `IConnection` identity/lifetime root from `IDuplexConnection` byte pipes and `IMultiplexedConnectionStream` streams. Core HTTP request/response and connection-info contracts do not acquire a transport dependency.

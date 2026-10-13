@@ -140,7 +140,7 @@ public class WebApplicationServerDefaultsTests
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
         await client.OpenControlStreamAsync(cancellationToken);
         await client.SendRequestAsync(method, "/inline", [], [], endStream, cancellationToken);
-        IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync(cancellationToken)).OpenAsync(cancellationToken);
+        IHttpConnectionContext connection = await (await listener.AcceptAsync(cancellationToken)).OpenAsync(cancellationToken);
         await using IAsyncEnumerator<IHttpContext> requests = connection.ReceiveAsync(cancellationToken).GetAsyncEnumerator();
 
         // Act — record both the calling thread and this synchronous call's lifetime. A queued hook

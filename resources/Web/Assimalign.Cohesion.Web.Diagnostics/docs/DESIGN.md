@@ -344,3 +344,5 @@ forwarding sinks, with the payload rules above. No public API or HTTP access-log
   above owns operator events and exact sink-failure attribution counters.
 - **No per-request configuration surface.** Everything is builder-time; the only per-request
   variance is the endpoint metadata override, itself attached at map time.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

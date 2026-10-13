@@ -19,6 +19,8 @@ internal sealed class ThrowingMultiplexedConnectionListener : MultiplexedConnect
         _exception = exception;
     }
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 17003);
 
     public override ConnectionCapabilities Capabilities => TestConnection.DefaultCapabilities with
@@ -27,8 +29,8 @@ internal sealed class ThrowingMultiplexedConnectionListener : MultiplexedConnect
         Security = ConnectionSecurity.Tls
     };
 
-    public override ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
-        => ValueTask.FromException<MultiplexedConnection>(_exception);
+    protected override ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken)
+        => ValueTask.FromException<IMultiplexedConnection>(_exception);
 
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

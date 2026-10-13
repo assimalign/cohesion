@@ -65,7 +65,7 @@ public class Http3PriorityTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         Http3Context http3Context = httpContext.ShouldBeOfType<Http3Context>();
@@ -90,7 +90,7 @@ public class Http3PriorityTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -133,7 +133,7 @@ public class Http3PriorityTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         // Act
@@ -161,7 +161,7 @@ public class Http3PriorityTests
 
         try
         {
-            Connection control = await peer.OpenUnidirectionalStreamAsync();
+            IDuplexConnection control = await peer.OpenUnidirectionalStreamAsync();
 
             // Act
             await control.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
@@ -171,7 +171,7 @@ public class Http3PriorityTests
 
             // Assert — a normal request remains serviceable after the accepted priority update.
             limited.ShouldNotBeNull().AbortReason.ShouldBeNull();
-            Connection request = await peer.OpenRequestStreamAsync();
+            IDuplexConnection request = await peer.OpenRequestStreamAsync();
             request.Output.Write(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/accepted", "https", "a"));
             await request.Output.CompleteAsync();
             (await receive.WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeTrue();
@@ -207,7 +207,7 @@ public class Http3PriorityTests
 
         try
         {
-            Connection control = await peer.OpenUnidirectionalStreamAsync();
+            IDuplexConnection control = await peer.OpenUnidirectionalStreamAsync();
             string priority = oversized ? "u=1, " + new string('x', 17 * 1024) : "u=1";
 
             // Act
@@ -250,7 +250,7 @@ public class Http3PriorityTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
         Http3ConnectionContext context = httpConnectionContext.ShouldBeOfType<Http3ConnectionContext>();
@@ -272,10 +272,10 @@ public class Http3PriorityTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
         Task<IHttpContext> dispatch = peer.NextContextAsync();
 
-        Connection control = await peer.OpenUnidirectionalStreamAsync();
+        IDuplexConnection control = await peer.OpenUnidirectionalStreamAsync();
         await control.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 0)));
 
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ended", "https", "a"));
         request.Output.Complete();
         IHttpContext exchange = await dispatch;
@@ -352,10 +352,10 @@ public class Http3PriorityTests
 
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
-        public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+        public override ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
             => _inner.AcceptStreamAsync(cancellationToken);
 
-        public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+        public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
             => _inner.OpenStreamAsync(direction, cancellationToken);
 
         public override void Abort(long errorCode, Exception? reason = null)

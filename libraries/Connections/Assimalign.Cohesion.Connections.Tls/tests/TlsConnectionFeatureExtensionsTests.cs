@@ -46,9 +46,9 @@ public class TlsConnectionFeatureExtensionsTests
     public async Task Tls_OnMultiplexedConnectionWithFeature_ShouldReturnRegisteredFeature()
     {
         // Arrange
-        (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        await using MultiplexedConnection clientLifetime = client;
-        await using MultiplexedConnection serverLifetime = server;
+        (IMultiplexedConnection client, IMultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
+        await using IMultiplexedConnection clientLifetime = client;
+        await using IMultiplexedConnection serverLifetime = server;
         TestTlsFeature feature = new();
         client.Features.Set(feature);
 
@@ -63,9 +63,9 @@ public class TlsConnectionFeatureExtensionsTests
     public async Task Tls_OnMultiplexedConnectionWithoutFeature_ShouldReturnNull()
     {
         // Arrange
-        (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
-        await using MultiplexedConnection clientLifetime = client;
-        await using MultiplexedConnection serverLifetime = server;
+        (IMultiplexedConnection client, IMultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
+        await using IMultiplexedConnection clientLifetime = client;
+        await using IMultiplexedConnection serverLifetime = server;
 
         // Act
         ITlsConnectionInfo? tls = ((IMultiplexedConnection)client).Tls;

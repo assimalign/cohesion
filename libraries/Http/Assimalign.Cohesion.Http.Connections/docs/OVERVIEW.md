@@ -28,7 +28,7 @@ neither their implementations nor Web hosting. See the [Http area map](../../REA
 
 Create a listener with `HttpConnectionListener.Create` and register the already-composed transport
 through `UseHttp1`, `UseHttp2`, `UseHttp1AndHttp2` or `UseHttp3`. Stream protocols accept an
-`IConnectionListener`; HTTP/3 accepts an `IMultiplexedConnectionListener`. The dual HTTP/1.1 and
+`IDuplexConnectionListener`; HTTP/3 accepts an `IMultiplexedConnectionListener`. The dual HTTP/1.1 and
 HTTP/2 registration requires TLS and chooses the protocol through ALPN.
 
 A custom host binds the listener, accepts HTTP connections, opens their contexts, receives
@@ -63,3 +63,7 @@ rejections, protocol error codes, slow-reader aborts and client-caused response 
 throttled and omit request text; metrics count every observed decision. See [Diagnostics](DESIGN.md#diagnostics)
 for event payloads, instrument names, units and tags. Application request spans and duration remain
 with the Web host.
+
+HTTP connections implement `IConnection` and expose their single `Protocol` and the wrapped
+transport's `Features`. Await `listener.BindAsync(token)` before reading its `EndPoints`;
+`AcceptAsync(token)` yields a connection and adds it to `Connections` until it closes.

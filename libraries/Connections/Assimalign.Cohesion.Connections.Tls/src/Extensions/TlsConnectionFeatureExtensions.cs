@@ -23,19 +23,4 @@ public static partial class TlsConnectionFeatureExtensions
         }
     }
 
-    extension(IMultiplexedConnection connection)
-    {
-        /// <summary>
-        /// Gets the TLS handshake facts, or <see langword="null"/> when none are registered.
-        /// </summary>
-        /// <exception cref="ArgumentNullException"><paramref name="connection"/> is null.</exception>
-        public ITlsConnectionInfo? Tls
-        {
-            get
-            {
-                ArgumentNullException.ThrowIfNull(connection);
-                return connection.Features.Get<ITlsConnectionInfo>();
-            }
-        }
-    }
 }

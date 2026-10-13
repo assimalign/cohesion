@@ -382,7 +382,7 @@ public class HttpResponseTrailerTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> exchanges = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await exchanges.MoveNextAsync()).ShouldBeTrue();
         IHttpContext context = exchanges.Current;
@@ -402,7 +402,7 @@ public class HttpResponseTrailerTests
         options.UseHttp3(new TestMultiplexedConnectionListener(new TestMultiplexedConnection(stream)), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();

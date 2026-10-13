@@ -474,6 +474,16 @@ public class WebApplicationServerDiagnosticsTests
 
         public ConnectionId Id => _connection.Id;
 
+        public HttpProtocol Protocol => _connection.Protocol;
+
+        public EndPoint? LocalEndPoint => _connection.LocalEndPoint;
+
+        public EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
+
+        public ConnectionCapabilities Capabilities => _connection.Capabilities;
+
+        public IConnectionFeatureCollection Features => _connection.Features;
+
         public ConnectionState State => _connection.State;
 
         public CancellationToken ConnectionClosed => _connection.ConnectionClosed;

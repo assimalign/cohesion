@@ -36,17 +36,17 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
-        (Connection garbageClient, Connection garbageServer) = InMemoryConnectionPair.Create();
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection garbageClient, IDuplexConnection garbageServer) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         BlockingConnectionListener transport = new();
         transport.Enqueue(garbageServer);
         transport.Enqueue(server);
-        await using IConnectionListener listener = transport.UseTls(CreateServerOptions());
+        await using IDuplexConnectionListener listener = transport.UseTls(CreateServerOptions());
         await garbageClient.Output.WriteAsync("HELLO-1304"u8.ToArray(), timeout.Token);
 
         // Act
-        Task<IConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
-        IConnection secured = await AcceptWithClientHandshakeAsync(accept, client, clientCertificate: null, timeout.Token);
+        Task<IDuplexConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
+        IDuplexConnection secured = await AcceptWithClientHandshakeAsync(accept, client, clientCertificate: null, timeout.Token);
 
         // Assert
         secured.Id.ShouldBe(server.Id);
@@ -60,17 +60,17 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
         string expected = _fixture.ClientCertificate.Thumbprint;
         TlsServerOptions options = CreateServerOptions().RequireClientCertificate((presented, _, _) => presented.Thumbprint == expected);
-        (Connection refusedClient, Connection refusedServer) = InMemoryConnectionPair.Create();
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection refusedClient, IDuplexConnection refusedServer) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         BlockingConnectionListener transport = new();
         transport.Enqueue(refusedServer);
         transport.Enqueue(server);
-        await using IConnectionListener listener = transport.UseTls(options);
+        await using IDuplexConnectionListener listener = transport.UseTls(options);
         Task refusedHandshake = ObserveAsync(refusedClient.UpgradeToTlsAsync(CreateClientOptions(clientCertificate: null), timeout.Token).AsTask());
 
         // Act
-        Task<IConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
-        IConnection secured = await AcceptWithClientHandshakeAsync(accept, client, _fixture.ClientCertificate, timeout.Token);
+        Task<IDuplexConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
+        IDuplexConnection secured = await AcceptWithClientHandshakeAsync(accept, client, _fixture.ClientCertificate, timeout.Token);
 
         // Assert
         secured.Id.ShouldBe(server.Id);
@@ -86,16 +86,16 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
         TlsServerOptions options = CreateServerOptions();
         options.HandshakeTimeout = TimeSpan.FromMinutes(5);
-        (Connection _, Connection silentServer) = InMemoryConnectionPair.Create();
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (DuplexConnection _, IDuplexConnection silentServer) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         BlockingConnectionListener transport = new();
         transport.Enqueue(silentServer);
         transport.Enqueue(server);
-        IConnectionListener listener = transport.UseTls(options);
+        IDuplexConnectionListener listener = transport.UseTls(options);
 
         // Act
-        Task<IConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
-        IConnection secured = await AcceptWithClientHandshakeAsync(accept, client, clientCertificate: null, timeout.Token);
+        Task<IDuplexConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
+        IDuplexConnection secured = await AcceptWithClientHandshakeAsync(accept, client, clientCertificate: null, timeout.Token);
         bool silentOpenWhileServing = !silentServer.ConnectionClosed.IsCancellationRequested;
         await listener.DisposeAsync();
 
@@ -112,17 +112,17 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
         TlsServerOptions options = CreateServerOptions();
         options.HandshakeTimeout = TimeSpan.FromSeconds(2);
-        (Connection _, Connection silentServer) = InMemoryConnectionPair.Create();
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (DuplexConnection _, IDuplexConnection silentServer) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         BlockingConnectionListener transport = new();
         transport.Enqueue(silentServer);
-        await using IConnectionListener listener = transport.UseTls(options);
-        Task<IConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
+        await using IDuplexConnectionListener listener = transport.UseTls(options);
+        Task<IDuplexConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
 
         // Act — the silent client's handshake times out first; a client that arrives afterwards is served.
         await WhenClosedAsync(silentServer, timeout.Token);
         transport.Enqueue(server);
-        IConnection secured = await AcceptWithClientHandshakeAsync(accept, client, clientCertificate: null, timeout.Token);
+        IDuplexConnection secured = await AcceptWithClientHandshakeAsync(accept, client, clientCertificate: null, timeout.Token);
 
         // Assert
         secured.Id.ShouldBe(server.Id);
@@ -136,13 +136,13 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
         TlsServerOptions options = CreateServerOptions();
         options.HandshakeTimeout = TimeSpan.FromMinutes(5);
         options.MaxConcurrentHandshakes = 1;
-        (Connection silentClient, Connection silentServer) = InMemoryConnectionPair.Create();
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection silentClient, IDuplexConnection silentServer) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         BlockingConnectionListener transport = new();
         transport.Enqueue(silentServer);
         transport.Enqueue(server);
-        await using IConnectionListener listener = transport.UseTls(options);
-        Task<IConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
+        await using IDuplexConnectionListener listener = transport.UseTls(options);
+        Task<IDuplexConnection> accept = listener.AcceptAsync(timeout.Token).AsTask();
         await WaitUntilAsync(() => transport.AcceptCalls >= 1, timeout.Token);
 
         // Act — the pause gives a listener that ignored the limit time to take the second connection; it
@@ -151,7 +151,7 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
         await Task.Delay(TimeSpan.FromMilliseconds(200), timeout.Token);
         int acceptsWhileFull = transport.AcceptCalls;
         await silentClient.DisposeAsync();
-        IConnection secured = await AcceptWithClientHandshakeAsync(accept, client, clientCertificate: null, timeout.Token);
+        IDuplexConnection secured = await AcceptWithClientHandshakeAsync(accept, client, clientCertificate: null, timeout.Token);
 
         // Assert
         acceptsWhileFull.ShouldBe(1);
@@ -193,20 +193,20 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
     /// Runs a well-behaved client's handshake on <paramref name="client"/> while the listener accepts, and
     /// returns the secured connection the listener produced.
     /// </summary>
-    private static async Task<IConnection> AcceptWithClientHandshakeAsync(
-        Task<IConnection> accept,
-        Connection client,
+    private static async Task<IDuplexConnection> AcceptWithClientHandshakeAsync(
+        Task<IDuplexConnection> accept,
+        IDuplexConnection client,
         X509Certificate2? clientCertificate,
         CancellationToken cancellationToken)
     {
-        Task<IConnection> clientHandshake = client.UpgradeToTlsAsync(CreateClientOptions(clientCertificate), cancellationToken).AsTask();
-        IConnection accepted = await accept;
+        Task<IDuplexConnection> clientHandshake = client.UpgradeToTlsAsync(CreateClientOptions(clientCertificate), cancellationToken).AsTask();
+        IDuplexConnection accepted = await accept;
         await clientHandshake;
 
         return accepted;
     }
 
-    private static async Task WhenClosedAsync(Connection connection, CancellationToken cancellationToken)
+    private static async Task WhenClosedAsync(IDuplexConnection connection, CancellationToken cancellationToken)
     {
         TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         using CancellationTokenRegistration registration = connection.ConnectionClosed.Register(
@@ -224,11 +224,11 @@ public class TlsHandshakeIsolationTests : IClassFixture<TestCertificateFixture>
         }
     }
 
-    private static async Task ObserveAsync(Task<IConnection> handshake)
+    private static async Task ObserveAsync(Task<IDuplexConnection> handshake)
     {
         try
         {
-            IConnection connection = await handshake;
+            IDuplexConnection connection = await handshake;
             await connection.DisposeAsync();
         }
         catch (Exception exception) when (exception is AuthenticationException or System.IO.IOException or OperationCanceledException)

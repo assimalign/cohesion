@@ -127,10 +127,10 @@ public class Http1TransportDiagnosticsTests
         driver.IsAborted.ShouldBeTrue();
     }
 
-    private static Http1ConnectionContext Create(IConnection driver, Http1ConnectionListenerOptions.Http1Limits limits)
+    private static Http1ConnectionContext Create(IDuplexConnection driver, Http1ConnectionListenerOptions.Http1Limits limits)
         => new(driver, false, limits, [], [], 0, null);
 
-    private static EventWrittenEventArgs SingleEvent(EventSourceRecorder events, int id, IConnection driver)
+    private static EventWrittenEventArgs SingleEvent(EventSourceRecorder events, int id, IDuplexConnection driver)
     {
         events.Events.ShouldNotContain(item => item.EventId == 0);
         EventWrittenEventArgs[] matches = events.Events.Where(item => item.EventId == id

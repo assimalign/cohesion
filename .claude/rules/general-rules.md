@@ -416,22 +416,20 @@ comment saying so (`deviations.md`). The `shared/` folder sits outside `src/`, s
 Public APIs stay interface-first — the interface is the contract consumers depend on. Where implementers benefit from guidance, also ship a **public `abstract` base class that explicitly implements the interface** and forwards each member to a strongly-typed `abstract`/`virtual` member:
 
 ```csharp
-public interface IConnectionListener
+public interface IMultiplexedConnection : IConnection
 {
-    ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default);
+    ValueTask<IMultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default);
 }
 
-public abstract class ConnectionListener : IConnectionListener
+public abstract class MultiplexedConnection : Connection, IMultiplexedConnection
 {
-    // Richer concrete-typed member guides the implementer; declared public so
-    // holders of the concrete type get the better signature without casting.
-    public abstract ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default);
+    public abstract ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default);
 
-    async ValueTask<IConnection> IConnectionListener.AcceptAsync(CancellationToken cancellationToken)
-        => await AcceptAsync(cancellationToken).ConfigureAwait(false);
+    async ValueTask<IMultiplexedConnectionStream> IMultiplexedConnection.AcceptStreamAsync(CancellationToken cancellationToken)
+        => await AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
 }
 
-internal sealed class TcpConnectionListener : ConnectionListener { /* ... */ }
+internal sealed class QuicMultiplexedConnection : MultiplexedConnection { /* ... */ }
 ```
 
 The interface remains the canonical public surface; concrete types derive from the base and stay `internal` where possible. Use the explicit-implementation forwarding only where the base can offer a richer, concrete-typed member; members without a richer counterpart are declared `public`/`protected abstract` directly.

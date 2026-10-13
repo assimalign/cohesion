@@ -149,7 +149,7 @@ public class HttpReceivedFieldSyntaxTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
 
         // Act
-        Connection malformed = await peer.OpenRequestStreamAsync();
+        IDuplexConnection malformed = await peer.OpenRequestStreamAsync();
         await malformed.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "GET"), (":scheme", "https"), (":path", "/malformed"), (":authority", "a"), (name, value)));
         malformed.Output.Complete();
@@ -169,7 +169,7 @@ public class HttpReceivedFieldSyntaxTests
             .ToArray();
 
         // Act
-        Connection malformed = await peer.OpenRequestStreamAsync();
+        IDuplexConnection malformed = await peer.OpenRequestStreamAsync();
         await malformed.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(fields));
         malformed.Output.Complete();
 
@@ -272,9 +272,9 @@ public class HttpReceivedFieldSyntaxTests
     /// exchange dispatched, that <paramref name="malformed"/> alone was reset with <c>H3_MESSAGE_ERROR</c>,
     /// and that the connection is still open.
     /// </summary>
-    private static async Task ShouldResetHttp3StreamBeforeDispatchAsync(Http3InMemoryPeer peer, Connection malformed)
+    private static async Task ShouldResetHttp3StreamBeforeDispatchAsync(Http3InMemoryPeer peer, IDuplexConnection malformed)
     {
-        Connection sibling = await peer.OpenRequestStreamAsync();
+        IDuplexConnection sibling = await peer.OpenRequestStreamAsync();
         await sibling.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/next", "https", "a"));
         sibling.Output.Complete();
 
@@ -312,7 +312,7 @@ public class HttpReceivedFieldSyntaxTests
         options.UseHttp3(new TestMultiplexedConnectionListener(new TestMultiplexedConnection(stream)), static _ => { });
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connection = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = connection.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();

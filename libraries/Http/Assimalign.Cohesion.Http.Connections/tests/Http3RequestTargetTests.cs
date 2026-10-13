@@ -155,7 +155,7 @@ public class Http3RequestTargetTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         // The malformed stream never became an exchange; the sibling is the first dispatched.
@@ -172,7 +172,7 @@ public class Http3RequestTargetTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return enumerator.Current;

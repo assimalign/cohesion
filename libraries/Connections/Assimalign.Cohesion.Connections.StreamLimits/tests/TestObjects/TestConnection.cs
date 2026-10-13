@@ -17,8 +17,8 @@ internal sealed class TestConnection : MultiplexedConnection
     public override ConnectionCapabilities Capabilities => default;
     public override ConnectionState State => _state;
     public override CancellationToken ConnectionClosed => _closedSource.Token;
-    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public override ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public override void Abort(Exception? reason = null)
     {
         _state = ConnectionState.Aborted;

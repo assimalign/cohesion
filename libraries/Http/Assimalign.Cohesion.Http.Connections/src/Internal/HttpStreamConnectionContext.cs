@@ -7,12 +7,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Shared base for HTTP connection contexts that parse a single reliable, ordered byte
-/// stream (HTTP/1.1 and HTTP/2). The wrapped <see cref="IConnection"/> is the duplex pipe;
+/// stream (HTTP/1.1 and HTTP/2). The wrapped <see cref="IDuplexConnection"/> is the duplex pipe;
 /// the <see cref="Stream"/> adapter is created once over it for the stream-based parsers.
 /// </summary>
 internal abstract class HttpStreamConnectionContext : HttpConnectionContext
 {
-    protected HttpStreamConnectionContext(IConnection connection, bool isSecure)
+    protected HttpStreamConnectionContext(IDuplexConnection connection, bool isSecure)
     {
         Connection = connection;
         Stream = connection.AsStream();
@@ -23,7 +23,7 @@ internal abstract class HttpStreamConnectionContext : HttpConnectionContext
     }
 
     protected bool IsSecure { get; }
-    protected IConnection Connection { get; }
+    protected IDuplexConnection Connection { get; }
     protected Stream Stream { get; }
     protected HttpConnectionInfo ConnectionInfo { get; }
 

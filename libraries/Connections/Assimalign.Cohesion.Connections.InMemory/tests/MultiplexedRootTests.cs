@@ -65,8 +65,8 @@ public class MultiplexedRootTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream receiver = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream receiver = await server.AcceptStreamAsync(cancellation.Token);
             if (alreadyResetWrite)
             {
                 sender.DirectionalAbort.ShouldNotBeNull().AbortWrite(17);
@@ -103,8 +103,8 @@ public class MultiplexedRootTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream receiver = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream receiver = await server.AcceptStreamAsync(cancellation.Token);
             await sender.DisposeAsync();
 
             // Act
@@ -130,8 +130,8 @@ public class MultiplexedRootTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream receiver = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream receiver = await server.AcceptStreamAsync(cancellation.Token);
             receiver.IsInputCompleted.ShouldBeFalse();
             await sender.Output.WriteAsync(new byte[] { 1 }, cancellation.Token);
 
@@ -161,8 +161,8 @@ public class MultiplexedRootTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream receiver = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream receiver = await server.AcceptStreamAsync(cancellation.Token);
             if (completeInputFirst)
             {
                 receiver.Input.Complete();
@@ -196,8 +196,8 @@ public class MultiplexedRootTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream receiver = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream sender = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream receiver = await server.AcceptStreamAsync(cancellation.Token);
             InvalidOperationException failure = new("The local reader failed");
 
             // Act
@@ -228,7 +228,7 @@ public class MultiplexedRootTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream stream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream stream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
 
             // Act / Assert
             Should.Throw<ArgumentOutOfRangeException>(() => stream.Abort(code));

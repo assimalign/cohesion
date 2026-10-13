@@ -12,19 +12,36 @@ concerns.
 
 ## The Contract at a Glance
 
-Three channel shapes, each honest about its delivery model:
+All connections implement `IConnection`: identity, endpoints, capabilities, state, features,
+closure notification, abort and asynchronous disposal. It has no byte pipe. Only its duplex
+branch exposes bytes; multiplexed and datagram roots express their own data planes.
+The interfaces and guided bases follow the same inheritance tree:
+
+```mermaid
+classDiagram
+    IConnection <|-- IDuplexConnection
+    IConnection <|-- IMultiplexedConnection
+    IConnection <|-- IDatagramConnection
+    IDuplexConnection <|-- IMultiplexedConnectionStream
+    Connection <|-- DuplexConnection
+    Connection <|-- MultiplexedConnection
+    Connection <|-- DatagramConnection
+    DuplexConnection <|-- MultiplexedConnectionStream
+```
+
+Three data-plane shapes, each honest about its delivery model:
 
 | Shape | Contract | Data plane |
 |---|---|---|
-| Single stream | `IConnection` (+ `IConnectionListener` / `IConnectionFactory`) | **is** a duplex pipe (`IConnection : IDuplexPipe`) |
-| Multiplexed | `IMultiplexedConnection` (+ listener/factory) | **yields** streams, each an `IMultiplexedStream : IConnection` |
+| Single stream | `IDuplexConnection` (+ `IDuplexConnectionListener` / `IDuplexConnectionFactory`) | **is** a duplex pipe (`IDuplexConnection : IDuplexPipe`) |
+| Multiplexed | `IMultiplexedConnection` (+ listener/factory) | **yields** streams, each an `IMultiplexedConnectionStream : IDuplexConnection` |
 | Datagram | `IDatagramConnection` | **speaks** discrete messages; no pipe |
 
 One generic composition unit:
 
-- `IConnectionLayer` — a connection-to-connection arrow (`UpgradeAsync(IConnection) → IConnection`),
+- `IConnectionLayer` — a connection-to-connection arrow (`UpgradeAsync(IDuplexConnection) → IDuplexConnection`),
   applied once per connection at establishment via `listener.Use(layer)` / `factory.Use(layer)`.
-  TLS (in `Assimalign.Cohesion.Security`) is the first implementation; proxy-protocol handling,
+  TLS (in `Assimalign.Cohesion.Connections.Security`) is the first implementation; proxy-protocol handling,
   traffic accounting, throttling, and connection-level compression are the same shape. A layer
   whose upgrade fails leaves the connection to its caller, which disposes it. The layered listener
   does so for a connection it accepted (see "Layered Listeners", below), and the layered factory
@@ -39,7 +56,7 @@ diagnostics-only.
 
 ## Connection features
 
-`IConnection`, `IMultiplexedConnection`, and `IDatagramConnection` expose an
+Every connection inherits from `IConnection` and exposes an
 `IConnectionFeatureCollection` through `Features`. A feature implements `IConnectionFeature` and
 has one stable, non-empty `Name`. `Set<TFeature>` installs it in that named slot, replacing any
 feature with the same ordinal, case-sensitive name; null features and null or empty names throw.
@@ -59,8 +76,8 @@ lock, and an enumerator retains the local snapshot it started with. Concurrent c
 invalidate a reader; a traversal across independently changing layers is not one atomic snapshot.
 Features themselves own the thread safety of their values.
 
-`Connection`, `MultiplexedConnection`, and `DatagramConnection` create no collection until the
-first `Features` access. They resolve protected `InnerFeatures`, construct the collection, and call
+`Connection` owns the feature plumbing once; every derived base inherits it. It creates no collection until the
+first `Features` access. Its initializer resolves protected `InnerFeatures`, constructs the collection, and calls
 protected `ConfigureFeatures` exactly once before publishing it with `Interlocked.CompareExchange`.
 Concurrent first readers wait for the configured collection; a failed configuration is remembered
 and rethrown rather than retried or partially published. The bases do not implement the collection.
@@ -81,8 +98,8 @@ flowchart LR
 
 | Package | Contract and pinned name | Access |
 |---|---|---|
-| `Assimalign.Cohesion.Connections.Tls` | `ITlsConnectionInfo`, `"Tls"` | `Tls` on a stream or multiplexed connection |
-| `Assimalign.Cohesion.Connections.StreamAbort` | `IMultiplexedStreamAbort`, `"StreamAbort"` | `DirectionalAbort` on `IMultiplexedStream` |
+| `Assimalign.Cohesion.Connections.Tls` | `ITlsConnectionInfo`, `"Tls"` | `Tls` on `IConnection`, including HTTP wrappers |
+| `Assimalign.Cohesion.Connections.StreamAbort` | `IMultiplexedStreamAbort`, `"StreamAbort"` | `DirectionalAbort` on `IMultiplexedConnectionStream` |
 | `Assimalign.Cohesion.Connections.StreamLimits` | `IMultiplexedConnectionStreamLimits`, `"StreamLimits"` | `StreamLimits` on a multiplexed connection |
 
 A byte-rewriting layer removes any inherited capability whose behavior it invalidates. TLS facts
@@ -91,7 +108,7 @@ once per connection or stream and cache it. `ConnectionCapabilities` remains the
 description of a transport class and does not move into this collection.
 
 **Breaking change against 10.0.0-preview.1 (owner decisions 15 and 56, #1452):** adding `Features`
-to the three root interfaces breaks direct implementers. Deriving from the guided bases supplies
+to the root interface breaks direct implementers. Deriving from the guided bases supplies
 the implementation. The three optional contracts were added after preview.1, so moving them into
 feature packages breaks no released API. The multiplexed root changes below complete the migration.
 
@@ -111,13 +128,13 @@ really had, throwing at runtime on mismatch. An abstraction whose every use is a
 followed by a type test is not an abstraction; the downcast targets were the real contract. This
 design promotes them into the type system:
 
-- **Direction is structural.** Servers are `IConnectionListener` (accept); clients are
-  `IConnectionFactory` (connect). The old `TransportKind` flag is gone — handing a client where a
+- **Direction is structural.** Servers are `IDuplexConnectionListener` (accept); clients are
+  `IDuplexConnectionFactory` (connect). The old `TransportKind` flag is gone — handing a client where a
   server is required is now a compile error, not a runtime check. Note that direction is a
   property of *establishment only*: once produced, inbound and outbound connections are
-  indistinguishable `IConnection`s (a BitTorrent node, which simultaneously listens and dials and
+  indistinguishable `IDuplexConnection`s (a BitTorrent node, which simultaneously listens and dials and
   runs one wire protocol over both, is the canonical demonstration).
-- **Stream multiplicity is structural.** HTTP/1.1 and HTTP/2 take an `IConnectionListener`;
+- **Stream multiplicity is structural.** HTTP/1.1 and HTTP/2 take an `IDuplexConnectionListener`;
   HTTP/3 takes an `IMultiplexedConnectionListener`. The old runtime switch became parameter types.
 - **Datagrams are a separate shape.** The old model forced UDP datagrams through a byte
   `Pipe`, erasing message boundaries — the one property UDP guarantees. `IDatagramConnection`
@@ -139,7 +156,7 @@ drivers compile in — while each driver reports its own diagnostics through an 
 source. Transports are
 configuration; connections are runtime. The naming rule
 follows: every type and package is named for the connection domain — the unit you consume
-(`IConnection`), its producers (`IConnectionListener`/`IConnectionFactory`), its description
+(`IDuplexConnection`), its producers (`IDuplexConnectionListener`/`IDuplexConnectionFactory`), its description
 (`ConnectionCapabilities`/`ConnectionProtocol`/`ConnectionDelivery`/`ConnectionSecurity`), and its
 diagnostics correlation (`ListenerId`, stamped only on listener-produced connections —
 factory-dialed connections carry none). No type or assembly carries the word "transport", because
@@ -171,10 +188,10 @@ nominal layers:
 
 | OSI | Here | Arrow shape |
 |---|---|---|
-| L4 | TCP/UDP drivers | origin → `IConnection` / `IDatagramConnection` |
-| L5 (sessions/mux) | QUIC streams; any future stream-mux layer | `IConnection` ⇄ `IMultiplexedConnection`; streams are `IMultiplexedStream : IConnection` (the recursion) |
-| L6 (TLS, compression) | `IConnectionLayer` | `IConnection → IConnection` |
-| L7 | HTTP, AMQP | consume `IConnection`, produce protocol sessions |
+| L4 | TCP/UDP drivers | origin → `IDuplexConnection` / `IDatagramConnection` |
+| L5 (sessions/mux) | QUIC streams; any future stream-mux layer | `IDuplexConnection` ⇄ `IMultiplexedConnection`; streams are `IMultiplexedConnectionStream : IDuplexConnection` (the recursion) |
+| L6 (TLS, compression) | `IConnectionLayer` | `IDuplexConnection → IDuplexConnection` |
+| L7 | HTTP, AMQP | consume `IDuplexConnection`, produce protocol sessions |
 | L1–L3 | the operating system | below the framework boundary |
 
 Two properties of the algebra matter:
@@ -185,13 +202,13 @@ Two properties of the algebra matter:
 2. **The recursion is real.** L4 itself is an arrow: TCP is, literally, a layer that turns
    unreliable IP datagrams into a reliable ordered stream, and QUIC turns UDP datagrams into a
    multiplexed secure stream bundle. A userspace protocol of the same kind (µTP, reliable-UDP
-   variants) would be implemented as `IDatagramConnection → IConnection` and every consumer above
+   variants) would be implemented as `IDatagramConnection → IDuplexConnection` and every consumer above
    it — TLS layer, HTTP, AMQP — would compose unchanged, because they bind to shapes, not
    protocols. Likewise DTLS is `IDatagramConnection → IDatagramConnection`, and tunnels are
-   `IConnection → IDatagramConnection`. This is the recursive-layer insight (cf. RINA): layers
+   `IDuplexConnection → IDatagramConnection`. This is the recursive-layer insight (cf. RINA): layers
    differ in scope and policy, not in kind, and the recurring unit is the connection.
 
-### Why `IConnection : IDuplexPipe` (the flattened data plane)
+### Why `IDuplexConnection : IDuplexPipe` (the flattened data plane)
 
 Earlier drafts gave the connection a `Transport` property carrying an `IDuplexPipe` (and the
 pre-redesign code wrapped the pipe in a bespoke `ITransportConnectionPipe`). Both were removed
@@ -258,7 +275,7 @@ TLS version, and cipher suite. `ITlsConnectionInfo`, owned by
 that carries it. A connection that terminates TLS registers it under `ITlsConnectionInfo.FeatureName`,
 and a consumer reads the `Tls` extension property on the connection it holds:
 
-- the secured `IConnection` the TLS layer returns (`Assimalign.Cohesion.Connections.Security`),
+- the secured `IDuplexConnection` the TLS layer returns (`Assimalign.Cohesion.Connections.Security`),
   which captures the values once its handshake completes;
 - a multiplexed connection whose transport is TLS itself (QUIC, RFC 9001).
 
@@ -312,24 +329,24 @@ SCTP's message streams have no individual close and belong to the datagram shape
 wins. Drivers validate their own code range, always rejecting negative codes. QUIC accepts 0 through
 2^62 - 1; a transport without close codes closes as `Abort(reason)` does.
 
-`IMultiplexedStream : IConnection` owns the whole-stream `Abort(code, reason)` and
+`IMultiplexedConnectionStream : IDuplexConnection` owns the whole-stream `Abort(code, reason)` and
 `IsInputCompleted`. The reset ends both directions, carrying the code where supported, and then ends
 the lifecycle. Each direction preserves its first end signal. HTTP/3 resets a stream with one root
-call. Per-direction aborts remain `DirectionalAbort` on `IMultiplexedStream`; cumulative stream
+call. Per-direction aborts remain `DirectionalAbort` on `IMultiplexedConnectionStream`; cumulative stream
 allowance remains `StreamLimits` on `IMultiplexedConnection`.
 
 **Breaking changes against 10.0.0-preview.1 (owner decisions 15 and 56):**
 
-- `AcceptStreamAsync` and `OpenStreamAsync` now return `ValueTask<IMultiplexedStream>` instead of
+- `AcceptStreamAsync` and `OpenStreamAsync` now return `ValueTask<IMultiplexedConnectionStream>` instead of
   `ValueTask<IConnection>`. Implementers and binaries break; a caller awaiting and assigning to
   `IConnection` still compiles.
-- The guided base returns `ValueTask<MultiplexedStream>` instead of `ValueTask<Connection>`.
+- The guided base returns `ValueTask<MultiplexedConnectionStream>` instead of `ValueTask<Connection>`.
 - `Abort(long, Exception?)` is required on `IMultiplexedConnection` and abstract on its guided base,
   breaking implementers and subclasses.
 - The removed coded-close and input-completion facets, and the narrowed `DirectionalAbort`
   accessor, postdate preview.1 and break no released API.
 
-### Observed input completion: `IMultiplexedStream.IsInputCompleted` (#1427, #1453)
+### Observed input completion: `IMultiplexedConnectionStream.IsInputCompleted` (#1427, #1453)
 
 Every surveyed byte-stream multiplexer has a half-close. The root reports a clean transport end
 once every received byte has been delivered to `Input`; it neither reads nor waits. A conservative
@@ -365,7 +382,7 @@ reason exception, whose type belongs to the caller.
 
 | Contract | Member | QUIC frame |
 |---|---|---|
-| `IMultiplexedStream` | `Abort(errorCode, reason)` | RESET_STREAM and STOP_SENDING |
+| `IMultiplexedConnectionStream` | `Abort(errorCode, reason)` | RESET_STREAM and STOP_SENDING |
 | `IMultiplexedConnection` | `Abort(errorCode, reason)` | CONNECTION_CLOSE |
 | `IMultiplexedStreamAbort` feature | `AbortRead(errorCode)` | STOP_SENDING |
 | `IMultiplexedStreamAbort` feature | `AbortWrite(errorCode)` | RESET_STREAM |
@@ -408,16 +425,129 @@ listener+factory in one node — mapped onto the algebra with no new shapes.
 
 ## Guided Abstract Bases
 
-Per the repository's interface-first-with-a-guided-abstract-base rule, each contract ships a
-public abstract base (`Connection`, `ConnectionListener`, `ConnectionFactory`,
-`MultiplexedConnection` and its listener/factory, `MultiplexedStream`, `DatagramConnection`). Where the base exposes a
-concrete-typed member — a listener's `AcceptAsync` returning `Connection` rather than
-`IConnection` — the typed member is declared `public` (so holders of the concrete type get the
-richer signature without casting) and the interface member is implemented explicitly, forwarding
-to it. Multiplexed stream accept/open members return `ValueTask<MultiplexedStream>` on the base
-and `ValueTask<IMultiplexedStream>` on the interface. `MultiplexedStream` inherits `Connection`
-(including its lazy features) and makes coded whole-stream abort and input completion abstract.
-The interface remains the canonical surface consumers depend on.
+The root `Connection` owns lazy features, `InnerFeatures`, and `ConfigureFeatures` once.
+`DuplexConnection` adds abstract `Input` and `Output`, with a virtual bidirectional `Direction`.
+`MultiplexedConnection` and `DatagramConnection` derive directly from the root;
+`MultiplexedConnectionStream` derives from the duplex base. Multiplexed accept/open members
+return `ValueTask<MultiplexedConnectionStream>` on the guided base and forward explicitly to
+`ValueTask<IMultiplexedConnectionStream>` on the interface.
+
+`ConnectionListener<TConnection>` implements both accept methods over one protected
+`AcceptCoreAsync`. Drivers implement that core and do no tracking. Its reference-type constraint
+lets one covariant `IReadOnlyCollection<TConnection>` object serve both collection properties.
+`DuplexConnectionListener` and `MultiplexedConnectionListener` add endpoint and capabilities.
+The interface `IConnectionListener<TConnection>` deliberately has no `out`: the return type
+`ValueTask<TConnection>` is invariant, so C# rejects a covariant declaration with CS1961.
+`IConnectionFactory<TConnection>` has the same restriction. Its guided generic base forwards
+both connect views through `ConnectCoreAsync`; the duplex and multiplexed factory bases name
+the connection kind.
+
+## Live listener connections
+
+`IConnectionListener` exposes `Id`, `Connections`, `BindAsync` and `AcceptAsync`.
+`IConnectionListener<TConnection>` narrows the collection and result with `new`; both accept
+methods drain the same queue. Transport listeners retain their `EndPoint` and `Capabilities`.
+A driver returns the listener id it uses in events; a layer returns its inner listener's id,
+because it represents the same bound endpoint. An HTTP aggregate has its own id.
+
+An accepted connection enters the live set before hand-out and leaves when `ConnectionClosed`
+fires. Tracking adds first and registers second, so an already-closed connection is removed by
+the token's immediate callback. The set uses a reference-keyed `ConcurrentDictionary`: expected
+constant-time add/remove, a nonthrowing weakly consistent enumeration, and an interlocked count.
+A concurrent count or traversal is an observation, not an atomic snapshot. Duplicate ids do not
+collapse distinct connection objects. A cached per-listener callback takes the connection itself
+as state, so tracking needs no per-connection closure or public tracking helper.
+
+The listener holds a **strong reference to every open connection it handed out**. An owner that
+drops an open connection without disposing it leaves that reference until the peer closes.
+This is the deliberate cost of a useful live view. Only the code that accepted the connection
+reads or writes it; enumeration gives observation, never competing I/O ownership. Disposing the
+listener releases its endpoint and unaccepted backlog, but never closes handed-out connections.
+Their owners dispose them. Layered listeners follow the same rule at each layer: an inner
+transport listener tracks the connection handed to its layer, and the outer listener tracks
+the upgraded connection handed to its caller. An HTTP listener similarly tracks its protocol
+wrapper. Each accepting listener therefore pays its own entry and registration; wrappers that
+share the transport closure token leave all of those views together.
+
+### TCP accept allocation measurement
+
+Measured on Windows Arm64 with .NET 10.0.12, Release, workstation GC, and TCP
+`IOQueueCount = 0`. The baseline is commit `e0b623246`. A one-off harness binds loopback
+port zero, warms two batches, then measures seven batches of 256 accepts. It connects each raw
+client socket before the measured interval and disposes all sockets/connections after the batch.
+The interval surrounds only `await listener.AcceptAsync(token)` and sums precise
+`GC.GetTotalAllocatedBytes(true)` deltas, so asynchronous receive/send pump allocations on other
+threads are included. EventSource listeners are disabled. These are whole-accept costs, not a
+microbenchmark of the collection alone.
+
+| Tree | Median bytes per accepted connection | Range across seven batches |
+| --- | ---: | ---: |
+| Baseline | 8,477.812 | 8,476.156–8,480.000 |
+| Unified hierarchy and live tracking | 8,580.375 | 8,573.500–8,582.562 |
+| Difference | +102.563 (+1.21%) | |
+
+The live set itself allocates one dictionary entry and one cancellation registration per
+connection; the callback is cached once per collection and its state is the connection itself.
+The baseline TCP driver already allocated a set entry, token registration and boxed
+(listener, connection) tuple. The new tracker removes that tuple and execution-context capture.
+There is no closure or per-connection tracking helper. A pending typed accept also needs
+an asynchronous continuation in the generic base so it can track the result before handing it
+out (synchronously completed accepts need no continuation box); a root-interface accept adds
+the return-type adaptation already required by invariant
+`ValueTask<T>`. TCP also retains shared pipe-pool ownership until accepted connections are
+disposed, and holds two pump-task references (two 8-byte fields on this runtime; object padding
+can also affect size) so disposal can await the pumps before releasing their pools. The reference-counted pool adds no
+per-connection lease allocation. These establishment costs buy centralized lifetime observation and independent
+listener/connection ownership; they add no work to per-byte I/O. Process-wide allocation noise
+means the measured difference is not an exact size attribution to any one object.
+
+## Why this, not that
+
+- A multiplexed connection inheriting a byte pipe would invent a byte stream it does not have.
+- An accept member on a root that some listeners cannot honor would make substitutability false.
+  Every listener instead returns `IConnection`, and typed listeners narrow that result.
+- Removing transport listener endpoints or capabilities would lose port-zero bind results,
+  HTTP/3 Alt-Svc port discovery, and registration-time capability validation.
+- A caller-chosen `AcceptAsync<T>()` lets a caller request a kind the listener cannot produce.
+  The listener declares its kind once.
+- A connection collection cannot replace HTTP's `EndPoints`: it is empty at server bind.
+- A separate identity-only connection interface duplicates the root; `IConnection` already
+  expresses the lifecycle all connection kinds share.
+
+## Breaking changes against 10.0.0-preview.1 (#1459)
+
+Every Connections package shipped in preview.1. These source and binary breaks are accepted on
+owner decision 15's terms:
+
+- `IConnection` and `Connection` no longer expose pipe members or `Direction`. Byte consumers
+  and subclasses use `IDuplexConnection` and `DuplexConnection`.
+- Multiplexed and datagram connections inherit the root. Datagram implementations now provide
+  `Id`, `State`, `ConnectionClosed` and `Abort`; their local endpoint is nullable.
+- Multiplexed streams use `IMultiplexedConnectionStream` and `MultiplexedConnectionStream`.
+  The current accept/open result types differ from preview.1's `IConnection` / `Connection`.
+- Listener and factory roots return `IConnection`; typed duplex/multiplexed interfaces narrow
+  the result. Listener implementations add `Id` and the live `Connections` view. Endpoint and
+  capability properties live on transport listener specializations, not the listener root.
+- The nongeneric listener/factory bases are replaced by generic bases and duplex specializations.
+  Subclasses implement the protected accept/connect core instead of overriding public accepts.
+  Guided and concrete listener/factory methods now return interface-typed
+  `ValueTask<IDuplexConnection>` or `ValueTask<IMultiplexedConnection>` instead of their
+  concrete connection bases. `ValueTask<T>` is invariant, so callers storing the old concrete
+  task type must update it.
+- `InMemoryConnectionPair.Create` returns `DuplexConnection` tuple elements instead of
+  `Connection`, preserving the pair's directly accessible pipe members.
+- Layer upgrades, `Use`, `UseTls`, and `AsStream` require duplex connections/producers.
+  Consumers passing only the root must declare the byte-oriented type they require.
+- Listener disposal no longer disposes accepted connections. Owners must release those connections.
+  Every connection now signals closure on abort and peer closure and by disposal completion.
+
+The feature-accessor cleanup affects APIs added after preview.1: `Tls` now has one root receiver,
+including HTTP connections, and loses its multiplexed overload; `DirectionalAbort` uses the
+renamed stream while `StreamLimits` stays multiplexed. These do not add a released-overload break.
+The existing feature and coded-abort breaks are detailed in their sections above. QUIC keeps at
+least one inbound unidirectional stream credit available so the runtime can observe idle peer
+closure, including when the configured inbound limits are zero; the QUIC DESIGN documents
+that wire-level behavior change. HTTP-specific API changes are recorded in Http.Connections' DESIGN.
 
 ## Lifecycle and Error Model
 
@@ -427,6 +557,11 @@ The interface remains the canonical surface consumers depend on.
   default for custom listeners that are pre-bound or own no external endpoint, while resource-owning
   drivers override it. `AcceptAsync` remains the connection-production operation, not the endpoint-
   acquisition signal.
+- `ConnectionClosed` fires on close, abort and peer closure, no later than `DisposeAsync` completing.
+  This guarantee applies to TCP, NamedPipes, in-memory connections and streams, QUIC connections
+  and streams, UDP, TLS layers, and HTTP wrappers. A clean multiplexed half-close alone does not
+  close the stream; peer abandonment does. UDP has no wire-level peer-close indication and
+  therefore reports local closure or transport failure, not a fictional remote session.
 - A connection is **live when produced** — there is no separate open step and no
   connection-versus-context duality. Read and write immediately.
 - **A listener contains each connection's failure.** `AcceptAsync` (on both listener shapes)
@@ -579,7 +714,7 @@ compatible.
   are **compiled into** each driver, `ListenerId` is public API, and diagnostics are each
   driver's own internal event source. There is no separate toolbox assembly and no
   `InternalsVisibleTo` between shipped assemblies.
-- **`Assimalign.Cohesion.Security`** — TLS as `TlsConnectionLayer` / `UpgradeToTlsAsync`.
+- **`Assimalign.Cohesion.Connections.Security`** — TLS as `TlsConnectionLayer` / `UpgradeToTlsAsync`.
 - **`Assimalign.Cohesion.Http.Connections` / `Assimalign.Cohesion.Amqp.Transports`** — application
   protocols consuming these contracts by capability.
 

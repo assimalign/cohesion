@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Http.Connections;
 
 /// <summary>
 /// Configuration for an HTTP/2 listener registered through
-/// <see cref="HttpConnectionListenerOptions.UseHttp2(Assimalign.Cohesion.Connections.IConnectionListener, Action{Http2ConnectionListenerOptions})"/>.
+/// <see cref="HttpConnectionListenerOptions.UseHttp2(Assimalign.Cohesion.Connections.IDuplexConnectionListener, Action{Http2ConnectionListenerOptions})"/>.
 /// HTTP/2-specific tunables live here — rather than on the shared
 /// <see cref="HttpConnectionListenerOptions"/> — so each protocol version owns its own
 /// configuration surface, captured per registration.

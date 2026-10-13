@@ -54,7 +54,7 @@ public class Http3ConnectionTimeoutTests
             http3.Limits.KeepAliveTimeout = _shortTimeout;
             http3.Limits.RequestHeadersTimeout = _longTimeout;
         });
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/slow", "https", "a"));
         request.Output.Complete();
         IHttpContext exchange = await peer.NextContextAsync();
@@ -83,7 +83,7 @@ public class Http3ConnectionTimeoutTests
             http3.Limits.KeepAliveTimeout = _shortTimeout;
             http3.Limits.RequestHeadersTimeout = _longTimeout;
         });
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/echo", "https", "a"));
         request.Output.Complete();
         IHttpContext exchange = await peer.NextContextAsync();
@@ -121,8 +121,8 @@ public class Http3ConnectionTimeoutTests
         Task<IHttpContext> dispatch = peer.NextContextAsync();
 
         // Act — one stream sends nothing, another only the first octets of its HEADERS frame.
-        Connection silent = await peer.OpenRequestStreamAsync();
-        Connection trickled = await peer.OpenRequestStreamAsync();
+        IDuplexConnection silent = await peer.OpenRequestStreamAsync();
+        IDuplexConnection trickled = await peer.OpenRequestStreamAsync();
         byte[] head = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/trickled", "https", "a");
         await trickled.Output.WriteAsync(head[..3]);
 
@@ -133,7 +133,7 @@ public class Http3ConnectionTimeoutTests
         trickledReset.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestRejected);
 
         // The connection keeps serving.
-        Connection ready = await peer.OpenRequestStreamAsync();
+        IDuplexConnection ready = await peer.OpenRequestStreamAsync();
         await ready.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ready", "https", "a"));
         ready.Output.Complete();
         (await dispatch).Request.Path.Value.ShouldBe("/ready");
@@ -154,7 +154,7 @@ public class Http3ConnectionTimeoutTests
         // Act — at 0.8 × the keep-alive, a request stream whose head lacks :method, which the server resets
         // as malformed (RFC 9114 §4.1.2) without dispatching it.
         await Task.Delay(keepAlive * 0.8);
-        Connection malformed = await peer.OpenRequestStreamAsync();
+        IDuplexConnection malformed = await peer.OpenRequestStreamAsync();
         await malformed.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw((":scheme", "https"), (":path", "/malformed"), (":authority", "a")));
         malformed.Output.Complete();
         Stopwatch sinceMalformed = Stopwatch.StartNew();

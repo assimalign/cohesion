@@ -20,8 +20,9 @@ internal sealed class UdpDatagramConnection : DatagramConnection
     private readonly EndPoint? _remoteEndPoint;
     private readonly EndPoint _receiveTemplate;
 
-    // IDatagramConnection has no identity of its own; this one exists only to correlate diagnostics.
-    private readonly ConnectionId _diagnosticId = ConnectionId.New();
+    private readonly ConnectionId _id = ConnectionId.New();
+    private readonly CancellationTokenSource _closed = new();
+    private int _state = (int)ConnectionState.Open;
     private int _disposed;
 
     /// <summary>
@@ -47,11 +48,23 @@ internal sealed class UdpDatagramConnection : DatagramConnection
             _ => throw new NotSupportedException($"The UDP datagram connection only supports IPv4 and IPv6 sockets; address family '{socket.AddressFamily}' is not supported.")
         };
 
-        UdpConnectionEventSource.Log.ConnectionOpened(_diagnosticId, localEndPoint, remoteEndPoint);
+        UdpConnectionEventSource.Log.ConnectionOpened(_id, localEndPoint, remoteEndPoint);
     }
 
     /// <inheritdoc />
-    public override EndPoint LocalEndPoint => _localEndPoint;
+    public override ConnectionId Id => _id;
+
+    /// <inheritdoc />
+    public override ConnectionState State => (ConnectionState)Volatile.Read(ref _state);
+
+    /// <inheritdoc />
+    public override CancellationToken ConnectionClosed => _closed.Token;
+
+    /// <inheritdoc />
+    public override void Abort(Exception? reason = null) => Close(ConnectionState.Aborted);
+
+    /// <inheritdoc />
+    public override EndPoint? LocalEndPoint => _localEndPoint;
 
     /// <inheritdoc />
     public override EndPoint? RemoteEndPoint => _remoteEndPoint;
@@ -104,14 +117,25 @@ internal sealed class UdpDatagramConnection : DatagramConnection
     /// <inheritdoc />
     public override ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        _socket.Dispose();
-        UdpConnectionEventSource.Log.ConnectionClosed(_diagnosticId);
-
+        Close(ConnectionState.Closed);
         return ValueTask.CompletedTask;
+    }
+
+    private void Close(ConnectionState state)
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            Volatile.Write(ref _state, (int)state);
+            _socket.Dispose();
+            UdpConnectionEventSource.Log.ConnectionClosed(_id);
+        }
+        try
+        {
+            _closed.Cancel();
+        }
+        catch (AggregateException)
+        {
+            // Observer failures cannot prevent transport teardown.
+        }
     }
 }

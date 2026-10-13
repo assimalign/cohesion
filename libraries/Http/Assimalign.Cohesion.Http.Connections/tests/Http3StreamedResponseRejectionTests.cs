@@ -32,7 +32,7 @@ public class Http3StreamedResponseRejectionTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             http3 => http3.Limits.MaxRequestBodySize = 16,
             static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
-        (Connection request, IHttpContext context) = await StartStreamedResponseAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await StartStreamedResponseAsync(peer);
 
         // Act — the body crosses the cap, the read fails, and the exchange is finalized.
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[64]));
@@ -51,7 +51,7 @@ public class Http3StreamedResponseRejectionTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             http3 => http3.Limits.MinRequestBodyDataRate = new HttpMinDataRate(bytesPerSecond: 100, gracePeriod: TimeSpan.FromMilliseconds(300)),
             static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
-        (Connection request, IHttpContext context) = await StartStreamedResponseAsync(peer);
+        (IDuplexConnection request, IHttpContext context) = await StartStreamedResponseAsync(peer);
 
         // Act — the peer sends none of the body, so the read fails once the grace period runs out.
         await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[128]).AsTask().WaitAsync(_timeout));
@@ -69,7 +69,7 @@ public class Http3StreamedResponseRejectionTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             http3 => http3.Limits.MaxRequestBodySize = 16,
             static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
-        (Connection request, IHttpContext context) = await StartStreamedResponseAsync(peer, HttpStatusCode.RequestEntityTooLarge);
+        (IDuplexConnection request, IHttpContext context) = await StartStreamedResponseAsync(peer, HttpStatusCode.RequestEntityTooLarge);
 
         // Act
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[64]));
@@ -83,11 +83,11 @@ public class Http3StreamedResponseRejectionTests
         Encoding.ASCII.GetString(frames[1].Payload).ShouldBe("partial");
     }
 
-    private static async Task<(Connection Request, IHttpContext Context)> StartStreamedResponseAsync(
+    private static async Task<(IDuplexConnection Request, IHttpContext Context)> StartStreamedResponseAsync(
         Http3InMemoryPeer peer,
         HttpStatusCode? statusCode = null)
     {
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
 

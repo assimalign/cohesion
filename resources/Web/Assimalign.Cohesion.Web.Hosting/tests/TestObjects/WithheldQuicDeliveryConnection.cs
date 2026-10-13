@@ -27,8 +27,8 @@ internal sealed class WithheldQuicDeliveryConnection : IHttpConnection
     private readonly QuicConnectionListener _listener;
     private readonly QuicConnection _client;
     private readonly QuicStream _clientStream;
-    private readonly MultiplexedConnection _connection;
-    private readonly Connection _stream;
+    private readonly IMultiplexedConnection _connection;
+    private readonly IDuplexConnection _stream;
     private readonly FakeHttpConnectionContext _context;
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _disposeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -41,8 +41,8 @@ internal sealed class WithheldQuicDeliveryConnection : IHttpConnection
         QuicConnectionListener listener,
         QuicConnection client,
         QuicStream clientStream,
-        MultiplexedConnection connection,
-        Connection stream,
+        IMultiplexedConnection connection,
+        IDuplexConnection stream,
         bool receiveEndsNaturally)
     {
         _listener = listener;
@@ -64,6 +64,16 @@ internal sealed class WithheldQuicDeliveryConnection : IHttpConnection
     public int GracefulCloseCount => _context.GracefulCloseCount;
 
     public ConnectionId Id => _connection.Id;
+
+    public HttpProtocol Protocol => HttpProtocol.Http30;
+
+    public EndPoint? LocalEndPoint => _connection.LocalEndPoint;
+
+    public EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
+
+    public ConnectionCapabilities Capabilities => _connection.Capabilities;
+
+    public IConnectionFeatureCollection Features => _connection.Features;
 
     public ConnectionState State => _connection.State;
 
@@ -90,11 +100,11 @@ internal sealed class WithheldQuicDeliveryConnection : IHttpConnection
 
         QuicConnection? client = null;
         QuicStream? clientStream = null;
-        MultiplexedConnection? connection = null;
+        IMultiplexedConnection? connection = null;
 
         try
         {
-            ValueTask<MultiplexedConnection> accepting = listener.AcceptAsync(cancellationToken);
+            ValueTask<IMultiplexedConnection> accepting = listener.AcceptAsync(cancellationToken);
             client = await QuicConnection.ConnectAsync(new QuicClientConnectionOptions
             {
                 RemoteEndPoint = listener.EndPoint,
@@ -119,7 +129,7 @@ internal sealed class WithheldQuicDeliveryConnection : IHttpConnection
             // direction and consume its byte, but leave the client's response direction unread.
             clientStream = await client.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken);
             await clientStream.WriteAsync(new byte[] { 1 }, completeWrites: true, cancellationToken);
-            Connection stream = await connection.AcceptStreamAsync(cancellationToken);
+            IDuplexConnection stream = await connection.AcceptStreamAsync(cancellationToken);
             ReadResult request = await stream.Input.ReadAsync(cancellationToken);
             stream.Input.AdvanceTo(request.Buffer.End);
 

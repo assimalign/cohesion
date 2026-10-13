@@ -412,3 +412,5 @@ request from a trusted proxy address: forwarded `https` passes redirection
 without a loop and receives HSTS, including when the proxy dials `localhost`;
 forwarded `http` redirects to the forwarded host; and forwarding headers are
 ignored both without the middleware and from an untrusted peer.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

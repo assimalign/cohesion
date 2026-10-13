@@ -193,7 +193,7 @@ public class HttpExchangeFeatureCapacityTests
 
         try
         {
-            received.Connection = await received.Listener.AcceptOrListenAsync();
+            received.Connection = await received.Listener.AcceptAsync();
             received.Context = await received.Connection.OpenAsync();
             received.Exchanges = received.Context.ReceiveAsync().GetAsyncEnumerator();
             (await received.Exchanges.MoveNextAsync()).ShouldBeTrue();

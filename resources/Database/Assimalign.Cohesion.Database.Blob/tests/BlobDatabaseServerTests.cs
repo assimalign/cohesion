@@ -37,7 +37,7 @@ public sealed class BlobDatabaseServerTests
         await using var remoteServer = BlobDatabaseServer.Create(otherEngine, new() { Listener = remoteListener });
         await server.StartAsync(token);
         await remoteServer.StartAsync(token);
-        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using IDuplexConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
         await HandshakeAsync(channel, "own", token);
         server.Context.Sessions.Single().DatabaseSession!.Database.Name.ShouldBe(own.Name);
@@ -76,7 +76,7 @@ public sealed class BlobDatabaseServerTests
         var authenticator = new RejectAuthenticator();
         await using var server = BlobDatabaseServer.Create(engine, new() { Listener = listener, Authenticator = authenticator });
         await server.StartAsync(token);
-        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using IDuplexConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
         await WriteAsync(channel, ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "objects", "alice").Encode(), token);
         (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Authenticate);
@@ -102,10 +102,10 @@ public sealed class BlobDatabaseServerTests
             Listener = listener, MaxSessions = 1, IdleTimeout = TimeSpan.FromMilliseconds(300)
         });
         await server.StartAsync(token);
-        await using IConnection first = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using IDuplexConnection first = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(first.AsStream(), BlobProtocol.Family);
         await HandshakeAsync(channel, "objects", token);
-        await using IConnection second = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using IDuplexConnection second = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var rejected = new ProtocolChannel(second.AsStream(), BlobProtocol.Family);
         ProtocolErrorMessage.Decode((await ReadAsync(rejected, token)).Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
         ProtocolErrorMessage idle = ProtocolErrorMessage.Decode((await ReadAsync(channel, token)).Payload.Span);
@@ -128,7 +128,7 @@ public sealed class BlobDatabaseServerTests
             Listener = listener, AuthenticationTimeout = TimeSpan.FromMilliseconds(100)
         });
         await server.StartAsync(deadline.Token);
-        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, deadline.Token);
+        await using IDuplexConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, deadline.Token);
         await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
         (await channel.Reader.ReadFrameAsync(deadline.Token)).ShouldBeNull();
         await server.StopAsync(deadline.Token);
@@ -152,7 +152,7 @@ public sealed class BlobDatabaseServerTests
             Listener = listener, ShutdownDrainTimeout = finish ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(100)
         });
         await server.StartAsync(token);
-        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using IDuplexConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
         await HandshakeAsync(channel, "objects", token);
         await WriteAsync(channel, BlobProtocolMessageType.Write, new BlobWriteMessage("files", "item").Encode(), token);
@@ -198,10 +198,10 @@ public sealed class BlobDatabaseServerTests
             Listener = listener, MaxSessions = 1, ShutdownDrainTimeout = TimeSpan.FromMilliseconds(100)
         });
         await server.StartAsync(token);
-        await using IConnection first = await inner.CreateFactory().ConnectAsync(inner.EndPoint, token);
+        await using IDuplexConnection first = await inner.CreateFactory().ConnectAsync(inner.EndPoint, token);
         await using var channel = new ProtocolChannel(first.AsStream(), BlobProtocol.Family);
         await HandshakeAsync(channel, "objects", token);
-        await using IConnection second = await inner.CreateFactory().ConnectAsync(inner.EndPoint, token);
+        await using IDuplexConnection second = await inner.CreateFactory().ConnectAsync(inner.EndPoint, token);
         await listener.Blocked.Task.WaitAsync(token);
         await server.StopAsync(token).WaitAsync(token);
         listener.Rejected!.WasAborted.ShouldBeTrue();
@@ -224,7 +224,7 @@ public sealed class BlobDatabaseServerTests
             Listener = listener, ShutdownDrainTimeout = TimeSpan.FromMilliseconds(100)
         });
         await server.StartAsync(token);
-        await using IConnection connection = await inner.CreateFactory().ConnectAsync(inner.EndPoint, token);
+        await using IDuplexConnection connection = await inner.CreateFactory().ConnectAsync(inner.EndPoint, token);
         await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
         await HandshakeAsync(channel, "objects", token);
         await WriteAsync(channel, BlobProtocolMessageType.Write, new BlobWriteMessage("files", "partial").Encode(), token);
@@ -273,7 +273,7 @@ public sealed class BlobDatabaseServerTests
         return result.ToArray();
     }
 
-    private sealed class FaultingAcceptListener : IConnectionListener
+    private sealed class FaultingAcceptListener : DuplexConnectionListener
     {
         private readonly InMemoryConnectionListener _inner;
         private bool _accepted;
@@ -286,19 +286,20 @@ public sealed class BlobDatabaseServerTests
             _inner = inner;
         }
         internal bool WasDisposed { get; private set; }
-        public EndPoint EndPoint => _inner.EndPoint;
-        public ConnectionCapabilities Capabilities => _inner.Capabilities;
-        public ValueTask BindAsync(CancellationToken cancellationToken = default) => _inner.BindAsync(cancellationToken);
-        public async ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default)
+        public override ListenerId Id => _inner.Id;
+        public override EndPoint EndPoint => _inner.EndPoint;
+        public override ConnectionCapabilities Capabilities => _inner.Capabilities;
+        public override ValueTask BindAsync(CancellationToken cancellationToken = default) => _inner.BindAsync(cancellationToken);
+        protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
         {
             if (_accepted) { throw new IOException("Injected accept failure."); }
             _accepted = true;
             return await _inner.AcceptAsync(cancellationToken);
         }
-        public async ValueTask DisposeAsync() { WasDisposed = true; await _inner.DisposeAsync(); }
+        public override async ValueTask DisposeAsync() { WasDisposed = true; await _inner.DisposeAsync(); }
     }
 
-    private sealed class BlockingRejectionListener : IConnectionListener
+    private sealed class BlockingRejectionListener : DuplexConnectionListener
     {
         private readonly InMemoryConnectionListener _inner;
         private int _accepted;
@@ -312,26 +313,27 @@ public sealed class BlobDatabaseServerTests
         }
         internal TaskCompletionSource Blocked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal BlockedConnection? Rejected { get; private set; }
-        public EndPoint EndPoint => _inner.EndPoint;
-        public ConnectionCapabilities Capabilities => _inner.Capabilities;
-        public ValueTask BindAsync(CancellationToken cancellationToken = default) => _inner.BindAsync(cancellationToken);
-        public async ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default)
+        public override ListenerId Id => _inner.Id;
+        public override EndPoint EndPoint => _inner.EndPoint;
+        public override ConnectionCapabilities Capabilities => _inner.Capabilities;
+        public override ValueTask BindAsync(CancellationToken cancellationToken = default) => _inner.BindAsync(cancellationToken);
+        protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
         {
-            IConnection connection = await _inner.AcceptAsync(cancellationToken);
+            IDuplexConnection connection = await _inner.AcceptAsync(cancellationToken);
             return ++_accepted == 1 ? connection : Rejected = new BlockedConnection(connection, Blocked);
         }
-        public ValueTask DisposeAsync() => _inner.DisposeAsync();
+        public override ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
-    private sealed class BlockedConnection : IConnection
+    private sealed class BlockedConnection : IDuplexConnection
     {
-        private readonly IConnection _inner;
+        private readonly IDuplexConnection _inner;
         /// <summary>
         /// Initializes a new instance of the <see cref="BlockedConnection"/> class.
         /// </summary>
         /// <param name="inner">The connection being wrapped.</param>
         /// <param name="blocked">The completion source signaled when a flush on the output blocks.</param>
-        public BlockedConnection(IConnection inner, TaskCompletionSource blocked)
+        public BlockedConnection(IDuplexConnection inner, TaskCompletionSource blocked)
         {
             _inner = inner;
             Output = new BlockedWriter(inner.Output, blocked);
@@ -344,6 +346,7 @@ public sealed class BlobDatabaseServerTests
         public ConnectionDirection Direction => _inner.Direction;
         public ConnectionCapabilities Capabilities => _inner.Capabilities;
         public ConnectionState State => _inner.State;
+        public IConnectionFeatureCollection Features => _inner.Features;
         public CancellationToken ConnectionClosed => _inner.ConnectionClosed;
         public PipeReader Input => _inner.Input;
         public PipeWriter Output { get; }

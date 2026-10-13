@@ -48,7 +48,7 @@ internal static class QuicTestClient
     /// </summary>
     public static async Task ConnectRefusedAsync(EndPoint endPoint, CancellationToken cancellationToken)
     {
-        MultiplexedConnection refused;
+        IMultiplexedConnection refused;
 
         try
         {
@@ -66,7 +66,7 @@ internal static class QuicTestClient
         {
             try
             {
-                await using Connection stream = await refused.AcceptStreamAsync(cancellationToken);
+                await using IDuplexConnection stream = await refused.AcceptStreamAsync(cancellationToken);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {

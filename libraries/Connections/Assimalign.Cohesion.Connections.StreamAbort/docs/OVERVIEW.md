@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Connections.StreamAbort
 
-Abandon one stream direction with an application error code. The package owns `IMultiplexedStreamAbort` and the `DirectionalAbort` extension property on `IMultiplexedStream` in the `Assimalign.Cohesion.Connections` namespace.
+Abandon one stream direction with an application error code. The package owns `IMultiplexedStreamAbort` and the `DirectionalAbort` extension property on `IMultiplexedConnectionStream` in the `Assimalign.Cohesion.Connections` namespace.
 
 ## Usage
 

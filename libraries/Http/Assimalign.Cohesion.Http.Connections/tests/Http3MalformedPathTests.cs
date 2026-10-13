@@ -41,11 +41,11 @@ public class Http3MalformedPathTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
 
         // Act — the first request stream carries the malformed :path; the second is an ordinary sibling.
-        Connection malformed = await peer.OpenRequestStreamAsync();
+        IDuplexConnection malformed = await peer.OpenRequestStreamAsync();
         await malformed.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", rawPath, "https", "a"));
         malformed.Output.Complete();
 
-        Connection sibling = await peer.OpenRequestStreamAsync();
+        IDuplexConnection sibling = await peer.OpenRequestStreamAsync();
         await sibling.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ok", "https", "a"));
         sibling.Output.Complete();
 
@@ -66,7 +66,7 @@ public class Http3MalformedPathTests
 
         // … and the connection was not: it is still open and dispatches a new request stream.
         peer.Server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
-        Connection later = await peer.OpenRequestStreamAsync();
+        IDuplexConnection later = await peer.OpenRequestStreamAsync();
         await later.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/later", "https", "a"));
         later.Output.Complete();
         (await peer.NextContextAsync()).Request.Path.Value.ShouldBe("/later");
@@ -78,7 +78,7 @@ public class Http3MalformedPathTests
         // The per-stream rejection only changes how a failed decode is scoped — a legal target still
         // decodes exactly as on the other transports (%2e%2e to "..", %2F kept encoded).
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/static/%2e%2e/a%2Fb", "https", "a"));
         request.Output.Complete();
 

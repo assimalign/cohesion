@@ -59,9 +59,9 @@ public class TcpConnectionEventSourceTests
         TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
         await listener.BindAsync(cancellation.Token);
 
-        ValueTask<Connection> accept = listener.AcceptAsync(cancellation.Token);
-        Connection client = await new TcpConnectionFactory().ConnectAsync(listener.EndPoint, cancellation.Token);
-        Connection server = await accept;
+        ValueTask<IDuplexConnection> accept = listener.AcceptAsync(cancellation.Token);
+        IDuplexConnection client = await new TcpConnectionFactory().ConnectAsync(listener.EndPoint, cancellation.Token);
+        IDuplexConnection server = await accept;
         long currentWhileOpen = TcpConnectionEventSource.Log.CurrentConnections;
 
         // Act
@@ -122,11 +122,11 @@ public class TcpConnectionEventSourceTests
 
         // Act
         int resetConnectionsReturned = 0;
-        Connection? accepted = null;
+        IDuplexConnection? accepted = null;
 
         for (int i = 0; i <= resetClients && accepted is null; i++)
         {
-            Connection connection = await listener.AcceptAsync(cancellation.Token);
+            IDuplexConnection connection = await listener.AcceptAsync(cancellation.Token);
 
             if (connection.RemoteEndPoint is IPEndPoint remote && remote.Port == healthyPort)
             {
@@ -188,7 +188,7 @@ public class TcpConnectionEventSourceTests
         await client.ConnectAsync(listener.EndPoint, cancellation.Token);
 
         // Act
-        await using Connection server = await listener.AcceptAsync(cancellation.Token);
+        await using IDuplexConnection server = await listener.AcceptAsync(cancellation.Token);
 
         // Assert
         accept.Attempts.ShouldBe(4);
@@ -241,7 +241,7 @@ public class TcpConnectionEventSourceTests
         await client.ConnectAsync(listener.EndPoint, cancellation.Token);
 
         // Act
-        await using Connection server = await listener.AcceptAsync(cancellation.Token);
+        await using IDuplexConnection server = await listener.AcceptAsync(cancellation.Token);
 
         // Assert
         IReadOnlyList<EventWrittenEventArgs> events = recorder.Events;

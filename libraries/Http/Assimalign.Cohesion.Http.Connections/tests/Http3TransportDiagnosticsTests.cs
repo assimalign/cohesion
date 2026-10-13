@@ -42,7 +42,7 @@ public class Http3TransportDiagnosticsTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(transport), static http3 => http3.QPack.MaxFieldSectionSize = 256);
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync(timeout.Token)).OpenAsync(timeout.Token);
+        IHttpConnectionContext connection = await (await listener.AcceptAsync(timeout.Token)).OpenAsync(timeout.Token);
         await using IAsyncEnumerator<IHttpContext> receive = connection.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
         long count = source.RejectedRequests;
         long measured = meter.Count(rejectedRequests, "3", statusCode: 431);
@@ -74,7 +74,7 @@ public class Http3TransportDiagnosticsTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(transport));
         await using HttpConnectionListener listener = new(options);
-        Http3ConnectionContext connection = (await (await listener.AcceptOrListenAsync(timeout.Token)).OpenAsync(timeout.Token)).ShouldBeOfType<Http3ConnectionContext>();
+        Http3ConnectionContext connection = (await (await listener.AcceptAsync(timeout.Token)).OpenAsync(timeout.Token)).ShouldBeOfType<Http3ConnectionContext>();
         await using IAsyncEnumerator<IHttpContext> receive = connection.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
         long count = source.ConnectionErrors;
         long measured = meter.Count(protocolErrors, "3", errorType: "260", scope: "connection");
@@ -101,7 +101,7 @@ public class Http3TransportDiagnosticsTests
         using EventSourceRecorder events = new(source, EventLevel.Verbose);
         using TransportMeterRecorder meter = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "POST"), (":scheme", "https"), (":path", "/diagnostics-secret"),
             (":authority", "a"), ("content-length", "3")), timeout.Token);
@@ -141,7 +141,7 @@ public class Http3TransportDiagnosticsTests
         using EventSourceRecorder events = new(source, EventLevel.Verbose);
         using TransportMeterRecorder meter = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "POST"), (":scheme", "https"), (":path", "/diagnostics-secret"),
             (":authority", "a"), ("content-length", "3")), timeout.Token);
@@ -237,7 +237,7 @@ public class Http3TransportDiagnosticsTests
         options.Interceptors.Add(new EagerBodyReadingInterceptor());
         options.UseHttp3(new TestMultiplexedConnectionListener(transport));
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync(timeout.Token)).OpenAsync(timeout.Token);
+        IHttpConnectionContext connection = await (await listener.AcceptAsync(timeout.Token)).OpenAsync(timeout.Token);
         await using IAsyncEnumerator<IHttpContext> receive = connection.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
         long rejectedCount = source.RejectedRequests;
         long resetCount = source.StreamResets;
@@ -270,7 +270,7 @@ public class Http3TransportDiagnosticsTests
         using TransportMeterRecorder meter = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             static http3 => http3.Limits.MinRequestBodyDataRate = new HttpMinDataRate(100, TimeSpan.FromMilliseconds(100)));
-        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/diagnostics-secret", "https", "a"), timeout.Token);
         await using IHttpContext context = await peer.NextContextAsync();
         long count = source.RejectedRequests;
@@ -304,7 +304,7 @@ public class Http3TransportDiagnosticsTests
             static http3 => http3.Limits.MinResponseDataRate = new HttpMinDataRate(1_000_000, TimeSpan.FromMilliseconds(100)),
             static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()),
             inner => server = new StallingMultiplexedConnection(inner));
-        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/diagnostics-secret", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext context = await peer.NextContextAsync();
@@ -341,7 +341,7 @@ public class Http3TransportDiagnosticsTests
         using EventSourceRecorder events = new(source, EventLevel.Verbose);
         using TransportMeterRecorder meter = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext context = await peer.NextContextAsync();

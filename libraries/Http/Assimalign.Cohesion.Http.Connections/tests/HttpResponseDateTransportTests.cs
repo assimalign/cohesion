@@ -68,7 +68,7 @@ public class HttpResponseDateTransportTests
         }
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
         await using HttpConnectionListener listener = new(options);
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(timeout.Token);
+        await using IHttpConnection connection = await listener.AcceptAsync(timeout.Token);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(timeout.Token);
         await using IAsyncEnumerator<IHttpContext> requests = connectionContext.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
         (await requests.MoveNextAsync()).ShouldBeTrue();
@@ -126,7 +126,7 @@ public class HttpResponseDateTransportTests
         options.UseHttp1(new TestConnectionListener(transport));
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
         await using HttpConnectionListener listener = new(options);
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(timeout.Token);
+        await using IHttpConnection connection = await listener.AcceptAsync(timeout.Token);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(timeout.Token);
         await using IAsyncEnumerator<IHttpContext> requests = connectionContext.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
         (await requests.MoveNextAsync()).ShouldBeTrue();
@@ -231,7 +231,7 @@ public class HttpResponseDateTransportTests
         }
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
         await using HttpConnectionListener listener = new(options);
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(timeout.Token);
+        await using IHttpConnection connection = await listener.AcceptAsync(timeout.Token);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(timeout.Token);
         int dispatched = 0;
         async Task ReceiveAsync()

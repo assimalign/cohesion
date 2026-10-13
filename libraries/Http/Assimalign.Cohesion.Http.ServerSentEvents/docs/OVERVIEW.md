@@ -42,3 +42,5 @@ await stream.WriteKeepAliveAsync();
 L1 foundation library (HTTP feature layer). See `DESIGN.md` for the rationale
 behind the separate package and the non-goals (response interceptor, Web result
 type, client parsing).
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

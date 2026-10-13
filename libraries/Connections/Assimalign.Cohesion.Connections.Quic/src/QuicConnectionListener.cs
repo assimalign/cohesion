@@ -43,6 +43,9 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     }
 
     /// <inheritdoc />
+    public override ListenerId Id => _listenerId;
+
+    /// <inheritdoc />
     /// <remarks>
     /// Before the listener is bound this is the configured endpoint; afterwards it is the actual
     /// local endpoint of the QUIC listener (relevant when binding to port 0).
@@ -154,7 +157,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     /// goes on to the next connection, so one client can never stop the listener.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
-    public override async ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         await BindAsync(cancellationToken).ConfigureAwait(false);
 

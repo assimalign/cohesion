@@ -214,7 +214,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
     private readonly HttpResponseHeaderPolicy _responseHeaderPolicy;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, bool allowAlternateSchemes = false, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
+    public Http2ConnectionContext(IDuplexConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, bool allowAlternateSchemes = false, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
         : base(connection, isSecure)
     {
         _http2Limits = limits;
@@ -3714,7 +3714,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// </para>
     /// <para>
     /// Closes the gap identified by #686: previously, <see cref="Http2Connection.DisposeAsync"/>
-    /// invoked <c>IConnection.DisposeAsync</c> directly, which
+    /// invoked <c>IDuplexConnection.DisposeAsync</c> directly, which
     /// aborts the socket immediately and can race the send task's
     /// in-flight <c>Socket.SendAsync</c>. Completing the output writer
     /// here lets the send task drain naturally; the caller then waits

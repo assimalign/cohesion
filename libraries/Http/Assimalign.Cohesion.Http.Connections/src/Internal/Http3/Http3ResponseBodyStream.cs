@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <see cref="Stream"/> write, so a full window blocks the write until the peer grants more credit —
 /// no manual window accounting is needed here. The response body is delimited by the QUIC stream
 /// end (RFC 9114 §4.1): completion flushes the last <c>DATA</c> frame and then ends the request
-/// stream's write side (a graceful FIN via the <see cref="IConnection"/> half-close contract), so a
+/// stream's write side (a graceful FIN via the <see cref="IDuplexConnection"/> half-close contract), so a
 /// real HTTP/3 client observes the streamed body terminate rather than waiting on connection
 /// teardown (which it would surface as <c>H3_CLOSED_CRITICAL_STREAM</c>). Staged trailers go out as a
 /// HEADERS frame just before that end (RFC 9114 §4.1). A response without content — to <c>HEAD</c>
@@ -93,8 +93,13 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 
         await _connection.FlushResponseAsync(_context, _stream, cancellationToken).ConfigureAwait(false);
 
+        // Local STOP_SENDING can signal stream closure immediately. The full response is now flushed,
+        // so detach cancellation before refusing unread input and sending its final FIN.
+        _context.StopObservingStreamClosure();
+        _context.RequestBody.RefuseRemainder();
+
         // RFC 9114 §4.1 — the streamed body is delimited by the request stream's end. End the write
-        // side (graceful QUIC FIN via the IConnection half-close contract) so the client sees the
+        // side (graceful QUIC FIN via the IDuplexConnection half-close contract) so the client sees the
         // body terminate now; leaving it dangling until connection teardown surfaces at the client as
         // H3_CLOSED_CRITICAL_STREAM. Best-effort: the DATA frames are already flushed, so a teardown
         // race that disposed the stream underneath the completion is benign.

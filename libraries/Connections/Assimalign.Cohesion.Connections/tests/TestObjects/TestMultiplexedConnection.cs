@@ -12,17 +12,17 @@ namespace Assimalign.Cohesion.Connections.Tests;
 /// </summary>
 internal sealed class TestMultiplexedConnection : MultiplexedConnection
 {
-    private readonly Queue<MultiplexedStream> _pendingStreams = new();
+    private readonly Queue<MultiplexedConnectionStream> _pendingStreams = new();
     private readonly CancellationTokenSource _closedSource = new();
     private readonly ConnectionId _id = ConnectionId.New();
-    private readonly List<MultiplexedStream> _streams = new();
+    private readonly List<MultiplexedConnectionStream> _streams = new();
     private ConnectionState _state = ConnectionState.Open;
 
     public ConnectionDirection? LastOpenedDirection { get; private set; }
 
     public long? LastAbortCode { get; private set; }
 
-    public void Enqueue(MultiplexedStream stream)
+    public void Enqueue(MultiplexedConnectionStream stream)
     {
         _pendingStreams.Enqueue(stream);
         _streams.Add(stream);
@@ -55,7 +55,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
         LastAbortCode = errorCode;
         _state = ConnectionState.Aborted;
-        foreach (MultiplexedStream stream in _streams)
+        foreach (MultiplexedConnectionStream stream in _streams)
         {
             stream.Abort(errorCode, reason);
         }
@@ -71,16 +71,16 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
             _closedSource.Cancel();
         }
 
-        foreach (MultiplexedStream stream in _streams)
+        foreach (MultiplexedConnectionStream stream in _streams)
         {
             await stream.DisposeAsync();
         }
     }
 
-    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         => ValueTask.FromResult(_pendingStreams.Dequeue());
 
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
         LastOpenedDirection = direction;
 

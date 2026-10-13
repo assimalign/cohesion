@@ -42,6 +42,9 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
     }
 
     /// <inheritdoc />
+    public override ListenerId Id { get; } = ListenerId.New();
+
+    /// <inheritdoc />
     public override EndPoint EndPoint => _endPoint;
 
     /// <inheritdoc />
@@ -63,7 +66,7 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
     }
 
     /// <inheritdoc />
-    public override async ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         try
         {

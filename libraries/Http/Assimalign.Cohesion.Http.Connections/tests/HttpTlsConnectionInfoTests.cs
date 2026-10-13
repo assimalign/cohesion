@@ -144,7 +144,7 @@ public class HttpTlsConnectionInfoTests
         // Assert — the facet is a copy, so a handler cannot cast its way to the connection.
         context.ConnectionInfo.ShouldBeAssignableTo<ITlsConnectionInfo>();
         context.ConnectionInfo.ShouldNotBeSameAs(connection);
-        context.ConnectionInfo.ShouldNotBeAssignableTo<IConnection>();
+        context.ConnectionInfo.ShouldNotBeAssignableTo<IDuplexConnection>();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - ConnectionInfo/Http3: Should snapshot the handshake rather than expose the QUIC connection")]
@@ -181,7 +181,7 @@ public class HttpTlsConnectionInfoTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(TestTlsConnection.TlsCapabilities, connection));
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act — serve and dispose each exchange, as a host does.
         List<IHttpConnectionInfo> connectionInfos = new();
@@ -278,7 +278,7 @@ public class HttpTlsConnectionInfoTests
 
     private static async Task<IHttpContext> ReceiveFirstExchangeAsync(HttpConnectionListener listener)
     {
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return enumerator.Current;

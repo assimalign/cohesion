@@ -5,7 +5,7 @@
 Provide an in-memory implementation of the Connections contracts whose two connection ends are
 cross-wired over process memory instead of an operating-system socket. The goal is a *live*
 transport for tests: application protocols (HTTP/1.1 keep-alive, HTTP/2 flow control and GOAWAY,
-HTTP/3 streams) can run multiple request/response cycles against a real `Connection` with no
+HTTP/3 streams) can run multiple request/response cycles against a real `DuplexConnection` with no
 loopback port, deterministically, on every CI operating system.
 
 This driver exists because `ConnectionProtocol.Memory` was already reserved in the value objects
@@ -16,8 +16,8 @@ live keep-alive and flow-control round-trips impossible. Consolidating the pipe-
 here gives every project one correct, live implementation.
 
 The driver is a peer of `Tcp` / `Udp` / `Quic`: it depends only on the Connections contracts,
-implements the standard `IConnectionListener` / `IConnectionFactory` (and multiplexed) surfaces
-with no contract changes, and plugs into the same `UseHttp1/2/3(IConnectionListener)` seams a real
+implements the standard `IDuplexConnectionListener` / `IDuplexConnectionFactory` (and multiplexed) surfaces
+with no contract changes, and plugs into the same `UseHttp1/2/3(IDuplexConnectionListener)` seams a real
 transport does. Phase 2 — the Web test-application factory (#793) — rides on this driver's client
 side over BCL types.
 
@@ -37,7 +37,7 @@ ends of a pair share two `System.IO.Pipelines.Pipe` instances directly:
 `InMemoryConnection.CreatePair` builds the two pipes and hands each end the reader it consumes and
 the writer it produces to. A flush on one end's `Output` is directly observable on the other end's
 `Input`; there is no copying loop in between. `InMemoryConnectionPair.Create` exposes this as a
-`(Client, Server)` tuple of `Connection`; the listener/factory produce the same pair on dial.
+`(Client, Server)` tuple of `DuplexConnection`; the listener/factory produce the same pair on dial.
 
 Pipes are configured **non-pausing** (`pauseWriterThreshold: 0`): the in-memory transport favors
 deterministic, non-blocking byte movement over back-pressure realism, so a synchronous prime write
@@ -47,9 +47,8 @@ belongs.
 
 ## Close / Dispose / Abort Semantics
 
-Teardown propagates to the peer through pipe completion, and there is no background watcher. The ends
-of a byte-stream pair hold no reference to each other; the two ends of a multiplexed stream do, only
-to signal an abandoned stream (see "Multiplexed Variant"):
+Teardown propagates through pipe completion. Every pair holds peer references so local close
+or abort signals both tokens immediately, without a background watcher or application I/O:
 
 - **Graceful half-close** — the holder completes `Output`. Completing `A.Output` (the `aToB`
   writer) makes `B.Input` (the `aToB` reader) observe `ReadResult.IsCompleted`. The connection's
@@ -65,12 +64,9 @@ to signal an abandoned stream (see "Multiplexed Variant"):
   flush observes completion. State becomes `Aborted` and `ConnectionClosed` is signaled. A `null`
   reason surfaces a `ConnectionAbortedException` on the peer.
 
-`ConnectionClosed` fires when **this** end is disposed or aborted. On a byte-stream pair it does not
-fire proactively when the *peer* closes — a peer close is observed by reading `Input` (which
-completes) or writing `Output` (whose flush reports completion), which is exactly how a byte-stream
-consumer such as an HTTP parser already detects end-of-connection. Keeping the closed token local
-avoids a background watcher and keeps the driver allocation-light and trim-safe. A multiplexed
-stream also fires it when the other end abandons the stream (see "Multiplexed Variant").
+`ConnectionClosed` fires on local disposal, abort, and peer closure before local disposal returns.
+Closing either end signals the peer synchronously. Completing one output cleanly remains a
+half-close. Multiplexed streams retain their directional reset notifications.
 
 Completion of the underlying pipe ends is guarded (idempotent, and tolerant of the holder having
 already completed a writer), so double dispose, abort-then-dispose, and holder-completed-output
@@ -82,7 +78,7 @@ followed by dispose are all safe.
 `Channel`, and the two ends reference each other. `OpenStreamAsync` builds a cross-wired
 stream pair (via `InMemoryConnection.CreateStreamPair`), returns the local end to the opener, and
 enqueues the peer end on the *other* multiplexed connection's inbound channel, where
-`AcceptStreamAsync` picks it up. Each stream is a `MultiplexedStream` with its own lifetime and
+`AcceptStreamAsync` picks it up. Each stream is a `MultiplexedConnectionStream` with its own lifetime and
 duplex pipe; stream capabilities report `IsMultiplexed = false` while the parent reports `true`.
 
 Stream direction is honored: an outbound unidirectional (`WriteOnly`) stream mirrors to a
@@ -144,8 +140,8 @@ tested over this driver puts its codes where the QUIC driver puts them:
   dispose does not complete an aborted direction again, so the other end keeps seeing the code, not the
   reason. Codes outside 0 to 2^62 - 1 throw, as on the QUIC driver.
 - The ends of a byte-stream pair do not register the feature: a single-stream transport has no code to
-  carry. `DirectionalAbort` is available only on `IMultiplexedStream`. Stream ends derive from
-  `MultiplexedStream` and compose the internal `InMemoryConnection` pipe and lifecycle mechanics.
+  carry. `DirectionalAbort` is available only on `IMultiplexedConnectionStream`. Stream ends derive from
+  `MultiplexedConnectionStream` and compose the internal `InMemoryConnection` pipe and lifecycle mechanics.
 
 **The multiplexed roots (#1453).** Streams expose `Abort(code, reason)`, which resets both
 available directions before ending the lifecycle. A direction already ended retains its first code.
@@ -164,14 +160,14 @@ The parent root accepts coded aborts in the same 62-bit
 range as streams; the first abort or disposal decides the pair close and notifies both ends as
 described above.
 
-The stream return types change from `ValueTask<IConnection>` to `ValueTask<IMultiplexedStream>`
-(and from `ValueTask<Connection>` to `ValueTask<MultiplexedStream>` on guided bases). Together
+The stream return types change from `ValueTask<IDuplexConnection>` to `ValueTask<IMultiplexedConnectionStream>`
+(and from `ValueTask<DuplexConnection>` to `ValueTask<MultiplexedConnectionStream>` on guided bases). Together
 with the required coded connection abort, these break preview.1 binaries and external implementers,
 accepted during previews on decisions 15 and 56. Awaited streams can still be assigned to
-`IConnection`. Stream reset and completion members are new; the removed optional contracts
+`IDuplexConnection`. Stream reset and completion members are new; the removed optional contracts
 postdate preview.1.
 
-## Connection features (#1452)
+## DuplexConnection features (#1452)
 
 The stream's `ConfigureFeatures` registers it once on first access, with
 `IConnectionFeature.Name` returning `IMultiplexedStreamAbort.FeatureName` (`"StreamAbort"`).
@@ -187,7 +183,7 @@ breaks no released API.
 
 ## Dial / Accept Model
 
-`InMemoryConnectionListener` holds an unbounded `Channel<Connection>` of accepted server ends and
+`InMemoryConnectionListener` holds an unbounded `Channel<DuplexConnection>` of accepted server ends and
 is dialed by an `InMemoryConnectionFactory` bound to it (`listener.CreateFactory()` or
 `new InMemoryConnectionFactory(listener)`). A dial creates a fresh pair, queues the server end, and
 returns the client end; `AcceptAsync` waits on the channel when empty — so a pending accept
@@ -222,8 +218,8 @@ compatible (`IsAotCompatible=true`).
 
 ## Relationships
 
-- **`Assimalign.Cohesion.Connections`** — the `Connection` / `ConnectionListener` /
-  `ConnectionFactory` guided bases and their multiplexed counterparts this driver implements, plus
+- **`Assimalign.Cohesion.Connections`** — the `DuplexConnection` / `DuplexConnectionListener` /
+  `DuplexConnectionFactory` guided bases and their multiplexed counterparts this driver implements, plus
   `ConnectionCapabilities`, `ConnectionProtocol.Memory`, and `ConnectionAbortedException`.
 - **`Assimalign.Cohesion.Connections.StreamAbort`** — the optional directional-abort contract
   registered by each multiplexed stream.
@@ -232,3 +228,17 @@ compatible (`IsAotCompatible=true`).
   build their test connections on this driver.
 - **Web test factory (#793)** — the downstream consumer that dials this driver's client side to run
   the full HTTP pipeline socketlessly.
+
+## Connection hierarchy compatibility
+
+Decision 58 changes the hierarchy shipped in 10.0.0-preview.1 under decision 15's accepted
+preview source and binary breaks. Byte-pipe APIs use `IDuplexConnection` and `DuplexConnection`, with duplex listener/factory bases.
+Their public accept/connect results are interfaces. The generic listener base supplies `Id`,
+`Connections`, and the shared accept core.
+Every connection shares root lifecycle and features. Accepted connections stay in the live set
+until their closed token fires; listener disposal never closes handed-out connections.
+Only the code that accepted a connection reads or writes it.
+
+Completing every usable holder direction, or both peers completing their outputs cleanly, signals
+`ConnectionClosed` on both ends of an in-memory multiplexed stream. Completing only one direction
+remains a half-close and leaves both lifecycle tokens unsignaled.

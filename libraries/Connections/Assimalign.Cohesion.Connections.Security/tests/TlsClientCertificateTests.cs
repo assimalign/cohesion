@@ -59,8 +59,8 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         });
 
         // Act
-        (Task<IConnection> server, Task<IConnection> _) = Handshake(serverOptions, _fixture.ClientCertificate, timeout.Token);
-        IConnection secured = await server;
+        (Task<IDuplexConnection> server, Task<IDuplexConnection> _) = Handshake(serverOptions, _fixture.ClientCertificate, timeout.Token);
+        IDuplexConnection secured = await server;
 
         // Assert
         validated.ShouldNotBeNull();
@@ -76,7 +76,7 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         TlsServerOptions serverOptions = CreateServerOptions().RequireClientCertificate(static (_, _, _) => true);
 
         // Act
-        (Task<IConnection> server, Task<IConnection> client) = Handshake(serverOptions, clientCertificate: null, timeout.Token);
+        (Task<IDuplexConnection> server, Task<IDuplexConnection> client) = Handshake(serverOptions, clientCertificate: null, timeout.Token);
 
         // Assert
         await Should.ThrowAsync<AuthenticationException>(server);
@@ -91,7 +91,7 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         TlsServerOptions serverOptions = CreateServerOptions().RequireClientCertificate(static (_, _, _) => false);
 
         // Act
-        (Task<IConnection> server, Task<IConnection> client) = Handshake(serverOptions, _fixture.ClientCertificate, timeout.Token);
+        (Task<IDuplexConnection> server, Task<IDuplexConnection> client) = Handshake(serverOptions, _fixture.ClientCertificate, timeout.Token);
 
         // Assert
         await Should.ThrowAsync<AuthenticationException>(server);
@@ -106,8 +106,8 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         TlsServerOptions serverOptions = CreateServerOptions().AllowClientCertificate(static (_, _, _) => true);
 
         // Act
-        (Task<IConnection> server, Task<IConnection> client) = Handshake(serverOptions, clientCertificate: null, timeout.Token);
-        IConnection secured = await server;
+        (Task<IDuplexConnection> server, Task<IDuplexConnection> client) = Handshake(serverOptions, clientCertificate: null, timeout.Token);
+        IDuplexConnection secured = await server;
         await client;
 
         // Assert
@@ -122,7 +122,7 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         TlsServerOptions serverOptions = CreateServerOptions().AllowClientCertificate();
 
         // Act
-        (Task<IConnection> server, Task<IConnection> client) = Handshake(serverOptions, _fixture.ClientCertificate, timeout.Token);
+        (Task<IDuplexConnection> server, Task<IDuplexConnection> client) = Handshake(serverOptions, _fixture.ClientCertificate, timeout.Token);
 
         // Assert
         await Should.ThrowAsync<AuthenticationException>(server);
@@ -139,8 +139,8 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
             .AllowClientCertificate(static (_, _, _) => true);
 
         // Act — the later "allow" policy admits a client without a certificate.
-        (Task<IConnection> server, Task<IConnection> client) = Handshake(serverOptions, clientCertificate: null, timeout.Token);
-        IConnection secured = await server;
+        (Task<IDuplexConnection> server, Task<IDuplexConnection> client) = Handshake(serverOptions, clientCertificate: null, timeout.Token);
+        IDuplexConnection secured = await server;
         await client;
 
         // Assert
@@ -175,12 +175,12 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
         };
     }
 
-    private static (Task<IConnection> Server, Task<IConnection> Client) Handshake(
+    private static (Task<IDuplexConnection> Server, Task<IDuplexConnection> Client) Handshake(
         TlsServerOptions serverOptions,
         X509Certificate2? clientCertificate,
         CancellationToken cancellationToken)
     {
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         TlsClientOptions clientOptions = new()
         {
             AuthenticationOptions =
@@ -195,17 +195,17 @@ public class TlsClientCertificateTests : IClassFixture<TestCertificateFixture>
             TlsConnectionInfoTests.UseClientCertificate(clientOptions, clientCertificate);
         }
 
-        Task<IConnection> serverUpgrade = server.UpgradeToTlsAsync(serverOptions, cancellationToken).AsTask();
-        Task<IConnection> clientUpgrade = client.UpgradeToTlsAsync(clientOptions, cancellationToken).AsTask();
+        Task<IDuplexConnection> serverUpgrade = server.UpgradeToTlsAsync(serverOptions, cancellationToken).AsTask();
+        Task<IDuplexConnection> clientUpgrade = client.UpgradeToTlsAsync(clientOptions, cancellationToken).AsTask();
 
         return (serverUpgrade, clientUpgrade);
     }
 
-    private static async Task ObserveAsync(Task<IConnection> task)
+    private static async Task ObserveAsync(Task<IDuplexConnection> task)
     {
         try
         {
-            IConnection connection = await task;
+            IDuplexConnection connection = await task;
             await connection.DisposeAsync();
         }
         catch (Exception exception) when (exception is AuthenticationException or System.IO.IOException or OperationCanceledException)

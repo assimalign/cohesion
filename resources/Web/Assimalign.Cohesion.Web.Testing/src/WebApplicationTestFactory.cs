@@ -332,7 +332,7 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
 
     private async ValueTask<Stream> DialAsync(CancellationToken cancellationToken)
     {
-        Connection connection = await _connectionFactory
+        IDuplexConnection connection = await _connectionFactory
             .ConnectAsync(_listener.EndPoint, cancellationToken)
             .ConfigureAwait(false);
 

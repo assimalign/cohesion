@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// </summary>
 public class Http1ExchangeControlClientFaultTests
 {
-    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: Connection loss should cancel pending and later reads with the exchange token")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: DuplexConnection loss should cancel pending and later reads with the exchange token")]
     [InlineData(false, false, false)]
     [InlineData(false, true, false)]
     [InlineData(true, false, false)]
@@ -42,7 +42,7 @@ public class Http1ExchangeControlClientFaultTests
             http1.Limits.MinRequestBodyDataRate = gated ? new HttpMinDataRate(1, TimeSpan.FromMinutes(1)) : null);
         options.Interceptors.Add(new ControlCapturingInterceptor());
         await using HttpConnectionListener listener = new(options);
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(timeout.Token);
+        await using IHttpConnection connection = await listener.AcceptAsync(timeout.Token);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(timeout.Token);
         await using var requests = connectionContext.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
         (await requests.MoveNextAsync()).ShouldBeTrue();
@@ -189,7 +189,7 @@ public class Http1ExchangeControlClientFaultTests
 
         await using (HttpConnectionListener listener = new(options))
         {
-            await using IHttpConnection connection = await listener.AcceptOrListenAsync();
+            await using IHttpConnection connection = await listener.AcceptAsync();
             IHttpConnectionContext connectionContext = await connection.OpenAsync();
 
             await foreach (IHttpContext exchange in connectionContext.ReceiveAsync())

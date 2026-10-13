@@ -154,7 +154,7 @@ public class Http2HPackDecodingErrorTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         int dispatched = 0;
 
         await foreach (IHttpContext context in connectionContext.ReceiveAsync())

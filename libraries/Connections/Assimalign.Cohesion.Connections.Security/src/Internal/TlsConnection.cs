@@ -12,15 +12,15 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Connections.Security.Internal;
 
 /// <summary>
-/// An <see cref="IConnection"/> decorator that secures an inner connection with a TLS session.
+/// An <see cref="IDuplexConnection"/> decorator that secures an inner connection with a TLS session.
 /// Identity, endpoints, state, and lifetime are delegated to the inner connection; the duplex pipe
 /// is replaced with a TLS-encrypted one and <see cref="Capabilities"/> reports
 /// <see cref="ConnectionSecurity.Tls"/>. What the handshake negotiated is reported through
 /// <see cref="ITlsConnectionInfo"/>, captured once the handshake has completed.
 /// </summary>
-internal sealed class TlsConnection : Connection, ITlsConnectionInfo
+internal sealed class TlsConnection : DuplexConnection, ITlsConnectionInfo
 {
-    private readonly IConnection _inner;
+    private readonly IDuplexConnection _inner;
     private readonly SslStream _ssl;
     private readonly PipeReader _input;
     private readonly PipeWriter _output;
@@ -30,7 +30,7 @@ internal sealed class TlsConnection : Connection, ITlsConnectionInfo
     private readonly TlsCipherSuite _cipherSuite;
     private readonly X509Certificate2? _remoteCertificate;
 
-    private TlsConnection(IConnection inner, SslStream ssl)
+    private TlsConnection(IDuplexConnection inner, SslStream ssl)
     {
         _inner = inner;
         _ssl = ssl;
@@ -84,12 +84,21 @@ internal sealed class TlsConnection : Connection, ITlsConnectionInfo
 
     public override async ValueTask DisposeAsync()
     {
-        await _ssl.DisposeAsync().ConfigureAwait(false);
-        await _inner.DisposeAsync().ConfigureAwait(false);
-
-        // The connection took ownership of the peer's certificate when it read it (see
-        // TakeRemoteCertificate), so it releases the certificate with itself.
-        _remoteCertificate?.Dispose();
+        try
+        {
+            await _ssl.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await _inner.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _remoteCertificate?.Dispose();
+            }
+        }
     }
 
     /// <summary>
@@ -116,7 +125,7 @@ internal sealed class TlsConnection : Connection, ITlsConnectionInfo
         }
     }
 
-    internal static async ValueTask<IConnection> AuthenticateAsServerAsync(IConnection inner, TlsServerOptions options, CancellationToken cancellationToken)
+    internal static async ValueTask<IDuplexConnection> AuthenticateAsServerAsync(IDuplexConnection inner, TlsServerOptions options, CancellationToken cancellationToken)
     {
         SslStream ssl = new(new DuplexPipeStream(inner), leaveInnerStreamOpen: false);
         bool authenticated = false;
@@ -137,7 +146,7 @@ internal sealed class TlsConnection : Connection, ITlsConnectionInfo
         return new TlsConnection(inner, ssl);
     }
 
-    internal static async ValueTask<IConnection> AuthenticateAsClientAsync(IConnection inner, TlsClientOptions options, CancellationToken cancellationToken)
+    internal static async ValueTask<IDuplexConnection> AuthenticateAsClientAsync(IDuplexConnection inner, TlsClientOptions options, CancellationToken cancellationToken)
     {
         SslStream ssl = new(new DuplexPipeStream(inner), leaveInnerStreamOpen: false);
         bool authenticated = false;

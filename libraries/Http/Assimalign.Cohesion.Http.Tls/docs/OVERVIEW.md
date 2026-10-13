@@ -48,3 +48,5 @@ runs before the exchange exists, reads the facet directly from its context's `Co
 
 No TLS configuration, no certificate validation, and no authentication from the certificate. See
 [DESIGN.md](./DESIGN.md).
+
+Live HTTP connections expose transport TLS through `IHttpConnection.Features` and the root `IConnection.Tls` accessor. This package continues to project the request-facing handshake snapshot; an `IMultiplexedConnectionStream` does not inherit its parent connection features.

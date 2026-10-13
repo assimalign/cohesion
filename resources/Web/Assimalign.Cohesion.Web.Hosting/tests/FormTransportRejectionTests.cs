@@ -208,7 +208,7 @@ public class FormTransportRejectionTests
 
     private static async Task<string> SendRawAsync(InMemoryConnectionListener transport, string request, CancellationToken cancellationToken)
     {
-        await using Connection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+        await using IDuplexConnection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
         Stream stream = connection.AsStream();
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken);
         await stream.FlushAsync(cancellationToken);

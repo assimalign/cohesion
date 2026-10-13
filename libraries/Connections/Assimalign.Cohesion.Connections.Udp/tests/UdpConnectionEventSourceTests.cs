@@ -55,7 +55,7 @@ public class UdpConnectionEventSourceTests
         UdpConnectionFactory factory = new();
 
         IDatagramConnection server = factory.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        IDatagramConnection client = factory.Connect(server.LocalEndPoint);
+        IDatagramConnection client = factory.Connect(server.LocalEndPoint.ShouldNotBeNull());
         long currentWhileOpen = UdpConnectionEventSource.Log.CurrentConnections;
 
         // Act

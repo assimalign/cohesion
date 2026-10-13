@@ -508,7 +508,7 @@ public class WebServerTelemetryTests
 
         await factory.StartAsync(cancellationToken);
 
-        await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+        await using IDuplexConnection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
         Stream stream = client.AsStream();
 
         // Act
@@ -738,7 +738,7 @@ public class WebServerTelemetryTests
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
 
         // Act
-        MultiplexedStream stream = await client.SendRequestAsync(
+        IMultiplexedConnectionStream stream = await client.SendRequestAsync(
             "POST",
             path,
             [("content-length", "100")],
@@ -792,7 +792,7 @@ public class WebServerTelemetryTests
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
 
         // Act
-        MultiplexedStream stream = await client.SendRequestAsync(
+        IMultiplexedConnectionStream stream = await client.SendRequestAsync(
             "POST",
             path,
             [],
@@ -848,8 +848,8 @@ public class WebServerTelemetryTests
         });
         await factory.StartAsync(cancellationToken);
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
-        await using Connection controlStream = await client.OpenControlStreamAsync(cancellationToken);
-        await using MultiplexedStream requestStream = await client.SendRequestAsync(
+        await using IDuplexConnection controlStream = await client.OpenControlStreamAsync(cancellationToken);
+        await using IMultiplexedConnectionStream requestStream = await client.SendRequestAsync(
             "POST",
             path,
             [],
@@ -1045,7 +1045,7 @@ public class WebServerTelemetryTests
 
         await factory.StartAsync(cancellationToken);
 
-        await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+        await using IDuplexConnection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
         Stream stream = client.AsStream();
 
         // Act — "zz" is not a chunk size (RFC 9112 §7.1).
@@ -1157,7 +1157,7 @@ public class WebServerTelemetryTests
 
         try
         {
-            await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+            await using IDuplexConnection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
             Stream stream = client.AsStream();
 
             // Act

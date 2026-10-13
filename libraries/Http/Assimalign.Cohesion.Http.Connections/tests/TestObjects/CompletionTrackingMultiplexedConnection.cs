@@ -48,9 +48,9 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
     public override ConnectionState State => _inner.State;
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
-    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
-        MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+        MultiplexedConnectionStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
         if (stream.Direction != ConnectionDirection.Bidirectional)
         {
             return stream;
@@ -65,7 +65,7 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
         return tracked;
     }
 
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
 
     public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
@@ -73,13 +73,13 @@ internal sealed class CompletionTrackingMultiplexedConnection : MultiplexedConne
     public override void Abort(Exception? reason = null) => _inner.Abort(reason);
     public override ValueTask DisposeAsync() => _inner.DisposeAsync();
 
-    private sealed class TrackedConnection : MultiplexedStream
+    private sealed class TrackedConnection : MultiplexedConnectionStream
     {
-        private readonly MultiplexedStream _inner;
+        private readonly MultiplexedConnectionStream _inner;
         private readonly CompletionReader _input;
         private int _disposed;
 
-        public TrackedConnection(MultiplexedStream inner)
+        public TrackedConnection(MultiplexedConnectionStream inner)
         {
             _inner = inner;
             _input = new CompletionReader(inner.Input);

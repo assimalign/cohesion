@@ -13,12 +13,12 @@ namespace Assimalign.Cohesion.Connections.Tcp;
 /// Establishes outbound, reliable, ordered single-stream TCP connections to a remote endpoint.
 /// </summary>
 /// <remarks>
-/// Each call to <see cref="ConnectionFactory.ConnectAsync(EndPoint, CancellationToken)"/> connects a
+/// Each call to <see cref="DuplexConnectionFactory.ConnectAsync(EndPoint, CancellationToken)"/> connects a
 /// fresh socket and returns a live <see cref="TcpConnection"/> whose IO loops are already running.
 /// <see cref="DnsEndPoint"/> values use the socket constructor that selects IPv4 or dual-mode IPv6
 /// according to platform support so name resolution is not constrained by an unspecified address family.
 /// </remarks>
-public sealed class TcpConnectionFactory : ConnectionFactory
+public sealed class TcpConnectionFactory : DuplexConnectionFactory
 {
     private readonly TcpConnectionFactoryOptions _options;
 
@@ -52,7 +52,7 @@ public sealed class TcpConnectionFactory : ConnectionFactory
         ConnectionSecurity.None);
 
     /// <inheritdoc />
-    public override async ValueTask<Connection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
 

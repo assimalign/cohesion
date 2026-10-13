@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -8,7 +9,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http1Connection : HttpConnection
 {
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
     private readonly IHttpExchangeInterceptor[] _interceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
@@ -17,7 +18,7 @@ internal sealed class Http1Connection : HttpConnection
     private readonly string? _altSvcHeaderValue;
     private Http1ConnectionContext? _openContext;
 
-    public Http1Connection(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
+    public Http1Connection(IDuplexConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
         : base(isSecure)
     {
         _connection = connection;
@@ -31,6 +32,15 @@ internal sealed class Http1Connection : HttpConnection
 
     public override ConnectionId Id => _connection.Id;
 
+    public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
+
+    public override EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
+
+    public override ConnectionCapabilities Capabilities => _connection.Capabilities;
+
+    public override IConnectionFeatureCollection Features => _connection.Features;
+
+    public override HttpProtocol Protocol => HttpProtocol.Http11;
     public override ConnectionState State => _connection.State;
 
     public override CancellationToken ConnectionClosed => _connection.ConnectionClosed;
@@ -100,7 +110,7 @@ internal sealed class Http1Connection : HttpConnection
         await _connection.DisposeAsync().ConfigureAwait(false);
     }
 
-    private static async ValueTask CompleteOutputAsync(IConnection connection)
+    private static async ValueTask CompleteOutputAsync(IDuplexConnection connection)
     {
         try
         {

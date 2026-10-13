@@ -85,3 +85,5 @@ time and the middleware resolves nothing per request. Delivered to applications
 through the `App.Web` shared framework (via `Sdk.Web`); no project wiring
 required. See `docs/DESIGN.md` for the security-detection, port-resolution, and
 HSTS emission-point decisions, and the non-goals.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

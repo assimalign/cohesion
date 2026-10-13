@@ -49,7 +49,7 @@ public class Http2ContentDigestVerificationTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         // The dispatch itself is the deadlock regression guard: the eager verifier read the body
@@ -107,7 +107,7 @@ public class Http2ContentDigestVerificationTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeTrue();
@@ -151,7 +151,7 @@ public class Http2ContentDigestVerificationTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         bool yielded;
         await using (IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator())
@@ -179,7 +179,7 @@ public class Http2ContentDigestVerificationTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();

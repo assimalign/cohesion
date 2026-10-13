@@ -1,5 +1,4 @@
 using System;
-using System.IO.Pipelines;
 using System.Net;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -24,23 +23,6 @@ public abstract class Connection : IConnection
 
     /// <inheritdoc />
     public abstract EndPoint? RemoteEndPoint { get; }
-
-    /// <summary>
-    /// Gets the reader for the bytes received from the remote peer.
-    /// </summary>
-    public abstract PipeReader Input { get; }
-
-    /// <summary>
-    /// Gets the writer for the bytes to send to the remote peer.
-    /// </summary>
-    public abstract PipeWriter Output { get; }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Defaults to <see cref="ConnectionDirection.Bidirectional"/>; unidirectional streams of a
-    /// multiplexed transport override this.
-    /// </remarks>
-    public virtual ConnectionDirection Direction => ConnectionDirection.Bidirectional;
 
     /// <inheritdoc />
     public abstract ConnectionCapabilities Capabilities { get; }

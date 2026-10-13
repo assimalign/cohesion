@@ -92,7 +92,7 @@ package (owner decision 20 of the Stage 10 review, 2026-10-09). A transport publ
 facts as facets on its connection info, or offers wire mechanisms through `IHttpExchangeControl`. The
 feature packages own the application-facing contracts (core Http DESIGN, "Where things live").
 
-HTTP/3 reads TLS from its parent multiplexed connection, not from the `IMultiplexedStream`
+HTTP/3 reads TLS from its parent multiplexed connection, not from the `IMultiplexedConnectionStream`
 that carries a request: stream features do not inherit connection features. The coded close,
 whole-stream reset and clean input-completion members on the multiplexed roots (#1453) do not
 change TLS ownership or this package's public surface.
@@ -163,3 +163,5 @@ which maps the certificate to a principal and supports application-specific mapp
 Pure managed code with no reflection, dynamic code generation, or runtime type inspection beyond one
 interface type test. The accessor is one feature lookup and, on first read, one allocation, so the
 package is trimming- and NativeAOT-safe.
+
+Live HTTP connections expose transport TLS through `IHttpConnection.Features` and the root `IConnection.Tls` accessor. This package continues to project the request-facing handshake snapshot; an `IMultiplexedConnectionStream` does not inherit its parent connection features.

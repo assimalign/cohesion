@@ -112,7 +112,7 @@ public static class WebHostingExtensions
         {
             ArgumentNullException.ThrowIfNull(configure);
 
-            return options.UseHttp1(() => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)));
+            return options.UseHttp1(() => TcpConnectionListener.Create(configure));
         }
 
         /// <summary>
@@ -125,7 +125,7 @@ public static class WebHostingExtensions
         {
             ArgumentNullException.ThrowIfNull(configure);
 
-            return options.UseHttp2(() => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)));
+            return options.UseHttp2(() => TcpConnectionListener.Create(configure));
         }
 
         /// <summary>
@@ -167,7 +167,7 @@ public static class WebHostingExtensions
 
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http11);
 
-            return options.UseHttp1(() => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
+            return options.UseHttp1(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
         }
 
         /// <summary>
@@ -210,7 +210,7 @@ public static class WebHostingExtensions
 
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http2);
 
-            return options.UseHttp2(() => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
+            return options.UseHttp2(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
         }
 
         /// <summary>
@@ -237,7 +237,7 @@ public static class WebHostingExtensions
         /// identifiers, as browsers do, gets HTTP/2 (RFC 9113 §3.2), a client that offers only
         /// <c>http/1.1</c> gets it, and a client that sends no ALPN extension gets HTTP/1.1. The choice
         /// is made per connection inside <c>Assimalign.Cohesion.Http.Connections</c>
-        /// (<see cref="HttpConnectionListenerOptions.UseHttp1AndHttp2(Func{IConnectionListener}, Action{Http1ConnectionListenerOptions}, Action{Http2ConnectionListenerOptions})"/>),
+        /// (<see cref="HttpConnectionListenerOptions.UseHttp1AndHttp2(Func{IDuplexConnectionListener}, Action{Http1ConnectionListenerOptions}, Action{Http2ConnectionListenerOptions})"/>),
         /// so both protocols share the endpoint, the request/response interceptors, and the <c>Alt-Svc</c>
         /// advertisement.
         /// </para>
@@ -277,7 +277,7 @@ public static class WebHostingExtensions
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http2, SslApplicationProtocol.Http11);
 
             return options.UseHttp1AndHttp2(
-                () => WebServerEndPoints.Track(options, TcpConnectionListener.Create(configure)).UseTls(tlsOptions),
+                () => TcpConnectionListener.Create(configure).UseTls(tlsOptions),
                 configureHttp1 ?? (static _ => { }),
                 configureHttp2 ?? (static _ => { }));
         }
@@ -331,7 +331,7 @@ public static class WebHostingExtensions
                 EnsureApplicationProtocols(quicOptions.ServerAuthenticationOptions, SslApplicationProtocol.Http3);
                 EnsureTls13(quicOptions.ServerAuthenticationOptions);
 
-                return WebServerEndPoints.Track(options, new QuicConnectionListener(quicOptions));
+                return new QuicConnectionListener(quicOptions);
             });
         }
 
@@ -417,7 +417,7 @@ public static class WebHostingExtensions
                         ? tlsOptions.HandshakeTimeout
                         : Timeout.InfiniteTimeSpan;
 
-                    return WebServerEndPoints.Track(options, new QuicConnectionListener(quicOptions));
+                    return new QuicConnectionListener(quicOptions);
                 },
                 configureHttp ?? (static _ => { }));
         }

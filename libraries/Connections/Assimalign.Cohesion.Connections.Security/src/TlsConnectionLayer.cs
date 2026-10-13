@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.Connections.Security;
 /// </summary>
 /// <remarks>
 /// Construct with <see cref="TlsServerOptions"/> to authenticate as the server (compose onto an
-/// <c>IConnectionListener</c>), or with <see cref="TlsClientOptions"/> to authenticate as the
-/// client (compose onto an <c>IConnectionFactory</c>).
+/// <c>IDuplexConnectionListener</c>), or with <see cref="TlsClientOptions"/> to authenticate as the
+/// client (compose onto an <c>IDuplexConnectionFactory</c>).
 /// </remarks>
 public sealed class TlsConnectionLayer : IConnectionLayer
 {
@@ -49,7 +49,7 @@ public sealed class TlsConnectionLayer : IConnectionLayer
         => capabilities with { Security = ConnectionSecurity.Tls };
 
     /// <inheritdoc />
-    public ValueTask<IConnection> UpgradeAsync(IConnection connection, CancellationToken cancellationToken = default)
+    public ValueTask<IDuplexConnection> UpgradeAsync(IDuplexConnection connection, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
 

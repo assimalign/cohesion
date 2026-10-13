@@ -8,14 +8,16 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections.Tests;
 
 /// <summary>
-/// A <see cref="ConnectionListener"/> double whose accept waits until a connection is enqueued, as a real
+/// A <see cref="DuplexConnectionListener"/> double whose accept waits until a connection is enqueued, as a real
 /// listener waits for a peer, and which can be made to fail as a real listener's endpoint can.
 /// </summary>
-internal sealed class BlockingConnectionListener : ConnectionListener
+internal sealed class BlockingConnectionListener : DuplexConnectionListener
 {
-    private readonly Channel<Connection> _pending = Channel.CreateUnbounded<Connection>();
+    private readonly Channel<DuplexConnection> _pending = Channel.CreateUnbounded<DuplexConnection>();
     private int _acceptCalls;
     private int _isDisposed;
+
+    public override ListenerId Id { get; } = ListenerId.New();
 
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 15001);
 
@@ -28,12 +30,12 @@ internal sealed class BlockingConnectionListener : ConnectionListener
     public bool IsDisposed => Volatile.Read(ref _isDisposed) == 1;
 
     /// <summary>Queues a connection for the next accept.</summary>
-    public void Enqueue(Connection connection) => _pending.Writer.TryWrite(connection);
+    public void Enqueue(DuplexConnection connection) => _pending.Writer.TryWrite(connection);
 
     /// <summary>Fails every accept with <paramref name="exception"/> once the queued connections are taken.</summary>
     public void Fault(Exception exception) => _pending.Writer.TryComplete(exception);
 
-    public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _acceptCalls);
 

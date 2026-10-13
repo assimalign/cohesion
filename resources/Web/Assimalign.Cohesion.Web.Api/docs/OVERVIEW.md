@@ -172,3 +172,5 @@ app.MapGet("/internal/cache", () => "cleared").ExcludeFromDescription();
   `Assimalign.Cohesion.Web.Antiforgery` (every `Sdk.Web` application does): register
   `AddAntiforgery(...)` and `UseAntiforgery()` after `UseRouting()`, or opt an endpoint out with
   `.DisableAntiforgery()`. Without the middleware those endpoints fail at dispatch.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

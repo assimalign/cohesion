@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 /// </summary>
 internal sealed class TestMultiplexedConnectionFactory : MultiplexedConnectionFactory
 {
-    private readonly Queue<MultiplexedConnection> _pending = new();
+    private readonly Queue<IMultiplexedConnection> _pending = new();
     private readonly ConnectionCapabilities _capabilities;
 
     public TestMultiplexedConnectionFactory(ConnectionCapabilities? capabilities = null)
@@ -25,9 +25,9 @@ internal sealed class TestMultiplexedConnectionFactory : MultiplexedConnectionFa
 
     public override ConnectionCapabilities Capabilities => _capabilities;
 
-    public void Enqueue(MultiplexedConnection connection) => _pending.Enqueue(connection);
+    public void Enqueue(IMultiplexedConnection connection) => _pending.Enqueue(connection);
 
-    public override ValueTask<MultiplexedConnection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override ValueTask<IMultiplexedConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         LastEndPoint = endPoint;
 

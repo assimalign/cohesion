@@ -131,7 +131,7 @@ public class HttpExpectContinueTests
     {
         // Arrange — the client sends the head with the expectation and withholds the content.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
         IHttpContext context = await peer.NextContextAsync();
@@ -174,7 +174,7 @@ public class HttpExpectContinueTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
         IHttpContext context = await peer.NextContextAsync();
@@ -196,7 +196,7 @@ public class HttpExpectContinueTests
     {
         // Arrange — the FIN arrives with the head: there is no content to solicit.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         request.Output.Write(HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["expect"] = "100-continue" }));
         await request.Output.CompleteAsync();
@@ -226,7 +226,7 @@ public class HttpExpectContinueTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             configureListener: options => options.Interceptors.Add(new SinkCapturingInterceptor()),
             decorate: inner => server = new StallingMultiplexedConnection(inner));
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
         IHttpContext context = await peer.NextContextAsync();
@@ -264,7 +264,7 @@ public class HttpExpectContinueTests
         // Arrange — the client refuses the response direction (STOP_SENDING) before the handler reads the body,
         // so the 100 Continue's write is the first to meet it.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
         IHttpContext context = await peer.NextContextAsync();
@@ -328,7 +328,7 @@ public class HttpExpectContinueTests
     /// Reads one whole frame the server wrote on <paramref name="request"/>, waiting for it, and consumes
     /// only that frame.
     /// </summary>
-    private static async Task<(long FrameType, byte[] Payload)> ReadFrameAsync(MultiplexedStream request)
+    private static async Task<(long FrameType, byte[] Payload)> ReadFrameAsync(MultiplexedConnectionStream request)
     {
         using CancellationTokenSource timeout = new(_timeout);
 

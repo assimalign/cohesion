@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Connections.Quic.Internal;
 namespace Assimalign.Cohesion.Connections.Quic.Internal;
 
 /// <summary>
-/// A single QUIC stream surfaced as a <see cref="MultiplexedStream"/>.
+/// A single QUIC stream surfaced as a <see cref="MultiplexedConnectionStream"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -53,18 +53,20 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 /// unless it has already ended, and leaves the sending direction alone. Once every usable half has been
 /// completed the stream is finished, so it is disposed in the background, and
 /// <see cref="DisposeAsync"/> waits for that disposal. Neither completion signals
-/// <see cref="ConnectionClosed"/>: a half the holder ends is a half-close, not an abort.
+/// <see cref="ConnectionClosed"/> by itself: one completed half leaves the other usable.
+/// Once every usable native direction completes or native release finishes, the token is signaled.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-internal sealed class QuicStreamConnection : MultiplexedStream, IMultiplexedStreamAbort
+internal sealed class QuicStreamConnection : MultiplexedConnectionStream, IMultiplexedStreamAbort
 {
     // RFC 9000 §16 — an application error code is a variable-length integer.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
 
     private readonly QuicStream _stream;
+    private int _nativeOpenHalves;
     private readonly Task _readsClosed;
     private readonly long _defaultStreamErrorCode;
     private readonly Action<QuicStreamConnection> _onDisposed;
@@ -141,6 +143,7 @@ internal sealed class QuicStreamConnection : MultiplexedStream, IMultiplexedStre
             ? new HalfClosingOutput(this, PipeWriter.Create(stream, streamOptions.WriterOptions))
             : UnwritablePipeWriter.Instance;
         _openHalves = (stream.CanRead ? 1 : 0) + (stream.CanWrite ? 1 : 0);
+        _nativeOpenHalves = _openHalves;
         _state = ConnectionState.Open;
 
         if (stream.CanRead)
@@ -211,14 +214,20 @@ internal sealed class QuicStreamConnection : MultiplexedStream, IMultiplexedStre
         ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
 
+        bool firstAbort;
         lock (_stateLock)
         {
-            if (_isDisposed || _state is ConnectionState.Aborted or ConnectionState.Closed)
+            firstAbort = !_isDisposed && _state is not (ConnectionState.Aborted or ConnectionState.Closed);
+            if (firstAbort)
             {
-                return;
+                _state = ConnectionState.Aborted;
             }
+        }
 
-            _state = ConnectionState.Aborted;
+        if (!firstAbort)
+        {
+            CancelConnectionClosedToken();
+            return;
         }
 
         // A direction already aborted through IMultiplexedStreamAbort keeps its code: QuicStream ends each
@@ -448,6 +457,7 @@ internal sealed class QuicStreamConnection : MultiplexedStream, IMultiplexedStre
             // beyond here retains its pipes and cancellation state for the life of the connection.
             _onDisposed(this);
             ReportClosed();
+            CancelConnectionClosedToken();
             _streamReleased.TrySetResult();
         }
     }
@@ -469,6 +479,7 @@ internal sealed class QuicStreamConnection : MultiplexedStream, IMultiplexedStre
     // paths, Abort and DisposeAsync, signal ConnectionClosed themselves; their faults
     // (OperationAborted) are left alone. The continuation runs on the thread pool, never on the QUIC
     // event thread that completed the task, so ConnectionClosed registrations cannot stall it.
+    // Successful completion of every usable native direction is also a complete stream close.
     private void ObservePeerClosure(Task closed)
     {
         _ = closed.ContinueWith(
@@ -478,10 +489,14 @@ internal sealed class QuicStreamConnection : MultiplexedStream, IMultiplexedStre
                 {
                     ((QuicStreamConnection)state!).CancelConnectionClosedToken();
                 }
+                else if (task.IsCompletedSuccessfully && Interlocked.Decrement(ref ((QuicStreamConnection)state!)._nativeOpenHalves) == 0)
+                {
+                    ((QuicStreamConnection)state!).CancelConnectionClosedToken();
+                }
             },
             this,
             CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted,
+            TaskContinuationOptions.None,
             TaskScheduler.Default);
     }
 

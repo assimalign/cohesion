@@ -1,34 +1,40 @@
 using System;
-using System.Net;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Connections;
 
 /// <summary>
-/// Accepts inbound single-stream connections bound to a local endpoint (the server side of a transport).
+/// Accepts inbound connections and observes the lifetime of the connections it hands to callers.
 /// </summary>
 public interface IConnectionListener : IAsyncDisposable
 {
     /// <summary>
-    /// Gets the configured local endpoint before binding and the acquired endpoint afterward.
+    /// Gets the unique identifier for this listener.
     /// </summary>
-    EndPoint EndPoint { get; }
+    ListenerId Id { get; }
 
     /// <summary>
-    /// Gets the capabilities of connections produced by this listener.
+    /// Gets a live view of accepted connections whose lifetime has not ended.
     /// </summary>
-    ConnectionCapabilities Capabilities { get; }
+    /// <remarks>
+    /// Entries appear before accept returns and leave when their connection-closed token fires.
+    /// Enumeration tolerates concurrent changes; it is not an atomic snapshot. Only the accepting
+    /// code reads or writes a connection. Disposing the listener does not close accepted connections.
+    /// The listener holds a strong reference to each entry until it closes.
+    /// </remarks>
+    IReadOnlyCollection<IConnection> Connections { get; }
 
     /// <summary>
-    /// Binds the listener to its configured local endpoint.
+    /// Binds the listener to its configured local endpoints.
     /// </summary>
     /// <remarks>
     /// Successful repeated calls are idempotent. Disposing the listener terminally releases the
-    /// endpoint; a resource-owning listener cannot be rebound after disposal.
+    /// endpoints; a resource-owning listener cannot be rebound after disposal.
     /// </remarks>
     /// <param name="cancellationToken">A token to cancel the bind operation.</param>
-    /// <returns>A task that completes when the endpoint has been acquired and the listener is ready to accept connections.</returns>
+    /// <returns>A task that completes when all endpoints have been acquired and the listener is ready to accept connections.</returns>
     /// <exception cref="OperationCanceledException">Thrown when the bind operation is canceled.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
     ValueTask BindAsync(CancellationToken cancellationToken = default);

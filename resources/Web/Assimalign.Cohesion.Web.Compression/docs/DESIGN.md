@@ -271,3 +271,5 @@ It changes no public API, rejection status, or compression behavior.
   per-route control belongs to whatever source-generated mapping layer arrives later.
 - **No Microsoft.Extensions dependencies, no separate hosting wiring.** The package composes purely
   against the Web root's builder seams and ships to applications via `App.Web`.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

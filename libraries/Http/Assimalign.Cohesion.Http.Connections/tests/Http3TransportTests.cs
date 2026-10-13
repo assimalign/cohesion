@@ -30,7 +30,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // Assert request
@@ -74,7 +74,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -100,7 +100,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Query);
@@ -121,7 +121,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
@@ -153,7 +153,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
@@ -173,7 +173,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
@@ -192,7 +192,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
@@ -215,7 +215,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
@@ -234,7 +234,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
@@ -249,14 +249,14 @@ public class Http3TransportTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
         Task<IHttpContext> dispatch = peer.NextContextAsync();
 
-        Connection reserved = await peer.OpenUnidirectionalStreamAsync();
+        IDuplexConnection reserved = await peer.OpenUnidirectionalStreamAsync();
         TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
         using CancellationTokenRegistration registration = reserved.ConnectionClosed.Register(() => stopped.TrySetResult());
 
         // Act — the reserved stream, then a request on the same connection.
         await reserved.Output.WriteAsync(new byte[] { 0x21, 0x00, 0x00 });
 
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/after", "https", "a"));
         request.Output.Complete();
 
@@ -282,7 +282,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Driving the receive loop opens and writes the control stream at start.
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -320,7 +320,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -355,7 +355,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
@@ -383,7 +383,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnection httpConnection = await listener.AcceptAsync();
         IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
 
         // Surface the request so the server opens its control stream (SETTINGS)
@@ -436,7 +436,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnection httpConnection = await listener.AcceptAsync();
         IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
 
         await using (IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator())
@@ -489,7 +489,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Get);
@@ -563,7 +563,7 @@ public class Http3TransportTests
         options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
@@ -592,7 +592,7 @@ public class Http3TransportTests
         options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.IsExtendedConnect.ShouldBeTrue();
@@ -638,7 +638,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         // Act
@@ -666,7 +666,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
         httpContext.Request.Path.Value.ShouldBe("/s");
@@ -715,7 +715,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -775,7 +775,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -823,7 +823,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         // The static request is served; the dynamic one hits the decompression
@@ -859,7 +859,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
@@ -875,7 +875,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();

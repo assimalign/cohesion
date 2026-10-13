@@ -113,7 +113,7 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
             _writeCompleted = true;
 
             // RFC 9114 §4.1 — the server's side of the stream ends with its FIN; completing the outbound
-            // pipe is the IConnection contract's graceful half-close, and flushes anything a cancelled
+            // pipe is the IDuplexConnection contract's graceful half-close, and flushes anything a cancelled
             // write left buffered first.
             await _context.StreamConnection.Output.CompleteAsync().ConfigureAwait(false);
         }

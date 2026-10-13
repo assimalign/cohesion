@@ -8,9 +8,9 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 /// <summary>
-/// A stream <see cref="ConnectionListener"/> double whose every accept throws the supplied exception.
+/// A stream <see cref="DuplexConnectionListener"/> double whose every accept throws the supplied exception.
 /// </summary>
-internal sealed class ThrowingConnectionListener : ConnectionListener
+internal sealed class ThrowingConnectionListener : DuplexConnectionListener
 {
     private readonly Exception _exception;
 
@@ -19,12 +19,14 @@ internal sealed class ThrowingConnectionListener : ConnectionListener
         _exception = exception;
     }
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 17002);
 
     public override ConnectionCapabilities Capabilities => TestConnection.DefaultCapabilities;
 
-    public override ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
-        => ValueTask.FromException<Connection>(_exception);
+    protected override ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken)
+        => ValueTask.FromException<IDuplexConnection>(_exception);
 
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

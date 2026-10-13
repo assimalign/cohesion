@@ -248,3 +248,7 @@ await foreach (IHttpContext exchange in exchanges)
 `ResourceControlPlaneMiddleware.InvokeAsync(IResourceControlPlane controlPlane, ResourceContext resourceContext, bool isApplicationReady, int? controlPlanePort, IHttpContext context, WebApplicationMiddleware next)` returns a `Task` for one exchange. Required reference arguments cannot be null. A mismatched non-null port forwards every path to `next`; null applies no port gate. Unknown namespaced paths apply the gateway credential check or standalone loopback restriction before returning 404.
 
 Acquire the lifetime during composition, then register `InvokeAsync` ahead of routes the terminal should own. The owning host supplies readiness and listener selection and drains concurrent requests before disposing the lease. Existing callers that only call `Validate` and `InvokeAsync` remain supported: they reuse the parsed key and validation profile but create and dispose a temporary ECDSA handle for each signed token. Stop registers a callback on `IWebResponseCompletionFeature` when present; the callback requests stop with `CancellationToken.None` after transmission. A custom server without the feature uses the request token for the direct-stop fallback.
+
+The server accepts HTTP connections through `AcceptAsync` and reports `ServerBound` addresses
+from `IHttpConnectionListener.EndPoints` after binding. Raw `UseServer` listener registrations
+report the same assigned TCP or QUIC ports as the hosting convenience registrations.

@@ -25,7 +25,7 @@ public class TransportHttpContextTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(new TestConnection(payload)), static _ => { });
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         await using IAsyncEnumerator<IHttpContext> exchanges = connectionContext.ReceiveAsync().GetAsyncEnumerator();
@@ -54,7 +54,7 @@ public class TransportHttpContextTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "api.test"));
         request.Output.Complete();
 

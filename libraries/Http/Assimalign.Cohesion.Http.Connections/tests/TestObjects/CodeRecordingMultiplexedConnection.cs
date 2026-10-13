@@ -49,11 +49,11 @@ internal sealed class CodeRecordingMultiplexedConnection : MultiplexedConnection
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
     /// <inheritdoc />
-    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         => _inner.AcceptStreamAsync(cancellationToken);
 
     /// <inheritdoc />
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
 
     /// <inheritdoc />

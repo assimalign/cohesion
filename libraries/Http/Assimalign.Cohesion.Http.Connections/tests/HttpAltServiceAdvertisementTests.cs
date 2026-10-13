@@ -204,7 +204,7 @@ public class HttpAltServiceAdvertisementTests
         Action<IHttpContext>? configureResponse = null)
     {
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Response.StatusCode = HttpStatusCode.Ok;
@@ -220,7 +220,7 @@ public class HttpAltServiceAdvertisementTests
         Action<IHttpContext>? configureResponse = null)
     {
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Response.StatusCode = HttpStatusCode.Ok;

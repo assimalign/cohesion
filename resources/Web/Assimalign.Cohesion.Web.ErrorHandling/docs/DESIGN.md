@@ -354,3 +354,5 @@ the canonical test-only recorder; fresh counter samples prove peer outcomes leav
   scope. Custom presentation is a status-code-pages responder or an `OnError` handler.
 - **Wire-level failure isolation** — the transport's per-connection survival (Http.Connections, and
   the server's #762 last-resort catch) is a separate layer the boundary sits inside, not a duplicate.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

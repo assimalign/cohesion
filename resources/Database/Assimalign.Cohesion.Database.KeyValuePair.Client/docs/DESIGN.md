@@ -77,3 +77,11 @@ fixture retrieves the engine from the built context for provisioning. The
 application owns the engine and the engine owns its server/listener; disposing
 the application closes this whole graph before the restart-recovery composition.
 Wire/client behavior and protocol remain unchanged.
+
+## Duplex transport composition
+
+`ConnectionFactory` accepts `IDuplexConnectionFactory`. The shared client reads and writes
+framed bytes through the returned `IDuplexConnection`; the common `IConnection` root carries
+identity, features and lifecycle only. TCP, InMemory and TLS-layered duplex factories satisfy
+this contract. The pool owns each established connection and disposes it when discarded or
+when the pool closes; transport disposal has signaled `ConnectionClosed` before it completes.

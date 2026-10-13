@@ -32,7 +32,7 @@ public class Http3QPackEncoderStreamTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             decorate: connection => recorded = new CodeRecordingMultiplexedConnection(connection));
         await ServeRequestAsync(peer, "/ready", timeout.Token);
-        await using Connection encoder = await peer.OpenUnidirectionalStreamAsync();
+        await using IDuplexConnection encoder = await peer.OpenUnidirectionalStreamAsync();
 
         // Act
         await encoder.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(instruction), timeout.Token);
@@ -58,7 +58,7 @@ public class Http3QPackEncoderStreamTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             decorate: connection => recorded = new CodeRecordingMultiplexedConnection(connection));
         await ServeRequestAsync(peer, "/ready", timeout.Token);
-        await using Connection encoder = await peer.OpenUnidirectionalStreamAsync();
+        await using IDuplexConnection encoder = await peer.OpenUnidirectionalStreamAsync();
 
         // Act — no instruction continuation and no FIN follow this byte.
         await encoder.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream([prefix]), timeout.Token);
@@ -79,7 +79,7 @@ public class Http3QPackEncoderStreamTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             decorate: connection => recorded = new CodeRecordingMultiplexedConnection(connection));
         await ServeRequestAsync(peer, "/ready", timeout.Token);
-        await using Connection encoder = await peer.OpenUnidirectionalStreamAsync();
+        await using IDuplexConnection encoder = await peer.OpenUnidirectionalStreamAsync();
         await encoder.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(), timeout.Token);
 
         // Act
@@ -99,7 +99,7 @@ public class Http3QPackEncoderStreamTests
 
     private static async Task ServeRequestAsync(Http3InMemoryPeer peer, string path, CancellationToken cancellationToken)
     {
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", path, "https", "a"), cancellationToken);
         request.Output.Complete();
         await using IHttpContext exchange = await peer.NextContextAsync();

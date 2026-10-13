@@ -25,12 +25,12 @@ public class MultiplexedPeerCloseTests
         {
             MultiplexedConnection closer = closeFromClient ? client : server;
             MultiplexedConnection peer = closeFromClient ? server : client;
-            await using MultiplexedStream local = await closer.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream inbound = await peer.AcceptStreamAsync(cancellation.Token);
-            await using MultiplexedStream outbound = await peer.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream remote = await closer.AcceptStreamAsync(cancellation.Token);
-            Task<MultiplexedStream> peerAccept = peer.AcceptStreamAsync(cancellation.Token).AsTask();
-            Task<MultiplexedStream> localAccept = closer.AcceptStreamAsync(cancellation.Token).AsTask();
+            await using MultiplexedConnectionStream local = await closer.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream inbound = await peer.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream outbound = await peer.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream remote = await closer.AcceptStreamAsync(cancellation.Token);
+            Task<MultiplexedConnectionStream> peerAccept = peer.AcceptStreamAsync(cancellation.Token).AsTask();
+            Task<MultiplexedConnectionStream> localAccept = closer.AcceptStreamAsync(cancellation.Token).AsTask();
             Task<ReadResult> inboundRead = inbound.Input.ReadAsync(cancellation.Token).AsTask();
             Task<ReadResult> outboundRead = outbound.Input.ReadAsync(cancellation.Token).AsTask();
             long expectedCode = abort ? 42 : 0;
@@ -58,7 +58,7 @@ public class MultiplexedPeerCloseTests
             (await Should.ThrowAsync<ConnectionResetException>(() => inboundRead)).ApplicationErrorCode.ShouldBe(expectedCode);
             (await Should.ThrowAsync<ConnectionResetException>(() => outboundRead)).ApplicationErrorCode.ShouldBe(expectedCode);
 
-            foreach (MultiplexedStream stream in new[] { local, inbound, outbound, remote })
+            foreach (MultiplexedConnectionStream stream in new[] { local, inbound, outbound, remote })
             {
                 stream.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
                 stream.IsInputCompleted.ShouldBeFalse();
@@ -84,7 +84,7 @@ public class MultiplexedPeerCloseTests
         {
             MultiplexedConnection opener = closeFromClient ? client : server;
             MultiplexedConnection peer = closeFromClient ? server : client;
-            await using MultiplexedStream stream = await opener.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream stream = await opener.OpenStreamAsync(cancellationToken: cancellation.Token);
 
             // Act
             await opener.DisposeAsync();
@@ -97,7 +97,7 @@ public class MultiplexedPeerCloseTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Peer close: Connection callbacks see coded loss and can dispose their stream")]
+    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Peer close: IDuplexConnection callbacks see coded loss and can dispose their stream")]
     public async Task Abort_WithReentrantPeerCallback_ShouldPublishLossBeforeNotification()
     {
         // Arrange
@@ -106,8 +106,8 @@ public class MultiplexedPeerCloseTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream local = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream remote = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream local = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream remote = await server.AcceptStreamAsync(cancellation.Token);
             Exception? observed = null;
             bool called = false;
             using CancellationTokenRegistration registration = server.ConnectionClosed.Register(() =>
@@ -148,8 +148,8 @@ public class MultiplexedPeerCloseTests
         {
             MultiplexedConnection closer = closeFromClient ? client : server;
             MultiplexedConnection peer = closeFromClient ? server : client;
-            await using MultiplexedStream local = await closer.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream remote = await peer.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream local = await closer.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream remote = await peer.AcceptStreamAsync(cancellation.Token);
 
             // Act
             closer.Abort(new InvalidOperationException("Only the code crosses the connection"));
@@ -170,8 +170,8 @@ public class MultiplexedPeerCloseTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream local = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream remote = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream local = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream remote = await server.AcceptStreamAsync(cancellation.Token);
             await local.Output.CompleteAsync();
             remote.IsInputCompleted.ShouldBeTrue();
 
@@ -194,8 +194,8 @@ public class MultiplexedPeerCloseTests
         await using (client)
         await using (server)
         {
-            await using MultiplexedStream local = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
-            await using MultiplexedStream remote = await server.AcceptStreamAsync(cancellation.Token);
+            await using MultiplexedConnectionStream local = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+            await using MultiplexedConnectionStream remote = await server.AcceptStreamAsync(cancellation.Token);
             using CancellationTokenRegistration registration = client.ConnectionClosed.Register(
                 () => throw new InvalidOperationException("A consumer callback failed"));
 
@@ -223,7 +223,7 @@ public class MultiplexedPeerCloseTests
             await using (server)
             {
                 TaskCompletionSource start = new(TaskCreationOptions.RunContinuationsAsynchronously);
-                MultiplexedStream? opened = null;
+                MultiplexedConnectionStream? opened = null;
                 ConnectionException? rejected = null;
                 Task open = Task.Run(async () =>
                 {

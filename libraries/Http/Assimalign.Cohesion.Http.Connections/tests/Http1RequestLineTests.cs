@@ -134,7 +134,7 @@ public class Http1RequestLineTests
 
         await using (HttpConnectionListener listener = new(options))
         {
-            await using IHttpConnection connection = await listener.AcceptOrListenAsync();
+            await using IHttpConnection connection = await listener.AcceptAsync();
             IHttpConnectionContext connectionContext = await connection.OpenAsync();
 
             await foreach (IHttpContext exchange in connectionContext.ReceiveAsync())

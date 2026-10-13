@@ -29,6 +29,122 @@ public class QuicMultiplexedConnectionTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - ConnectionClosed: A closed idle peer removes its accepted connection")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConnectionClosed_OnDisposeOrAbort_ShouldNotifyIdlePeerAndUntrack(bool abort)
+    {
+        // Arrange
+        QuicListener.IsSupported.ShouldBeTrue();
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+        pair.Listener.Connections.Count.ShouldBe(1);
+        pair.Listener.Id.ShouldNotBe(ListenerId.Empty);
+        TaskCompletionSource peerClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = pair.Server.ConnectionClosed.Register(() => peerClosed.TrySetResult());
+
+        // Act
+        if (abort)
+        {
+            pair.Client.Abort();
+            pair.Client.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        }
+        await pair.Client.DisposeAsync();
+        pair.Client.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        await peerClosed.Task.WaitAsync(cancellation.Token);
+        while (pair.Listener.Connections.Count != 0)
+        {
+            await Task.Delay(1, cancellation.Token);
+        }
+
+        // Assert
+        pair.Client.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        pair.Server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        pair.Listener.Connections.Count.ShouldBe(0);
+        await pair.Server.DisposeAsync();
+        pair.Server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+    }
+
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - ConnectionClosed: Zero stream options and idle clients still observe peer closure")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConnectionClosed_WithZeroInboundOptions_ShouldNotifyEitherIdlePeer(bool closeServer)
+    {
+        // Arrange
+        QuicListener.IsSupported.ShouldBeTrue();
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token,
+            configureListener: options =>
+            {
+                options.MaxBidirectionalStreamCount = 0;
+                options.MaxUnidirectionalStreamCount = 0;
+            });
+        MultiplexedConnection closing = closeServer ? pair.Server : pair.Client;
+        MultiplexedConnection observing = closeServer ? pair.Client : pair.Server;
+
+        // Act
+        await closing.DisposeAsync();
+        closing.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        await WaitForClosedAsync(observing.ConnectionClosed, cancellation.Token);
+
+        // Assert
+        closing.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        observing.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        ((QuicMultiplexedConnection)observing).InboundBidirectionalStreamLimit.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - DisposeAsync: Every completed concurrent call signals connection closure")]
+    public async Task DisposeAsync_WhileFirstCallWaitsForDelivery_ShouldSignalBeforeSecondReturns()
+    {
+        // Arrange
+        QuicListener.IsSupported.ShouldBeTrue();
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using WithheldCreditPair pair = await WithheldCreditPair.CreateAsync(
+            certificate, options => options.CloseDeliveryTimeout = TimeSpan.FromMilliseconds(200), cancellation.Token);
+        Task first = pair.Server.DisposeAsync().AsTask();
+        first.IsCompleted.ShouldBeFalse();
+
+        // Act
+        await pair.Server.DisposeAsync();
+
+        // Assert
+        pair.Server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        await first.WaitAsync(cancellation.Token);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - Stream lifecycle: Disposal and abort signal both stream endpoints")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamConnectionClosed_OnDisposeOrAbort_ShouldNotifyBothEnds(bool abort)
+    {
+        // Arrange
+        QuicListener.IsSupported.ShouldBeTrue();
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+        (MultiplexedConnectionStream client, MultiplexedConnectionStream server) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        await using MultiplexedConnectionStream clientLifetime = client;
+        await using MultiplexedConnectionStream serverLifetime = server;
+
+        // Act
+        if (abort)
+        {
+            client.Abort();
+        }
+        await client.DisposeAsync();
+        await WaitForClosedAsync(server.ConnectionClosed, cancellation.Token);
+
+        // Assert
+        client.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        await server.DisposeAsync();
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Features: Registers distinct connection features and isolated stream abort features over real QUIC")]
     public async Task Features_OnRealQuic_ShouldRegisterNamedFeaturesWithoutParentFallback()
     {
@@ -41,7 +157,7 @@ public class QuicMultiplexedConnectionTests
         // Act
         ITlsConnectionInfo tls = pair.Server.Tls.ShouldNotBeNull();
         IMultiplexedConnectionStreamLimits limits = pair.Server.StreamLimits.ShouldNotBeNull();
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
         await using (clientStream)
         await using (serverStream)
         {
@@ -82,7 +198,7 @@ public class QuicMultiplexedConnectionTests
 
         for (int index = 0; index < 3; index++)
         {
-            (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+            (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
             await using (clientStream)
             await using (serverStream)
             {
@@ -115,9 +231,9 @@ public class QuicMultiplexedConnectionTests
         IMultiplexedConnectionStreamLimits serverLimits = pair.Server.StreamLimits.ShouldNotBeNull();
         clientLimits.InboundBidirectionalStreamLimit.ShouldBe(0);
         serverLimits.InboundBidirectionalStreamLimit.ShouldBe(1);
-        await using MultiplexedStream clientStream = await pair.Client.OpenStreamAsync(direction, cancellation.Token);
+        await using MultiplexedConnectionStream clientStream = await pair.Client.OpenStreamAsync(direction, cancellation.Token);
         await clientStream.Output.WriteAsync(new byte[] { 1 }, cancellation.Token);
-        await using MultiplexedStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await using MultiplexedConnectionStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
         await ReadBytesAsync(serverStream.Input, 1, cancellation.Token);
 
         // Act
@@ -151,7 +267,7 @@ public class QuicMultiplexedConnectionTests
             afterBind: () => listenerOptions!.MaxBidirectionalStreamCount = 0);
 
         // Act — opening a request also proves the handshake advertised the frozen nonzero allowance.
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
         await using (clientStream)
         await using (serverStream)
         {
@@ -306,13 +422,13 @@ public class QuicMultiplexedConnectionTests
         byte[] payload = [1, 2, 3, 4, 5];
 
         // Act
-        await using MultiplexedStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
+        await using MultiplexedConnectionStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
 
         // A freshly opened QUIC stream is not visible to the peer until data is flushed on it,
         // so write before accepting on the server side.
         await clientStream.Output.WriteAsync(payload, cancellation.Token);
 
-        await using MultiplexedStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await using MultiplexedConnectionStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
 
         byte[] received = await ReadBytesAsync(serverStream.Input, payload.Length, cancellation.Token);
 
@@ -344,7 +460,7 @@ public class QuicMultiplexedConnectionTests
         byte[] payload = [9, 8, 7, 6];
 
         // Act
-        await using MultiplexedStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellation.Token);
+        await using MultiplexedConnectionStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellation.Token);
 
         // The outbound unidirectional stream has no readable half: its input is pre-completed.
         ReadResult inputResult = await clientStream.Input.ReadAsync(cancellation.Token);
@@ -355,7 +471,7 @@ public class QuicMultiplexedConnectionTests
         // so write before accepting on the server side.
         await clientStream.Output.WriteAsync(payload, cancellation.Token);
 
-        await using MultiplexedStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await using MultiplexedConnectionStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
 
         byte[] received = await ReadBytesAsync(serverStream.Input, payload.Length, cancellation.Token);
 
@@ -443,11 +559,11 @@ public class QuicMultiplexedConnectionTests
         // (the HTTP/3 control and QPACK streams): the client holds it open for the
         // connection's lifetime and must never see it terminate ahead of the connection close
         // (RFC 9114 §6.2.1 — H3_CLOSED_CRITICAL_STREAM).
-        await using MultiplexedStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellation.Token);
+        await using MultiplexedConnectionStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellation.Token);
 
         await clientStream.Output.WriteAsync(new byte[] { 1 }, cancellation.Token);
 
-        await using MultiplexedStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await using MultiplexedConnectionStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
 
         // Act
         await pair.Server.DisposeAsync();
@@ -477,11 +593,11 @@ public class QuicMultiplexedConnectionTests
 
         byte[] payload = [1, 2, 3, 4, 5];
 
-        await using MultiplexedStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
+        await using MultiplexedConnectionStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
 
         await clientStream.Output.WriteAsync(payload, cancellation.Token);
 
-        await using MultiplexedStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await using MultiplexedConnectionStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
 
         byte[] received = await ReadBytesAsync(serverStream.Input, payload.Length, cancellation.Token);
 
@@ -569,12 +685,12 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
-        await using MultiplexedStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
+        await using MultiplexedConnectionStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
 
         // A freshly opened QUIC stream is not visible to the peer until data is flushed on it.
         await clientStream.Output.WriteAsync(new byte[] { 1 }, cancellation.Token);
 
-        await using MultiplexedStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await using MultiplexedConnectionStream serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
         await ReadBytesAsync(serverStream.Input, 1, cancellation.Token);
 
         TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -612,7 +728,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
@@ -645,7 +761,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
@@ -677,7 +793,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
@@ -703,12 +819,12 @@ public class QuicMultiplexedConnectionTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
         {
-            IMultiplexedStream stream = serverStream;
+            IMultiplexedConnectionStream stream = serverStream;
 
             // Act
             stream.Abort(errorCode, new InvalidOperationException("reset stream"));
@@ -739,7 +855,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
@@ -775,7 +891,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
         byte[] response = [9, 8, 7];
 
         await using (clientStream)
@@ -813,7 +929,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
         byte[] response = [9, 8, 7];
         byte[] upload = new byte[512 * 1024];
         Random.Shared.NextBytes(upload);
@@ -835,7 +951,7 @@ public class QuicMultiplexedConnectionTests
             await sending;
 
             // Assert — the client saw the response and the FIN; the server read the whole upload and its FIN,
-            // and neither end saw the stream abandoned.
+            // and both ended directions signal full stream closure.
             received.ShouldBe(response);
             end.IsCompleted.ShouldBeTrue();
             end.Buffer.IsEmpty.ShouldBeTrue();
@@ -843,8 +959,8 @@ public class QuicMultiplexedConnectionTests
             uploadEnd.IsCompleted.ShouldBeTrue();
             uploadEnd.Buffer.IsEmpty.ShouldBeTrue();
             serverStream.State.ShouldBe(ConnectionState.Open);
-            serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
-            clientStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+            await WaitForClosedAsync(serverStream.ConnectionClosed, cancellation.Token);
+            await WaitForClosedAsync(clientStream.ConnectionClosed, cancellation.Token);
         }
     }
 
@@ -868,7 +984,7 @@ public class QuicMultiplexedConnectionTests
 
         for (int exchange = 0; exchange < 6; exchange++)
         {
-            (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+            (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
             try
             {
@@ -929,7 +1045,7 @@ public class QuicMultiplexedConnectionTests
 
         for (int exchange = 0; exchange < 6; exchange++)
         {
-            (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+            (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
             try
             {
@@ -970,8 +1086,8 @@ public class QuicMultiplexedConnectionTests
                 QuicConnectionEventSource.Log.CurrentStreams.ShouldBe(streamsBaseline);
                 serverStream.State.ShouldBe(ConnectionState.Open);
                 clientStream.State.ShouldBe(ConnectionState.Open);
-                serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
-                clientStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+                serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+                clientStream.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
                 server.State.ShouldBe(ConnectionState.Open);
                 client.State.ShouldBe(ConnectionState.Open);
             }
@@ -999,7 +1115,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
         byte[] response = [6, 5, 4];
 
         await using (clientStream)
@@ -1037,7 +1153,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
@@ -1160,7 +1276,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
@@ -1188,7 +1304,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
@@ -1220,7 +1336,7 @@ public class QuicMultiplexedConnectionTests
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
-        (MultiplexedStream clientStream, MultiplexedStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        (MultiplexedConnectionStream clientStream, MultiplexedConnectionStream serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
 
         await using (clientStream)
         await using (serverStream)
@@ -1283,12 +1399,19 @@ public class QuicMultiplexedConnectionTests
     /// Opens a bidirectional stream from the client and accepts it on the server, which sees a QUIC stream only
     /// once data is flushed on it; the server has read the one octet that announced it.
     /// </summary>
-    private static async Task<(MultiplexedStream Client, MultiplexedStream Server)> OpenAcceptedStreamAsync(LoopbackPair pair, CancellationToken cancellationToken)
+    private static async Task WaitForClosedAsync(CancellationToken closed, CancellationToken cancellationToken)
     {
-        MultiplexedStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken);
+        TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = closed.Register(() => completion.TrySetResult());
+        await completion.Task.WaitAsync(cancellationToken);
+    }
+
+    private static async Task<(MultiplexedConnectionStream Client, MultiplexedConnectionStream Server)> OpenAcceptedStreamAsync(LoopbackPair pair, CancellationToken cancellationToken)
+    {
+        MultiplexedConnectionStream clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken);
         await clientStream.Output.WriteAsync(new byte[] { 1 }, cancellationToken);
 
-        MultiplexedStream serverStream = await pair.Server.AcceptStreamAsync(cancellationToken);
+        MultiplexedConnectionStream serverStream = await pair.Server.AcceptStreamAsync(cancellationToken);
         await ReadBytesAsync(serverStream.Input, 1, cancellationToken);
 
         return (clientStream, serverStream);
@@ -1298,7 +1421,7 @@ public class QuicMultiplexedConnectionTests
     /// Writes <paramref name="payload"/> in 16 KiB pieces, each flushed, then ends the stream's sending
     /// direction with its FIN.
     /// </summary>
-    private static async Task SendAndFinishAsync(MultiplexedStream stream, byte[] payload, CancellationToken cancellationToken)
+    private static async Task SendAndFinishAsync(MultiplexedConnectionStream stream, byte[] payload, CancellationToken cancellationToken)
     {
         const int piece = 16 * 1024;
 
@@ -1314,7 +1437,7 @@ public class QuicMultiplexedConnectionTests
     /// Writes on the supplied stream until the peer's teardown signal surfaces, returning the
     /// <see cref="QuicException"/> that carries it.
     /// </summary>
-    private static async Task<QuicException> WaitForClientWriteFailureAsync(MultiplexedStream clientStream, CancellationToken cancellationToken)
+    private static async Task<QuicException> WaitForClientWriteFailureAsync(MultiplexedConnectionStream clientStream, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -1391,7 +1514,7 @@ public class QuicMultiplexedConnectionTests
         // read (64 KiB); the rest stays queued at the server, well inside what MsQuic buffers for its writes.
         public const int ResponseLength = 160 * 1024;
 
-        private WithheldCreditPair(QuicConnectionListener listener, QuicConnection client, QuicStream clientStream, MultiplexedConnection server, MultiplexedStream serverStream)
+        private WithheldCreditPair(QuicConnectionListener listener, QuicConnection client, QuicStream clientStream, MultiplexedConnection server, MultiplexedConnectionStream serverStream)
         {
             Listener = listener;
             Client = client;
@@ -1408,7 +1531,7 @@ public class QuicMultiplexedConnectionTests
 
         public MultiplexedConnection Server { get; }
 
-        public MultiplexedStream ServerStream { get; }
+        public MultiplexedConnectionStream ServerStream { get; }
 
         public static async Task<WithheldCreditPair> CreateAsync(
             X509Certificate2 certificate,
@@ -1436,7 +1559,7 @@ public class QuicMultiplexedConnectionTests
 
             try
             {
-                ValueTask<MultiplexedConnection> accepting = listener.AcceptAsync(cancellationToken);
+                ValueTask<IMultiplexedConnection> accepting = listener.AcceptAsync(cancellationToken);
 
                 client = await QuicConnection.ConnectAsync(new QuicClientConnectionOptions
                 {
@@ -1457,12 +1580,12 @@ public class QuicMultiplexedConnectionTests
                     }
                 }, cancellationToken);
 
-                MultiplexedConnection server = await accepting;
+                MultiplexedConnection server = (MultiplexedConnection)await accepting;
 
                 QuicStream clientStream = await client.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken);
                 await clientStream.WriteAsync(new byte[] { 1 }, completeWrites: true, cancellationToken);
 
-                MultiplexedStream serverStream = await server.AcceptStreamAsync(cancellationToken);
+                MultiplexedConnectionStream serverStream = await server.AcceptStreamAsync(cancellationToken);
                 await ReadBytesAsync(serverStream.Input, 1, cancellationToken);
 
                 byte[] response = new byte[ResponseLength];
@@ -1515,7 +1638,7 @@ public class QuicMultiplexedConnectionTests
             await Listener.DisposeAsync();
         }
 
-        private static async Task SendAsync(MultiplexedStream stream, byte[] payload, CancellationToken cancellationToken)
+        private static async Task SendAsync(MultiplexedConnectionStream stream, byte[] payload, CancellationToken cancellationToken)
         {
             const int piece = 16 * 1024;
 
@@ -1566,7 +1689,7 @@ public class QuicMultiplexedConnectionTests
             try
             {
                 afterBind?.Invoke();
-                ValueTask<MultiplexedConnection> acceptTask = listener.AcceptAsync(cancellationToken);
+                ValueTask<IMultiplexedConnection> acceptTask = listener.AcceptAsync(cancellationToken);
 
                 QuicConnectionFactory factory = QuicConnectionFactory.Create(options =>
                 {
@@ -1581,8 +1704,8 @@ public class QuicMultiplexedConnectionTests
                     configureClient?.Invoke(options);
                 });
 
-                MultiplexedConnection client = await factory.ConnectAsync(listener.EndPoint, cancellationToken);
-                MultiplexedConnection server = await acceptTask;
+                MultiplexedConnection client = (MultiplexedConnection)await factory.ConnectAsync(listener.EndPoint, cancellationToken);
+                MultiplexedConnection server = (MultiplexedConnection)await acceptTask;
 
                 return new LoopbackPair(listener, client, server);
             }

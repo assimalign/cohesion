@@ -130,7 +130,7 @@ public class Http2HeadersPaddingTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         int dispatched = 0;
 
         // Act — the receive loop absorbs the connection error.

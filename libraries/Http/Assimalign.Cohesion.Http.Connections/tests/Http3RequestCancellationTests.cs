@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -7,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Http.Connections.Internal;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests;
@@ -45,7 +48,7 @@ public class Http3RequestCancellationTests
     {
         // Arrange — a POST whose body is still coming; the application has neither read nor answered it.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
         context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
@@ -76,7 +79,7 @@ public class Http3RequestCancellationTests
     {
         // Arrange — a whole request: head, body, and the client's FIN.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Http2TestPeer.CreateBody(100)));
         await request.Output.CompleteAsync();
@@ -92,6 +95,45 @@ public class Http3RequestCancellationTests
 
         // Assert
         context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Cancellation: Local STOP_SENDING after the final flush must not cancel a successful response")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RequestCancelled_OnLocalReadAbortClosingStream_ShouldRemainFalse(bool streamed)
+    {
+        // Arrange — this driver reports its own closure synchronously from AbortRead, before FIN.
+        StallingMultiplexedConnection? transport = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            configureListener: options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()),
+            decorate: inner => transport = new StallingMultiplexedConnection(inner, signalClosedOnReadAbort: true));
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
+        IHttpContext context = await peer.NextContextAsync();
+        StallingConnection serverStream = transport.ShouldNotBeNull().RequestStreams.ShouldHaveSingleItem();
+        await using IHttpContext ownedContext = context;
+        await using StallingConnection ownedStream = serverStream;
+        byte[] responseBody = Encoding.ASCII.GetBytes("done");
+        if (streamed)
+        {
+            await context.Response.Streaming.WriteAsync(responseBody);
+        }
+        else
+        {
+            context.Response.Body = new MemoryStream(responseBody);
+        }
+
+        // Act
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+
+        // Assert — response and FIN arrive despite local closure, and the unread body stays refused.
+        serverStream.ReadAbortCode.ShouldBe((long)Http3ErrorCode.NoError);
+        serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
+        Http3FrameCollector output = new(request);
+        await output.ReadUntilAsync(collector => collector.IsCompleted, "the complete response after local read abort");
+        output.DataPayload().ShouldBe(responseBody);
+        await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[1]).AsTask());
     }
 
     private static async Task ShouldFireAsync(CancellationToken token)

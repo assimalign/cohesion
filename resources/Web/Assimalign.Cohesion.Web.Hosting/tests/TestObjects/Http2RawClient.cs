@@ -52,11 +52,11 @@ internal sealed class Http2RawClient : IAsyncDisposable
 {
     private static readonly byte[] _preface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
-    private readonly Connection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly Stream _stream;
     private readonly List<Http2RawFrame> _frames = new();
 
-    private Http2RawClient(Connection connection)
+    private Http2RawClient(IDuplexConnection connection)
     {
         _connection = connection;
         _stream = connection.AsStream();
@@ -70,7 +70,7 @@ internal sealed class Http2RawClient : IAsyncDisposable
     /// </summary>
     public static async Task<Http2RawClient> ConnectAsync(InMemoryConnectionListener transport, CancellationToken cancellationToken)
     {
-        Connection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken).ConfigureAwait(false);
+        IDuplexConnection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken).ConfigureAwait(false);
         Http2RawClient client = new(connection);
 
         await client._stream.WriteAsync(_preface, cancellationToken).ConfigureAwait(false);

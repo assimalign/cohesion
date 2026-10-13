@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 /// <summary>Counts feature accesses without advertising a directional-abort contract on the connection.</summary>
-internal sealed class FeatureLookupCountingConnection : IMultiplexedStream
+internal sealed class FeatureLookupCountingConnection : IMultiplexedConnectionStream
 {
     private readonly TestConnection _inner;
     private readonly PipeReader _input;

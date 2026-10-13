@@ -74,7 +74,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
         options.UseHttp3(new TestMultiplexedConnectionListener(decorate?.Invoke(server) ?? server), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         return new Http3InMemoryPeer(client, server, listener, connectionContext);
     }
@@ -86,7 +86,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// Opens a client-initiated bidirectional stream — a request stream, as the server sees it.
     /// </summary>
     /// <returns>The client end of the request stream.</returns>
-    public async Task<MultiplexedStream> OpenRequestStreamAsync()
+    public async Task<MultiplexedConnectionStream> OpenRequestStreamAsync()
     {
         return await _client.OpenStreamAsync(ConnectionDirection.Bidirectional);
     }
@@ -96,7 +96,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// its stream-type prefix.
     /// </summary>
     /// <returns>The client end of the unidirectional stream.</returns>
-    public async Task<MultiplexedStream> OpenUnidirectionalStreamAsync()
+    public async Task<MultiplexedConnectionStream> OpenUnidirectionalStreamAsync()
     {
         return await _client.OpenStreamAsync(ConnectionDirection.WriteOnly);
     }
@@ -110,7 +110,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     public async Task<long> ReadGoAwayAsync()
     {
         using CancellationTokenSource timeout = new(_timeout);
-        Connection control = await _client.AcceptStreamAsync(timeout.Token);
+        IDuplexConnection control = await _client.AcceptStreamAsync(timeout.Token);
         List<byte> received = new();
 
         while (true)
@@ -162,7 +162,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// decoder stream second.
     /// </summary>
     /// <returns>The client end of the server's next unidirectional stream.</returns>
-    public async Task<MultiplexedStream> AcceptServerStreamAsync()
+    public async Task<MultiplexedConnectionStream> AcceptServerStreamAsync()
     {
         using CancellationTokenSource timeout = new(_timeout);
         return await _client.AcceptStreamAsync(timeout.Token);
@@ -211,7 +211,7 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// </summary>
     /// <param name="stream">The client end of a request stream.</param>
     /// <returns>The octets the server wrote.</returns>
-    public static async Task<byte[]> ReadToEndAsync(Connection stream)
+    public static async Task<byte[]> ReadToEndAsync(IDuplexConnection stream)
     {
         using CancellationTokenSource timeout = new(_timeout);
         List<byte> accumulated = new();

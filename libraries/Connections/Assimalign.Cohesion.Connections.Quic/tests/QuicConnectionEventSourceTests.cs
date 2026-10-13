@@ -82,8 +82,8 @@ public class QuicConnectionEventSourceTests
             };
         }, cancellation.Token);
 
-        ValueTask<MultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token);
-        MultiplexedConnection client = await QuicConnectionFactory.Create(options =>
+        ValueTask<IMultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token);
+        MultiplexedConnection client = (MultiplexedConnection)await QuicConnectionFactory.Create(options =>
         {
             options.ClientAuthenticationOptions = new SslClientAuthenticationOptions
             {
@@ -93,8 +93,8 @@ public class QuicConnectionEventSourceTests
                 RemoteCertificateValidationCallback = static (_, _, _, _) => true
             };
         }).ConnectAsync(listener.EndPoint, cancellation.Token);
-        MultiplexedConnection server = await accept;
-        Connection stream = await client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
+        MultiplexedConnection server = (MultiplexedConnection)await accept;
+        IDuplexConnection stream = await client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
         long connectionsWhileOpen = QuicConnectionEventSource.Log.CurrentConnections;
         long streamsWhileOpen = QuicConnectionEventSource.Log.CurrentStreams;
 
@@ -155,7 +155,7 @@ public class QuicConnectionEventSourceTests
             };
         }, cancellation.Token);
 
-        Task<MultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token).AsTask();
+        Task<IMultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token).AsTask();
 
         // Act — the refused client is dropped, and the same accept goes on to return the next client.
         await QuicTestClient.ConnectRefusedAsync(listener.EndPoint, cancellation.Token);
@@ -164,8 +164,8 @@ public class QuicConnectionEventSourceTests
             await Task.Delay(TimeSpan.FromMilliseconds(10), cancellation.Token);
         }
 
-        MultiplexedConnection client = await QuicTestClient.CreateFactory(clientCertificate).ConnectAsync(listener.EndPoint, cancellation.Token);
-        MultiplexedConnection server = await accept;
+        MultiplexedConnection client = (MultiplexedConnection)await QuicTestClient.CreateFactory(clientCertificate).ConnectAsync(listener.EndPoint, cancellation.Token);
+        MultiplexedConnection server = (MultiplexedConnection)await accept;
         await client.DisposeAsync();
         await server.DisposeAsync();
         await listener.DisposeAsync();

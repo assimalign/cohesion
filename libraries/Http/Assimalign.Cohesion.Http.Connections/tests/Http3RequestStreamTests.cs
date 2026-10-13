@@ -35,7 +35,7 @@ public class Http3RequestStreamTests
     {
         // Arrange — only the HEADERS frame is on the wire: no DATA and no FIN yet.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
 
         // Act — the request is dispatched before a single body octet exists.
@@ -66,7 +66,7 @@ public class Http3RequestStreamTests
     {
         // Arrange — the first request sends its head and part of its body, then pauses.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection upload = await peer.OpenRequestStreamAsync();
+        IDuplexConnection upload = await peer.OpenRequestStreamAsync();
         await upload.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("part-1;"))));
@@ -77,7 +77,7 @@ public class Http3RequestStreamTests
         Encoding.ASCII.GetString(partOne).ShouldBe("part-1;");
 
         // Act — a second request arrives while the first body has neither finished nor been drained.
-        Connection other = await peer.OpenRequestStreamAsync();
+        IDuplexConnection other = await peer.OpenRequestStreamAsync();
         await other.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/second", "https", "a"));
         other.Output.Complete();
 
@@ -98,8 +98,8 @@ public class Http3RequestStreamTests
     {
         // Arrange — stream 0 is opened but sends nothing; stream 4 sends a complete request.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection stalled = await peer.OpenRequestStreamAsync();
-        Connection ready = await peer.OpenRequestStreamAsync();
+        IDuplexConnection stalled = await peer.OpenRequestStreamAsync();
+        IDuplexConnection ready = await peer.OpenRequestStreamAsync();
         await ready.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ready", "https", "a"));
         ready.Output.Complete();
 
@@ -125,7 +125,7 @@ public class Http3RequestStreamTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             configureListener: options => options.Interceptors.Add(gate));
 
-        Connection slow = await peer.OpenRequestStreamAsync();
+        IDuplexConnection slow = await peer.OpenRequestStreamAsync();
         await slow.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/slow", "https", "a"));
         slow.Output.Complete();
         IHttpContext slowContext = await peer.NextContextAsync();
@@ -136,7 +136,7 @@ public class Http3RequestStreamTests
             await gate.Entered.Task.WaitAsync(_timeout);
 
             // Act — another stream arrives while the slow response's hook remains blocked.
-            Connection fast = await peer.OpenRequestStreamAsync();
+            IDuplexConnection fast = await peer.OpenRequestStreamAsync();
             await fast.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/fast", "https", "a"));
             fast.Output.Complete();
             IHttpContext fastContext = await peer.NextContextAsync();
@@ -161,7 +161,7 @@ public class Http3RequestStreamTests
         // The server may dispatch each exchange on its own task, so an exchange keeps reading its body
         // after ReceiveAsync has returned and its teardown has run.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("part-1;"))));
@@ -199,11 +199,11 @@ public class Http3RequestStreamTests
         });
         Task<IHttpContext> dispatch = peer.NextContextAsync();
 
-        Connection encoder = await peer.OpenUnidirectionalStreamAsync();
+        IDuplexConnection encoder = await peer.OpenUnidirectionalStreamAsync();
         await encoder.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
             HttpProtocolPayloadFactory.QPackSetCapacity(4096)));
 
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello"))));
@@ -241,7 +241,7 @@ public class Http3RequestStreamTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
 
         IHttpContext context = await peer.NextContextAsync();
@@ -264,7 +264,7 @@ public class Http3RequestStreamTests
         // exchange then faults: the server resets it through CancelAsync followed by SendAsync.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             configureListener: static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/stream", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[16])));
@@ -290,7 +290,7 @@ public class Http3RequestStreamTests
     {
         // Arrange — a 128 KiB DATA frame against a 1 KiB cap; the client keeps its side open.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MaxRequestBodySize = 1024);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[128 * 1024])));
@@ -345,7 +345,7 @@ public class Http3RequestStreamTests
     {
         // The declared length alone decides: no DATA frame is ever sent, and the read still fails at once.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MaxRequestBodySize = 16);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "4096" }));
 
@@ -369,7 +369,7 @@ public class Http3RequestStreamTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), static http3 => http3.Limits.MaxRequestBodySize = 16);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
@@ -384,7 +384,7 @@ public class Http3RequestStreamTests
     {
         // Arrange — the handler answers without reading the 1 MiB body the client is still sending.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request(
                 "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "1048576" }),
@@ -411,7 +411,7 @@ public class Http3RequestStreamTests
     {
         // Arrange — the handler ignores a small body that is still arriving; the client keeps its side open.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[512])));
@@ -441,7 +441,7 @@ public class Http3RequestStreamTests
         // Arrange — the handler starts a body read that waits for octets the client never sends, and answers
         // without awaiting it.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
 
         IHttpContext context = await peer.NextContextAsync();
@@ -469,7 +469,7 @@ public class Http3RequestStreamTests
         // Arrange — the body, then a trailing HEADERS frame whose field section is only partly sent: the
         // two-octet QPACK prefix of a declared eight.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello")),
@@ -510,8 +510,10 @@ public class Http3RequestStreamTests
     public async Task SendAsync_OnBodilessRequestWhoseFinArrived_ShouldNotStopSending()
     {
         // Arrange — a GET whose FIN follows its HEADERS frame; the handler never reads its (empty) body.
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        Connection request = await peer.OpenRequestStreamAsync();
+        StallingMultiplexedConnection? observed = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            decorate: connection => observed = new StallingMultiplexedConnection(connection));
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/resource", "https", "a"));
         request.Output.Complete();
 
@@ -522,11 +524,13 @@ public class Http3RequestStreamTests
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
 
         // Assert — the complete response, and no STOP_SENDING: the request had already ended, so there is
-        // nothing to refuse (RFC 9114 §4.1). A stop would fire the client's ConnectionClosed on this driver.
+        // nothing to refuse (RFC 9114 §4.1). Both FINs now signal stream closure, so observe the
+        // directional abort itself to distinguish STOP_SENDING from successful completion.
         IReadOnlyList<(long FrameType, byte[] Payload)> frames =
             HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
         Encoding.ASCII.GetString(frames.Single(frame => frame.FrameType == (long)Http3FrameType.Data).Payload).ShouldBe("done");
-        request.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+        request.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        observed.ShouldNotBeNull().RequestStreams.ShouldHaveSingleItem().ReadAbortCode.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A bodiless request whose FIN has arrived should not owe a QPACK Stream Cancellation")]
@@ -545,7 +549,7 @@ public class Http3RequestStreamTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
 
@@ -752,7 +756,7 @@ public class Http3RequestStreamTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), static http3 => http3.Limits.MaxRequestHeadersFrameSize = 128);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -817,7 +821,7 @@ public class Http3RequestStreamTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -859,7 +863,7 @@ public class Http3RequestStreamTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -874,7 +878,7 @@ public class Http3RequestStreamTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         bool yielded;
         await using (IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator())

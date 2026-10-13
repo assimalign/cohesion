@@ -314,3 +314,5 @@ package's addition under #1405.
   needs more checks `Origin` itself before accepting.
 - **A hub or message layer** (SignalR-style). A separate decision (Http ADR 1).
 - **Message-size limits.** Recorded as "to revisit" in Http ADR 1.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

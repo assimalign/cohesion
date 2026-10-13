@@ -1,6 +1,4 @@
 using System;
-using System.Net;
-using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,68 +10,23 @@ namespace Assimalign.Cohesion.Connections;
 /// <remarks>
 /// Override <see cref="AcceptStreamAsync(CancellationToken)"/> and
 /// <see cref="OpenStreamAsync(ConnectionDirection, CancellationToken)"/> to return the concrete
-/// <see cref="MultiplexedStream"/> stream type; the explicit interface implementations forward to them.
+/// <see cref="MultiplexedConnectionStream"/> stream type; the explicit interface implementations forward to them.
 /// </remarks>
-public abstract class MultiplexedConnection : IMultiplexedConnection
+public abstract class MultiplexedConnection : Connection, IMultiplexedConnection
 {
-    private IConnectionFeatureCollection? _features;
-    private object? _featuresSync;
-    private ExceptionDispatchInfo? _featuresError;
-
-    /// <inheritdoc />
-    public abstract ConnectionId Id { get; }
-
-    /// <inheritdoc />
-    public abstract EndPoint? LocalEndPoint { get; }
-
-    /// <inheritdoc />
-    public abstract EndPoint? RemoteEndPoint { get; }
-
-    /// <inheritdoc />
-    public abstract ConnectionCapabilities Capabilities { get; }
-
-    /// <inheritdoc />
-    public IConnectionFeatureCollection Features => Volatile.Read(ref _features) ?? InitializeFeatures();
-
-    /// <summary>
-    /// Gets the wrapped connection's features, or <see langword="null"/> for an unlayered connection.
-    /// </summary>
-    protected virtual IConnectionFeatureCollection? InnerFeatures => null;
-
-    /// <summary>
-    /// Registers this connection's features once, on first access, before the collection is published.
-    /// </summary>
-    /// <param name="features">The collection that will be exposed by <see cref="Features"/>.</param>
-    /// <remarks>Configure the supplied collection rather than accessing <see cref="Features"/> recursively.</remarks>
-    protected virtual void ConfigureFeatures(IConnectionFeatureCollection features)
-    {
-    }
-
-    /// <inheritdoc />
-    public abstract ConnectionState State { get; }
-
-    /// <inheritdoc />
-    public abstract CancellationToken ConnectionClosed { get; }
-
-    /// <inheritdoc />
-    public abstract void Abort(Exception? reason = null);
-
     /// <inheritdoc />
     public abstract void Abort(long errorCode, Exception? reason = null);
-
-    /// <inheritdoc />
-    public abstract ValueTask DisposeAsync();
 
     /// <summary>
     /// Accepts the next inbound stream opened by the remote peer.
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the accept operation.</param>
-    /// <returns>The accepted stream as a <see cref="MultiplexedStream"/>.</returns>
+    /// <returns>The accepted stream as a <see cref="MultiplexedConnectionStream"/>.</returns>
     /// <remarks>
     /// A transport that supports only bidirectional streams never returns a
     /// <see cref="ConnectionDirection.ReadOnly"/> stream.
     /// </remarks>
-    public abstract ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default);
+    public abstract ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Opens a new outbound stream to the remote peer.
@@ -83,7 +36,7 @@ public abstract class MultiplexedConnection : IMultiplexedConnection
     /// <see cref="ConnectionDirection.WriteOnly"/> for an outbound unidirectional stream.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the open operation.</param>
-    /// <returns>The opened stream as a <see cref="MultiplexedStream"/>.</returns>
+    /// <returns>The opened stream as a <see cref="MultiplexedConnectionStream"/>.</returns>
     /// <exception cref="ArgumentException">
     /// <paramref name="direction"/> is <see cref="ConnectionDirection.ReadOnly"/>.
     /// </exception>
@@ -91,42 +44,12 @@ public abstract class MultiplexedConnection : IMultiplexedConnection
     /// <paramref name="direction"/> is <see cref="ConnectionDirection.WriteOnly"/> and the transport
     /// supports only bidirectional streams.
     /// </exception>
-    public abstract ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default);
+    public abstract ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default);
 
-    async ValueTask<IMultiplexedStream> IMultiplexedConnection.AcceptStreamAsync(CancellationToken cancellationToken)
+    async ValueTask<IMultiplexedConnectionStream> IMultiplexedConnection.AcceptStreamAsync(CancellationToken cancellationToken)
         => await AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
 
-    async ValueTask<IMultiplexedStream> IMultiplexedConnection.OpenStreamAsync(ConnectionDirection direction, CancellationToken cancellationToken)
+    async ValueTask<IMultiplexedConnectionStream> IMultiplexedConnection.OpenStreamAsync(ConnectionDirection direction, CancellationToken cancellationToken)
         => await OpenStreamAsync(direction, cancellationToken).ConfigureAwait(false);
 
-    private IConnectionFeatureCollection InitializeFeatures()
-    {
-        object? sync = Volatile.Read(ref _featuresSync);
-        if (sync is null)
-        {
-            sync = Interlocked.CompareExchange(ref _featuresSync, new object(), null) ?? _featuresSync;
-        }
-
-        lock (sync!)
-        {
-            if (_features is not null)
-            {
-                return _features;
-            }
-
-            _featuresError?.Throw();
-            try
-            {
-                var features = new ConnectionFeatureCollection(InnerFeatures);
-                ConfigureFeatures(features);
-                Interlocked.CompareExchange(ref _features, features, null);
-                return features;
-            }
-            catch (Exception exception)
-            {
-                _featuresError = ExceptionDispatchInfo.Capture(exception);
-                throw;
-            }
-        }
-    }
 }

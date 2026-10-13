@@ -890,8 +890,8 @@ public class ResponseStartingFeatureTests
         {
             await factory.StartAsync(cancellationToken);
             await using Http3RawClient client = await Http3RawClient.ConnectAsync(multiplexed, cancellationToken);
-            await using Connection control = await client.OpenControlStreamAsync(cancellationToken);
-            await using Connection stream = await client.SendRequestAsync("POST", "/", [], [], endStream: true, cancellationToken);
+            await using IDuplexConnection control = await client.OpenControlStreamAsync(cancellationToken);
+            await using IDuplexConnection stream = await client.SendRequestAsync("POST", "/", [], [], endStream: true, cancellationToken);
             return await ReadHttp3ResponseAsync(stream, cancellationToken);
         }
 
@@ -927,7 +927,7 @@ public class ResponseStartingFeatureTests
         return snapshot;
     }
 
-    private static async Task<ResponseSnapshot> ReadHttp3ResponseAsync(Connection stream, CancellationToken cancellationToken)
+    private static async Task<ResponseSnapshot> ReadHttp3ResponseAsync(IDuplexConnection stream, CancellationToken cancellationToken)
     {
         ResponseSnapshot snapshot = new();
         List<byte> received = [];

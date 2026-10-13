@@ -64,7 +64,7 @@ deliberately no transport abstraction — see the naming rule and full design ra
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Connections` | The contracts: `IConnection` (a live duplex pipe), `IConnectionListener` / `IConnectionFactory`, `IMultiplexedConnection` (+ listener/factory), `IDatagramConnection`, the `IConnectionLayer` composition arrow, `ConnectionCapabilities`, the named `IConnectionFeatureCollection`, `IMultiplexedStream` (whole-stream reset and input completion), coded multiplexed connection close, and the guided abstract bases. Also carries `ListenerId` and the `shared/` driver source (pipe-pair wiring, pooled pipe options) that the drivers compile in. |
+| `Assimalign.Cohesion.Connections` | The contracts: `IConnection` (shared identity/lifecycle), `IDuplexConnection` (a live duplex pipe), `IConnectionListener` / `IConnectionFactory`, `IMultiplexedConnection` (+ listener/factory), `IDatagramConnection`, the `IConnectionLayer` composition arrow, `ConnectionCapabilities`, the named `IConnectionFeatureCollection`, `IMultiplexedConnectionStream` (whole-stream reset and input completion), coded multiplexed connection close, and the guided abstract bases. Also carries `ListenerId` and the `shared/` driver source (pipe-pair wiring, pooled pipe options) that the drivers compile in. |
 | [Assimalign.Cohesion.Connections.Tls](Assimalign.Cohesion.Connections.Tls/docs/OVERVIEW.md) | TLS handshake facts (`ITlsConnectionInfo`), discovered through `connection.Tls`. |
 | [Assimalign.Cohesion.Connections.StreamAbort](Assimalign.Cohesion.Connections.StreamAbort/docs/OVERVIEW.md) | Optional coded per-direction aborts (`IMultiplexedStreamAbort`), discovered through `stream.DirectionalAbort`. |
 | [Assimalign.Cohesion.Connections.StreamLimits](Assimalign.Cohesion.Connections.StreamLimits/docs/OVERVIEW.md) | Optional cumulative inbound stream allowance (`IMultiplexedConnectionStreamLimits`), discovered through `connection.StreamLimits`. |
@@ -72,7 +72,7 @@ deliberately no transport abstraction — see the naming rule and full design ra
 | `Assimalign.Cohesion.Connections.Tcp` | Reliable, ordered, single-stream socket driver (`TcpConnectionListener` / `TcpConnectionFactory`). Serves both TCP over IP and Unix domain sockets (with socket-file lifecycle and honest protocol stamping), plus socket-activation descriptor hand-off. |
 | `Assimalign.Cohesion.Connections.NamedPipes` | Reliable, ordered, single-stream named-pipe driver (`NamedPipeConnectionListener` / `NamedPipeConnectionFactory`) for Windows-native local IPC with ACL/filesystem access control; the peer of the `Tcp` driver's Unix domain socket path. |
 | `Assimalign.Cohesion.Connections.Udp` | Message-oriented UDP datagram driver (`UdpConnectionFactory` → `IDatagramConnection`). |
-| `Assimalign.Cohesion.Connections.Quic` | Reliable, ordered, multiplexed QUIC driver (`QuicConnectionListener` / `QuicConnectionFactory`); each stream is an `IMultiplexedStream : IConnection` with a `ConnectionDirection`. |
+| `Assimalign.Cohesion.Connections.Quic` | Reliable, ordered, multiplexed QUIC driver (`QuicConnectionListener` / `QuicConnectionFactory`); each stream is an `IMultiplexedConnectionStream : IDuplexConnection` with a `ConnectionDirection`. |
 | `Assimalign.Cohesion.Connections.InMemory` | Socketless in-memory driver: cross-wired duplex-pipe connection pairs (`InMemoryConnectionListener` / `InMemoryConnectionFactory`, plus a multiplexed variant) for deterministic, live transport testing. |
 
 ## Layering
@@ -113,4 +113,4 @@ reference is [docs/EVENT_SOURCES.md](../../docs/EVENT_SOURCES.md).
 - [Assimalign.Cohesion.Connections/docs/OVERVIEW.md](Assimalign.Cohesion.Connections/docs/OVERVIEW.md)
 - [Assimalign.Cohesion.Connections/docs/DESIGN.md](Assimalign.Cohesion.Connections/docs/DESIGN.md) —
   includes the consolidated design rationale (why the old transport abstraction dissolved, the
-  layer algebra, the flattened `IConnection : IDuplexPipe` data plane, capability gating).
+  layer algebra, the flattened `IDuplexConnection : IDuplexPipe` data plane, capability gating).

@@ -421,3 +421,5 @@ body reader and the negotiated writer, and COHWEB0007 reports an application tha
   file-system dependency.
 - Per-endpoint form limits (`HttpFormOptions` as endpoint metadata). The limits are the exchange's form
   feature's, set by installing one ahead of the endpoint.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

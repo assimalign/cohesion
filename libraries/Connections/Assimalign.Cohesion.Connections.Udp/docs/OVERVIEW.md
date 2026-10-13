@@ -5,7 +5,9 @@
 The message-oriented UDP driver for the Cohesion Connections contracts. It produces
 `IDatagramConnection`s: a server socket bound to a local endpoint that receives from any peer, or a
 client socket connected to one remote peer. Datagrams keep their boundaries — one send is one message,
-one receive is one message — which is why this shape is not an `IConnection` byte stream.
+one receive is one message — and derive from the common `IConnection` lifecycle without exposing a byte pipe.
+`Id`, `State`, `ConnectionClosed`, and `Abort` are available on every datagram connection.
+Disposal cancels the closed token before returning; abort preserves the `Aborted` state.
 
 ## Scope
 
@@ -28,9 +30,9 @@ one receive is one message — which is why this shape is not an `IConnection` b
 UdpConnectionFactory factory = new();
 
 await using IDatagramConnection server = factory.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-await using IDatagramConnection client = factory.Connect(server.LocalEndPoint);
+await using IDatagramConnection client = factory.Connect(server.LocalEndPoint!);
 
-await client.SendAsync(payload, server.LocalEndPoint, cancellationToken);
+await client.SendAsync(payload, server.LocalEndPoint!, cancellationToken);
 DatagramReceiveResult result = await server.ReceiveAsync(buffer, cancellationToken);
 ```
 

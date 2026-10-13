@@ -99,6 +99,11 @@ public sealed class QuicConnectionListenerOptions
     /// <summary>
     /// Gets or sets the maximum number of concurrent inbound unidirectional streams per connection.
     /// </summary>
+    /// <remarks>
+    /// Defaults to ten. Zero grants one concurrent inbound unidirectional stream at the transport
+    /// layer so a pending native accept can observe idle peer closure. Zero does not forbid
+    /// unidirectional streams. Negative values are rejected when the connection options are used.
+    /// </remarks>
     public int MaxUnidirectionalStreamCount { get; set; } = 10;
 
     /// <summary>
@@ -128,13 +133,6 @@ public sealed class QuicConnectionListenerOptions
     /// with an error, which resets the sending direction (a clean completion sends the FIN). A direction
     /// aborted through <see cref="IMultiplexedStreamAbort"/> carries the caller's code instead, and keeps
     /// it when the stream is later aborted or disposed.
-    /// </para>
-    /// <para>
-    /// Changed from 10.0.0-preview.1 (#1330; see the Breaking changes in the driver's DESIGN): completing
-    /// <see cref="System.IO.Pipelines.IDuplexPipe.Output"/> used to dispose the whole stream, which stopped a
-    /// receiving direction still open with this code, and completing it with an error sent the FIN. It now
-    /// ends only the sending direction, and completing it with an error sends <c>RESET_STREAM</c> with this
-    /// code.
     /// </para>
     /// <para>
     /// Defaults to <c>0x10c</c> — HTTP/3 <c>H3_REQUEST_CANCELLED</c> (RFC 9114 §8.1) — matching
@@ -224,7 +222,7 @@ public sealed class QuicConnectionListenerOptions
         {
             ServerAuthenticationOptions = ServerAuthenticationOptions,
             MaxInboundBidirectionalStreams = maxInboundBidirectionalStreams,
-            MaxInboundUnidirectionalStreams = MaxUnidirectionalStreamCount,
+            MaxInboundUnidirectionalStreams = MaxUnidirectionalStreamCount == 0 ? 1 : MaxUnidirectionalStreamCount,
             DefaultCloseErrorCode = DefaultCloseErrorCode,
             DefaultStreamErrorCode = DefaultStreamErrorCode,
             HandshakeTimeout = HandshakeTimeout

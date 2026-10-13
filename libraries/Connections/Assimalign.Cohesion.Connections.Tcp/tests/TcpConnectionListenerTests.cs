@@ -1,4 +1,5 @@
 using System;
+using System.IO.Pipelines;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
@@ -124,14 +125,14 @@ public class TcpConnectionListenerTests
         // The listener binds lazily on the first accept; the bind happens in the synchronous
         // prefix of AcceptAsync, so the ephemeral endpoint is available once the call returns
         // its pending task.
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         IPEndPoint boundEndPoint = (IPEndPoint)listener.EndPoint;
 
         TcpConnectionFactory factory = new();
 
-        await using Connection client = await factory.ConnectAsync(boundEndPoint, cancellation.Token);
-        await using Connection server = await acceptTask;
+        await using IDuplexConnection client = await factory.ConnectAsync(boundEndPoint, cancellation.Token);
+        await using IDuplexConnection server = await acceptTask;
 
         // Assert
         boundEndPoint.Port.ShouldNotBe(0);
@@ -169,7 +170,7 @@ public class TcpConnectionListenerTests
         await using TcpConnectionListener listener = TcpConnectionListener.Create(
             options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(acceptCancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(acceptCancellation.Token);
 
         // Act
         acceptCancellation.Cancel();
@@ -196,8 +197,8 @@ public class TcpConnectionListenerTests
         exception.ShouldBeNull();
     }
 
-    [Fact]
-    public async Task DisposeAsync_WithLiveAcceptedConnection_ShouldCloseTrackedConnection()
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - DisposeAsync: Accepted connections remain usable until their owner closes them")]
+    public async Task DisposeAsync_WithLiveAcceptedConnection_ShouldPreserveTrackedConnection()
     {
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
@@ -205,21 +206,27 @@ public class TcpConnectionListenerTests
         TcpConnectionListener listener = TcpConnectionListener.Create(
             options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         TcpConnectionFactory factory = new();
 
-        await using Connection client = await factory.ConnectAsync(listener.EndPoint, cancellation.Token);
-        await using Connection server = await acceptTask;
+        await using IDuplexConnection client = await factory.ConnectAsync(listener.EndPoint, cancellation.Token);
+        await using IDuplexConnection server = await acceptTask;
 
         // Act
         await listener.DisposeAsync();
 
         // Assert
-        // The listener disposes every tracked live connection, and a connection's dispose only
-        // returns after its pump loops have finished and signaled closure.
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+        server.State.ShouldBe(ConnectionState.Open);
+        listener.Connections.Count.ShouldBe(1);
+        await client.Output.WriteAsync(new byte[] { 42 }, cancellation.Token);
+        ReadResult read = await server.Input.ReadAsync(cancellation.Token);
+        read.Buffer.FirstSpan[0].ShouldBe((byte)42);
+        server.Input.AdvanceTo(read.Buffer.End);
+        await server.DisposeAsync();
         server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
-        server.State.ShouldBe(ConnectionState.Closed);
+        listener.Connections.Count.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - Dispose: A client connecting while an accept is cancelled is never left connected to nothing")]
@@ -238,7 +245,7 @@ public class TcpConnectionListenerTests
             await listener.BindAsync();
 
             using CancellationTokenSource acceptCancellation = new();
-            Task<Connection> accept = listener.AcceptAsync(acceptCancellation.Token).AsTask();
+            Task<IDuplexConnection> accept = listener.AcceptAsync(acceptCancellation.Token).AsTask();
 
             using Socket client = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             Task connect = client.ConnectAsync(listener.EndPoint);
@@ -263,7 +270,7 @@ public class TcpConnectionListenerTests
 
             try
             {
-                await using Connection connection = await accept;
+                await using IDuplexConnection connection = await accept;
             }
             catch (OperationCanceledException)
             {
@@ -309,11 +316,11 @@ public class TcpConnectionListenerTests
         int healthyPort = ((IPEndPoint)healthy.LocalEndPoint!).Port;
 
         // Act
-        Connection? accepted = null;
+        IDuplexConnection? accepted = null;
 
         for (int i = 0; i <= resetClients && accepted is null; i++)
         {
-            Connection connection = await listener.AcceptAsync(cancellation.Token);
+            IDuplexConnection connection = await listener.AcceptAsync(cancellation.Token);
 
             if (connection.RemoteEndPoint is IPEndPoint remote && remote.Port == healthyPort)
             {
@@ -348,7 +355,7 @@ public class TcpConnectionListenerTests
         await first.ConnectAsync(listener.EndPoint, cancellation.Token);
 
         // Act
-        await using Connection firstAccepted = await listener.AcceptAsync(cancellation.Token);
+        await using IDuplexConnection firstAccepted = await listener.AcceptAsync(cancellation.Token);
         IReadOnlyList<long> attempts = accept.AttemptTimestamps;
 
         accept.Fail(error);
@@ -357,7 +364,7 @@ public class TcpConnectionListenerTests
         await second.ConnectAsync(listener.EndPoint, cancellation.Token);
 
         Stopwatch secondAcceptTime = Stopwatch.StartNew();
-        await using Connection secondAccepted = await listener.AcceptAsync(cancellation.Token);
+        await using IDuplexConnection secondAccepted = await listener.AcceptAsync(cancellation.Token);
         secondAcceptTime.Stop();
 
         // Assert
@@ -385,7 +392,7 @@ public class TcpConnectionListenerTests
         await using TcpConnectionListener listener = CreateListener(accept);
         await listener.BindAsync(timeout.Token);
 
-        Task<Connection> acceptTask = listener.AcceptAsync(acceptCancellation.Token).AsTask();
+        Task<IDuplexConnection> acceptTask = listener.AcceptAsync(acceptCancellation.Token).AsTask();
         await accept.WaitForAttemptsAsync(9, acceptTask, timeout.Token);
         acceptTask.IsCompleted.ShouldBeFalse("the listener should be backing off, not failing");
 
@@ -410,7 +417,7 @@ public class TcpConnectionListenerTests
         await using TcpConnectionListener listener = CreateListener(accept);
         await listener.BindAsync(timeout.Token);
 
-        Task<Connection> acceptTask = listener.AcceptAsync(timeout.Token).AsTask();
+        Task<IDuplexConnection> acceptTask = listener.AcceptAsync(timeout.Token).AsTask();
         await accept.WaitForAttemptsAsync(9, acceptTask, timeout.Token);
         acceptTask.IsCompleted.ShouldBeFalse("the listener should be backing off, not failing");
 
@@ -442,7 +449,7 @@ public class TcpConnectionListenerTests
         // Act
         Exception? exception = await Record.ExceptionAsync(async () =>
         {
-            await using Connection connection = await listener.AcceptAsync(cancellation.Token);
+            await using IDuplexConnection connection = await listener.AcceptAsync(cancellation.Token);
         });
 
         // Assert
@@ -497,7 +504,7 @@ public class TcpConnectionListenerTests
         await healthy.ConnectAsync(listener.EndPoint, cancellation.Token);
 
         // Act
-        await using Connection accepted = await listener.AcceptAsync(cancellation.Token);
+        await using IDuplexConnection accepted = await listener.AcceptAsync(cancellation.Token);
 
         // Assert
         accept.Attempts.ShouldBe(2, "the connection that failed set-up is skipped and the next one accepted");

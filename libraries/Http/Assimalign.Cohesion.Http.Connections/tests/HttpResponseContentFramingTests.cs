@@ -160,7 +160,7 @@ public class HttpResponseContentFramingTests
         options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleHttp1ContextAsync(connectionContext);
         context.Response.StatusCode = HttpStatusCode.NoContent;
         context.Response.Headers[HttpHeaderKey.TransferEncoding] = "chunked";
@@ -191,7 +191,7 @@ public class HttpResponseContentFramingTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> exchanges = connectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         // Act
@@ -226,7 +226,7 @@ public class HttpResponseContentFramingTests
         options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleHttp1ContextAsync(connectionContext);
         context.Response.StatusCode = HttpStatusCode.NoContent;
 
@@ -430,7 +430,7 @@ public class HttpResponseContentFramingTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleHttp1ContextAsync(connectionContext);
 
         respond(context);
@@ -466,7 +466,7 @@ public class HttpResponseContentFramingTests
         options.UseHttp3(new TestMultiplexedConnectionListener(new TestMultiplexedConnection(stream)), static _ => { });
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();

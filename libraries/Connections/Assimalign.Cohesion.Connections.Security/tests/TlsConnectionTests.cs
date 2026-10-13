@@ -30,10 +30,10 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Act
-        (IConnection securedClient, IConnection securedServer) = await UpgradePairAsync(client, server, timeout.Token);
+        (IDuplexConnection securedClient, IDuplexConnection securedServer) = await UpgradePairAsync(client, server, timeout.Token);
 
         // Assert: bytes written by the client arrive decrypted at the server.
         byte[] clientPayload = Encoding.UTF8.GetBytes("hello from client");
@@ -53,10 +53,10 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Act
-        (IConnection securedClient, IConnection securedServer) = await UpgradePairAsync(client, server, timeout.Token);
+        (IDuplexConnection securedClient, IDuplexConnection securedServer) = await UpgradePairAsync(client, server, timeout.Token);
 
         // Assert
         securedClient.Capabilities.ShouldBe(client.Capabilities with { Security = ConnectionSecurity.Tls });
@@ -68,10 +68,10 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Act
-        (IConnection securedClient, IConnection _) = await UpgradePairAsync(client, server, timeout.Token);
+        (IDuplexConnection securedClient, IDuplexConnection _) = await UpgradePairAsync(client, server, timeout.Token);
 
         // Assert
         securedClient.Id.ShouldBe(client.Id);
@@ -85,11 +85,12 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
-        (IConnection securedClient, IConnection _) = await UpgradePairAsync(client, server, timeout.Token);
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection securedClient, IDuplexConnection _) = await UpgradePairAsync(client, server, timeout.Token);
 
         // Act
         await securedClient.DisposeAsync();
+        securedClient.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
 
         // Assert
         client.State.ShouldBe(ConnectionState.Closed);
@@ -105,14 +106,14 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
         await using MultiplexedConnection clientLifetime = client;
         await using MultiplexedConnection serverLifetime = server;
-        await using MultiplexedStream clientStream = await client.OpenStreamAsync(cancellationToken: timeout.Token);
-        await using MultiplexedStream serverStream = await server.AcceptStreamAsync(timeout.Token);
-        (IConnection securedClient, IConnection securedServer) = await UpgradePairAsync(clientStream, serverStream, timeout.Token);
-        await using IConnection securedClientLifetime = securedClient;
-        await using IConnection securedServerLifetime = securedServer;
-        IConnection sender = readAtServer ? securedClient : securedServer;
-        IConnection receiver = readAtServer ? securedServer : securedClient;
-        IMultiplexedStream innerReceiver = readAtServer ? serverStream : clientStream;
+        await using MultiplexedConnectionStream clientStream = await client.OpenStreamAsync(cancellationToken: timeout.Token);
+        await using MultiplexedConnectionStream serverStream = await server.AcceptStreamAsync(timeout.Token);
+        (IDuplexConnection securedClient, IDuplexConnection securedServer) = await UpgradePairAsync(clientStream, serverStream, timeout.Token);
+        await using IDuplexConnection securedClientLifetime = securedClient;
+        await using IDuplexConnection securedServerLifetime = securedServer;
+        IDuplexConnection sender = readAtServer ? securedClient : securedServer;
+        IDuplexConnection receiver = readAtServer ? securedServer : securedClient;
+        IMultiplexedConnectionStream innerReceiver = readAtServer ? serverStream : clientStream;
         IMultiplexedStreamAbort innerAbort = innerReceiver.DirectionalAbort.ShouldNotBeNull();
         byte[] payload = [1, 2, 3];
         await sender.Output.WriteAsync(payload, timeout.Token);
@@ -135,9 +136,36 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
         receiver.Tls.ShouldNotBeNull();
     }
 
-    private async Task<(IConnection Client, IConnection Server)> UpgradePairAsync(
-        Connection client,
-        Connection server,
+    [Theory(DisplayName = "Cohesion Test [Connections.Security] - ConnectionClosed: TLS preserves local and idle peer closure")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConnectionClosed_OnDisposeOrAbort_ShouldNotifyBothEnds(bool abort)
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection securedClient, IDuplexConnection securedServer) = await UpgradePairAsync(client, server, timeout.Token);
+        await using IDuplexConnection clientLifetime = securedClient;
+        await using IDuplexConnection serverLifetime = securedServer;
+
+        // Act
+        if (abort)
+        {
+            securedClient.Abort();
+            securedClient.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        }
+        await securedClient.DisposeAsync();
+
+        // Assert
+        securedClient.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        securedServer.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        await securedServer.DisposeAsync();
+        securedServer.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+    }
+
+    private async Task<(IDuplexConnection Client, IDuplexConnection Server)> UpgradePairAsync(
+        IDuplexConnection client,
+        IDuplexConnection server,
         CancellationToken cancellationToken)
     {
         TlsServerOptions serverOptions = new()
@@ -156,8 +184,8 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
             }
         };
 
-        Task<IConnection> serverUpgrade = server.UpgradeToTlsAsync(serverOptions, cancellationToken).AsTask();
-        Task<IConnection> clientUpgrade = client.UpgradeToTlsAsync(clientOptions, cancellationToken).AsTask();
+        Task<IDuplexConnection> serverUpgrade = server.UpgradeToTlsAsync(serverOptions, cancellationToken).AsTask();
+        Task<IDuplexConnection> clientUpgrade = client.UpgradeToTlsAsync(clientOptions, cancellationToken).AsTask();
 
         await Task.WhenAll(serverUpgrade, clientUpgrade);
 

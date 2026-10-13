@@ -97,3 +97,5 @@ The framing is `System.Net.WebSockets` from the shared framework; there is no pa
 
 No frame codec (the BCL's is used), no origin policy (that is `Web.WebSockets`), and no client. See
 [DESIGN.md](./DESIGN.md).
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

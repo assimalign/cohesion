@@ -216,3 +216,5 @@ accepted even when the wire host is not, that a forwarded host outside the
 allowlist is rejected even when the wire host is allowlisted, and that without
 the forwarded-headers middleware, or with the guard registered ahead of it, the
 wire host is validated and forwarding headers are ignored.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

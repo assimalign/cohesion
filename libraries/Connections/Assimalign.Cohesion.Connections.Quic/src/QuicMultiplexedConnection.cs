@@ -8,6 +8,7 @@ using System.Runtime.Versioning;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Quic.Internal;
@@ -15,7 +16,7 @@ using Assimalign.Cohesion.Connections.Quic.Internal;
 namespace Assimalign.Cohesion.Connections.Quic;
 
 /// <summary>
-/// A QUIC connection that multiplexes independent streams, each surfaced as a <see cref="MultiplexedStream"/>.
+/// A QUIC connection that multiplexes independent streams, each surfaced as a <see cref="MultiplexedConnectionStream"/>.
 /// </summary>
 /// <remarks>
 /// QUIC carries TLS 1.3 in its own handshake (RFC 9001), so the connection reports what that
@@ -33,7 +34,7 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// <para>
 /// The connection and its streams carry application error codes: <see cref="Abort(long, Exception)"/>
 /// closes the connection with the caller's code, and every stream exposes a whole-stream reset through
-/// <see cref="IMultiplexedStream.Abort(long, Exception)"/> and the optional <see cref="IMultiplexedStreamAbort"/>
+/// <see cref="IMultiplexedConnectionStream.Abort(long, Exception)"/> and the optional <see cref="IMultiplexedStreamAbort"/>
 /// directional-abort feature. <see cref="Abort(Exception)"/> and
 /// <see cref="DisposeAsync"/> close with the configured default close code.
 /// </para>
@@ -48,6 +49,8 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
     private const long maxStreamCount = 1L << 60;
 
     private readonly QuicConnection _connection;
+    private readonly Channel<MultiplexedConnectionStream> _inbound = Channel.CreateUnbounded<MultiplexedConnectionStream>();
+    private readonly Task _acceptPump;
     private readonly long _defaultStreamErrorCode;
     private readonly long _defaultCloseErrorCode;
     private readonly TimeSpan _closeDeliveryTimeout;
@@ -92,6 +95,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         _state = ConnectionState.Open;
 
         QuicConnectionEventSource.Log.ConnectionOpened(Id, listenerId, LocalEndPoint, RemoteEndPoint);
+        _acceptPump = AcceptInboundStreamsAsync();
     }
 
     /// <inheritdoc />
@@ -149,13 +153,19 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
 
     /// <inheritdoc />
     /// <exception cref="ObjectDisposedException">Thrown when the connection has been disposed.</exception>
-    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        QuicStream stream = await _connection.AcceptInboundStreamAsync(cancellationToken).ConfigureAwait(false);
-
-        return await WrapStreamAsync(stream, isInbound: true).ConfigureAwait(false);
+        try
+        {
+            return await _inbound.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException exception) when (exception.InnerException is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -165,7 +175,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
     /// the remote side writes to.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Thrown when the connection has been disposed.</exception>
-    public override async ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
@@ -205,20 +215,23 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
     public override async ValueTask DisposeAsync()
     {
         long closeErrorCode;
+        bool alreadyDisposed;
         lock (_stateLock)
         {
-            if (_isDisposed)
-            {
-                return;
-            }
-
+            alreadyDisposed = _isDisposed;
             _isDisposed = true;
             closeErrorCode = _closeErrorCode;
 
-            if (_state != ConnectionState.Aborted)
+            if (!alreadyDisposed && _state != ConnectionState.Aborted)
             {
                 _state = ConnectionState.Closing;
             }
+        }
+
+        if (alreadyDisposed)
+        {
+            CancelConnectionClosedToken();
+            return;
         }
 
         // Teardown ordering is wire-visible and load-bearing. Bidirectional streams are
@@ -244,6 +257,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         }
 
         await CloseConnectionAsync(closeErrorCode).ConfigureAwait(false);
+        await _acceptPump.ConfigureAwait(false);
 
         // The close ended any stream still delivering. Release the remaining streams together,
         // including streams accepted after the first snapshot, within a second shared bound. Repeated
@@ -256,6 +270,9 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         }
 
         await _connection.DisposeAsync().ConfigureAwait(false);
+        while (_inbound.Reader.TryRead(out _))
+        {
+        }
 
         // Reading QuicConnection.RemoteCertificate handed its ownership to this connection (see
         // TakeRemoteCertificate), so the certificate is released here, with the connection.
@@ -301,7 +318,42 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         }
     }
 
-    private async ValueTask<MultiplexedStream> WrapStreamAsync(QuicStream stream, bool isInbound)
+    private async Task AcceptInboundStreamsAsync()
+    {
+        Exception? error = null;
+        try
+        {
+            while (true)
+            {
+                QuicStream stream = await _connection.AcceptInboundStreamAsync().ConfigureAwait(false);
+                MultiplexedConnectionStream wrapped = await WrapStreamAsync(stream, isInbound: true).ConfigureAwait(false);
+                if (!_inbound.Writer.TryWrite(wrapped))
+                {
+                    await wrapped.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is QuicException or AuthenticationException or ObjectDisposedException or OperationCanceledException)
+        {
+            error = exception;
+        }
+        finally
+        {
+            lock (_stateLock)
+            {
+                if (_state == ConnectionState.Open)
+                {
+                    _state = ConnectionState.Aborted;
+                }
+            }
+
+            _inbound.Writer.TryComplete(error);
+            CancelConnectionClosedToken();
+            ReportClosed();
+        }
+    }
+
+    private async ValueTask<MultiplexedConnectionStream> WrapStreamAsync(QuicStream stream, bool isInbound)
     {
         QuicStreamConnection connection;
         Action? onReleaseStarted = isInbound && stream.Type == QuicStreamType.Bidirectional
@@ -399,26 +451,29 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
     private void AbortCore(long errorCode)
     {
         long closeErrorCode;
+        bool firstAbort;
         lock (_stateLock)
         {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
-            {
-                return;
-            }
-
-            if (!_isDisposed)
+            firstAbort = _state is not (ConnectionState.Aborted or ConnectionState.Closed);
+            if (firstAbort && !_isDisposed)
             {
                 _closeErrorCode = errorCode;
             }
 
             closeErrorCode = _closeErrorCode;
-            _state = ConnectionState.Aborted;
+            if (firstAbort)
+            {
+                _state = ConnectionState.Aborted;
+            }
         }
 
         // Abort is synchronous while closing a QUIC connection is asynchronous; fire and forget
         // the close, which observes its own faults so nothing surfaces as unobserved. An abort during
         // disposal ends its delivery wait immediately while retaining the code disposal selected.
-        _ = CloseConnectionAsync(closeErrorCode);
+        if (firstAbort)
+        {
+            _ = CloseConnectionAsync(closeErrorCode);
+        }
 
         CancelConnectionClosedToken();
         ReportClosed();

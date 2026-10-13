@@ -35,13 +35,13 @@ public class FileHandleEndPointTests
         await using TcpConnectionListener listener = TcpConnectionListener.Create(
             options => options.EndPoint = new FileHandleEndPoint(fileHandle, FileHandleType.Tcp));
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         TcpConnectionFactory factory = new();
 
         // Act — dialing the inherited listening socket's address should be accepted by the adopting listener.
-        await using Connection client = await factory.ConnectAsync(bound, cancellation.Token);
-        await using Connection server = await acceptTask;
+        await using IDuplexConnection client = await factory.ConnectAsync(bound, cancellation.Token);
+        await using IDuplexConnection server = await acceptTask;
 
         // Assert
         server.ShouldNotBeNull();

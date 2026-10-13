@@ -13,6 +13,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Http.Connections;
 using HttpVersion = Assimalign.Cohesion.Http.HttpVersion;
 using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -24,6 +25,36 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 public sealed class WebServerEventSourceTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - EventSource: A raw HTTP listener registration reports its bound endpoint")]
+    public async Task StartAsync_WithRawHttpRegistration_ShouldReportBoundEndPoint()
+    {
+        // Arrange
+        TcpConnectionListener transport = TcpConnectionListener.Create(
+            options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        using EventSourceRecorder recorded = new(WebServerEventSource.Log, EventLevel.Informational);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Server.UseServer((HttpConnectionListenerOptions options) => options.UseHttp1(() => transport));
+        await using WebApplication app = builder.Build();
+        using CancellationTokenSource timeout = new(_timeout);
+
+        // Act
+        try
+        {
+            await ((IWebApplication)app).StartAsync(timeout.Token);
+
+            // Assert
+            ((IPEndPoint)transport.EndPoint).Port.ShouldBeGreaterThan(0);
+            long serverId = app.Context.Servers.Single().ShouldBeOfType<WebApplicationServer>().ServerId;
+            EventWrittenEventArgs bound = recorded.Events.Where(entry =>
+                entry.EventId == 1 && Equals(entry.Payload![0], serverId)).ShouldHaveSingleItem();
+            bound.Payload![2].ShouldBe(transport.EndPoint.ToString());
+        }
+        finally
+        {
+            await ((IWebApplication)app).StopAsync(CancellationToken.None).WaitAsync(_timeout);
+        }
+    }
 
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - EventSource: Two composed servers report their actual bound addresses")]
     [InlineData(false)]

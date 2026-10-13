@@ -57,9 +57,9 @@ public class NamedPipeConnectionEventSourceTests
         NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(options => options.EndPoint = endPoint);
         await listener.BindAsync(cancellation.Token);
 
-        ValueTask<Connection> accept = listener.AcceptAsync(cancellation.Token);
-        Connection client = await new NamedPipeConnectionFactory().ConnectAsync(endPoint, cancellation.Token);
-        Connection server = await accept;
+        ValueTask<IDuplexConnection> accept = listener.AcceptAsync(cancellation.Token);
+        IDuplexConnection client = await new NamedPipeConnectionFactory().ConnectAsync(endPoint, cancellation.Token);
+        IDuplexConnection server = await accept;
         long currentWhileOpen = NamedPipeConnectionEventSource.Log.CurrentConnections;
 
         // Act

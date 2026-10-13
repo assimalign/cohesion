@@ -35,7 +35,7 @@ public class Http3RequestBodyDataRateTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
 
@@ -70,7 +70,7 @@ public class Http3RequestBodyDataRateTests
                 http3.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
             },
             static options => options.Interceptors.Add(new FieldInjectingInterceptor()));
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
         Task<bool> next = peer.MoveNextAsync();
@@ -110,7 +110,7 @@ public class Http3RequestBodyDataRateTests
         // Arrange — 50 octets every 100 ms is 500 octets per second, five times the rate, for longer than
         // the grace period.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
         byte[] body = new byte[500];
@@ -135,7 +135,7 @@ public class Http3RequestBodyDataRateTests
     {
         // Arrange — RFC 9110 §9.3.6: a CONNECT's DATA is tunnel traffic, which may idle indefinitely.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),

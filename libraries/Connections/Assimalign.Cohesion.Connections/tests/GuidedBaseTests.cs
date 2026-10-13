@@ -19,7 +19,7 @@ public class GuidedBaseTests
     {
         // Arrange
         TestConnectionListener listener = new();
-        IConnectionListener viaInterface = listener;
+        IDuplexConnectionListener viaInterface = listener;
 
         // Act
         await listener.BindAsync();
@@ -40,7 +40,7 @@ public class GuidedBaseTests
         listener.Enqueue(second);
 
         // Act
-        Connection typed = await listener.AcceptAsync();
+        IDuplexConnection typed = await listener.AcceptAsync();
         IConnection viaInterface = await ((IConnectionListener)listener).AcceptAsync();
 
         // Assert
@@ -59,7 +59,7 @@ public class GuidedBaseTests
         factory.Enqueue(second);
 
         // Act
-        Connection typed = await factory.ConnectAsync(_testEndPoint);
+        IDuplexConnection typed = await factory.ConnectAsync(_testEndPoint);
         IConnection viaInterface = await ((IConnectionFactory)factory).ConnectAsync(_testEndPoint);
 
         // Assert
@@ -76,7 +76,7 @@ public class GuidedBaseTests
         connection.Enqueue(stream);
 
         // Act
-        MultiplexedStream opened = await connection.OpenStreamAsync();
+        MultiplexedConnectionStream opened = await connection.OpenStreamAsync();
 
         // Assert
         connection.LastOpenedDirection.ShouldBe(ConnectionDirection.Bidirectional);
@@ -93,7 +93,7 @@ public class GuidedBaseTests
         IMultiplexedConnection viaInterface = connection;
 
         // Act
-        IMultiplexedStream opened = await viaInterface.OpenStreamAsync();
+        IMultiplexedConnectionStream opened = await viaInterface.OpenStreamAsync();
 
         // Assert
         connection.LastOpenedDirection.ShouldBe(ConnectionDirection.Bidirectional);
@@ -110,7 +110,7 @@ public class GuidedBaseTests
         IMultiplexedConnection viaInterface = connection;
 
         // Act
-        IMultiplexedStream accepted = await viaInterface.AcceptStreamAsync();
+        IMultiplexedConnectionStream accepted = await viaInterface.AcceptStreamAsync();
 
         // Assert
         accepted.ShouldBeSameAs(stream);
@@ -154,7 +154,7 @@ public class GuidedBaseTests
     {
         // Arrange
         await using TestConnection stream = new();
-        IMultiplexedStream viaInterface = stream;
+        IMultiplexedConnectionStream viaInterface = stream;
 
         // Act
         viaInterface.Abort(42);
@@ -170,7 +170,7 @@ public class GuidedBaseTests
     {
         // Arrange
         await using TestConnection stream = new();
-        IMultiplexedStream viaInterface = stream;
+        IMultiplexedConnectionStream viaInterface = stream;
 
         // Act
         bool completed = viaInterface.IsInputCompleted;
@@ -182,10 +182,10 @@ public class GuidedBaseTests
     }
 
     /// <summary>
-    /// A minimal <see cref="Connection"/> that does not override <see cref="Connection.Direction"/>,
+    /// A minimal <see cref="DuplexConnection"/> that does not override <see cref="DuplexConnection.Direction"/>,
     /// proving the guided base supplies the bidirectional default.
     /// </summary>
-    private sealed class MinimalConnection : Connection
+    private sealed class MinimalConnection : DuplexConnection
     {
         private readonly Pipe _pipe = new();
 

@@ -11,6 +11,11 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// <summary>
 /// Defines options for creating outbound QUIC connections.
 /// </summary>
+/// <remarks>
+/// Outbound connections grant the peer one concurrent unidirectional stream and no bidirectional
+/// streams. The inbound allowance keeps a native accept pending so idle peer closure can signal
+/// <see cref="IConnection.ConnectionClosed"/> without application reads.
+/// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -113,13 +118,6 @@ public sealed class QuicConnectionFactoryOptions
     /// with an error, which resets the sending direction (a clean completion sends the FIN). A direction
     /// aborted through <see cref="IMultiplexedStreamAbort"/> carries the caller's code instead, and keeps
     /// it when the stream is later aborted or disposed.
-    /// </para>
-    /// <para>
-    /// Changed from 10.0.0-preview.1 (#1330; see the Breaking changes in the driver's DESIGN): completing
-    /// <see cref="System.IO.Pipelines.IDuplexPipe.Output"/> used to dispose the whole stream, which stopped a
-    /// receiving direction still open with this code, and completing it with an error sent the FIN. It now
-    /// ends only the sending direction, and completing it with an error sends <c>RESET_STREAM</c> with this
-    /// code.
     /// </para>
     /// <para>
     /// Defaults to <c>0x10c</c> — HTTP/3 <c>H3_REQUEST_CANCELLED</c> (RFC 9114 §8.1) — matching

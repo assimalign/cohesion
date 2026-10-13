@@ -67,7 +67,7 @@ public class Http3ExchangeControlClientFaultTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await StartAsync(http3 => http3.Limits.MaxRequestBodySize = 16);
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[32])));
@@ -93,7 +93,7 @@ public class Http3ExchangeControlClientFaultTests
         // Arrange — the head leaves the stream open for a body the peer never sends.
         await using Http3InMemoryPeer peer = await StartAsync(
             http3 => http3.Limits.MinRequestBodyDataRate = new HttpMinDataRate(bytesPerSecond: 100, gracePeriod: TimeSpan.FromMilliseconds(200)));
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
         IHttpExchangeControl control = GetControl(context);
@@ -113,7 +113,7 @@ public class Http3ExchangeControlClientFaultTests
     {
         // Arrange — the stream ends after 16 of the 100 octets the head declares.
         await using Http3InMemoryPeer peer = await StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request(
                 "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "100" }),
@@ -141,7 +141,7 @@ public class Http3ExchangeControlClientFaultTests
     {
         // Arrange — "content-length" is prohibited in a trailer section (RFC 9110 §6.5.1).
         await using Http3InMemoryPeer peer = await StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}")),
@@ -168,7 +168,7 @@ public class Http3ExchangeControlClientFaultTests
         // frame behind it is an invalid frame sequence, a connection error.
         byte[] json = Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}");
         await using Http3InMemoryPeer peer = await StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, json),
@@ -195,7 +195,7 @@ public class Http3ExchangeControlClientFaultTests
     {
         // Arrange — part of the body arrived and was read; the next read waits for more.
         await using Http3InMemoryPeer peer = await StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello"))));
@@ -254,11 +254,11 @@ public class Http3ExchangeControlClientFaultTests
             },
             configureListener: static options => options.Interceptors.Add(new ControlCapturingInterceptor()),
             decorate: inner => server = new CodeRecordingMultiplexedConnection(inner));
-        await using MultiplexedStream controlStream = await peer.OpenUnidirectionalStreamAsync();
+        await using MultiplexedConnectionStream controlStream = await peer.OpenUnidirectionalStreamAsync();
         await controlStream.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
             new (long, long)[] { (0x01, 0) },
             ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(0, "u=1"))), timeout.Token);
-        await using MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        await using MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello"))), timeout.Token);
@@ -346,7 +346,7 @@ public class Http3ExchangeControlClientFaultTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await StartAsync();
-        MultiplexedStream request = await peer.OpenRequestStreamAsync();
+        MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request(
                 "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5" }),
@@ -375,7 +375,7 @@ public class Http3ExchangeControlClientFaultTests
         return context.Features.Get<CapturedControlFeature>().ShouldNotBeNull().Control;
     }
 
-    private static async Task<string> ReadStatusAsync(MultiplexedStream request)
+    private static async Task<string> ReadStatusAsync(MultiplexedConnectionStream request)
     {
         IReadOnlyList<(long FrameType, byte[] Payload)> frames =
             HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));

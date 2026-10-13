@@ -22,6 +22,6 @@ internal sealed class Http1ConnectionFactory : HttpConnectionFactory
         _featureCapacity = featureCapacity;
     }
 
-    public override HttpConnection Create(IConnection connection, bool isSecure)
+    public override HttpConnection Create(IDuplexConnection connection, bool isSecure)
         => new Http1Connection(connection, isSecure, _limits, _interceptors, _responseInterceptors, _featureCapacity, AltSvcHeaderValue, ResponseHeaderPolicy);
 }

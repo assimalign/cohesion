@@ -11,7 +11,7 @@ by a parent process (socket activation).
 ## Scope
 
 - `TcpConnectionListener` — the accept side: binds explicitly through `BindAsync` and produces live
-  `Connection`s. Binds an `IPEndPoint`, a `UnixDomainSocketEndPoint` (with socket-file lifecycle), or
+  `DuplexConnection`s. Binds an `IPEndPoint`, a `UnixDomainSocketEndPoint` (with socket-file lifecycle), or
   adopts a `FileHandleEndPoint` (inherited descriptor).
 - `TcpConnectionFactory` — the dial side: connects an outbound socket to any of the same endpoint forms.
 - `TcpConnectionListenerOptions` / `TcpConnectionFactoryOptions` — backlog, Nagle, IO-queue count,
@@ -40,11 +40,11 @@ await using TcpConnectionListener listener = TcpConnectionListener.Create(
 await using TcpConnectionListener uds = TcpConnectionListener.Create(
     options => options.EndPoint = new UnixDomainSocketEndPoint("/tmp/cohesion.sock"));
 
-ValueTask<Connection> accept = listener.AcceptAsync(cancellationToken);
+ValueTask<DuplexConnection> accept = listener.AcceptAsync(cancellationToken);
 
 TcpConnectionFactory factory = new();
-Connection dialed = await factory.ConnectAsync(listener.EndPoint, cancellationToken);
-Connection accepted = await accept;
+DuplexConnection dialed = await factory.ConnectAsync(listener.EndPoint, cancellationToken);
+DuplexConnection accepted = await accept;
 ```
 
 ## Diagnostics
@@ -57,3 +57,8 @@ by name in `dotnet-trace` / `dotnet-counters`, or forward it into an application
 
 See [DESIGN.md](DESIGN.md) for the data path, the endpoint bind switch, the Unix domain socket file
 lifecycle, socket activation, and honest protocol stamping.
+
+The driver participates in the common `IConnection` identity, feature, and lifecycle hierarchy.
+Listeners expose a stable `Id` and live `Connections`. Entries disappear on closure; disposing
+the listener leaves accepted connections open for their owners to dispose. `ConnectionClosed`
+fires on abort, observed peer closure, and no later than local disposal.

@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
@@ -44,6 +45,15 @@ internal sealed class Http3Connection : HttpConnection
 
     public override ConnectionId Id => _connection.Id;
 
+    public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
+
+    public override EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
+
+    public override ConnectionCapabilities Capabilities => _connection.Capabilities;
+
+    public override IConnectionFeatureCollection Features => _connection.Features;
+
+    public override HttpProtocol Protocol => HttpProtocol.Http30;
     public override ConnectionState State => _connection.State;
 
     public override CancellationToken ConnectionClosed => _connection.ConnectionClosed;
@@ -84,13 +94,18 @@ internal sealed class Http3Connection : HttpConnection
         // the critical unidirectional streams released) stays in the QUIC
         // driver's DisposeAsync. Emission is best-effort and precedes it. When a host began a graceful
         // close earlier, its GOAWAY is the one sent, and the close is complete once it is written.
-        if (_openContext is not null)
+        try
         {
-            await _openContext.CompleteGracefulCloseAsync().ConfigureAwait(false);
+            if (_openContext is not null)
+            {
+                await _openContext.CompleteGracefulCloseAsync().ConfigureAwait(false);
+            }
         }
-
-        _openContext?.MarkLocalConnectionClose();
-        await _connection.DisposeAsync().ConfigureAwait(false);
+        finally
+        {
+            _openContext?.MarkLocalConnectionClose();
+            await _connection.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     [SupportedOSPlatformGuard("windows")]

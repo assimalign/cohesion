@@ -31,7 +31,7 @@ public class Http3ExtendedConnectTests
     {
         // Arrange — the application staged a status, a header the tunnel keeps, and fields it cannot carry.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
-        Connection request = await OpenExtendedConnectAsync(peer);
+        IDuplexConnection request = await OpenExtendedConnectAsync(peer);
         IHttpContext context = await peer.NextContextAsync();
         context.Response.StatusCode = HttpStatusCode.Accepted;
         context.Response.Headers[new HttpHeaderKey("x-tunnel")] = "ready";
@@ -62,7 +62,7 @@ public class Http3ExtendedConnectTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
-        (Connection request, _, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
+        (IDuplexConnection request, _, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
         byte[] buffer = new byte[64];
 
         // Act — each message is read from the client's DATA and written straight back.
@@ -89,7 +89,7 @@ public class Http3ExtendedConnectTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
-        (Connection request, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
+        (IDuplexConnection request, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
 
         // Act — the client sends its last octets and ends its side first.
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("bye")));
@@ -118,7 +118,7 @@ public class Http3ExtendedConnectTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
-        (Connection request, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
+        (IDuplexConnection request, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
         await tunnel.WriteAsync(Encoding.ASCII.GetBytes("last")).AsTask().WaitAsync(_timeout);
 
         // Act — the server ends its side first; the client never ends its own.
@@ -165,7 +165,7 @@ public class Http3ExtendedConnectTests
         byte[] upload = Http2TestPeer.CreateBody(length);
         byte[] download = Enumerable.Reverse(upload).ToArray();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
-        (Connection request, _, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
+        (IDuplexConnection request, _, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
 
         // Act — the client sends in 64 KiB DATA frames while the server reads; then the server writes.
         Task<byte[]> reading = ReadExactlyAsync(tunnel, length);
@@ -243,7 +243,7 @@ public class Http3ExtendedConnectTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
-        (Connection request, _, Stream tunnel, _) = await AcceptTunnelAsync(peer);
+        (IDuplexConnection request, _, Stream tunnel, _) = await AcceptTunnelAsync(peer);
         Task<int> read = tunnel.ReadAsync(new byte[16]).AsTask();
 
         // Act — the client aborts the request stream in both directions.
@@ -294,9 +294,9 @@ public class Http3ExtendedConnectTests
     private static void WithExtendedConnect(HttpConnectionListenerOptions options)
         => options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
-    private static async Task<Connection> OpenExtendedConnectAsync(Http3InMemoryPeer peer)
+    private static async Task<IDuplexConnection> OpenExtendedConnectAsync(Http3InMemoryPeer peer)
     {
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),
@@ -306,9 +306,9 @@ public class Http3ExtendedConnectTests
         return request;
     }
 
-    private static async Task<(Connection Request, IHttpContext Context, Stream Tunnel, Http3FrameCollector Output)> AcceptTunnelAsync(Http3InMemoryPeer peer)
+    private static async Task<(IDuplexConnection Request, IHttpContext Context, Stream Tunnel, Http3FrameCollector Output)> AcceptTunnelAsync(Http3InMemoryPeer peer)
     {
-        Connection request = await OpenExtendedConnectAsync(peer);
+        IDuplexConnection request = await OpenExtendedConnectAsync(peer);
         IHttpContext context = await peer.NextContextAsync();
         Stream tunnel = await context.ExtendedConnect!.AcceptAsync().AsTask().WaitAsync(_timeout);
         Http3FrameCollector output = new(request);

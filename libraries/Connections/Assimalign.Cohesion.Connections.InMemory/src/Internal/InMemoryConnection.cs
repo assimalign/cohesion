@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 
 /// <summary>
-/// One end of a cross-wired, in-memory <see cref="Connection"/>. The two ends of a pair share two
+/// One end of a cross-wired, in-memory <see cref="DuplexConnection"/>. The two ends of a pair share two
 /// <see cref="Pipe"/> instances so that bytes written to one end's <see cref="Output"/> arrive on the
 /// other end's <see cref="Input"/>, exactly like the two ends of a real transport connection.
 /// </summary>
@@ -21,12 +21,12 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// flush — so a peer observes tear-down the next time it reads or writes.
 /// </para>
 /// <para>
-/// The two ends of a multiplexed stream also hold each other, so an end that abandons the stream
+/// The two ends hold each other, so an end that closes or abandons the connection
 /// signals the other end's <see cref="ConnectionClosed"/> at once, as a QUIC stream's peer abort does:
 /// it aborts, or its holder completes <see cref="Output"/> with an error (the in-memory
 /// <c>RESET_STREAM</c>) or <see cref="Input"/> with an error (the in-memory <c>STOP_SENDING</c>). A
-/// clean completion is a half-close, not an abort, and signals nothing. The ends of a byte-stream pair
-/// keep their closed tokens local.
+/// clean completion of one direction is a half-close and leaves the other direction usable.
+/// Disposal signals both ends without requiring the peer to read or write.
 /// </para>
 /// <para>
 /// The composing end of a multiplexed stream implements <see cref="IMultiplexedStreamAbort"/>, the in-memory
@@ -46,7 +46,7 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// <see cref="System.IO.Pipelines"/> composition and is fully trim-safe.
 /// </para>
 /// </remarks>
-internal sealed class InMemoryConnection : Connection
+internal sealed class InMemoryConnection : DuplexConnection
 {
     // RFC 9000 §16 — the codes the QUIC driver accepts, so a test over this driver fails where QUIC would.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
@@ -85,8 +85,8 @@ internal sealed class InMemoryConnection : Connection
     private bool _isDisposed;
     private StreamEnd? _streamEnd;
 
-    // The other end of a multiplexed stream, which this end signals when it abandons the stream; null
-    // for a byte-stream pair. Set once, before either end is handed out.
+    // The other end, signaled on abort or disposal without requiring a peer read or write.
+    // Set once, before either end is handed out.
     private InMemoryConnection? _peer;
 
     private InMemoryConnection(
@@ -174,16 +174,14 @@ internal sealed class InMemoryConnection : Connection
     {
         lock (_gate)
         {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            if (_state is not (ConnectionState.Aborted or ConnectionState.Closed))
             {
-                return;
+                _state = ConnectionState.Aborted;
+                _inputFailed = true;
+                Exception abortReason = reason ?? new ConnectionAbortedException();
+                CompleteOutput(abortReason);
+                CompleteInput(abortReason);
             }
-
-            _state = ConnectionState.Aborted;
-            _inputFailed = true;
-            Exception abortReason = reason ?? new ConnectionAbortedException();
-            CompleteOutput(abortReason);
-            CompleteInput(abortReason);
         }
 
         // Completing the send side with the reason makes the peer's read throw it; completing the
@@ -198,14 +196,11 @@ internal sealed class InMemoryConnection : Connection
     public override ValueTask DisposeAsync()
     {
         bool connectionLost;
+        bool alreadyDisposed;
 
         lock (_gate)
         {
-            if (_isDisposed)
-            {
-                return ValueTask.CompletedTask;
-            }
-
+            alreadyDisposed = _isDisposed;
             _isDisposed = true;
             connectionLost = _connectionLoss is not null;
             if (_state != ConnectionState.Aborted)
@@ -214,7 +209,7 @@ internal sealed class InMemoryConnection : Connection
             }
 
             // Complete under the lifecycle gate so a later abort cannot choose either direction's end.
-            if (!connectionLost)
+            if (!connectionLost && !alreadyDisposed)
             {
                 CompleteOutput(null);
                 CompleteInput(null);
@@ -225,11 +220,8 @@ internal sealed class InMemoryConnection : Connection
         {
             _streamEnd!.FinishConnectionLoss();
         }
-        else
-        {
-            CancelConnectionClosed();
-        }
-
+        CancelConnectionClosed();
+        SignalPeer();
         _streamEnd?.NotifyClosedIfEnded();
 
         return ValueTask.CompletedTask;
@@ -272,11 +264,8 @@ internal sealed class InMemoryConnection : Connection
         InMemoryConnection a = new(bToA.Reader, aToB.Writer, directionA, capabilities, endPointA, endPointB, signalsPeer: isStream);
         InMemoryConnection b = new(aToB.Reader, bToA.Writer, directionB, capabilities, endPointB, endPointA, signalsPeer: isStream);
 
-        if (isStream)
-        {
-            a._peer = b;
-            b._peer = a;
-        }
+        a._peer = b;
+        b._peer = a;
 
         // A unidirectional stream leaves one pipe degenerate: the write-only end never reads and the
         // read-only end never writes. Pre-complete the unused receive half so the write-only end sees
@@ -479,7 +468,7 @@ internal sealed class InMemoryConnection : Connection
     /// One end of a stream of an in-memory multiplexed connection, which can abandon either direction with an
     /// application error code.
     /// </summary>
-    internal sealed class StreamEnd : MultiplexedStream, IMultiplexedStreamAbort
+    internal sealed class StreamEnd : MultiplexedConnectionStream, IMultiplexedStreamAbort
     {
         private readonly InMemoryConnection _inner;
         private readonly Action<StreamEnd> _onClosed;
@@ -518,16 +507,14 @@ internal sealed class InMemoryConnection : Connection
             ValidateErrorCode(errorCode);
             lock (_inner._gate)
             {
-                if (_inner._state is ConnectionState.Aborted or ConnectionState.Closed)
+                if (_inner._state is not (ConnectionState.Aborted or ConnectionState.Closed))
                 {
-                    return;
+                    // Publish both resets before notifying the peer or ending the lifecycle.
+                    _inner.AbortInput(errorCode, signalPeer: false);
+                    _inner.AbortOutput(errorCode, signalPeer: false);
+                    _inner._state = ConnectionState.Aborted;
+                    _inner._inputFailed = true;
                 }
-
-                // Publish both resets before notifying the peer or ending the lifecycle.
-                _inner.AbortInput(errorCode, signalPeer: false);
-                _inner.AbortOutput(errorCode, signalPeer: false);
-                _inner._state = ConnectionState.Aborted;
-                _inner._inputFailed = true;
             }
 
             _inner.CancelConnectionClosed();
@@ -593,15 +580,38 @@ internal sealed class InMemoryConnection : Connection
         internal void NotifyClosedIfEnded()
         {
             bool ended;
+            bool outputCompleted;
             lock (_inner._gate)
             {
                 ended = HasEnded();
+                outputCompleted = _inner._outputCompletedCleanly;
+            }
+
+            // Each output is the peer's input. Two FINs close both native directions even when
+            // holders still own buffered reads. Never acquire both mechanics gates together.
+            if (!ended && outputCompleted && Direction == ConnectionDirection.Bidirectional)
+            {
+                bool peerOutputCompleted;
+                lock (_inner._peer!._gate)
+                {
+                    peerOutputCompleted = _inner._peer._outputCompletedCleanly;
+                }
+                if (peerOutputCompleted)
+                {
+                    _inner.CancelConnectionClosed();
+                    _inner.SignalPeer();
+                }
             }
 
             // The parent owns a different gate. Never call back while holding the mechanics gate.
-            if (ended && Interlocked.Exchange(ref _closedReported, 1) == 0)
+            if (ended)
             {
-                _onClosed(this);
+                _inner.CancelConnectionClosed();
+                _inner.SignalPeer();
+                if (Interlocked.Exchange(ref _closedReported, 1) == 0)
+                {
+                    _onClosed(this);
+                }
             }
         }
 

@@ -32,7 +32,7 @@ public class Http3LateRequestRejectionTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
         Task<IHttpContext> dispatch = peer.NextContextAsync();
 
-        Connection inFlight = await peer.OpenRequestStreamAsync();
+        IDuplexConnection inFlight = await peer.OpenRequestStreamAsync();
         await inFlight.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/in-flight", "https", "a"));
         inFlight.Output.Complete();
         IHttpContext exchange = await dispatch;
@@ -41,7 +41,7 @@ public class Http3LateRequestRejectionTests
         (await peer.ReadGoAwayAsync()).ShouldBe(4L);
 
         // Act — the client opens a request after the GOAWAY: stream 4, at the boundary.
-        Connection late = await peer.OpenRequestStreamAsync();
+        IDuplexConnection late = await peer.OpenRequestStreamAsync();
         await WriteLateHeadAsync(late, "/late");
         late.Output.Complete();
 
@@ -67,8 +67,8 @@ public class Http3LateRequestRejectionTests
         (await receive).ShouldBeFalse();
 
         // Act — three requests, one of which never sends its head.
-        Connection silent = await peer.OpenRequestStreamAsync();
-        Connection[] complete = new Connection[2];
+        IDuplexConnection silent = await peer.OpenRequestStreamAsync();
+        IDuplexConnection[] complete = new IDuplexConnection[2];
         for (int index = 0; index < complete.Length; index++)
         {
             complete[index] = await peer.OpenRequestStreamAsync();
@@ -77,7 +77,7 @@ public class Http3LateRequestRejectionTests
         }
 
         // Assert — each is refused at once, whether or not its head arrived.
-        foreach (Connection stream in complete.Prepend(silent))
+        foreach (IDuplexConnection stream in complete.Prepend(silent))
         {
             ConnectionResetException rejection = await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(stream));
             rejection.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestRejected);
@@ -96,17 +96,17 @@ public class Http3LateRequestRejectionTests
         });
         Task<IHttpContext> dispatch = peer.NextContextAsync();
 
-        Connection inFlight = await peer.OpenRequestStreamAsync();
+        IDuplexConnection inFlight = await peer.OpenRequestStreamAsync();
         await inFlight.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/in-flight", "https", "a"));
         inFlight.Output.Complete();
         await dispatch;
 
         peer.ConnectionContext.BeginGracefulClose();
         (await peer.ReadGoAwayAsync()).ShouldBe(4L);
-        Connection decoder = await peer.AcceptServerStreamAsync();
+        IDuplexConnection decoder = await peer.AcceptServerStreamAsync();
 
         // Act
-        Connection late = await peer.OpenRequestStreamAsync();
+        IDuplexConnection late = await peer.OpenRequestStreamAsync();
         await WriteLateHeadAsync(late, "/late");
         await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(late));
 
@@ -115,7 +115,7 @@ public class Http3LateRequestRejectionTests
         (await ReadAtLeastAsync(decoder.Input, expected.Length)).ShouldBe(expected);
     }
 
-    private static async Task WriteLateHeadAsync(Connection stream, string path)
+    private static async Task WriteLateHeadAsync(IDuplexConnection stream, string path)
     {
         try
         {

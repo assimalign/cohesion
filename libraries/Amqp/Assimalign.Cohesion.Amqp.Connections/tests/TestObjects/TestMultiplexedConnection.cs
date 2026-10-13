@@ -14,8 +14,8 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 /// </summary>
 internal sealed class TestMultiplexedConnection : MultiplexedConnection
 {
-    private readonly Queue<MultiplexedStream> _pendingStreams = new();
-    private readonly List<MultiplexedStream> _streams = new();
+    private readonly Queue<MultiplexedConnectionStream> _pendingStreams = new();
+    private readonly List<MultiplexedConnectionStream> _streams = new();
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _closedSource = new();
     private readonly ConnectionId _id = ConnectionId.New();
@@ -40,7 +40,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
     public bool IsDisposed { get; private set; }
 
-    public void Enqueue(MultiplexedStream stream)
+    public void Enqueue(MultiplexedConnectionStream stream)
     {
         lock (_gate)
         {
@@ -64,7 +64,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
     public override void Abort(long errorCode, Exception? reason = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
-        MultiplexedStream[] streams;
+        MultiplexedConnectionStream[] streams;
         lock (_gate)
         {
             if (_state is ConnectionState.Aborted or ConnectionState.Closed)
@@ -78,7 +78,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
         }
 
         _closedSource.Cancel();
-        foreach (MultiplexedStream stream in streams)
+        foreach (MultiplexedConnectionStream stream in streams)
         {
             stream.Abort(errorCode, reason);
         }
@@ -88,7 +88,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
     public override async ValueTask DisposeAsync()
     {
-        MultiplexedStream[] streams;
+        MultiplexedConnectionStream[] streams;
         lock (_gate)
         {
             if (IsDisposed)
@@ -105,20 +105,20 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
         }
 
         _closedSource.Cancel();
-        foreach (MultiplexedStream stream in streams)
+        foreach (MultiplexedConnectionStream stream in streams)
         {
             await stream.DisposeAsync();
         }
     }
 
-    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
             if (_state is ConnectionState.Aborted or ConnectionState.Closed)
             {
-                return ValueTask.FromException<MultiplexedStream>(new OperationCanceledException(cancellationToken));
+                return ValueTask.FromException<MultiplexedConnectionStream>(new OperationCanceledException(cancellationToken));
             }
 
             AcceptStreamCount++;
@@ -126,7 +126,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
         }
     }
 
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)

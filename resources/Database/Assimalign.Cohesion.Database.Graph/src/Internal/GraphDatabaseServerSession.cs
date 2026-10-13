@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
 {
     private readonly GraphDatabaseServer _server;
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly GraphDatabaseServerOptions _options;
     private readonly IDatabaseEngine _engine;
     private readonly IDatabaseAuthenticator _authenticator;
@@ -35,7 +35,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
 
     internal GraphDatabaseServerSession(
         GraphDatabaseServer server,
-        IConnection connection,
+        IDuplexConnection connection,
         GraphDatabaseServerOptions options,
         IDatabaseEngine engine,
         IDatabaseAuthenticator authenticator)

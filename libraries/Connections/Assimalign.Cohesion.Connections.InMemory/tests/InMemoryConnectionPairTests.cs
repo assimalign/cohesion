@@ -18,7 +18,7 @@ public class InMemoryConnectionPairTests
     {
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         byte[] payload = [1, 2, 3, 4, 5];
 
@@ -42,7 +42,7 @@ public class InMemoryConnectionPairTests
     {
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Act & Assert — three independent request/response cycles over the same live connection,
         // which the previous single-shot doubles could not do.
@@ -70,7 +70,7 @@ public class InMemoryConnectionPairTests
     {
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         byte[] payload = [10, 20, 30];
         await client.Output.WriteAsync(payload, cancellation.Token);
@@ -92,7 +92,7 @@ public class InMemoryConnectionPairTests
     public async Task Complete_OnOutput_ShouldTransitionToClosing()
     {
         // Arrange
-        (Connection client, Connection _) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, DuplexConnection _) = InMemoryConnectionPair.Create();
         client.State.ShouldBe(ConnectionState.Open);
 
         // Act
@@ -107,7 +107,7 @@ public class InMemoryConnectionPairTests
     {
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         InvalidOperationException reason = new("boom");
 
@@ -128,7 +128,7 @@ public class InMemoryConnectionPairTests
     {
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Act
         client.Abort();
@@ -138,18 +138,17 @@ public class InMemoryConnectionPairTests
             async () => await server.Input.ReadAsync(cancellation.Token));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Pair: A peer abort should not signal the other end's ConnectionClosed")]
-    public void Abort_OnClient_ShouldNotSignalServerConnectionClosed()
+    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Pair: A peer abort should signal the other end's ConnectionClosed")]
+    public void Abort_OnClient_ShouldSignalServerConnectionClosed()
     {
-        // Arrange — a byte-stream pair keeps its closed token local; only a multiplexed stream's ends
-        // signal each other (see InMemoryMultiplexedConnectionTests).
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        // Arrange — root lifecycle includes peer abort for byte-stream pairs.
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Act
         client.Abort();
 
         // Assert
-        server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Pair: Disposing one end should complete the peer read")]
@@ -157,7 +156,7 @@ public class InMemoryConnectionPairTests
     {
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Act
         await client.DisposeAsync();
@@ -165,6 +164,8 @@ public class InMemoryConnectionPairTests
 
         // Assert
         client.State.ShouldBe(ConnectionState.Closed);
+        client.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
         result.IsCompleted.ShouldBeTrue();
         server.Input.AdvanceTo(result.Buffer.End);
     }
@@ -173,7 +174,7 @@ public class InMemoryConnectionPairTests
     public async Task DisposeAsync_CalledTwice_ShouldBeIdempotent()
     {
         // Arrange
-        (Connection client, Connection _) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, DuplexConnection _) = InMemoryConnectionPair.Create();
 
         // Act
         await client.DisposeAsync();
@@ -188,7 +189,7 @@ public class InMemoryConnectionPairTests
     public void Create_EndPoints_ShouldMirrorAcrossPair()
     {
         // Act
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Assert
         client.LocalEndPoint.ShouldNotBeNull();
@@ -201,7 +202,7 @@ public class InMemoryConnectionPairTests
     public void Create_Ids_ShouldBeUniqueAndNonEmpty()
     {
         // Act
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Assert
         client.Id.ShouldNotBe(ConnectionId.Empty);
@@ -213,7 +214,7 @@ public class InMemoryConnectionPairTests
     public void Create_Capabilities_ShouldAdvertiseMemoryProtocol()
     {
         // Act
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
 
         // Assert
         client.Capabilities.Protocol.ShouldBe(ConnectionProtocol.Memory);
@@ -234,7 +235,7 @@ public class InMemoryConnectionPairTests
         };
 
         // Act
-        (Connection client, Connection server) = InMemoryConnectionPair.Create(capabilities);
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create(capabilities);
 
         // Assert
         client.Capabilities.Security.ShouldBe(ConnectionSecurity.Tls);

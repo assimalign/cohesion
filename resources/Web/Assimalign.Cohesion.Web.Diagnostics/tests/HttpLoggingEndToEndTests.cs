@@ -631,7 +631,7 @@ public class HttpLoggingEndToEndTests
     {
         await factory.StartAsync(cancellationToken);
 
-        await using Connection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+        await using IDuplexConnection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
         Stream stream = connection.AsStream();
 
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken);

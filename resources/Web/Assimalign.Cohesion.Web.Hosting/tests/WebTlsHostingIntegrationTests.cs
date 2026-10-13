@@ -303,7 +303,7 @@ public class WebTlsHostingIntegrationTests
     {
         try
         {
-            await using IHttpConnection connection = await listener.AcceptOrListenAsync(cancellationToken).ConfigureAwait(false);
+            await using IHttpConnection connection = await listener.AcceptAsync(cancellationToken).ConfigureAwait(false);
             IHttpConnectionContext context = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             await foreach (IHttpContext exchange in context.ReceiveAsync(cancellationToken).ConfigureAwait(false))

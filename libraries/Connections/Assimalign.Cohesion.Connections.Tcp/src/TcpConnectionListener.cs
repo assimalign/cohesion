@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -15,17 +14,16 @@ namespace Assimalign.Cohesion.Connections.Tcp;
 /// Listens for inbound, reliable, ordered single-stream TCP connections on a local endpoint.
 /// </summary>
 /// <remarks>
-/// <see cref="BindAsync(CancellationToken)"/> acquires the listening socket explicitly. For backward
-/// compatibility, <see cref="AcceptAsync(CancellationToken)"/> binds the listener when necessary.
-/// Each accepted connection is returned as a live <see cref="Connection"/> whose IO loops are
+/// <see cref="BindAsync(CancellationToken)"/> acquires the listening socket explicitly.
+/// <see cref="AcceptAsync(CancellationToken)"/> binds the listener when necessary.
+/// Each accepted connection is returned as a live <see cref="DuplexConnection"/> whose IO loops are
 /// already running.
 /// </remarks>
-public sealed class TcpConnectionListener : ConnectionListener
+public sealed class TcpConnectionListener : DuplexConnectionListener
 {
     private readonly TcpConnectionListenerOptions _options;
     private readonly TcpConnectionSettings[] _settings;
     private readonly ListenerId _listenerId = ListenerId.New();
-    private readonly ConcurrentDictionary<ConnectionId, TcpConnection> _connections = new();
     private readonly Func<Socket, CancellationToken, ValueTask<Socket>> _acceptSocket;
     private readonly TcpAcceptBackoff _backoff = new();
     // Cancelled on disposal to end a back-off wait, and never disposed, so a wait that races disposal can
@@ -85,6 +83,9 @@ public sealed class TcpConnectionListener : ConnectionListener
             IsMultiplexed: false,
             ConnectionSecurity.None);
     }
+
+    /// <inheritdoc />
+    public override ListenerId Id => _listenerId;
 
     /// <inheritdoc />
     /// <remarks>
@@ -153,7 +154,7 @@ public sealed class TcpConnectionListener : ConnectionListener
     /// Any other failure of the accept escapes, because it leaves the listening socket unable to accept.
     /// </para>
     /// </remarks>
-    public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         await BindAsync(cancellationToken).ConfigureAwait(false);
 
@@ -224,6 +225,7 @@ public sealed class TcpConnectionListener : ConnectionListener
             }
 
             TcpConnection? connection = null;
+            SocketPipeOptionsContext? retainedOptions = null;
 
             try
             {
@@ -238,8 +240,8 @@ public sealed class TcpConnectionListener : ConnectionListener
                             socket.NoDelay = _options.NoDelay;
                         }
 
-                        connection = new TcpConnection(socket, settings, _listenerId);
-                        _connections.TryAdd(connection.Id, connection);
+                        retainedOptions = settings.PipeOptions.Retain();
+                        connection = new TcpConnection(socket, settings, _listenerId, retainedOptions);
                     }
                 }
             }
@@ -249,6 +251,7 @@ public sealed class TcpConnectionListener : ConnectionListener
                 // setting TCP_NODELAY fails with EINVAL once the client has reset the connection. Close the socket,
                 // which nothing else owns yet, and accept the next connection. Letting the error escape would stop
                 // the listener over one client, as a reset before the accept did until #1308.
+                retainedOptions?.Dispose();
                 socket.Dispose();
                 TcpConnectionEventSource.Log.AcceptedConnectionDropped(_listenerId, exception.SocketErrorCode);
 
@@ -256,6 +259,7 @@ public sealed class TcpConnectionListener : ConnectionListener
             }
             catch
             {
+                retainedOptions?.Dispose();
                 socket.Dispose();
                 throw;
             }
@@ -266,14 +270,6 @@ public sealed class TcpConnectionListener : ConnectionListener
                 socket.Dispose();
                 throw new ObjectDisposedException(GetType().FullName);
             }
-
-            connection.ConnectionClosed.Register(static state =>
-            {
-                (TcpConnectionListener listener, TcpConnection closed) = ((TcpConnectionListener, TcpConnection))state!;
-
-                listener._connections.TryRemove(closed.Id, out _);
-
-            }, (this, connection));
 
             return connection;
         }
@@ -329,7 +325,7 @@ public sealed class TcpConnectionListener : ConnectionListener
     }
 
     /// <inheritdoc />
-    public override async ValueTask DisposeAsync()
+    public override ValueTask DisposeAsync()
     {
         Socket? socket;
         string? socketFilePath;
@@ -338,7 +334,7 @@ public sealed class TcpConnectionListener : ConnectionListener
         {
             if (_isDisposed)
             {
-                return;
+                return ValueTask.CompletedTask;
             }
 
             _isDisposed = true;
@@ -368,19 +364,12 @@ public sealed class TcpConnectionListener : ConnectionListener
             UnixDomainSocketFile.Unlink(socketFilePath);
         }
 
-        // ConcurrentDictionary.Values returns a snapshot, so connections removing themselves
-        // from the dictionary as they close do not invalidate the iteration.
-        foreach (TcpConnection connection in _connections.Values)
-        {
-            await connection.DisposeAsync().ConfigureAwait(false);
-        }
-
-        _connections.Clear();
-
         foreach (TcpConnectionSettings settings in _settings)
         {
             settings.PipeOptions.Dispose();
         }
+
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>

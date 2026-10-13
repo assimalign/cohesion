@@ -38,7 +38,7 @@ public class Http2FlowControlBackpressureTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Drain the receive enumerable without reading any request body. The pump
         // buffers the 30 KB body but the application never consumes it.
@@ -71,7 +71,7 @@ public class Http2FlowControlBackpressureTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Drive the receive enumerable to completion without reading the body, so
         // the pump consumes the whole window and then trips on the overflow octet.
@@ -96,7 +96,7 @@ public class Http2FlowControlBackpressureTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         IHttpContext context = await ReadFirstContextAsync(httpConnectionContext);
 
@@ -132,7 +132,7 @@ public class Http2FlowControlBackpressureTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        await using IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        await using IHttpConnection httpConnection = await listener.AcceptAsync();
         IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
@@ -183,7 +183,7 @@ public class Http2FlowControlBackpressureTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         IHttpContext context = await ReadFirstContextAsync(httpConnectionContext);
 
@@ -206,7 +206,7 @@ public class Http2FlowControlBackpressureTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -259,7 +259,7 @@ public class Http2FlowControlBackpressureTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -420,7 +420,7 @@ public class Http2FlowControlBackpressureTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // The pump must absorb the protocol violation: emit GOAWAY on the wire and
         // complete the enumerable without propagating, so a malformed peer cannot

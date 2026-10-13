@@ -17,11 +17,13 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 internal sealed class StallingMultiplexedConnection : MultiplexedConnection
 {
     private readonly MultiplexedConnection _inner;
+    private readonly bool _signalClosedOnReadAbort;
     private readonly List<StallingConnection> _requestStreams = new();
 
-    public StallingMultiplexedConnection(MultiplexedConnection inner)
+    public StallingMultiplexedConnection(MultiplexedConnection inner, bool signalClosedOnReadAbort = false)
     {
         _inner = inner;
+        _signalClosedOnReadAbort = signalClosedOnReadAbort;
     }
 
     /// <summary>Gets the request streams the server accepted, in order.</summary>
@@ -58,16 +60,16 @@ internal sealed class StallingMultiplexedConnection : MultiplexedConnection
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
     /// <inheritdoc />
-    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
-        MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+        MultiplexedConnectionStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
 
         if (stream.Direction != ConnectionDirection.Bidirectional)
         {
             return stream;
         }
 
-        StallingConnection stalling = new(stream);
+        StallingConnection stalling = new(stream, _signalClosedOnReadAbort);
 
         lock (_requestStreams)
         {
@@ -78,7 +80,7 @@ internal sealed class StallingMultiplexedConnection : MultiplexedConnection
     }
 
     /// <inheritdoc />
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
 
     /// <inheritdoc />

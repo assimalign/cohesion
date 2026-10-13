@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections.Internal;
 
 /// <summary>
-/// An <see cref="IConnectionListener"/> that applies a <see cref="IConnectionLayer"/> to every
+/// An <see cref="IDuplexConnectionListener"/> that applies a <see cref="IConnectionLayer"/> to every
 /// accepted connection, upgrading each one on its own task.
 /// </summary>
 /// <remarks>
@@ -34,15 +34,15 @@ namespace Assimalign.Cohesion.Connections.Internal;
 /// <see cref="ObjectDisposedException"/>.
 /// </para>
 /// </remarks>
-internal sealed class LayeredConnectionListener : IConnectionListener
+internal sealed class LayeredConnectionListener : DuplexConnectionListener
 {
     /// <summary>The number of slots <c>listener.Use(layer)</c> gives the listener.</summary>
     internal const int DefaultMaxConcurrentUpgrades = 512;
 
-    private readonly IConnectionListener _inner;
+    private readonly IDuplexConnectionListener _inner;
     private readonly IConnectionLayer _layer;
     private readonly SemaphoreSlim _slots;
-    private readonly Channel<IConnection> _upgraded;
+    private readonly Channel<IDuplexConnection> _upgraded;
     private readonly CancellationTokenSource _lifetime;
     private readonly CancellationToken _lifetimeToken;
     private readonly TaskCompletionSource _upgradesDrained;
@@ -52,7 +52,7 @@ internal sealed class LayeredConnectionListener : IConnectionListener
     private int _draining;
     private bool _isDisposed;
 
-    public LayeredConnectionListener(IConnectionListener inner, IConnectionLayer layer, int maxConcurrentUpgrades)
+    public LayeredConnectionListener(IDuplexConnectionListener inner, IConnectionLayer layer, int maxConcurrentUpgrades)
     {
         _inner = inner;
         _layer = layer;
@@ -60,7 +60,7 @@ internal sealed class LayeredConnectionListener : IConnectionListener
 
         // Unbounded because the slots already bound it: a queued connection keeps its slot until
         // AcceptAsync returns it.
-        _upgraded = Channel.CreateUnbounded<IConnection>(new UnboundedChannelOptions
+        _upgraded = Channel.CreateUnbounded<IDuplexConnection>(new UnboundedChannelOptions
         {
             SingleReader = false,
             SingleWriter = false
@@ -71,14 +71,16 @@ internal sealed class LayeredConnectionListener : IConnectionListener
         _gate = new Lock();
     }
 
-    public EndPoint EndPoint => _inner.EndPoint;
+    public override ListenerId Id => _inner.Id;
 
-    public ConnectionCapabilities Capabilities => _layer.Describe(_inner.Capabilities);
+    public override EndPoint EndPoint => _inner.EndPoint;
 
-    public ValueTask BindAsync(CancellationToken cancellationToken = default)
+    public override ConnectionCapabilities Capabilities => _layer.Describe(_inner.Capabilities);
+
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
         => _inner.BindAsync(cancellationToken);
 
-    public async ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         EnsurePumpStarted();
 
@@ -86,7 +88,7 @@ internal sealed class LayeredConnectionListener : IConnectionListener
         {
             // The token abandons this wait only: connections the pump accepted keep upgrading and are
             // returned by a later call.
-            IConnection connection = await _upgraded.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            IDuplexConnection connection = await _upgraded.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
 
             // The connection leaves the listener here, so its slot goes back to the pump.
             _slots.Release();
@@ -105,7 +107,7 @@ internal sealed class LayeredConnectionListener : IConnectionListener
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         Task? pump;
 
@@ -141,7 +143,7 @@ internal sealed class LayeredConnectionListener : IConnectionListener
             // let a pending or later AcceptAsync observe the disposal.
             _upgraded.Writer.TryComplete();
 
-            while (_upgraded.Reader.TryRead(out IConnection? connection))
+            while (_upgraded.Reader.TryRead(out IDuplexConnection? connection))
             {
                 await DisposeQuietlyAsync(connection).ConfigureAwait(false);
             }
@@ -187,7 +189,7 @@ internal sealed class LayeredConnectionListener : IConnectionListener
             {
                 await _slots.WaitAsync(_lifetimeToken).ConfigureAwait(false);
 
-                IConnection connection;
+                IDuplexConnection connection;
 
                 try
                 {
@@ -232,11 +234,11 @@ internal sealed class LayeredConnectionListener : IConnectionListener
         }
     }
 
-    private async Task RunUpgradeAsync(IConnection connection)
+    private async Task RunUpgradeAsync(IDuplexConnection connection)
     {
         try
         {
-            IConnection upgraded;
+            IDuplexConnection upgraded;
 
             try
             {
@@ -296,7 +298,7 @@ internal sealed class LayeredConnectionListener : IConnectionListener
         return _upgradesDrained.Task;
     }
 
-    private static async ValueTask DisposeQuietlyAsync(IConnection connection)
+    private static async ValueTask DisposeQuietlyAsync(IDuplexConnection connection)
     {
         try
         {

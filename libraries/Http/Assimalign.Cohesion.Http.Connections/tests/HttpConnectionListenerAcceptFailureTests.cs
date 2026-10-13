@@ -22,7 +22,7 @@ public class HttpConnectionListenerAcceptFailureTests
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: A stream transport's unrequested cancellation should fault the listener instead of silently ending its accepts")]
-    public async Task AcceptOrListenAsync_OnUnrequestedCancellationFromStreamTransport_ShouldFaultTheListener()
+    public async Task AcceptAsync_OnUnrequestedCancellationFromStreamTransport_ShouldFaultTheListener()
     {
         // Arrange
         OperationCanceledException unrequested = new("The transport canceled its own accept.");
@@ -32,8 +32,8 @@ public class HttpConnectionListenerAcceptFailureTests
 
         // Act — the accept that observes the fault may see the backlog channel's own cancellation; the
         // listener's recorded failure is what every later accept reports.
-        Exception? first = await Record.ExceptionAsync(() => WithinTestTimeoutAsync(listener.AcceptOrListenAsync()));
-        Exception? later = await Record.ExceptionAsync(() => WithinTestTimeoutAsync(listener.AcceptOrListenAsync()));
+        Exception? first = await Record.ExceptionAsync(() => WithinTestTimeoutAsync(listener.AcceptAsync().AsTask()));
+        Exception? later = await Record.ExceptionAsync(() => WithinTestTimeoutAsync(listener.AcceptAsync().AsTask()));
 
         // Assert
         first.ShouldBeAssignableTo<OperationCanceledException>();
@@ -41,7 +41,7 @@ public class HttpConnectionListenerAcceptFailureTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: A multiplexed transport's unrequested cancellation should fault the listener instead of silently ending its accepts")]
-    public async Task AcceptOrListenAsync_OnUnrequestedCancellationFromMultiplexedTransport_ShouldFaultTheListener()
+    public async Task AcceptAsync_OnUnrequestedCancellationFromMultiplexedTransport_ShouldFaultTheListener()
     {
         // Arrange
         OperationCanceledException unrequested = new("The transport canceled its own accept.");
@@ -50,8 +50,8 @@ public class HttpConnectionListenerAcceptFailureTests
         await using HttpConnectionListener listener = new(options);
 
         // Act
-        Exception? first = await Record.ExceptionAsync(() => WithinTestTimeoutAsync(listener.AcceptOrListenAsync()));
-        Exception? later = await Record.ExceptionAsync(() => WithinTestTimeoutAsync(listener.AcceptOrListenAsync()));
+        Exception? first = await Record.ExceptionAsync(() => WithinTestTimeoutAsync(listener.AcceptAsync().AsTask()));
+        Exception? later = await Record.ExceptionAsync(() => WithinTestTimeoutAsync(listener.AcceptAsync().AsTask()));
 
         // Assert
         first.ShouldBeAssignableTo<OperationCanceledException>();
@@ -62,7 +62,7 @@ public class HttpConnectionListenerAcceptFailureTests
     /// Awaits the accept, failing instead of hanging when it neither completes nor faults. Unlike
     /// <c>Task.WaitAsync</c>, this rethrows the accept's own cancellation exception rather than a new one.
     /// </summary>
-    private static async Task<HttpConnection> WithinTestTimeoutAsync(Task<HttpConnection> accept)
+    private static async Task<IHttpConnection> WithinTestTimeoutAsync(Task<IHttpConnection> accept)
     {
         if (await Task.WhenAny(accept, Task.Delay(_testTimeout)) != accept)
         {

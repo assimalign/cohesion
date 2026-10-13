@@ -27,7 +27,7 @@ flowchart LR
 | Package | Role |
 | --- | --- |
 | `Assimalign.Cohesion.Connections` | Connection roots and the layered feature collection. |
-| `Assimalign.Cohesion.Connections.Tls` | `ITlsConnectionInfo` and the `Tls` extension properties. |
+| `Assimalign.Cohesion.Connections.Tls` | `ITlsConnectionInfo` and the `Tls` extension property. |
 | `Assimalign.Cohesion.Connections.Security` | Negotiates TLS over an existing byte stream and registers the facts. |
 | `Assimalign.Cohesion.Connections.Quic` | Registers the handshake QUIC already negotiated. |
 | `Assimalign.Cohesion.Http.Connections` | Reads `Tls` for ALPN and snapshots it into HTTP connection info. |
@@ -40,13 +40,13 @@ Drivers register explicitly in `ConfigureFeatures`. The TLS layer registers itse
 `_inner.Features` through `InnerFeatures`. QUIC registers a separate TLS object beside its stream-limit
 object, because one object fills one named slot.
 
-The two `Tls` extension properties call `Features.Get<ITlsConnectionInfo>()`. Own features are searched
+The single `Tls` extension property on `IConnection` calls `Features.Get<ITlsConnectionInfo>()`. Own features are searched
 before effective inner features; setting a feature with the same name replaces the inner feature,
 and removing the name hides it. The concrete collection performs typed lookup without allocation.
 A missing TLS feature returns `null`. A wrapper preserves features by forwarding `InnerFeatures`,
 without implementing and forwarding every optional contract. Multiplexed streams do not inherit
-connection-level TLS facts from their parent connection. The #1453 `IMultiplexedStream` root
-inherits `IConnection`, so existing stream-level `Tls` access remains available but reports only
+connection-level TLS facts from their parent connection. The #1453 `IMultiplexedConnectionStream` root
+inherits `IDuplexConnection` and `IConnection`, so existing stream-level `Tls` access remains available but reports only
 features registered on that stream.
 
 ## Ownership and errors
@@ -66,3 +66,11 @@ The package is an App kernel root beside Connections.
 
 The accessors use ordinary generic feature lookup, with no reflection or runtime code generation.
 The package retains the repository's NativeAOT compatibility requirement.
+
+## Connection hierarchy compatibility
+
+Decision 58 changes the hierarchy shipped in 10.0.0-preview.1 under decision 15's accepted
+preview source and binary breaks. `Tls` is a single extension on `IConnection`; multiplexed callers bind to the root extension.
+Every connection shares root lifecycle and features. Accepted connections stay in the live set
+until their closed token fires; listener disposal never closes handed-out connections.
+Only the code that accepted a connection reads or writes it.

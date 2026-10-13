@@ -643,7 +643,7 @@ root's rollup).
 
 `SqlDatabaseServer.Create(engine, options)` — or the `AddSqlServer(engine,
 configure)` builder verb — composes a server. The options carry one configured
-`IConnectionListener` instance, not a listener factory. `StartAsync` explicitly
+`IDuplexConnectionListener` instance, not a listener factory. `StartAsync` explicitly
 awaits `BindAsync` before it starts the accept loop or returns; a bind failure is
 propagated only after the listener is terminally disposed, so a partially
 acquired endpoint cannot remain live. `StopAsync` cancels the pending accept,
@@ -1083,3 +1083,12 @@ Foreign-key string columns require equal effective collations so forward and rev
 checks agree. Default changes after table creation reject until index rebuild support
 exists. Other model defaults are unaffected. See the design for the legacy
 CompareInfo compatibility escalation and #1026 linguistic-collation boundary.
+
+## Connection contracts
+
+The server accepts `IDuplexConnection` values through `IDuplexConnectionListener`:
+framed database traffic requires the byte-pipe contract. The transport listener's live
+`Connections` collection is observational; the server owns every connection it accepts,
+performs its I/O, and drains, aborts or disposes it during shutdown. Disposing the listener
+alone does not close accepted connections. `ConnectionClosed` signals local close, abort,
+peer close and, at the latest, completion of connection disposal.

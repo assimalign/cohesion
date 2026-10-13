@@ -64,7 +64,7 @@ public class HttpWebSocketTransportTests
     /// </summary>
     private static async Task<string?> ServeOneSocketAsync(HttpConnectionListener listener, CancellationToken cancellationToken)
     {
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(cancellationToken);
+        await using IHttpConnection connection = await listener.AcceptAsync(cancellationToken);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(cancellationToken);
         string? message = null;
 

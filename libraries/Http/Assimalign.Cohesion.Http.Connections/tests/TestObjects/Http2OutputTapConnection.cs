@@ -32,12 +32,12 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// the transport, and only the wait is cut short.
 /// </para>
 /// </remarks>
-internal sealed class Http2OutputTapConnection : Connection
+internal sealed class Http2OutputTapConnection : DuplexConnection
 {
-    private readonly Connection _inner;
+    private readonly IDuplexConnection _inner;
     private readonly TapPipeWriter _output;
 
-    public Http2OutputTapConnection(Connection inner)
+    public Http2OutputTapConnection(IDuplexConnection inner)
     {
         _inner = inner;
         _output = new TapPipeWriter(inner.Output, this);

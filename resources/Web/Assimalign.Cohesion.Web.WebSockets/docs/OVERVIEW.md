@@ -86,3 +86,5 @@ coordinates the two, so a receive loop written the usual way ends cleanly.
 
 It references nothing in the hosting family; the drain signal reaches it through `Web.Server`'s
 feature contract. See [DESIGN.md](./DESIGN.md).
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

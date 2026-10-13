@@ -75,3 +75,5 @@ This is a behavioral breaking change from 10.0.0-preview.1 (owner decision 46, a
 decision 15's preview terms): a reachable
 standalone admin listener previously accepted remote control-plane requests without credentials.
 Use a loopback connection for standalone development or a gateway identity for remote management.
+
+Model server factories supply `IDuplexConnectionListener` instances to their model options. Each server owns accepted `IDuplexConnection` sessions and closes them during its drain; listener disposal does not transfer connection ownership to the hosting module.

@@ -13,13 +13,15 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// A listener whose bind completion is controlled by a test, exposing the
 /// server's bind/start ordering without relying on transport timing.
 /// </summary>
-internal sealed class ControlledConnectionListener : ConnectionListener
+internal sealed class ControlledConnectionListener : DuplexConnectionListener
 {
     private readonly TaskCompletionSource<bool> _bindStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<bool> _bindReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly Channel<Connection> _connections = Channel.CreateUnbounded<Connection>();
+    private readonly Channel<IDuplexConnection> _connections = Channel.CreateUnbounded<IDuplexConnection>();
     private Exception? _bindException;
     private int _acceptCount;
+
+    public override ListenerId Id { get; } = ListenerId.New();
 
     public override EndPoint EndPoint { get; } = new InMemoryEndPoint("controlled-bind");
 
@@ -48,7 +50,7 @@ internal sealed class ControlledConnectionListener : ConnectionListener
         }
     }
 
-    public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _acceptCount);
         return await _connections.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);

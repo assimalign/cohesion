@@ -60,3 +60,5 @@ The serving gateway carries the matched issuer's list onto the authenticated pri
 both apply and delete. A forbidden kind returns the existing 409 Rejected observation with a detail
 naming the issuer and kind. It does not dispatch the command or release existing ownership.
 Manifest advertisement, command-token scope and owner-equals-issuer checks remain in force.
+
+HTTP connections are accepted with `AcceptAsync` from a typed HTTP listener over the configured TCP duplex listener. Each serving task owns and disposes its accepted connection.

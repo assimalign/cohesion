@@ -31,7 +31,7 @@ internal sealed class ControlledConnectionLayer : IConnectionLayer
     /// <summary>Completes when the connection's upgrade has started.</summary>
     public Task WhenStarted(IConnection connection) => GetStarted(connection.Id).Task;
 
-    public async ValueTask<IConnection> UpgradeAsync(IConnection connection, CancellationToken cancellationToken = default)
+    public async ValueTask<IDuplexConnection> UpgradeAsync(IDuplexConnection connection, CancellationToken cancellationToken = default)
     {
         GetStarted(connection.Id).TrySetResult();
 

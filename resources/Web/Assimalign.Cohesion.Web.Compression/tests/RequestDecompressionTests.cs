@@ -228,7 +228,7 @@ public class RequestDecompressionTests
     /// </summary>
     private static async Task<string> ExchangeRawAsync(InMemoryConnectionListener transport, string request, CancellationToken cancellationToken)
     {
-        await using Connection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+        await using IDuplexConnection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
         Stream stream = connection.AsStream();
 
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken);

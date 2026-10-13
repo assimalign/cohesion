@@ -14,13 +14,20 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// connection (HTTP/1.1, HTTP/2) or grants no stream credit (an HTTP/3 request stream). Everything else is
 /// the inner connection's, including the coded stream aborts of a multiplexed stream end.
 /// </summary>
-internal sealed class StallingConnection : MultiplexedStream, IMultiplexedStreamAbort
+internal sealed class StallingConnection : MultiplexedConnectionStream, IMultiplexedStreamAbort
 {
-    private readonly Connection _inner;
+    private readonly IDuplexConnection _inner;
+    private readonly CancellationTokenSource? _readAbortClosed;
+    private readonly CancellationToken _connectionClosed;
 
-    public StallingConnection(Connection inner)
+    public StallingConnection(IDuplexConnection inner, bool signalClosedOnReadAbort = false)
     {
         _inner = inner;
+        if (signalClosedOnReadAbort)
+        {
+            _readAbortClosed = CancellationTokenSource.CreateLinkedTokenSource(inner.ConnectionClosed);
+        }
+        _connectionClosed = _readAbortClosed?.Token ?? inner.ConnectionClosed;
         Writer = new StallingPipeWriter(inner.Output);
     }
 
@@ -39,8 +46,11 @@ internal sealed class StallingConnection : MultiplexedStream, IMultiplexedStream
     /// <summary>Gets the code the server reset the sending direction with, or <see langword="null"/>.</summary>
     public long? WriteAbortCode { get; private set; }
 
+    /// <summary>Gets the code the server stopped the receiving direction with, or <see langword="null"/>.</summary>
+    public long? ReadAbortCode { get; private set; }
+
     /// <inheritdoc />
-    public override bool IsInputCompleted => (_inner as IMultiplexedStream)?.IsInputCompleted ?? false;
+    public override bool IsInputCompleted => (_inner as IMultiplexedConnectionStream)?.IsInputCompleted ?? false;
 
     public override ConnectionId Id => _inner.Id;
 
@@ -66,7 +76,7 @@ internal sealed class StallingConnection : MultiplexedStream, IMultiplexedStream
     public override ConnectionState State => _inner.State;
 
     /// <inheritdoc />
-    public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+    public override CancellationToken ConnectionClosed => _connectionClosed;
 
     /// <inheritdoc />
     public override void Abort(long errorCode, Exception? reason = null)
@@ -74,7 +84,7 @@ internal sealed class StallingConnection : MultiplexedStream, IMultiplexedStream
         ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
         WriteAbortCode ??= errorCode;
         IsAborted = true;
-        if (_inner is IMultiplexedStream stream)
+        if (_inner is IMultiplexedConnectionStream stream)
         {
             stream.Abort(errorCode, reason);
         }
@@ -93,16 +103,29 @@ internal sealed class StallingConnection : MultiplexedStream, IMultiplexedStream
     /// <inheritdoc />
     public void AbortRead(long errorCode)
     {
-        (_inner as IMultiplexedStream)?.DirectionalAbort?.AbortRead(errorCode);
+        ReadAbortCode ??= errorCode;
+        (_inner as IMultiplexedConnectionStream)?.DirectionalAbort?.AbortRead(errorCode);
+        // A transport can report local directional shutdown through its lifecycle token immediately.
+        _readAbortClosed?.Cancel();
     }
 
     /// <inheritdoc />
     public void AbortWrite(long errorCode)
     {
         WriteAbortCode ??= errorCode;
-        (_inner as IMultiplexedStream)?.DirectionalAbort?.AbortWrite(errorCode);
+        (_inner as IMultiplexedConnectionStream)?.DirectionalAbort?.AbortWrite(errorCode);
     }
 
     /// <inheritdoc />
-    public override ValueTask DisposeAsync() => _inner.DisposeAsync();
+    public override async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await _inner.DisposeAsync();
+        }
+        finally
+        {
+            _readAbortClosed?.Dispose();
+        }
+    }
 }

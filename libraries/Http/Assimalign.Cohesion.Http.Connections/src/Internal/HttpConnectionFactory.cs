@@ -34,5 +34,5 @@ internal abstract class HttpConnectionFactory
     /// connection (its TLS handshake negotiated an application protocol the registration does not
     /// speak); the accept loop then closes the connection and keeps accepting.
     /// </returns>
-    public abstract HttpConnection? Create(IConnection connection, bool isSecure);
+    public abstract HttpConnection? Create(IDuplexConnection connection, bool isSecure);
 }

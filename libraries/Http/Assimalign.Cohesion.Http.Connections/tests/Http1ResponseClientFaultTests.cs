@@ -188,7 +188,7 @@ public class Http1ResponseClientFaultTests
             options.Interceptors.Add(capture);
             options.UseHttp1(new TestConnectionListener(transport), http1 => http1.Limits.MinResponseDataRate = rate);
             HttpConnectionListener listener = new(options);
-            IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync()).OpenAsync();
+            IHttpConnectionContext connection = await (await listener.AcceptAsync()).OpenAsync();
             IAsyncEnumerator<IHttpContext> receive = connection.ReceiveAsync(receiveToken).GetAsyncEnumerator();
             (await receive.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeTrue();
             return new Fixture(transport, listener, connection, receive, capture.Control.ShouldNotBeNull());

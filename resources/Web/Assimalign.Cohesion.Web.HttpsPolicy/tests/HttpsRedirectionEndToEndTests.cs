@@ -186,7 +186,7 @@ public class HttpsRedirectionEndToEndTests
         public async Task<string> ExchangeAsync(string request, CancellationToken cancellationToken)
         {
             InMemoryConnectionFactory connectionFactory = _listener.CreateFactory();
-            Connection connection = await connectionFactory.ConnectAsync(_listener.EndPoint, cancellationToken);
+            IDuplexConnection connection = await connectionFactory.ConnectAsync(_listener.EndPoint, cancellationToken);
 
             await using (connection.ConfigureAwait(false))
             {

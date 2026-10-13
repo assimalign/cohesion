@@ -142,7 +142,7 @@ public sealed class HostFilteringEventSourceTests
         try
         {
             // Act
-            await using Connection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, cancellation.Token);
+            await using IDuplexConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, cancellation.Token);
             Stream stream = connection.AsStream();
             await stream.WriteAsync(Encoding.ASCII.GetBytes("GET / HTTP/1.1\r\n" + (authority is null ? string.Empty : "Host: " + authority + "\r\n") + "Connection: close\r\n\r\n"), cancellation.Token);
             await stream.FlushAsync(cancellation.Token);

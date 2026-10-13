@@ -15,7 +15,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 /// <summary>
-/// Covers <see cref="HttpConnectionListenerOptions.UseHttp1AndHttp2(IConnectionListener)"/>: one TLS
+/// Covers <see cref="HttpConnectionListenerOptions.UseHttp1AndHttp2(IDuplexConnectionListener)"/>: one TLS
 /// listener serving HTTP/1.1 and HTTP/2, each connection dispatched by the application protocol its
 /// handshake negotiated through ALPN (RFC 7301, RFC 9113 §3.2). The connections are doubles that report
 /// a negotiated protocol through <see cref="ITlsConnectionInfo"/>; the real TLS handshake is covered by
@@ -177,8 +177,8 @@ public class HttpAlpnDispatchTests
         // Act / Assert
         Should.Throw<ArgumentNullException>(() => options.UseHttp1AndHttp2(listener, null!, static _ => { }));
         Should.Throw<ArgumentNullException>(() => options.UseHttp1AndHttp2(listener, static _ => { }, null!));
-        Should.Throw<ArgumentNullException>(() => options.UseHttp1AndHttp2((IConnectionListener)null!));
-        Should.Throw<ArgumentNullException>(() => options.UseHttp1AndHttp2((Func<IConnectionListener>)null!));
+        Should.Throw<ArgumentNullException>(() => options.UseHttp1AndHttp2((IDuplexConnectionListener)null!));
+        Should.Throw<ArgumentNullException>(() => options.UseHttp1AndHttp2((Func<IDuplexConnectionListener>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - UseHttp1AndHttp2: Should apply the HTTP/1.1 options to the connections served HTTP/1.1")]
@@ -195,7 +195,7 @@ public class HttpAlpnDispatchTests
             http1 => http1.Limits.MaxRequestLineSize = 24,
             static _ => { });
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         bool yielded = false;
@@ -298,7 +298,7 @@ public class HttpAlpnDispatchTests
 
     private static async Task<(IHttpConnectionContext ConnectionContext, IHttpContext Context)> ReceiveFirstExchangeWithContextAsync(HttpConnectionListener listener)
     {
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return (connectionContext, enumerator.Current);

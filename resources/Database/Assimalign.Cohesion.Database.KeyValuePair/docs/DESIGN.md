@@ -289,7 +289,7 @@ contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message
 scalar component for independent clients. The server binds KeyValueProtocol.Family
 once on accept, retains wire version 1.0 and the existing bytes, and negotiates
 incompatible majors before authentication. Result materialization belongs to
-Database.KeyValuePair.Client. Transport listeners remain supplied through generic IConnectionListener.
+Database.KeyValuePair.Client. Transport listeners remain supplied through generic IDuplexConnectionListener.
 
 Payload offsets are zero-based and exclude the shared five-byte frame header. `Execute` (5)
 starts with a signed 32-bit big-endian statement byte length `S` at bytes 0–3, followed by
@@ -344,3 +344,12 @@ model-specific options stay on each derived builder interface.
 This interface-first entry enables standalone nested composition and lets the concrete
 hosting-aware engine factory configure the same builder from its final configuration
 and services. The model still sees no DI or configuration contract.
+
+## Connection contracts
+
+The server accepts `IDuplexConnection` values through `IDuplexConnectionListener`:
+framed database traffic requires the byte-pipe contract. The transport listener's live
+`Connections` collection is observational; the server owns every connection it accepts,
+performs its I/O, and drains, aborts or disposes it during shutdown. Disposing the listener
+alone does not close accepted connections. `ConnectionClosed` signals local close, abort,
+peer close and, at the latest, completion of connection disposal.

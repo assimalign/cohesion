@@ -120,7 +120,7 @@ internal sealed class Http3LoopbackServer : IAsyncDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                IHttpConnection connection = await _listener.AcceptOrListenAsync(cancellationToken).ConfigureAwait(false);
+                IHttpConnection connection = await _listener.AcceptAsync(cancellationToken).ConfigureAwait(false);
 
                 // Serve each connection on its own task so a second client (or reconnect) is not
                 // blocked behind the first; the client under test reuses one connection for its

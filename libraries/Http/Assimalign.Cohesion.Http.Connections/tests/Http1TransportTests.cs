@@ -25,7 +25,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnection httpConnection = await listener.AcceptAsync();
         IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
@@ -75,7 +75,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // The body is streamed and dispatched at head, so the trailer section is only available once
@@ -99,7 +99,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // A non-chunked request cannot carry a trailer section (RFC 9112 §7.1.2).
@@ -123,7 +123,7 @@ public class Http1TransportTests
             connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -148,7 +148,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -170,7 +170,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -210,7 +210,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -234,7 +234,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
@@ -263,7 +263,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -317,7 +317,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // Act
@@ -604,7 +604,7 @@ public class Http1TransportTests
         // First connection: malformed. ReceiveAsync yields nothing and
         // exits cleanly. The exception is absorbed inside the receive
         // loop, never reaching the application.
-        IHttpConnection conn1 = await listener.AcceptOrListenAsync();
+        IHttpConnection conn1 = await listener.AcceptAsync();
         IHttpConnectionContext ctx1 = await conn1.OpenAsync();
         await using (IAsyncEnumerator<IHttpContext> enum1 = ctx1.ReceiveAsync().GetAsyncEnumerator())
         {
@@ -614,7 +614,7 @@ public class Http1TransportTests
 
         // Second connection: well-formed. Listener is alive; the request
         // parses normally and the application sees a valid context.
-        IHttpConnection conn2 = await listener.AcceptOrListenAsync();
+        IHttpConnection conn2 = await listener.AcceptAsync();
         IHttpConnectionContext ctx2 = await conn2.OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(ctx2);
 
@@ -650,7 +650,7 @@ public class Http1TransportTests
 
         await using HttpConnectionListener listener = new(options);
 
-        IHttpConnection conn1 = await listener.AcceptOrListenAsync();
+        IHttpConnection conn1 = await listener.AcceptAsync();
         IHttpConnectionContext ctx1 = await conn1.OpenAsync();
         await using (IAsyncEnumerator<IHttpContext> enum1 = ctx1.ReceiveAsync().GetAsyncEnumerator())
         {
@@ -658,7 +658,7 @@ public class Http1TransportTests
         }
         await conn1.DisposeAsync();
 
-        IHttpConnection conn2 = await listener.AcceptOrListenAsync();
+        IHttpConnection conn2 = await listener.AcceptAsync();
         IHttpConnectionContext ctx2 = await conn2.OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(ctx2);
 
@@ -689,7 +689,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         IHttpProtocolUpgrade? upgrade = httpContext.Upgrade;
@@ -707,7 +707,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // Regression guard: this used to throw NotImplementedException on every access.
@@ -726,7 +726,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Upgrade.ShouldBeNull();
@@ -743,7 +743,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Upgrade.ShouldBeNull();
@@ -760,7 +760,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // Act — accept the upgrade and take ownership of the raw duplex stream.
@@ -795,7 +795,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -825,7 +825,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         IHttpProtocolUpgrade? upgrade = httpContext.Upgrade;
@@ -856,7 +856,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         Stream tunnel = await httpContext.Upgrade!.AcceptAsync();
@@ -904,7 +904,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadSingleContextAsync(httpConnectionContext);
     }
 
@@ -931,7 +931,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();

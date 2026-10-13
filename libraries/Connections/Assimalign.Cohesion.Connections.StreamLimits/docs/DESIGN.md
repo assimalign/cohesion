@@ -31,6 +31,10 @@ The accessor uses `Features.Get<IMultiplexedConnectionStreamLimits>()`. The conn
 
 The collection does not own or dispose feature objects. Features that delegate to a driver share the driver's lifetime. QUIC registers distinct objects for TLS and stream limits; its stream registers itself for directional abort, as does the in-memory multiplexed stream.
 
+The multiplexed connection now inherits identity, features and lifecycle from `IConnection` (#1459).
+The accessor remains declared only on `IMultiplexedConnection`; ordinary duplex connections do not
+acquire stream-limit semantics.
+
 ## Compatibility and AOT
 
 The contract's existing members move unchanged from Connections. Its XML documentation describes feature registration, the `StreamLimits` accessor and `InnerFeatures` propagation. The contract did not ship in 10.0.0-preview.1, so its move introduces no released API break. Adding `Features` to the three connection root interfaces does break preview.1 implementers, accepted under decision 15; subclasses of the guided bases inherit the implementation.

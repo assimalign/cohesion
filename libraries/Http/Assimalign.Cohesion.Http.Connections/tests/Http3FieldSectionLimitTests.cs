@@ -123,7 +123,7 @@ public class Http3FieldSectionLimitTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act — driving the receive loop opens the control stream and writes SETTINGS first.
         await using (IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator())
@@ -154,7 +154,7 @@ public class Http3FieldSectionLimitTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         qpack!.MaxFieldSectionSize = 1024;
 
         // Act
@@ -277,7 +277,7 @@ public class Http3FieldSectionLimitTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), static http3 => http3.QPack.MaxFieldSectionSize = 256);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // Act
@@ -338,7 +338,7 @@ public class Http3FieldSectionLimitTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), static http3 => http3.QPack.MaxFieldSectionSize = 256);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         IHttpResponseStreamingFeature streaming = context.Response.Streaming;
@@ -451,7 +451,7 @@ public class Http3FieldSectionLimitTests
     private static async Task<List<string>> ReceiveAllPathsAsync(HttpConnectionListenerOptions options)
     {
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         List<string> paths = [];
 
         await using (IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator())
@@ -471,7 +471,7 @@ public class Http3FieldSectionLimitTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), configure);
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadSingleContextAsync(connectionContext);
     }
 

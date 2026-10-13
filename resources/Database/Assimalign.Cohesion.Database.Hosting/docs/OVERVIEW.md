@@ -38,3 +38,5 @@ An enabled resource's standalone `admin` control plane accepts `/cohesion/v1` on
 peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other peers receive 403 regardless of
 forwarded headers. This restricts remote standalone access supported by 10.0.0-preview.1 (#1431).
 Bare `/healthz`, `/readyz`, and `/livez` stay open, and gateway-managed behavior is unchanged.
+
+The model server options take `IDuplexConnectionListener`; client composition supplies an `IDuplexConnectionFactory` for the shared database pool.

@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 public sealed class GraphDatabaseServer : IDatabaseServer
 {
     private readonly GraphDatabaseServerOptions _options;
-    private readonly IConnectionListener _listener;
+    private readonly IDuplexConnectionListener _listener;
     private readonly IDatabaseAuthenticator _authenticator;
     private readonly GraphDatabaseServerContext _context;
     private readonly ConcurrentDictionary<Guid, GraphDatabaseServerSession> _sessions = new();
@@ -230,7 +230,7 @@ public sealed class GraphDatabaseServer : IDatabaseServer
     {
         while (!softStop.IsCancellationRequested)
         {
-            IConnection connection;
+            IDuplexConnection connection;
 
             try
             {
@@ -263,7 +263,7 @@ public sealed class GraphDatabaseServer : IDatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private static async Task RejectAsync(IConnection connection, CancellationToken hardAbort)
+    private static async Task RejectAsync(IDuplexConnection connection, CancellationToken hardAbort)
     {
         try
         {

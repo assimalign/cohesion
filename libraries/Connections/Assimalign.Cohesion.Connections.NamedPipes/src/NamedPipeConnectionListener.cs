@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
 using System.Net;
@@ -23,12 +22,11 @@ namespace Assimalign.Cohesion.Connections.NamedPipes;
 /// stay live. Access control is applied at creation time via <see cref="NamedPipeConnectionListenerOptions.PipeSecurity"/>
 /// (Windows) or <see cref="NamedPipeConnectionListenerOptions.CurrentUserOnly"/>.
 /// </remarks>
-public sealed class NamedPipeConnectionListener : ConnectionListener
+public sealed class NamedPipeConnectionListener : DuplexConnectionListener
 {
     private readonly NamedPipeConnectionListenerOptions _options;
     private readonly NamedPipeEndPoint _endPoint;
     private readonly ListenerId _listenerId = ListenerId.New();
-    private readonly ConcurrentDictionary<ConnectionId, NamedPipeConnection> _connections = new();
     private readonly Lock _gate = new();
 
     private NamedPipeServerStream? _pendingStream;
@@ -66,6 +64,9 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
     }
 
     /// <inheritdoc />
+    public override ListenerId Id => _listenerId;
+
+    /// <inheritdoc />
     public override EndPoint EndPoint => _endPoint;
 
     /// <inheritdoc />
@@ -101,7 +102,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
     }
 
     /// <inheritdoc />
-    public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         await BindAsync(cancellationToken).ConfigureAwait(false);
 
@@ -168,17 +169,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
                     break;
                 }
 
-                _connections.TryAdd(connection.Id, connection);
             }
-
-            connection.ConnectionClosed.Register(static state =>
-            {
-                (NamedPipeConnectionListener listener, NamedPipeConnection closed) =
-                    ((NamedPipeConnectionListener, NamedPipeConnection))state!;
-
-                listener._connections.TryRemove(closed.Id, out _);
-
-            }, (this, connection));
 
             return connection;
         }
@@ -214,15 +205,6 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
         {
             await pending.DisposeAsync().ConfigureAwait(false);
         }
-
-        // ConcurrentDictionary.Values is a snapshot, so connections removing themselves as they close
-        // do not invalidate the iteration.
-        foreach (NamedPipeConnection connection in _connections.Values)
-        {
-            await connection.DisposeAsync().ConfigureAwait(false);
-        }
-
-        _connections.Clear();
 
         if (wasBound)
         {

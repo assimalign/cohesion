@@ -66,3 +66,5 @@ Delivered to applications through the `App.Web` shared framework (via
 `Sdk.Web`); no project wiring required. See `docs/DESIGN.md` for the design
 decisions, the composition with host-based route matching, and the ordering
 interaction with forwarded-headers processing.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

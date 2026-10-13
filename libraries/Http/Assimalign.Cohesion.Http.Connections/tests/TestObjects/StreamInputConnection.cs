@@ -18,11 +18,11 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// transport completion independently from the stream-backed pipe. Everything else is the inner connection's, including the
 /// coded stream aborts of a multiplexed stream end.
 /// </summary>
-internal sealed class StreamInputConnection : MultiplexedStream
+internal sealed class StreamInputConnection : MultiplexedConnectionStream
 {
-    private readonly MultiplexedStream _inner;
+    private readonly MultiplexedConnectionStream _inner;
 
-    public StreamInputConnection(MultiplexedStream inner)
+    public StreamInputConnection(MultiplexedConnectionStream inner)
     {
         _inner = inner;
         Input = PipeReader.Create(inner.Input.AsStream());

@@ -174,7 +174,7 @@ public class HttpExchangeResponseInterceptorTests
                 options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
                 options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
             });
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
 
         // Act
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(ExtendedConnectFields("https")));
@@ -202,7 +202,7 @@ public class HttpExchangeResponseInterceptorTests
         options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // Act
@@ -305,7 +305,7 @@ public class HttpExchangeResponseInterceptorTests
             }
 
             HttpConnectionListener listener = new(options);
-            IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+            IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
             IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
             return new Exchange(listener, connectionContext, context);

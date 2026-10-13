@@ -93,7 +93,7 @@ internal static class Program
 
     private static async Task RunServerAsync(HttpConnectionListener listener, CancellationToken cancellationToken)
     {
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(cancellationToken).ConfigureAwait(false);
+        await using IHttpConnection connection = await listener.AcceptAsync(cancellationToken).ConfigureAwait(false);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await foreach (IHttpContext context in connectionContext.ReceiveAsync(cancellationToken).ConfigureAwait(false))

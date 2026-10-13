@@ -45,15 +45,15 @@ internal sealed class StreamInputMultiplexedConnection : MultiplexedConnection
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
     /// <inheritdoc />
-    public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
-        MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+        MultiplexedConnectionStream stream = await _inner.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
 
         return stream.Direction == ConnectionDirection.Bidirectional ? new StreamInputConnection(stream) : stream;
     }
 
     /// <inheritdoc />
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
 
     /// <inheritdoc />

@@ -282,7 +282,7 @@ public class Http3InterceptorTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadSingleContextAsync(context);
     }
 
@@ -302,7 +302,7 @@ public class Http3InterceptorTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
 
         bool yielded;
         await using (IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator())

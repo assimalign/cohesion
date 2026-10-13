@@ -18,12 +18,14 @@ namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 /// The connection is live on construction: the constructor starts the receive and send pump
 /// loops, which continuously move bytes between the socket and the consumer-facing duplex pipe.
 /// </remarks>
-internal sealed class TcpConnection : Connection
+internal sealed class TcpConnection : DuplexConnection
 {
     private readonly CancellationTokenSource _connectionClosedTokenSource = new CancellationTokenSource();
     private readonly TaskCompletionSource _connectionClosingProcess = new TaskCompletionSource();
 
     private readonly DuplexPipePair _pair;
+    private readonly Task _receiveTask;
+    private readonly Task _sendTask;
     private readonly SocketPipeReceiver _receiver;
     private readonly SocketPipeSenderPool _senderPool;
     private readonly Socket _socket;
@@ -34,7 +36,7 @@ internal sealed class TcpConnection : Connection
 
     private Exception? _connectionError;
     private bool _isConnectionClosed;
-    private bool _isDisposed;
+    private int _disposeStarted;
     private volatile bool _isSocketDisposed;
     private volatile ConnectionState _state;
 
@@ -69,8 +71,8 @@ internal sealed class TcpConnection : Connection
         // Reported before the pump loops start, so no loop event can precede it.
         TcpConnectionEventSource.Log.ConnectionOpened(Id, listenerId, _protocol, LocalEndPoint, RemoteEndPoint);
 
-        _ = ReceiveAsync();
-        _ = SendAsync();
+        _receiveTask = ReceiveAsync();
+        _sendTask = SendAsync();
 
         _state = ConnectionState.Open;
     }
@@ -107,44 +109,48 @@ internal sealed class TcpConnection : Connection
     /// <inheritdoc />
     public override void Abort(Exception? reason = null)
     {
+        bool firstAbort;
         lock (_lock)
         {
-            if (_isSocketDisposed)
+            firstAbort = !_isSocketDisposed;
+            if (firstAbort)
             {
-                return;
-            }
+                _isSocketDisposed = true;
+                _connectionError ??= reason;
+                try
+                {
+                    _socket.Shutdown(SocketShutdown.Both);
+                }
+                catch (SocketException)
+                {
+                    // The connection is being torn down regardless of shutdown errors.
+                }
+                catch (ObjectDisposedException)
+                {
+                }
 
-            _isSocketDisposed = true;
-            _connectionError ??= reason;
-
-            try
-            {
-                // Try to gracefully close the socket even for aborts to match libuv behavior.
-                _socket.Shutdown(SocketShutdown.Both);
+                _socket.Dispose();
+                _state = ConnectionState.Aborted;
             }
-            catch (SocketException)
-            {
-                // Ignore any errors from Socket.Shutdown() since the connection is being torn down anyway.
-            }
-            catch (ObjectDisposedException)
-            {
-                // Ignore any errors from Socket.Shutdown() since the connection is being torn down anyway.
-            }
-
-            _socket.Dispose();
-            _state = ConnectionState.Aborted;
         }
+
+        if (firstAbort)
+        {
+            _pair.TransportInput.CancelPendingRead();
+            _pair.TransportOutput.CancelPendingFlush();
+        }
+
+        CancelConnectionClosedToken();
     }
 
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
-        if (_isDisposed)
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
         {
+            CancelConnectionClosedToken();
             return;
         }
-
-        _isDisposed = true;
 
         // An abort before disposal is a hard tear-down and the connection stays Aborted; a
         // dispose-initiated close transitions to Closed once the pump loops have finished.
@@ -152,7 +158,8 @@ internal sealed class TcpConnection : Connection
 
         Abort();
 
-        await _connectionClosingProcess.Task.ConfigureAwait(false);
+        await _receiveTask.ConfigureAwait(false);
+        await _sendTask.ConfigureAwait(false);
 
         _ownedResource?.Dispose();
 

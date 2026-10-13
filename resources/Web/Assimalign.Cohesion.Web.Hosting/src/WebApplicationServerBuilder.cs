@@ -95,7 +95,6 @@ public sealed class WebApplicationServerBuilder
             int featureCount = HostFeatureCount + _builder.StampedFeatureCount;
 
             HttpConnectionListenerOptions options = new();
-            WebServerEndPoints endPoints = WebServerEndPoints.Capture(options);
             ApplyDefaultInterceptors(options);
             options.ExchangeFeatureCapacity = featureCount;
 
@@ -113,7 +112,6 @@ public sealed class WebApplicationServerBuilder
             {
                 Pipeline = pipeline,
                 Listener = listener,
-                EndPointReaders = endPoints.Snapshot(),
                 MaxConcurrentConnections = _maxConcurrentConnections ?? _configuredMaxConcurrentConnections,
                 TelemetryQueryValues = _telemetryQueryValues?.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             });

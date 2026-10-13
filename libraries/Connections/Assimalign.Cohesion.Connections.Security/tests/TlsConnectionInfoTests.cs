@@ -39,7 +39,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
 
         // Act
-        (IConnection client, IConnection server) = await UpgradePairAsync(
+        (IDuplexConnection client, IDuplexConnection server) = await UpgradePairAsync(
             [SslApplicationProtocol.Http2, SslApplicationProtocol.Http11],
             [SslApplicationProtocol.Http2, SslApplicationProtocol.Http11],
             timeout.Token);
@@ -56,7 +56,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
 
         // Act
-        (IConnection _, IConnection server) = await UpgradePairAsync(
+        (IDuplexConnection _, IDuplexConnection server) = await UpgradePairAsync(
             [SslApplicationProtocol.Http2, SslApplicationProtocol.Http11],
             [SslApplicationProtocol.Http11],
             timeout.Token);
@@ -72,7 +72,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
 
         // Act
-        (IConnection _, IConnection server) = await UpgradePairAsync(
+        (IDuplexConnection _, IDuplexConnection server) = await UpgradePairAsync(
             [SslApplicationProtocol.Http2, SslApplicationProtocol.Http11],
             clientProtocols: null,
             timeout.Token);
@@ -88,7 +88,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
 
         // Act
-        (IConnection client, IConnection server) = await UpgradePairAsync(null, null, timeout.Token);
+        (IDuplexConnection client, IDuplexConnection server) = await UpgradePairAsync(null, null, timeout.Token);
         ITlsConnectionInfo serverTls = server.Tls.ShouldNotBeNull();
         ITlsConnectionInfo clientTls = client.Tls.ShouldNotBeNull();
 
@@ -106,7 +106,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
 
         // Act
-        (IConnection client, IConnection _) = await UpgradePairAsync(null, null, timeout.Token);
+        (IDuplexConnection client, IDuplexConnection _) = await UpgradePairAsync(null, null, timeout.Token);
 
         // Assert
         client.Tls.ShouldNotBeNull().RemoteCertificate!.Thumbprint.ShouldBe(_fixture.Certificate.Thumbprint);
@@ -119,7 +119,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
 
         // Act
-        (IConnection _, IConnection server) = await UpgradePairAsync(null, null, timeout.Token);
+        (IDuplexConnection _, IDuplexConnection server) = await UpgradePairAsync(null, null, timeout.Token);
 
         // Assert
         server.Tls.ShouldNotBeNull().RemoteCertificate.ShouldBeNull();
@@ -132,7 +132,7 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         using CancellationTokenSource timeout = new(_testTimeout);
 
         // Act
-        (IConnection _, IConnection server) = await UpgradePairAsync(
+        (IDuplexConnection _, IDuplexConnection server) = await UpgradePairAsync(
             null,
             null,
             timeout.Token,
@@ -155,13 +155,13 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         TestConnectionFeature innerFeature = new();
 
         // Act
-        (IConnection client, IConnection server) = await UpgradePairAsync(
+        (IDuplexConnection client, IDuplexConnection server) = await UpgradePairAsync(
             null,
             null,
             timeout.Token,
             configureConnection: connection => connection.Features.Set(innerFeature));
-        await using IConnection clientLifetime = client;
-        await using IConnection serverLifetime = server;
+        await using IDuplexConnection clientLifetime = client;
+        await using IDuplexConnection serverLifetime = server;
 
         // Assert
         server.Tls.ShouldNotBeNull().Name.ShouldBe(ITlsConnectionInfo.FeatureName);
@@ -176,15 +176,15 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         options.AuthenticationOptions.LocalCertificateSelectionCallback = (_, _, _, _, _) => certificate;
     }
 
-    private async Task<(IConnection Client, IConnection Server)> UpgradePairAsync(
+    private async Task<(IDuplexConnection Client, IDuplexConnection Server)> UpgradePairAsync(
         List<SslApplicationProtocol>? serverProtocols,
         List<SslApplicationProtocol>? clientProtocols,
         CancellationToken cancellationToken,
         Action<TlsServerOptions>? configureServer = null,
         Action<TlsClientOptions>? configureClient = null,
-        Action<Connection>? configureConnection = null)
+        Action<IDuplexConnection>? configureConnection = null)
     {
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         TlsServerOptions serverOptions = new()
         {
             AuthenticationOptions =
@@ -206,8 +206,8 @@ public class TlsConnectionInfoTests : IClassFixture<TestCertificateFixture>
         configureServer?.Invoke(serverOptions);
         configureClient?.Invoke(clientOptions);
 
-        Task<IConnection> serverUpgrade = server.UpgradeToTlsAsync(serverOptions, cancellationToken).AsTask();
-        Task<IConnection> clientUpgrade = client.UpgradeToTlsAsync(clientOptions, cancellationToken).AsTask();
+        Task<IDuplexConnection> serverUpgrade = server.UpgradeToTlsAsync(serverOptions, cancellationToken).AsTask();
+        Task<IDuplexConnection> clientUpgrade = client.UpgradeToTlsAsync(clientOptions, cancellationToken).AsTask();
 
         await Task.WhenAll(serverUpgrade, clientUpgrade);
 

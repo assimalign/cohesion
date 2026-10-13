@@ -155,7 +155,7 @@ contract, and those clients need not copy Blob's former lifetime machinery.
 ## Settings and compatibility
 
 Connection strings carry database, principal, endpoint, and pool size. Drivers are
-typed `IConnectionFactory` options, composed statically. Typed endpoints also
+typed `IDuplexConnectionFactory` options, composed statically. Typed endpoints also
 support in-memory transports. The endpoint selects the model; startup carries no
 model discriminator.
 
@@ -188,3 +188,11 @@ ResourceCommandObservation with Status and Detail, retaining actionable provider
 Transport failures propagate; HTTP refusals become Rejected observations. Serialization uses explicit
 Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect following and cookies
 are disabled. No runtime Hosting or ApplicationModel dependency was added.
+
+## Duplex transport composition
+
+`ConnectionFactory` accepts `IDuplexConnectionFactory`. The shared client reads and writes
+framed bytes through the returned `IDuplexConnection`; the common `IConnection` root carries
+identity, features and lifecycle only. TCP, InMemory and TLS-layered duplex factories satisfy
+this contract. The pool owns each established connection and disposes it when discarded or
+when the pool closes; transport disposal has signaled `ConnectionClosed` before it completes.

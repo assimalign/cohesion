@@ -109,3 +109,5 @@ affects HTTP entries. Forwarded diagnostics are excluded from the W3C file by it
 filter. See [Diagnostics](DESIGN.md#diagnostics) for payload and failure semantics.
 
 See [DESIGN.md](DESIGN.md) for the architecture and the decisions behind it.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

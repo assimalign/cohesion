@@ -16,18 +16,18 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// </summary>
 internal sealed class TestMultiplexedConnection : MultiplexedConnection
 {
-    private readonly Queue<MultiplexedStream> _pendingStreams;
+    private readonly Queue<MultiplexedConnectionStream> _pendingStreams;
     private readonly List<TestConnection> _openedStreams = new();
-    private readonly List<MultiplexedStream> _streams;
+    private readonly List<MultiplexedConnectionStream> _streams;
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _closedSource = new();
     private readonly ConnectionId _id = ConnectionId.New();
     private ConnectionState _state = ConnectionState.Open;
 
-    public TestMultiplexedConnection(params MultiplexedStream[] streams)
+    public TestMultiplexedConnection(params MultiplexedConnectionStream[] streams)
     {
-        _pendingStreams = new Queue<MultiplexedStream>(streams);
-        _streams = new List<MultiplexedStream>(streams);
+        _pendingStreams = new Queue<MultiplexedConnectionStream>(streams);
+        _streams = new List<MultiplexedConnectionStream>(streams);
     }
 
     public bool IsDisposed { get; private set; }
@@ -71,7 +71,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
     public override void Abort(long errorCode, Exception? reason = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
-        MultiplexedStream[] streams;
+        MultiplexedConnectionStream[] streams;
         lock (_gate)
         {
             if (_state is ConnectionState.Aborted or ConnectionState.Closed)
@@ -85,7 +85,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
         }
 
         _closedSource.Cancel();
-        foreach (MultiplexedStream stream in streams)
+        foreach (MultiplexedConnectionStream stream in streams)
         {
             stream.Abort(errorCode, reason);
         }
@@ -95,7 +95,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
     public override async ValueTask DisposeAsync()
     {
-        MultiplexedStream[] streams;
+        MultiplexedConnectionStream[] streams;
         lock (_gate)
         {
             if (IsDisposed)
@@ -112,13 +112,13 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
         }
 
         _closedSource.Cancel();
-        foreach (MultiplexedStream stream in streams)
+        foreach (MultiplexedConnectionStream stream in streams)
         {
             await stream.DisposeAsync();
         }
     }
 
-    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
@@ -126,14 +126,14 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
             if (_state is ConnectionState.Aborted or ConnectionState.Closed || _pendingStreams.Count == 0)
             {
                 // No more inbound streams will arrive; cancellation terminates the receive loop.
-                return ValueTask.FromException<MultiplexedStream>(new OperationCanceledException(cancellationToken));
+                return ValueTask.FromException<MultiplexedConnectionStream>(new OperationCanceledException(cancellationToken));
             }
 
             return ValueTask.FromResult(_pendingStreams.Dequeue());
         }
     }
 
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
         // Capture the opened outbound stream so tests can inspect what the
         // holder wrote to it (e.g. the server control stream's SETTINGS frame)
@@ -149,7 +149,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
             TestConnection stream = new(direction: direction);
             _openedStreams.Add(stream);
             _streams.Add(stream);
-            return ValueTask.FromResult<MultiplexedStream>(stream);
+            return ValueTask.FromResult<MultiplexedConnectionStream>(stream);
         }
     }
 }

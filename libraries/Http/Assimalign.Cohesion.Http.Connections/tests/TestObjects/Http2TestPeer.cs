@@ -75,7 +75,7 @@ internal sealed class Http2TestPeer : IAsyncDisposable
         HttpConnectionListenerOptions? options = null,
         Action<Http2ConnectionListenerOptions>? configure = null,
         uint? initialWindowSize = null,
-        Func<Connection, Connection>? decorate = null,
+        Func<IDuplexConnection, IDuplexConnection>? decorate = null,
         CancellationToken receiveToken = default)
     {
         byte[] settings = initialWindowSize is { } windowSize
@@ -86,12 +86,12 @@ internal sealed class Http2TestPeer : IAsyncDisposable
             Http2TestSettings.RawFrame(0x4, 0, 0, settings));
 
         TestConnection transport = new(opening, completeInput: false);
-        Connection served = decorate?.Invoke(transport) ?? transport;
+        IDuplexConnection served = decorate?.Invoke(transport) ?? transport;
         options ??= new HttpConnectionListenerOptions();
         options.UseHttp2(new TestConnectionListener(served), configure ?? (_ => { }));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnection connection = await listener.AcceptOrListenAsync();
+        IHttpConnection connection = await listener.AcceptAsync();
         IHttpConnectionContext connectionContext = await connection.OpenAsync();
         return new Http2TestPeer(transport, listener, connection, connectionContext, receiveToken);
     }

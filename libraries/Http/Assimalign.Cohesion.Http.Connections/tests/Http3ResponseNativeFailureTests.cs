@@ -31,7 +31,7 @@ public class Http3ResponseNativeFailureTests
         // QuicStream's failed write winning the race against the driver's thread-pool continuation.
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/stream", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext exchange = await peer.NextContextAsync();
@@ -70,7 +70,7 @@ public class Http3ResponseNativeFailureTests
         // Arrange — this already-held behavior guards the classifier's local-abort exclusion.
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/stream", "https", "a"), timeout.Token);
         await request.Output.CompleteAsync();
         await using IHttpContext exchange = await peer.NextContextAsync();

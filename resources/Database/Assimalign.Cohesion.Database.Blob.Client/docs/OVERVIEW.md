@@ -4,7 +4,7 @@
 properties, and prefix listing over the Blob wire family. It targets .NET 10 and NativeAOT,
 uses explicit binary codecs, and requires neither reflection nor Microsoft.Extensions.
 
-`BlobClient.Create` composes `DatabaseConnectionSettings` and an `IConnectionFactory`.
+`BlobClient.Create` composes `DatabaseConnectionSettings` and an `IDuplexConnectionFactory`.
 The shared `Database.Client` owns dialing, authentication, framing, and connection pooling;
 this package owns Blob exchanges and the streaming API. The application supplies the
 transport factory. Database and container provisioning remain server-side engine operations.

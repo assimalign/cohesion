@@ -20,9 +20,9 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 /// </summary>
 internal sealed class Http3RawClient : IAsyncDisposable
 {
-    private readonly MultiplexedConnection _connection;
+    private readonly IMultiplexedConnection _connection;
 
-    private Http3RawClient(MultiplexedConnection connection)
+    private Http3RawClient(IMultiplexedConnection connection)
     {
         _connection = connection;
     }
@@ -30,14 +30,14 @@ internal sealed class Http3RawClient : IAsyncDisposable
     /// <summary>Dials <paramref name="listener"/>.</summary>
     public static async Task<Http3RawClient> ConnectAsync(InMemoryMultiplexedConnectionListener listener, CancellationToken cancellationToken)
     {
-        MultiplexedConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, cancellationToken).ConfigureAwait(false);
+        IMultiplexedConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, cancellationToken).ConfigureAwait(false);
         return new Http3RawClient(connection);
     }
 
     /// <summary>Opens the client control stream and writes its empty SETTINGS frame, leaving it open.</summary>
-    public async Task<MultiplexedStream> OpenControlStreamAsync(CancellationToken cancellationToken)
+    public async Task<IMultiplexedConnectionStream> OpenControlStreamAsync(CancellationToken cancellationToken)
     {
-        MultiplexedStream stream = await _connection.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken).ConfigureAwait(false);
+        IMultiplexedConnectionStream stream = await _connection.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken).ConfigureAwait(false);
         await stream.Output.WriteAsync(new byte[] { 0x00, 0x04, 0x00 }, cancellationToken).ConfigureAwait(false);
         return stream;
     }
@@ -49,7 +49,7 @@ internal sealed class Http3RawClient : IAsyncDisposable
     /// out in the same write, so the server sees the stream end with what it carries.
     /// </summary>
     /// <returns>The client end of the request stream.</returns>
-    public async Task<MultiplexedStream> SendRequestAsync(
+    public async Task<IMultiplexedConnectionStream> SendRequestAsync(
         string method,
         string path,
         (string Name, string Value)[] fields,
@@ -57,7 +57,7 @@ internal sealed class Http3RawClient : IAsyncDisposable
         bool endStream,
         CancellationToken cancellationToken)
     {
-        MultiplexedStream stream = await _connection.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken).ConfigureAwait(false);
+        IMultiplexedConnectionStream stream = await _connection.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken).ConfigureAwait(false);
         List<(string Name, string Value)> head = new()
         {
             (":method", method),
@@ -101,7 +101,7 @@ internal sealed class Http3RawClient : IAsyncDisposable
     /// The statuses in wire order and <see langword="null"/>; or no status and the reset's application
     /// error code when the server reset the stream.
     /// </returns>
-    public static async Task<(IReadOnlyList<int> Statuses, long? ResetCode)> ReadResponseAsync(Connection stream, CancellationToken cancellationToken)
+    public static async Task<(IReadOnlyList<int> Statuses, long? ResetCode)> ReadResponseAsync(IDuplexConnection stream, CancellationToken cancellationToken)
     {
         List<byte> received = new();
 

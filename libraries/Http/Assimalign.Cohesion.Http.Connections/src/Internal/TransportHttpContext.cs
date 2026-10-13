@@ -285,9 +285,9 @@ internal abstract class TransportHttpContext : HttpContext
             TripRequestCancelled());
     }
 
-    // Trips RequestCancelled for an exchange the transport ends on its peer's account, and returns the token
-    // the exception carries; default once the exchange has completed and nothing is left to cancel.
-    private CancellationToken TripRequestCancelled()
+    /// <summary>Signals cancellation when the transport ends the exchange on its peer's account.</summary>
+    /// <returns>The exchange's cancelled token, or the default token after the exchange is disposed.</returns>
+    protected CancellationToken TripRequestCancelled()
     {
         try
         {

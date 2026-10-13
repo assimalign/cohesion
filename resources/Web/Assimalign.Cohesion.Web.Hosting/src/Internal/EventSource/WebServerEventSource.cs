@@ -40,14 +40,14 @@ internal sealed class WebServerEventSource : EventSource
     internal long RejectedCredentials => Interlocked.Read(ref _rejectedCredentials);
 
     [NonEvent]
-    public void ServerBound(long serverId, HttpProtocol protocols, IReadOnlyList<Func<EndPoint>> endPointReaders, int maxConcurrentConnections)
+    public void ServerBound(long serverId, HttpProtocol protocols, IReadOnlyList<EndPoint> boundEndPoints, int maxConcurrentConnections)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            string[] endPoints = new string[endPointReaders.Count];
+            string[] endPoints = new string[boundEndPoints.Count];
             for (int index = 0; index < endPoints.Length; index++)
             {
-                endPoints[index] = endPointReaders[index]().ToString() ?? string.Empty;
+                endPoints[index] = boundEndPoints[index].ToString() ?? string.Empty;
             }
             ServerBound(serverId, FormatProtocols(protocols), string.Join(", ", endPoints), maxConcurrentConnections);
         }

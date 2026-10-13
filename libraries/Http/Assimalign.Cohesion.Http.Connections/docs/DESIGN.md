@@ -12,24 +12,81 @@ Web server, #1049.)
 
 ### What it is
 
-This package no longer carries (or inherits) any transport machinery of
-its own. The deleted `Assimalign.Cohesion.Transports` stack
+This package delegates transport I/O and resource acquisition to Connections drivers.
+The deleted `Assimalign.Cohesion.Transports` stack
 (`ITransport`, `ITransportConnection`, `ITransportConnectionContext`,
 `TransportConnectionPipe`, `ServerTransport<T>`, the `Items`/`IsSecure`
 extensions) has been replaced by consumption of the
 `Assimalign.Cohesion.Connections` contracts:
 
-- `IConnectionListener` produces live `IConnection`s — the connection
+- `IDuplexConnectionListener` produces live `IDuplexConnection`s — the connection
   **is** the duplex pipe (`Input`/`Output` directly on it; there is no
   separate "context" and no `OpenAsync` step on the transport).
 - `IMultiplexedConnectionListener` produces `IMultiplexedConnection`s
-  whose accepted/opened streams are `IMultiplexedStream`s with a per-stream
+  whose accepted/opened streams are `IMultiplexedConnectionStream`s with a per-stream
   `Direction`, whole-stream coded abort and observable clean input completion.
 
-HTTP **consumes** these contracts; it never extends them. The HTTP-side
-contracts (`IHttpConnectionListener`, `IHttpConnection`,
-`IHttpConnectionContext`) are standalone interfaces that wrap a
-connection and project HTTP semantics over it.
+`IHttpConnection` derives from `IConnection`: identity, endpoints, capabilities,
+state, cancellation and abort belong to the same connection hierarchy. Its
+`Protocol` is the one HTTP version the connection speaks, including when ALPN
+selects it from a listener's combined `Protocols`. `Features` is the wrapped
+transport's exact collection, so `Tls` can be read through `IHttpConnection`.
+`IHttpConnectionContext` remains the separate HTTP request/response projection.
+
+`IHttpConnectionListener` derives from `IConnectionListener<IHttpConnection>`.
+`HttpConnectionListener` uses the generic listener base for both accept methods
+and its live collection: root and typed `AcceptAsync` calls drain one channel,
+and one covariant collection object exposes the same connections to both views.
+The listener assigns its own `ListenerId`; it is distinct from transport listener
+identities. A handed-out connection stays in `Connections` until its
+`ConnectionClosed` token fires. Disposal closes queued connections that have no
+owner yet, while connections already handed out remain their owners' responsibility.
+The collection strongly retains open connections; only the accepting owner reads
+or writes them. See the Connections design for tracking and abandoned-owner costs.
+
+Every HTTP wrapper forwards `ConnectionClosed` from its transport. Closing,
+aborting or a peer close signals it, no later than `DisposeAsync` completing.
+HTTP/2 and HTTP/3 dispose their transport even if their protocol cleanup fails.
+For an HTTP/3 request stream, `ConnectionClosed` also signals successful completion
+after both FINs. That lifecycle signal is broader than `RequestCancelled`: the exchange
+observes peer cancellation until its complete response has flushed, then detaches its
+stream-close registration before refusing unread input and sending the final FIN. A local
+STOP_SENDING may signal the stream token synchronously; it must follow that detachment.
+Successful buffered and streamed responses therefore retain an uncancelled request
+token, and locally abandoned body reads retain their `IOException` contract.
+
+The hierarchy and its transport projections are:
+
+```mermaid
+classDiagram
+    IConnection <|-- IHttpConnection
+    IConnection <|-- IDuplexConnection
+    IConnection <|-- IMultiplexedConnection
+    IHttpConnection <|.. HttpConnection
+    HttpConnection <|-- Http1Connection
+    HttpConnection <|-- Http2Connection
+    HttpConnection <|-- Http3Connection
+    Http1Connection --> IDuplexConnection : wraps
+    Http2Connection --> IDuplexConnection : wraps
+    Http3Connection --> IMultiplexedConnection : wraps
+```
+
+### Breaking changes against 10.0.0-preview.1 (#1459)
+
+On decision 15's terms, this contract refactor accepts source and binary breaks:
+`IHttpConnection` now inherits `IConnection` and requires `Protocol`, transport
+endpoints, capabilities and features; its guided `HttpConnection` base adds the
+`LocalEndPoint`, `RemoteEndPoint`, `Capabilities`, `Features` and `Protocol` abstract
+members. `IHttpConnectionListener` inherits the typed
+listener, adding `Id`, the live `Connections` collection and `EndPoints`.
+`AcceptOrListenAsync` is replaced by `AcceptAsync`, which returns
+`ValueTask<IHttpConnection>` on the concrete listener and typed interfaces; the root
+interface returns `ValueTask<IConnection>`. HTTP/1.1,
+HTTP/2 and combined registrations now require `IDuplexConnectionListener` or
+`Func<IDuplexConnectionListener>`. HTTP/3 uses the renamed
+`IMultiplexedConnectionStream` internally and in transport-facing consumers.
+Outside implementations and callers must adopt these contracts and await the new
+accept method. No wire format changes.
 
 ### Optional connection features (#1452)
 
@@ -49,11 +106,11 @@ end without creating a stream feature collection; unread DATA, trailer bytes, pa
 frame headers, cancelled input and failed input keep the existing probe/abort path.
 Content-Length validation on body reads is unchanged. Since Part 2 of decision 56 (#1453),
 HTTP/3 calls coded connection close and whole-stream reset on the multiplexed roots, and
-reads `IMultiplexedStream.IsInputCompleted` directly. A whole reset is one
+reads `IMultiplexedConnectionStream.IsInputCompleted` directly. A whole reset is one
 `Abort(code, reason)` call that ends both directions and the lifecycle. Directional
 abort stays optional, and the request-body reader keeps its fallback when that feature
 is absent. The root return-type and coded-abort changes are the Connections package's
-accepted source/binary breaks against 10.0.0-preview.1; HTTP's public API is unchanged.
+accepted source/binary breaks against 10.0.0-preview.1; the hierarchy changes above extend that migration to HTTP.
 
 ### Structural listener registration
 
@@ -63,8 +120,8 @@ with shape safety enforced at the seam:
 ```csharp
 HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 {
-    options.UseHttp1(tcpListener);                 // IConnectionListener
-    options.UseHttp2(tlsTcpListener, http2 =>      // IConnectionListener (TLS pre-composed)
+    options.UseHttp1(tcpListener);                 // IDuplexConnectionListener
+    options.UseHttp2(tlsTcpListener, http2 =>      // IDuplexConnectionListener (TLS pre-composed)
     {
         http2.Limits.MaxStreamsPerConnection = 256;
     });
@@ -75,8 +132,8 @@ HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 });
 ```
 
-- `UseHttp1` / `UseHttp2` accept an `IConnectionListener` (or a
-  `Func<IConnectionListener>` materialized when the
+- `UseHttp1` / `UseHttp2` accept an `IDuplexConnectionListener` (or a
+  `Func<IDuplexConnectionListener>` materialized when the
   `HttpConnectionListener` is constructed) and **gate on capabilities,
   never on protocol identity**: the listener's `ConnectionCapabilities`
   must report `Delivery == Stream`, `IsReliable`, and `IsOrdered`, else
@@ -121,10 +178,16 @@ Decoded field-section size").
 
 `BacklogCapacity` retains its bounded-channel semantics: it caps how
 many accepted HTTP connections may buffer before the per-listener accept
-loops wait for `AcceptOrListenAsync` to drain them.
+loops wait for `AcceptAsync` to drain them.
 
 ### Bind lifecycle, accept loops, and the live-connection model
 
+`EndPoints` reads every configured transport listener's current `EndPoint`.
+After `BindAsync` completes it contains the bound addresses, including TCP and
+QUIC ports assigned for port-zero binds. It is independent of the live connection
+collection, which can be empty when a host reports its bind. This lets any
+composition, including raw listener factories, report its endpoints without a
+separate capture mechanism.
 `HttpConnectionListener.BindAsync` is the explicit resource-acquisition boundary. It awaits
 `BindAsync` on every registered stream and multiplexed transport before it completes, and it does
 not start any accept loop. Binding is idempotent. If a later transport fails to bind, the aggregate
@@ -132,14 +195,14 @@ releases every materialized listener and rethrows the original failure, so host 
 leave a partially bound endpoint set behind. `DisposeAsync` is the symmetric release boundary and
 is terminal for that listener instance; an in-process restart constructs a fresh host and listener.
 
-`AcceptOrListenAsync` retains a compatibility fallback that invokes `BindAsync` before starting the
+`AcceptAsync` retains a compatibility fallback that invokes `BindAsync` before starting the
 accept loops. Hosted servers still call `BindAsync` explicitly from their awaited `StartAsync`, so a
 resource is never reported started while its endpoint remains unbound. Alt-Svc is computed only
 after all transports bind, allowing an HTTP/3 listener configured with port zero to advertise its
 actual assigned port.
 
 `HttpConnectionListener` runs one accept loop per registered listener.
-The HTTP/1.1 and HTTP/2 loops do `IConnection connection = await
+The HTTP/1.1 and HTTP/2 loops do `IDuplexConnection connection = await
 listener.AcceptAsync(token)` and wrap the result in
 `Http1Connection`/`Http2Connection`; the HTTP/3 loop accepts an
 `IMultiplexedConnection` (with the QUIC platform guard) and wraps it in
@@ -338,7 +401,7 @@ flowchart TD
     Read -->|"h2"| H2["Http2ConnectionFactory: HTTP/2 connection"]
     Read -->|"http/1.1 or none"| H1["Http1ConnectionFactory: HTTP/1.1 connection"]
     Read -->|"another protocol"| Close["close the connection, keep accepting"]
-    H2 --> Queue["backlog channel, AcceptOrListenAsync"]
+    H2 --> Queue["backlog channel, AcceptAsync"]
     H1 --> Queue
 ```
 
@@ -942,7 +1005,7 @@ the connection that did, through its `Tls` feature:
 
 | Version | Source of the handshake facts |
 |---|---|
-| HTTP/1.1, HTTP/2 | the accepted `IConnection`, which the TLS layer secured |
+| HTTP/1.1, HTTP/2 | the accepted `IDuplexConnection`, which the TLS layer secured |
 | HTTP/3 | the accepted `IMultiplexedConnection`: QUIC's own TLS 1.3 handshake (RFC 9001) |
 
 A connection without a registered `Tls` feature (cleartext, or secured by a layer that
@@ -1084,7 +1147,7 @@ emitted by the transport when it finalizes the exchange, not by the feature, and
   stream (a HEADERS frame with no `Content-Length`, then DATA frames). The body is
   delimited by the QUIC stream **end** (RFC 9114 §4.1), so when the response completes
   the transport ends the request stream's write side — a graceful QUIC FIN via the
-  `IConnection` half-close contract (`Output.Complete()`). This happens for both the
+  `IDuplexConnection` half-close contract (`Output.Complete()`). This happens for both the
   buffered `SendAsync` path (after the HEADERS + optional DATA frame and any trailer
   section's HEADERS frame) and the streaming sink's finalize (which writes the trailer
   section first); see "Ending the request stream at response completion" below for why
@@ -1562,11 +1625,11 @@ the listener's own. The accept loops rely on it:
 - **An exception from `AcceptAsync` is fatal to the `HttpConnectionListener`.**
   The accept loop completes the backlog channel with the listener's
   exception *before* cancelling the internal dispose token (the ordering
-  is load-bearing: a pending `AcceptOrListenAsync` must observe the
+  is load-bearing: a pending `AcceptAsync` must observe the
   faulted channel, not the cancellation) and records the exception so
   accepts that begin after cancellation rethrow it too. The host
   therefore sees the transport's root-cause exception from
-  `AcceptOrListenAsync`, never a bare `ObjectDisposedException`. (The
+  `AcceptAsync`, never a bare `ObjectDisposedException`. (The
   accept that observes the fault directly can see the channel's own
   cancellation instead when the root cause is itself a cancellation; the
   accepts after it see the recorded exception.)
@@ -3085,7 +3148,7 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
 - **HTTP/3** sets it unless the request stream's FIN is already buffered behind its HEADERS frame
   (`Http3RequestStreamReader.IsEndBuffered`, a `TryRead` that consumes nothing), and only when a
   request hook is registered (or an `Expect: 100-continue` needs the signal). The QUIC driver's
-  `IMultiplexedStream.IsInputCompleted` exposes a clean FIN already observed by the runtime (#1427, #1453),
+  `IMultiplexedConnectionStream.IsInputCompleted` exposes a clean FIN already observed by the runtime (#1427, #1453),
   even before its stream-backed pipe reads zero bytes. The probe requires an empty, uncancelled
   pipe as well; buffered DATA followed by FIN still reports a body. A positive declared content
   length also retains the gate: an empty stream then faults when its body is validated. It never
@@ -4318,7 +4381,7 @@ every inbound stream to processing of its own:
 | unidirectional, any other type | abandon: stop reading with `STOP_SENDING(H3_STREAM_CREATION_ERROR)` and release the stream — unknown and reserved stream types are not a connection error, but their recipient must abort reading or discard the data (RFC 9114 §6.2). A stream that ends before its type, or whose type cannot be read, is released the same way |
 
 The stream direction is reported by the transport via
-`IConnection.Direction` on each accepted stream (see below); the HTTP
+`IDuplexConnection.Direction` on each accepted stream (see below); the HTTP
 layer never inspects QUIC stream IDs directly. A second control, QPACK
 encoder, or QPACK decoder stream is `H3_STREAM_CREATION_ERROR`; because
 unidirectional streams are typed concurrently, the at-most-one rule is an
@@ -4699,7 +4762,7 @@ QUIC and in-memory streams also register the `DirectionalAbort` feature from
 `Connections.StreamAbort`, for operations that end only one direction:
 
 - **`STOP_SENDING`** is `DirectionalAbort.AbortRead(code)` on the request stream.
-- **A reset** is `IMultiplexedStream.Abort(code, Http3StreamException)`. The
+- **A reset** is `IMultiplexedConnectionStream.Abort(code, Http3StreamException)`. The
   driver ends both directions with the code where carried, preserving any direction
   already ended, then ends the lifecycle and fires the exchange's `RequestCancelled`
   (`Http3ConnectionContext.ResetStream`).
@@ -4778,7 +4841,7 @@ An HTTP/3 response body is delimited by the **request stream's end** (RFC 9114
 §4.1), not by `Content-Length`: a real client (`System.Net.Http.Http3RequestStream`)
 stays in its response-content read until it observes the stream FIN, even for a
 zero-length body. So when a response completes, the engine ends the request stream's
-write side — the graceful QUIC FIN, signalled through the `IConnection` half-close
+write side — the graceful QUIC FIN, signalled through the `IDuplexConnection` half-close
 contract by completing the stream's `Output` (`PipeWriter`). Both response paths do
 this: the buffered `SendAsync` after it flushes the HEADERS (+ optional DATA) frame
 and any trailer section, and the streaming sink's `CompleteFramedAsync` after it
@@ -4986,7 +5049,7 @@ connection closed.
 
 Every inbound stream — the unidirectional-stream handlers and, since #1066,
 the request-stream reader (`Http3RequestStreamReader`) — is read directly off
-the accepted stream connection's `PipeReader` (`IConnection.Input`) using a
+the accepted stream connection's `PipeReader` (`IDuplexConnection.Input`) using a
 buffered `ReadOnlySequence<byte>` model, **not** the `AsStream()` adapter
 (which the response side still writes through). Two reasons:
 
@@ -5022,7 +5085,7 @@ how many bytes it consumed so the loop can advance the reader precisely.
 
 Demultiplexing request streams from control/QPACK/push streams requires
 knowing a stream's direction, and only the transport knows it. The
-signal is `IConnection.Direction` in `Assimalign.Cohesion.Connections`:
+signal is `IDuplexConnection.Direction` in `Assimalign.Cohesion.Connections`:
 stream transports always report `Bidirectional`, while a multiplexed
 transport's unidirectional streams report `ReadOnly` (inbound; the
 output throws) or `WriteOnly` (outbound; the input is pre-completed).
@@ -5837,8 +5900,8 @@ Advertisement is opt-in via `HttpConnectionListenerOptions.AltServiceAdvertiseme
 beyond `ma` (such as `persist=1`) are deliberately not server knobs — an application
 that needs them sets the header itself via the typed `HttpAltService`, and the
 server's guarded injection yields to it. `HttpConnectionListener` computes the
-header value **once, at construction**,
-after every listener has been materialized so the h3 endpoint is known. The value is
+header value **once, after binding**,
+after every transport has acquired its endpoint so the assigned h3 port is known. The value is
 produced only when advertisement is enabled **and** at least one HTTP/3 listener is
 registered **and** at least one stream listener exists to carry it; otherwise it is
 `null` and nothing is injected. The h3 port is derived as `:"<port>"` from the first
@@ -5846,12 +5909,12 @@ multiplexed listener's `EndPoint` (advertising the alternative on the request's 
 host), unless `Authority` overrides it — needed when the QUIC bind port is not the
 port clients reach (port-mapping load balancer) or the alternative lives on another
 host. If advertisement is enabled but the port cannot be determined (endpoint exposes
-no port and no explicit `Authority`), construction fails loud rather than silently
+no port and no explicit `Authority`), binding fails rather than silently
 not advertising.
 
 The precomputed value is pushed onto the stream connection factories
 (`HttpConnectionFactory.AltSvcHeaderValue`) before the first connection is accepted
-— the accept loops start lazily on the first `AcceptOrListenAsync`, so no factory
+— the accept loops start lazily on the first `AcceptAsync`, so no factory
 observes a half-set value — and flows factory → connection → connection context.
 A `UseHttp1AndHttp2` registration forwards it to both of its protocol factories, so
 the endpoint advertises the same alternative whichever protocol a connection speaks.
@@ -5895,7 +5958,7 @@ the shared injector are the seam a future auto-header would reuse.
 ### AOT posture
 
 No reflection or dynamic dispatch. `HttpAltService` is a span-based value type; the
-per-listener header value is a single string computed at construction and read on the
+per-listener header value is a single string computed after binding and read on the
 response path. `IsAotCompatible=true` holds.
 
 ### Non-goals

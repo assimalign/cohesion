@@ -89,7 +89,7 @@ public class HttpQueryEmptyNameTests
     private static async Task<IHttpContext?> ReadFirstContextOrNullAsync(HttpConnectionListenerOptions options)
     {
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connection = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = connection.ReceiveAsync().GetAsyncEnumerator();
         return await enumerator.MoveNextAsync() ? enumerator.Current : null;
     }

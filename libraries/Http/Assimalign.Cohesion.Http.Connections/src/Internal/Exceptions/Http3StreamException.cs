@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// (<see cref="Assimalign.Cohesion.Connections.IMultiplexedStreamAbort"/>, which the QUIC and in-memory
 /// drivers implement): a reset aborts both directions with it, and stopping a request aborts the receiving
 /// direction. The exception is then handed to the connection abstraction as the reason, when the transport
-/// resets the stream (<see cref="Assimalign.Cohesion.Connections.IConnection.Abort(Exception)"/>) or stops
+/// resets the stream (<see cref="Assimalign.Cohesion.Connections.IDuplexConnection.Abort(Exception)"/>) or stops
 /// reading it (<see cref="System.IO.Pipelines.PipeReader.Complete(Exception)"/>). On a stream that cannot
 /// carry a code, the reason is the only place the code travels, and a test double surfaces it to the peer
 /// (see docs/DESIGN.md, "Request streams").

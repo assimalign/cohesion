@@ -32,7 +32,7 @@ public class HttpContextTransportExtensionsTests
         options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.HasResponseStarted.ShouldBeFalse();
@@ -56,7 +56,7 @@ public class HttpContextTransportExtensionsTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("buffered"));
@@ -81,7 +81,7 @@ public class HttpContextTransportExtensionsTests
         options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.HasResponseStarted.ShouldBeFalse();
@@ -106,7 +106,7 @@ public class HttpContextTransportExtensionsTests
         options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.HasResponseStarted.ShouldBeFalse();
@@ -133,7 +133,7 @@ public class HttpContextTransportExtensionsTests
             static http3 => http3.Limits.MaxRequestBodySize = 16);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[128]).AsTask());

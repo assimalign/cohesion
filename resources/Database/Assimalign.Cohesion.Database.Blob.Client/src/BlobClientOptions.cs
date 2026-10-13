@@ -10,5 +10,5 @@ public sealed class BlobClientOptions
     public DatabaseConnectionSettings? Settings { get; set; }
 
     /// <summary>Gets or sets the transport factory used to dial the Blob endpoint.</summary>
-    public IConnectionFactory? ConnectionFactory { get; set; }
+    public IDuplexConnectionFactory? ConnectionFactory { get; set; }
 }

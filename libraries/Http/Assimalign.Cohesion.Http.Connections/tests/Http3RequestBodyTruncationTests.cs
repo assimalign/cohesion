@@ -31,7 +31,7 @@ public class Http3RequestBodyTruncationTests
     {
         // Arrange — part of the body arrived and was read; the next read waits for more.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        (Connection request, _, Task<int> pending) = await StartWaitingReadAsync(peer, declaresContentLength);
+        (IDuplexConnection request, _, Task<int> pending) = await StartWaitingReadAsync(peer, declaresContentLength);
 
         // Act — RESET_STREAM: the client abandons its sending direction.
         request.Output.Complete(new ConnectionAbortedException("The client reset its request stream."));
@@ -62,7 +62,7 @@ public class Http3RequestBodyTruncationTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
-        (Connection request, IHttpContext context, Task<int> pending) = await StartWaitingReadAsync(peer, declaresContentLength: false);
+        (IDuplexConnection request, IHttpContext context, Task<int> pending) = await StartWaitingReadAsync(peer, declaresContentLength: false);
 
         // Act — the last DATA frame, then the FIN.
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Http2TestPeer.CreateBody(100)));
@@ -77,13 +77,13 @@ public class Http3RequestBodyTruncationTests
 
     // Opens a request stream with a POST, delivers and reads 400 body octets, then starts a read that
     // waits for more.
-    private static async Task<(Connection Request, IHttpContext Context, Task<int> Pending)> StartWaitingReadAsync(Http3InMemoryPeer peer, bool declaresContentLength)
+    private static async Task<(IDuplexConnection Request, IHttpContext Context, Task<int> Pending)> StartWaitingReadAsync(Http3InMemoryPeer peer, bool declaresContentLength)
     {
         Dictionary<string, string>? headers = declaresContentLength
             ? new Dictionary<string, string> { ["content-length"] = "1000" }
             : null;
 
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a", headers));
         IHttpContext context = await peer.NextContextAsync();
 

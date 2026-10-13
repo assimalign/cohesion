@@ -17,10 +17,10 @@ namespace Assimalign.Cohesion.Database.Client.Internal;
 internal sealed class PooledDatabaseConnection : IDatabaseConnection
 {
     private readonly DefaultDatabaseClient _owner;
-    private readonly IConnectionFactory _connectionFactory;
+    private readonly IDuplexConnectionFactory _connectionFactory;
     private readonly DatabaseConnectionSettings _settings;
 
-    private IConnection? _connection;
+    private IDuplexConnection? _connection;
     private IProtocolFrameReader? _reader;
     private IProtocolFrameWriter? _writer;
     private bool _isOpen;
@@ -31,7 +31,7 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     private TaskCompletionSource? _exchangeCompletion;
     private Task? _returnTask;
 
-    internal PooledDatabaseConnection(DefaultDatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
+    internal PooledDatabaseConnection(DefaultDatabaseClient owner, IDuplexConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
         _owner = owner;
         _connectionFactory = connectionFactory;

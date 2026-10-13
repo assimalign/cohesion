@@ -179,3 +179,11 @@ future Documents and Graph clients can supply their own startup and content prot
 copying Blob's former queue, producer, cancellation, or rental-release machinery. Listings
 remain a Blob-owned bounded typed enumeration: they produce metadata items rather than a
 content stream and validate Blob-specific prefix and item-count rules.
+
+## Duplex transport composition
+
+`ConnectionFactory` accepts `IDuplexConnectionFactory`. The shared client reads and writes
+framed bytes through the returned `IDuplexConnection`; the common `IConnection` root carries
+identity, features and lifecycle only. TCP, InMemory and TLS-layered duplex factories satisfy
+this contract. The pool owns each established connection and disposes it when discarded or
+when the pool closes; transport disposal has signaled `ConnectionClosed` before it completes.

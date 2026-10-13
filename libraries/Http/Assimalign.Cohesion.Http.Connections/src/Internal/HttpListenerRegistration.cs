@@ -8,20 +8,20 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// Binds a single HTTP protocol to the connection listener that will produce its transport
 /// connections, and to the factory that turns each accepted transport connection into a
 /// protocol-specific <see cref="HttpConnection"/>. Stream protocols (HTTP/1.1, HTTP/2) bind to an
-/// <see cref="IConnectionListener"/> plus an <see cref="HttpConnectionFactory"/>; HTTP/3 binds to an
+/// <see cref="IDuplexConnectionListener"/> plus an <see cref="HttpConnectionFactory"/>; HTTP/3 binds to an
 /// <see cref="IMultiplexedConnectionListener"/> plus an <see cref="HttpMultiplexedConnectionFactory"/>,
 /// the multiplexed listener type itself acting as the shape gate.
 /// </summary>
 internal sealed class HttpListenerRegistration
 {
-    private readonly Func<IConnectionListener>? _streamListenerFactory;
+    private readonly Func<IDuplexConnectionListener>? _streamListenerFactory;
     private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory>? _streamConnectionFactoryBuilder;
     private readonly Func<IMultiplexedConnectionListener>? _multiplexedListenerFactory;
     private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
 
     private HttpListenerRegistration(
         HttpProtocol protocol,
-        Func<IConnectionListener>? streamListenerFactory,
+        Func<IDuplexConnectionListener>? streamListenerFactory,
         Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory>? streamConnectionFactoryBuilder,
         Func<IMultiplexedConnectionListener>? multiplexedListenerFactory,
         Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
@@ -46,7 +46,7 @@ internal sealed class HttpListenerRegistration
 
     public static HttpListenerRegistration ForStream(
         HttpProtocol protocol,
-        Func<IConnectionListener> listenerFactory,
+        Func<IDuplexConnectionListener> listenerFactory,
         Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(protocol, listenerFactory, connectionFactoryBuilder, multiplexedListenerFactory: null, multiplexedConnectionFactoryBuilder: null);
@@ -63,9 +63,9 @@ internal sealed class HttpListenerRegistration
     /// Materializes the stream listener, re-validating its capabilities (factory-registered
     /// listeners cannot be inspected until they exist).
     /// </summary>
-    public IConnectionListener CreateStreamListener()
+    public IDuplexConnectionListener CreateStreamListener()
     {
-        IConnectionListener listener = _streamListenerFactory!.Invoke()
+        IDuplexConnectionListener listener = _streamListenerFactory!.Invoke()
             ?? throw new InvalidOperationException($"The connection listener factory registered for '{Protocol}' returned null.");
 
         ValidateStreamCapabilities(listener.Capabilities, Protocol, paramName: null);

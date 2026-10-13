@@ -47,7 +47,7 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         TestConnectionListener listener = new();
         listener.Enqueue(server);
         await using SslStream clientSsl = new(
@@ -56,13 +56,14 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
             userCertificateValidationCallback: static (_, _, _, _) => true);
 
         // Act: accept through the TLS-layered listener while a raw client handshakes on the far end.
-        IConnectionListener secured = listener.UseTls(CreateServerOptions());
-        Task<IConnection> acceptTask = secured.AcceptAsync(timeout.Token).AsTask();
+        IDuplexConnectionListener secured = listener.UseTls(CreateServerOptions());
+        secured.Id.ShouldBe(listener.Id);
+        Task<IDuplexConnection> acceptTask = secured.AcceptAsync(timeout.Token).AsTask();
         Task clientHandshake = clientSsl.AuthenticateAsClientAsync(
             new SslClientAuthenticationOptions { TargetHost = "localhost" },
             timeout.Token);
         await Task.WhenAll(acceptTask, clientHandshake);
-        IConnection accepted = await acceptTask;
+        IDuplexConnection accepted = await acceptTask;
 
         // Assert
         accepted.Capabilities.Security.ShouldBe(ConnectionSecurity.Tls);
@@ -81,7 +82,7 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
         TestConnectionListener listener = new();
 
         // Act
-        IConnectionListener secured = listener.UseTls(CreateServerOptions());
+        IDuplexConnectionListener secured = listener.UseTls(CreateServerOptions());
 
         // Assert
         secured.Capabilities.ShouldBe(listener.Capabilities with { Security = ConnectionSecurity.Tls });
@@ -92,19 +93,19 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         TestConnectionFactory factory = new();
         factory.Enqueue(client);
         await using SslStream serverSsl = new(server.AsStream(), leaveInnerStreamOpen: false);
 
         // Act: connect through the TLS-layered factory while a raw server handshakes on the far end.
-        IConnectionFactory secured = factory.UseTls(CreateClientOptions());
-        Task<IConnection> connectTask = secured.ConnectAsync(new IPEndPoint(IPAddress.Loopback, 22000), timeout.Token).AsTask();
+        IDuplexConnectionFactory secured = factory.UseTls(CreateClientOptions());
+        Task<IDuplexConnection> connectTask = secured.ConnectAsync(new IPEndPoint(IPAddress.Loopback, 22000), timeout.Token).AsTask();
         Task serverHandshake = serverSsl.AuthenticateAsServerAsync(
             new SslServerAuthenticationOptions { ServerCertificate = _fixture.Certificate },
             timeout.Token);
         await Task.WhenAll(connectTask, serverHandshake);
-        IConnection connected = await connectTask;
+        IDuplexConnection connected = await connectTask;
 
         // Assert
         connected.Capabilities.Security.ShouldBe(ConnectionSecurity.Tls);
@@ -122,15 +123,15 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
         // Arrange
         TestConnectionListener listener = new();
         TestConnectionFactory factory = new();
-        (Connection client, Connection _) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, DuplexConnection _) = InMemoryConnectionPair.Create();
 
         // Act & Assert
         Should.Throw<ArgumentNullException>(() => listener.UseTls(null!));
-        Should.Throw<ArgumentNullException>(() => ((IConnectionListener)null!).UseTls(new TlsServerOptions()));
+        Should.Throw<ArgumentNullException>(() => ((IDuplexConnectionListener)null!).UseTls(new TlsServerOptions()));
         Should.Throw<ArgumentNullException>(() => factory.UseTls(null!));
-        Should.Throw<ArgumentNullException>(() => ((IConnectionFactory)null!).UseTls(new TlsClientOptions()));
+        Should.Throw<ArgumentNullException>(() => ((IDuplexConnectionFactory)null!).UseTls(new TlsClientOptions()));
         Should.Throw<ArgumentNullException>(() => _ = client.UpgradeToTlsAsync((TlsServerOptions)null!));
         Should.Throw<ArgumentNullException>(() => _ = client.UpgradeToTlsAsync((TlsClientOptions)null!));
-        Should.Throw<ArgumentNullException>(() => _ = ((IConnection)null!).UpgradeToTlsAsync(new TlsServerOptions()));
+        Should.Throw<ArgumentNullException>(() => _ = ((IDuplexConnection)null!).UpgradeToTlsAsync(new TlsServerOptions()));
     }
 }

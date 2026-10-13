@@ -3,7 +3,7 @@
 ## Design Intent
 
 The socket-backed stream driver for the Cohesion Connections contracts. It implements
-`IConnectionListener` / `IConnectionFactory` producing reliable, ordered, single-stream `IConnection`s
+`IDuplexConnectionListener` / `IDuplexConnectionFactory` producing reliable, ordered, single-stream `IDuplexConnection`s
 over a connected `System.Net.Sockets.Socket`. It is the default production transport for HTTP/1.1 and
 HTTP/2 and the reference implementation of the socket receive/send pump loops the other stream drivers
 are modeled against.
@@ -113,12 +113,14 @@ transport security) are identical for both families — only the protocol identi
 - A connection is **live on construction**: the constructor starts the receive and send loops.
 - **Graceful half-close** — complete `Output`; **`DisposeAsync`** — close (transitions to `Closed` once
   the loops finish); **`Abort(reason)`** — immediate tear-down (`Aborted`), discarding in-flight data.
-  `ConnectionClosed` is signaled on closure.
+  `ConnectionClosed` is signaled on abort and observed peer closure, and before disposal returns.
 - Socket reset/abort conditions are classified by `SocketHelper` and surfaced through the
   `ConnectionException` family (`ConnectionResetException` for resets) so consumers catch one hierarchy.
-- The listener tracks live accepted connections and disposes them on `DisposeAsync`, then disposes its
-  per-IO-queue pipe options. Disposal also releases the listening endpoint and is terminal; restart uses
-  a newly constructed listener.
+- The generic listener base owns the live accepted set. Listener disposal releases the listening
+  endpoint and its reference to each per-IO-queue pipe-options context, while accepted connections
+  remain open. Each accepted connection holds one reference to its shared context, released after
+  both pumps finish during connection disposal. This internal reference count adds no per-connection
+  wrapper or token registration. Restart constructs a new listener.
 - **No client is left connected to nothing when the listener stops.** On Windows an accept is an
   `AcceptEx` into a socket created before the call, and the OS can attach an incoming client to that
   socket before the accept completes. If the accept is cancelled, or the listening socket closes, at that
@@ -133,7 +135,7 @@ transport security) are identical for both families — only the protocol identi
   `ConnectionReset`. BSD-derived stacks, and Linux in some cases, fail it with `ConnectionAborted`;
   Linux usually returns the connection anyway, already reset. `AcceptAsync` treats those two errors as
   the queued connection's own, raises `AcceptSkipped`, and accepts the next connection. This is the
-  `IConnectionListener.AcceptAsync` contract: a failure that belongs to one inbound connection never
+  `IDuplexConnectionListener.AcceptAsync` contract: a failure that belongs to one inbound connection never
   escapes, because a consumer such as the HTTP accept loop treats whatever escapes as the listener's
   end. Until #1308 the error escaped, and one reset stopped an HTTP endpoint. Neither error can recur
   without a new connection, so the retry cannot spin.
@@ -218,8 +220,8 @@ Ordering and pairing are guaranteed, which is what keeps `current-connections` e
 - `ConnectionOpened` is raised in the constructor **before** the pump loops start, so no loop event can
   precede it.
 - `ConnectionClosed` is raised exactly once, from the receive loop's close path (the one place the
-  connection-closed signal is scheduled), and **before** that signal completes — so `DisposeAsync` never
-  returns ahead of it. The driver previously raised no close event at all.
+  connection-closed signal is scheduled), and before disposal completes. Abort can signal closure
+  before the receive loop finishes; disposal awaits both pumps before releasing its pool reference. The driver previously raised no close event at all.
 - Lifetimes use `Bound`/`Opened`/`Closed` names, not `Start`/`Stop`: a connection opens on the accept
   loop's flow and closes on the receive loop's, and EventSource's activity tracking would otherwise
   nest every connection under the previous one.
@@ -243,8 +245,8 @@ async socket-event args, and `System.Diagnostics.Tracing` counters — all from 
 
 ## Relationships
 
-- **`Assimalign.Cohesion.Connections`** — the guided bases (`Connection`, `ConnectionListener`,
-  `ConnectionFactory`), `ConnectionCapabilities` / `ConnectionProtocol`, the exception family, and
+- **`Assimalign.Cohesion.Connections`** — the guided bases (`DuplexConnection`, `DuplexConnectionListener`,
+  `DuplexConnectionFactory`), `ConnectionCapabilities` / `ConnectionProtocol`, the exception family, and
   `ListenerId`. Diagnostics are not taken from it: this driver owns its event source (see
   *Diagnostics*). Its pipe plumbing (`DuplexPipePair`,
   `PipeOptionsContext`, `PipeOptionsFactory`) is compiled into this driver from that
@@ -254,5 +256,15 @@ async socket-event args, and `System.Diagnostics.Tracing` counters — all from 
   Windows-native counterpart to this driver's Unix domain socket.
 - **`Assimalign.Cohesion.Security`** — TLS as a connection layer composed over this driver.
 - **`Assimalign.Cohesion.Http.Connections`** — the primary consumer, composing this listener via
-  `UseHttp1/UseHttp2(IConnectionListener)` (HTTP-over-UDS is validated end-to-end by
+  `UseHttp1/UseHttp2(IDuplexConnectionListener)` (HTTP-over-UDS is validated end-to-end by
   `HttpOverUnixDomainSocketTests`).
+
+## Connection hierarchy compatibility
+
+Decision 58 changes the hierarchy shipped in 10.0.0-preview.1 under decision 15's accepted
+preview source and binary breaks. Byte-pipe APIs use `IDuplexConnection` and `DuplexConnection`, with duplex listener/factory bases.
+Their public accept/connect results are interfaces. The generic listener base supplies `Id`,
+`Connections`, and the shared accept core.
+Every connection shares root lifecycle and features. Accepted connections stay in the live set
+until their closed token fires; listener disposal never closes handed-out connections.
+Only the code that accepted a connection reads or writes it.

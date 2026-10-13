@@ -19,7 +19,7 @@ internal sealed class TestTlsMultiplexedConnection : MultiplexedConnection, ITls
 {
     private readonly TestMultiplexedConnection _inner;
 
-    public TestTlsMultiplexedConnection(X509Certificate2? remoteCertificate, params MultiplexedStream[] streams)
+    public TestTlsMultiplexedConnection(X509Certificate2? remoteCertificate, params MultiplexedConnectionStream[] streams)
     {
         _inner = new TestMultiplexedConnection(streams);
         RemoteCertificate = remoteCertificate;
@@ -57,9 +57,9 @@ internal sealed class TestTlsMultiplexedConnection : MultiplexedConnection, ITls
 
     public override ValueTask DisposeAsync() => _inner.DisposeAsync();
 
-    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         => _inner.AcceptStreamAsync(cancellationToken);
 
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => _inner.OpenStreamAsync(direction, cancellationToken);
 }

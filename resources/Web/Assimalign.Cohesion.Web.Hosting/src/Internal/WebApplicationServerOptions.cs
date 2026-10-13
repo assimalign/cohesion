@@ -2,7 +2,6 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 using System;
 using System.Collections.Frozen;
-using System.Net;
 
 using Assimalign.Cohesion.Http.Connections;
 
@@ -20,9 +19,6 @@ internal sealed class WebApplicationServerOptions
     /// Gets or sets the listener the accept loop draws connections from.
     /// </summary>
     public IHttpConnectionListener? Listener { get; set; }
-
-    /// <summary>Gets or sets the bound endpoint readers supplied by hosting composition.</summary>
-    public Func<EndPoint>[] EndPointReaders { get; set; } = [];
 
     /// <summary>
     /// Gets or sets the maximum number of connections served concurrently. <see langword="null"/>

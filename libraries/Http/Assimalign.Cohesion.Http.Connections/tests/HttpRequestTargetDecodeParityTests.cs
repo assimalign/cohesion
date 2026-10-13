@@ -135,7 +135,7 @@ public class HttpRequestTargetDecodeParityTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadFirstContextOrNullAsync(context);
     }
 
@@ -147,7 +147,7 @@ public class HttpRequestTargetDecodeParityTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadFirstContextOrNullAsync(context);
     }
 

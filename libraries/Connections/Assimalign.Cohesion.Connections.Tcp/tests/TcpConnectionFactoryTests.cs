@@ -40,8 +40,8 @@ public class TcpConnectionFactoryTests
         TcpConnectionFactory factory = new();
 
         // Act
-        await using Connection typed = await factory.ConnectAsync(endPoint, cancellation.Token);
-        await using IConnection viaInterface = await ((IConnectionFactory)factory).ConnectAsync(endPoint, cancellation.Token);
+        await using IDuplexConnection typed = await factory.ConnectAsync(endPoint, cancellation.Token);
+        await using IDuplexConnection viaInterface = await ((IDuplexConnectionFactory)factory).ConnectAsync(endPoint, cancellation.Token);
 
         // Assert
         // The guided base forwards the explicit interface implementation to the typed overload,
@@ -60,7 +60,7 @@ public class TcpConnectionFactoryTests
         TcpConnectionFactory factory = new();
 
         // Act
-        await using Connection connection = await factory.ConnectAsync(dnsEndPoint, cancellation.Token);
+        await using IDuplexConnection connection = await factory.ConnectAsync(dnsEndPoint, cancellation.Token);
 
         // Assert
         connection.ShouldBeOfType<TcpConnection>();

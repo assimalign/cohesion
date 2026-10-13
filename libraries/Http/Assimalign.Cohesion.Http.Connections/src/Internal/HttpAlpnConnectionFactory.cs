@@ -60,7 +60,7 @@ internal sealed class HttpAlpnConnectionFactory : HttpConnectionFactory
         }
     }
 
-    public override HttpConnection? Create(IConnection connection, bool isSecure)
+    public override HttpConnection? Create(IDuplexConnection connection, bool isSecure)
     {
         SslApplicationProtocol protocol = connection.Tls?.ApplicationProtocol ?? default;
 

@@ -31,7 +31,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 
     private readonly HttpResponseHeaderPolicy _responseHeaderPolicy;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
+    public Http1ConnectionContext(IDuplexConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
         : base(connection, isSecure)
     {
         _limits = limits;

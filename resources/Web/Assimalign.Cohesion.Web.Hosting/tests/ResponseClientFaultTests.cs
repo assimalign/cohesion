@@ -109,7 +109,7 @@ public class ResponseClientFaultTests
             await context.Response.Streaming.StartAsync(cancellationToken);
         });
         await factory.StartAsync(cancellationToken);
-        await using Connection? http1 = protocol == 1
+        await using IDuplexConnection? http1 = protocol == 1
             ? await transport.Connections.CreateFactory().ConnectAsync(transport.Connections.EndPoint, cancellationToken)
             : null;
         await using Http2RawClient? http2 = protocol == 2
@@ -120,7 +120,7 @@ public class ResponseClientFaultTests
             : null;
 
         // Act — the real response-starting feature cancels before rethrowing the callback exception.
-        await using Connection? requestStream = http3 is not null
+        await using IDuplexConnection? requestStream = http3 is not null
             ? await http3.SendRequestAsync("GET", path, [], [], endStream: true, cancellationToken)
             : null;
         if (http1 is not null)
@@ -269,7 +269,7 @@ public class ResponseClientFaultTests
             }
         });
         await factory.StartAsync(cancellationToken);
-        await using Connection? http1 = protocol == 1
+        await using IDuplexConnection? http1 = protocol == 1
             ? await transport.Connections.CreateFactory().ConnectAsync(transport.Connections.EndPoint, cancellationToken)
             : null;
         await using Http2RawClient? http2 = protocol == 2
@@ -278,7 +278,7 @@ public class ResponseClientFaultTests
         await using Http3RawClient? http3 = protocol == 3
             ? await Http3RawClient.ConnectAsync(transport.MultiplexedConnections, cancellationToken)
             : null;
-        await using MultiplexedStream? requestStream = http3 is not null
+        await using IMultiplexedConnectionStream? requestStream = http3 is not null
             ? await http3.SendRequestAsync("GET", path, [], [], endStream: true, cancellationToken)
             : null;
 

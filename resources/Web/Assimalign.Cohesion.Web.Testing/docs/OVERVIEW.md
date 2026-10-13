@@ -90,3 +90,7 @@ The client side is otherwise pure BCL (`SocketsHttpHandler`, `HttpClient`).
 
 See [`DESIGN.md`](DESIGN.md) for the composition model, lifecycle contract, protocol scope
 (including why HTTP/3 is out), parallel-isolation guarantees, and AOT posture.
+
+The socketless client transport consumes `IDuplexConnection` for its input/output pipe.
+Identity and lifetime remain available through the shared `IConnection` root; HTTP listener
+accepts use `AcceptAsync` and retain their accepted connections until `ConnectionClosed` fires.

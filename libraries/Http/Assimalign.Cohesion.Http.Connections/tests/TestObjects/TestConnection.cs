@@ -23,10 +23,10 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// <c>Open → Closing</c> transition when the holder completes <see cref="Output"/>, and close/dispose
 /// propagation — now live in the driver rather than in a bespoke pipe-pair implementation.
 /// </remarks>
-internal sealed class TestConnection : MultiplexedStream
+internal sealed class TestConnection : MultiplexedConnectionStream
 {
-    private readonly Connection _self;
-    private readonly Connection _peer;
+    private readonly IDuplexConnection _self;
+    private readonly IDuplexConnection _peer;
     private readonly ConnectionDirection _direction;
     private bool _isAborted;
     private bool _isDisposed;
@@ -89,7 +89,10 @@ internal sealed class TestConnection : MultiplexedStream
 
     public override PipeReader Input => _self.Input;
 
-    public override PipeWriter Output => _self.Output;
+    /// <summary>Replaces the output projection so tests can observe transport writes and completion.</summary>
+    public PipeWriter? OutputOverride { get; set; }
+
+    public override PipeWriter Output => OutputOverride ?? _self.Output;
 
     public override ConnectionDirection Direction => _direction;
 

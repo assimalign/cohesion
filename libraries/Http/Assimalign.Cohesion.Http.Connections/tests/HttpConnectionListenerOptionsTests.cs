@@ -89,8 +89,8 @@ public class HttpConnectionListenerOptionsTests
         HttpConnectionListenerOptions options = new();
 
         // Act + Assert
-        Should.Throw<ArgumentNullException>(() => options.UseHttp1((IConnectionListener)null!));
-        Should.Throw<ArgumentNullException>(() => options.UseHttp1((Func<IConnectionListener>)null!));
+        Should.Throw<ArgumentNullException>(() => options.UseHttp1((IDuplexConnectionListener)null!));
+        Should.Throw<ArgumentNullException>(() => options.UseHttp1((Func<IDuplexConnectionListener>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: UseHttp2 should reject a null listener")]
@@ -100,8 +100,8 @@ public class HttpConnectionListenerOptionsTests
         HttpConnectionListenerOptions options = new();
 
         // Act + Assert
-        Should.Throw<ArgumentNullException>(() => options.UseHttp2((IConnectionListener)null!));
-        Should.Throw<ArgumentNullException>(() => options.UseHttp2((Func<IConnectionListener>)null!));
+        Should.Throw<ArgumentNullException>(() => options.UseHttp2((IDuplexConnectionListener)null!));
+        Should.Throw<ArgumentNullException>(() => options.UseHttp2((Func<IDuplexConnectionListener>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: UseHttp3 should reject a null listener")]

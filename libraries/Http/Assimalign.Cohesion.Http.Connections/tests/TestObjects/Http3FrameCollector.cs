@@ -27,7 +27,7 @@ internal sealed class Http3FrameCollector
     private readonly List<byte> _pending = new();
     private readonly List<(long FrameType, byte[] Payload)> _frames = new();
 
-    public Http3FrameCollector(Connection stream)
+    public Http3FrameCollector(IDuplexConnection stream)
         : this(stream.Input)
     {
     }

@@ -74,7 +74,7 @@ public class Http3InputCompletionAllocationTests
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
         await client.OpenControlStreamAsync(cancellationToken);
         await client.SendRequestAsync("POST", "/incomplete", [("content-length", "5")], [], endStream: true, cancellationToken);
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(cancellationToken);
+        await using IHttpConnection connection = await listener.AcceptAsync(cancellationToken);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(cancellationToken);
         await using IAsyncEnumerator<IHttpContext> requests = connectionContext.ReceiveAsync(cancellationToken).GetAsyncEnumerator();
 
@@ -107,7 +107,7 @@ public class Http3InputCompletionAllocationTests
             await client.SendRequestAsync("GET", "/complete", [], [], endStream: true, cancellationToken);
         }
 
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(cancellationToken);
+        await using IHttpConnection connection = await listener.AcceptAsync(cancellationToken);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(cancellationToken);
         await using IAsyncEnumerator<IHttpContext> requests = connectionContext.ReceiveAsync(cancellationToken).GetAsyncEnumerator();
 

@@ -928,20 +928,16 @@ feature reads for payloads happen only while the corresponding event level is en
 | 17 | CommandMalformed | Warning | resourceName, requestId, httpMethod, phase, exceptionType, suppressedCount:int |
 | 18 | StopAccepted | Informational | resourceName, requestId, deferred:bool |
 
-`endPoints` comma-joins the actual bound addresses of the TCP, TLS and QUIC listeners composed
-by Web.Hosting, including configuration-bound and development-default endpoints. Internal
-`WebServerEndPoints` associates endpoint readers with each listener-options instance during
-composition. The default server snapshots those readers after the transport materializes its
-listeners, then reads and formats them only inside `ServerBound`'s enabled branch after binding.
-Port-zero listeners therefore report the ports the operating system assigned. Two servers in one
-process retain independent reader snapshots, letting operators map each `serverId` to its addresses.
-
-The aggregate `IHttpConnectionListener` exposes no endpoints. Raw instance/factory registrations
-made directly through Http.Connections remain outside this host-owned capture, so a composition
-that mixes registration styles reports only its Web.Hosting-created listeners. No address is
-invented for an opaque custom listener, and no public transport member, reflection, or cross-library
-internal grant is added. Connection-fault endpoints still come from the opened context.
-
+`endPoints` comma-joins `IHttpConnectionListener.EndPoints` after binding completes.
+The transport listener supplies its actual endpoint, so TCP, TLS and QUIC port-zero
+binds report the operating system's assigned port. The HTTP listener aggregates
+all registrations, including raw `UseServer(Action<HttpConnectionListenerOptions>)`
+instance and factory registrations. Each server reads its own listener's endpoint
+set; it has no options-associated capture or `EndPointReaders` snapshot.
+`WebServerEndPoints` and the hosting helpers' tracking calls have been deleted.
+The server accepts through the typed listener's `AcceptAsync`; its accepted
+connections participate in the shared `IConnection` identity and lifetime model.
+Connection-fault endpoints still come from the opened context.
 The four lazily created PollingCounters are `connection-faults`, `connection-cap-waits`,
 `refused-response-heads`, and `rejected-credentials`. Their backing values stay exact with no listener. A local per-connection
 flag counts faults once even if serving and teardown both fail. An IOException, SocketException,
@@ -2088,7 +2084,7 @@ bind asynchronously — documented in "HTTP/3 (QUIC) registration surface" below
 ### AOT posture
 
 No reflection, no runtime codegen. The composition is plain delegate wiring
-(`TcpConnectionListener.Create(...).UseTls(...)` inside a `Func<IConnectionListener>`),
+(`TcpConnectionListener.Create(...).UseTls(...)` inside a `Func<IDuplexConnectionListener>`),
 and the ALPN default is a list assignment. `IsAotCompatible=true` holds with no
 special handling.
 

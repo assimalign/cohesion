@@ -163,7 +163,7 @@ public class HttpResponseConnectionFieldTests
     private static async Task<Dictionary<string, string>> SendHttp3HeadAsync(ResponseHead head, string name, string value)
     {
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: Configure);
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/page", "https", "a"));
         await request.Output.CompleteAsync();
         IHttpContext context = await peer.NextContextAsync();

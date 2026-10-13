@@ -96,7 +96,7 @@ public class Http1ServerLimitsTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(context);
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Get);
@@ -118,7 +118,7 @@ public class Http1ServerLimitsTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
 
         bool yielded = await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
@@ -143,7 +143,7 @@ public class Http1ServerLimitsTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
 
         // First request parses normally.
@@ -162,7 +162,7 @@ public class Http1ServerLimitsTests
         options.UseHttp1(new TestConnectionListener(connection), configure);
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadSingleContextAsync(context);
     }
 
@@ -181,7 +181,7 @@ public class Http1ServerLimitsTests
         options.UseHttp1(new TestConnectionListener(connection), configure);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
 
         bool yielded;
         await using (IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator())

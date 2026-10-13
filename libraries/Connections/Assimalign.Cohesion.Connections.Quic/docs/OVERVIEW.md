@@ -14,7 +14,7 @@ as every other transport.
   accepts inbound QUIC connections.
 - `QuicConnectionFactory` — client-side: dials outbound QUIC connections.
 - `QuicMultiplexedConnection` — one QUIC connection; accepts and opens
-  streams, each surfaced as a `MultiplexedStream`, and reports its TLS 1.3
+  streams, each surfaced as a `MultiplexedConnectionStream`, and reports its TLS 1.3
   handshake (ALPN protocol, cipher suite, peer certificate) through the
   `Tls` feature from `Connections.Tls`. It and its streams carry the caller's
   QUIC application error codes through root `Abort(code, reason)` calls: a connection
@@ -74,7 +74,7 @@ await listener.BindAsync(cancellationToken);
 
 // CreateAsync(options, cancellationToken) remains available as construct-and-bind shorthand.
 IMultiplexedConnection connection = await listener.AcceptAsync(cancellationToken);
-IMultiplexedStream stream = await connection.AcceptStreamAsync(cancellationToken);
+IMultiplexedConnectionStream stream = await connection.AcceptStreamAsync(cancellationToken);
 
 // End this side gracefully (FIN). The stream stays readable: the peer may keep sending
 // until it ends its own side.
@@ -100,3 +100,13 @@ code, including when disposal is still waiting for stream delivery. A later abor
 that wait with the already chosen code, allowing a shorter shutdown budget to force teardown.
 The new stream return types
 are binary breaks against 10.0.0-preview.1; see DESIGN.md for the migration and accepted breaks.
+
+The driver participates in the common `IConnection` identity, feature, and lifecycle hierarchy.
+Listeners expose a stable `Id` and live `Connections`. Entries disappear on closure; disposing
+the listener leaves accepted connections open for their owners to dispose. `ConnectionClosed`
+fires on abort, observed peer closure, and no later than local disposal.
+
+QUIC connections keep an inbound stream accept pending to observe idle peer closure. Factory
+connections grant one concurrent inbound unidirectional stream. A listener configured with
+`MaxUnidirectionalStreamCount = 0` also grants one; zero does not forbid unidirectional streams.
+The configured bidirectional allowance is unchanged.

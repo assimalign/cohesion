@@ -36,7 +36,7 @@ public class HttpExpectContinueCancellationTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(output), http1 => http1.Limits.MinRequestBodyDataRate = null);
         await using HttpConnectionListener listener = new(options);
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync();
+        await using IHttpConnection connection = await listener.AcceptAsync();
         IHttpConnectionContext context = await connection.OpenAsync();
         await using IAsyncEnumerator<IHttpContext> contexts = context.ReceiveAsync().GetAsyncEnumerator();
         (await contexts.MoveNextAsync()).ShouldBeTrue();
@@ -114,7 +114,7 @@ public class HttpExpectContinueCancellationTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(output), http1 => http1.Limits.MinRequestBodyDataRate = null);
         await using HttpConnectionListener listener = new(options);
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync();
+        await using IHttpConnection connection = await listener.AcceptAsync();
         IHttpConnectionContext context = await connection.OpenAsync();
         await using IAsyncEnumerator<IHttpContext> contexts = context.ReceiveAsync().GetAsyncEnumerator();
         (await contexts.MoveNextAsync()).ShouldBeTrue();

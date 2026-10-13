@@ -236,7 +236,7 @@ public class Http2InterceptorTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(context);
 
         bool readFailed = false;
@@ -275,7 +275,7 @@ public class Http2InterceptorTests
         options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxRequestBodySize = 16);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(context);
 
         using StreamReader reader = new(httpContext.Request.Body);
@@ -303,7 +303,7 @@ public class Http2InterceptorTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadSingleContextAsync(context);
     }
 
@@ -322,7 +322,7 @@ public class Http2InterceptorTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
 
         bool yielded;
         await using (IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator())

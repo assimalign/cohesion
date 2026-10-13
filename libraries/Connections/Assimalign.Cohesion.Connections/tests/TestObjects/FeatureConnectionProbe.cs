@@ -32,7 +32,7 @@ internal sealed class FeatureConnectionProbe
     }
 }
 
-internal sealed class FeatureProbeConnection : Connection
+internal sealed class FeatureProbeConnection : DuplexConnection
 {
     private readonly FeatureConnectionProbe _probe;
 
@@ -85,9 +85,9 @@ internal sealed class FeatureProbeMultiplexedConnection : MultiplexedConnection
         Abort(reason);
     }
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    public override ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
-    public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+    public override ValueTask<MultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
 }
 
@@ -100,6 +100,10 @@ internal sealed class FeatureProbeDatagramConnection : DatagramConnection
         _probe = probe;
     }
 
+    public override ConnectionId Id => ConnectionId.Empty;
+    public override ConnectionState State => ConnectionState.Open;
+    public override CancellationToken ConnectionClosed => CancellationToken.None;
+    public override void Abort(Exception? reason = null) { }
     public override EndPoint LocalEndPoint => new IPEndPoint(IPAddress.Loopback, 0);
     public override EndPoint? RemoteEndPoint => null;
     public override ConnectionCapabilities Capabilities => default;

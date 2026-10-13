@@ -15,7 +15,7 @@ internal sealed class AmqpMultiplexedTransportConnection : AmqpTransportConnecti
 {
     private readonly IMultiplexedConnection _connection;
     private readonly bool _opensCarrierStream;
-    private IConnection? _stream;
+    private IDuplexConnection? _stream;
 
     public AmqpMultiplexedTransportConnection(IMultiplexedConnection connection, bool opensCarrierStream, AmqpTransportOptions options)
         : base(options)
@@ -35,7 +35,7 @@ internal sealed class AmqpMultiplexedTransportConnection : AmqpTransportConnecti
         _connection.Abort(reason);
     }
 
-    protected override async ValueTask<IConnection> AcquireCarrierAsync(CancellationToken cancellationToken)
+    protected override async ValueTask<IDuplexConnection> AcquireCarrierAsync(CancellationToken cancellationToken)
     {
         _stream = _opensCarrierStream
             ? await _connection.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken).ConfigureAwait(false)

@@ -149,12 +149,12 @@ public class ConnectionFeaturesTests
         probe.ConfigurationCount.ShouldBe(1);
     }
 
-    private static (object Connection, Func<IConnectionFeatureCollection> GetFeatures) Create(int shape, FeatureConnectionProbe probe)
+    private static (object DuplexConnection, Func<IConnectionFeatureCollection> GetFeatures) Create(int shape, FeatureConnectionProbe probe)
     {
         switch (shape)
         {
             case 0:
-                IConnection stream = new FeatureProbeConnection(probe);
+                IDuplexConnection stream = new FeatureProbeConnection(probe);
                 return (stream, () => stream.Features);
             case 1:
                 IMultiplexedConnection multiplexed = new FeatureProbeMultiplexedConnection(probe);

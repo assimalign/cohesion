@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// <see cref="ITlsConnectionInfo"/>, and delegates its pipes and lifetime to a plaintext
 /// <see cref="TestConnection"/> that carries the preloaded request bytes and captures the response.
 /// </summary>
-internal sealed class TestTlsConnection : Connection, ITlsConnectionInfo
+internal sealed class TestTlsConnection : DuplexConnection, ITlsConnectionInfo
 {
     public TestTlsConnection(
         byte[] input,

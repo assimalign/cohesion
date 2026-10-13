@@ -16,13 +16,13 @@ namespace Assimalign.Cohesion.Database.Client.Internal;
 /// </summary>
 internal sealed class DefaultDatabaseClient : IDatabaseClient
 {
-    private readonly IConnectionFactory _connectionFactory;
+    private readonly IDuplexConnectionFactory _connectionFactory;
     private readonly ProtocolMessageFamily _family;
     private readonly ConcurrentStack<PooledDatabaseConnection> _idle = new();
     private readonly SemaphoreSlim _slots;
     private bool _isDisposed;
 
-    internal DefaultDatabaseClient(DatabaseConnectionSettings settings, IConnectionFactory connectionFactory, ProtocolMessageFamily family)
+    internal DefaultDatabaseClient(DatabaseConnectionSettings settings, IDuplexConnectionFactory connectionFactory, ProtocolMessageFamily family)
     {
         Settings = settings;
         _connectionFactory = connectionFactory;

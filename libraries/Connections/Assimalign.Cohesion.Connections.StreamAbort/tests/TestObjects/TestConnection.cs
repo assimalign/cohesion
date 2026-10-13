@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Connections.StreamAbort.Tests.TestObjects;
 
-internal sealed class TestConnection : MultiplexedStream
+internal sealed class TestConnection : MultiplexedConnectionStream
 {
     private readonly CancellationTokenSource _closedSource = new();
     private ConnectionState _state = ConnectionState.Open;

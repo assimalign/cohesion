@@ -59,10 +59,10 @@ public class ConnectionLayerEventSourceTests
         BlockingConnectionListener inner = new();
         inner.Enqueue(rejected);
         inner.Enqueue(ready);
-        IConnectionListener listener = inner.Use(layer);
+        IDuplexConnectionListener listener = inner.Use(layer);
 
         // Act — disposal waits for every upgrade, so the failure has been reported once it returns.
-        IConnection accepted = await listener.AcceptAsync(timeout.Token);
+        IDuplexConnection accepted = await listener.AcceptAsync(timeout.Token);
         await listener.DisposeAsync();
 
         // Assert
@@ -96,8 +96,8 @@ public class ConnectionLayerEventSourceTests
         layer.Hold(stalled);
         BlockingConnectionListener inner = new();
         inner.Enqueue(stalled);
-        IConnectionListener listener = inner.Use(layer);
-        Task<IConnection> pending = listener.AcceptAsync(timeout.Token).AsTask();
+        IDuplexConnectionListener listener = inner.Use(layer);
+        Task<IDuplexConnection> pending = listener.AcceptAsync(timeout.Token).AsTask();
         await layer.WhenStarted(stalled).WaitAsync(timeout.Token);
 
         // Act

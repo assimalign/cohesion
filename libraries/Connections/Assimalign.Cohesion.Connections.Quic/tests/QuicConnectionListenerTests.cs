@@ -117,15 +117,15 @@ public class QuicConnectionListenerTests
         using EventSourceRecorder recorder = new(QuicConnectionEventSource.Log, EventLevel.Warning);
         await using QuicConnectionListener listener = new(options);
         await listener.BindAsync(cancellation.Token);
-        Task<MultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token).AsTask();
+        Task<IMultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token).AsTask();
 
         // Act — the first client is refused. Wait until the pending accept has dealt with the refusal
         // (it reports the dropped handshake, or it fails), then a second client presents a certificate.
         await QuicTestClient.ConnectRefusedAsync(listener.EndPoint, cancellation.Token);
         await WaitUntilAsync(() => accept.IsCompleted || recorder.Events.Any(e => e.EventName == "HandshakeFailed"), cancellation.Token);
         bool acceptEndedByRefusal = accept.IsCompleted;
-        await using MultiplexedConnection client = await QuicTestClient.CreateFactory(clientCertificate).ConnectAsync(listener.EndPoint, cancellation.Token);
-        await using MultiplexedConnection server = await accept;
+        await using MultiplexedConnection client = (MultiplexedConnection)await QuicTestClient.CreateFactory(clientCertificate).ConnectAsync(listener.EndPoint, cancellation.Token);
+        await using MultiplexedConnection server = (MultiplexedConnection)await accept;
 
         // Assert — the accept that was pending when the refusal happened returned the second client.
         acceptEndedByRefusal.ShouldBeFalse();

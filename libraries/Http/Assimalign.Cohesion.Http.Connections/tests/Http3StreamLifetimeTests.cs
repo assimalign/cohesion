@@ -31,7 +31,7 @@ public class Http3StreamLifetimeTests
         CompletionTrackingMultiplexedConnection? tracked = null;
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             decorate: connection => tracked = new CompletionTrackingMultiplexedConnection(connection));
-        await using Connection request = await peer.OpenRequestStreamAsync();
+        await using IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/unanswered", "https", "a"), timeout.Token);
         IHttpContext exchange = await peer.NextContextAsync();
         if (peerReset)
@@ -69,7 +69,7 @@ public class Http3StreamLifetimeTests
         {
             // Act — a complete request and response on the same connection, without disposing the
             // client stream before checking that the HTTP layer has completed its server-side pipes.
-            await using Connection request = await peer.OpenRequestStreamAsync();
+            await using IDuplexConnection request = await peer.OpenRequestStreamAsync();
             await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", $"/{index}", "https", "a"), timeout.Token);
             request.Output.Complete();
             IHttpContext exchange = await peer.NextContextAsync();

@@ -91,7 +91,7 @@ public class HttpResponseInterceptorAllocationTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        await using IHttpConnection connection = await listener.AcceptOrListenAsync(CancellationToken.None);
+        await using IHttpConnection connection = await listener.AcceptAsync(CancellationToken.None);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(CancellationToken.None);
         await using IAsyncEnumerator<IHttpContext> exchanges = connectionContext.ReceiveAsync(CancellationToken.None).GetAsyncEnumerator();
         byte[] body = new byte[3];

@@ -11,7 +11,7 @@ the framework already ships:
 
 - **Server side** — the builder-time listener registration seam:
   `builder.Server.UseServer(options => options.UseHttp1(listener))` accepts any
-  `IConnectionListener`, so the in-memory driver's `InMemoryConnectionListener`
+  `IDuplexConnectionListener`, so the in-memory driver's `InMemoryConnectionListener`
   (`Assimalign.Cohesion.Connections.InMemory`, #772) plugs in with no contract changes.
 - **Client side** — `SocketsHttpHandler.ConnectCallback`: the real .NET HTTP client dials the
   in-memory listener's bound `InMemoryConnectionFactory` and speaks over the returned
@@ -195,3 +195,7 @@ Default program factories issue an ephemeral ES256 JWT with issuer `tests`, subj
 and the program assembly name as audience. The ambient context carries the token and its public
 P-256 trust JWK. Internal stop requests send that JWT as Bearer; public clients remain uncredentialed.
 Custom managed contexts must supply a matching JWT and public trust key.
+
+The socketless client transport consumes `IDuplexConnection` for its input/output pipe.
+Identity and lifetime remain available through the shared `IConnection` root; HTTP listener
+accepts use `AcceptAsync` and retain their accepted connections until `ConnectionClosed` fires.

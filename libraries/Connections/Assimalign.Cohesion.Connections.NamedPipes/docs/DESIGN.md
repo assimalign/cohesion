@@ -5,14 +5,14 @@
 Provide a named-pipe implementation of the Connections contracts: the Windows-native local
 inter-process transport, and the cross-platform peer of the Unix domain socket path in the stream
 (`Tcp`) driver. It is the same *shape* as the socket drivers — a reliable, ordered, single-stream
-`IConnectionListener` / `IConnectionFactory` producing `IConnection`s — but the wire is a named pipe
+`IDuplexConnectionListener` / `IDuplexConnectionFactory` producing `IDuplexConnection`s — but the wire is a named pipe
 (`NamedPipeServerStream` / `NamedPipeClientStream`) rather than a socket.
 
 Named pipes matter for Cohesion's own architecture. The ApplicationModel LocalGateway spawns
 co-located service processes; local IPC over a named pipe (or a Unix domain socket) removes port
 allocation, firewall, and loopback-security concerns and replaces them with filesystem/ACL access
 control. Because the Connections stack selects transports by **capability, not protocol identity**, a
-named-pipe listener drops into the same `UseHttp1/2(IConnectionListener)` seams a TCP or UDS listener
+named-pipe listener drops into the same `UseHttp1/2(IDuplexConnectionListener)` seams a TCP or UDS listener
 uses, with no change to the HTTP stack above it.
 
 The driver is a peer of `Tcp` / `Udp` / `Quic` / `InMemory`: it lives beside them under
@@ -22,20 +22,20 @@ model instead of a bespoke transport abstraction.
 
 ## The Stream Bridge
 
-A named pipe is a `Stream` (`PipeStream`), not a socket, so this driver does not run the socket
-receive/send pump loops the `Tcp` driver does. Instead `NamedPipeConnection` bridges the pipe stream to
-the connection's duplex pipe with the BCL adapters:
+The input side uses a receive pump that copies from the native pipe stream into a bounded
+`Pipe`. It keeps a read pending while the application is idle, so observed peer closure cancels
+`ConnectionClosed` without requiring application I/O. A `PipeWriter.Create` adapter serves output.
+The connection owns the stream, cancels a blocked flush during teardown, and awaits the pump
+before disposal completes. Input backpressure bounds buffered memory.
 
-```
-connection.Input  = PipeReader.Create(pipeStream, leaveOpen: true)
-connection.Output = PipeWriter.Create(pipeStream, leaveOpen: true)
-```
+The driver depends on the duplex base and shares the root lifecycle:
 
-These are pull-based: a read pulls from the stream on demand, and a flush writes buffered bytes to the
-stream — no background copy loop, no extra thread. This is the same technique the TLS layer
-(`Assimalign.Cohesion.Security`) uses to bridge an `SslStream` to a connection, and it keeps the driver
-allocation-light and trim-safe. The pipe stream is left open by both adapters; the connection owns it
-and disposes it exactly once on tear-down.
+```mermaid
+flowchart LR
+    Named["NamedPipeConnection"] --> Duplex["DuplexConnection"]
+    Duplex --> Root["Connection / IConnection"]
+    Named --> Pump["Receive pump and bounded input pipe"]
+```
 
 ## Accept Model
 
@@ -89,11 +89,10 @@ must be `"."`), because a named-pipe server cannot be created on a remote machin
 - **Abort(reason)** completes the halves with the reason and disposes the stream so the peer's next
   read/write faults; state becomes `Aborted` and `ConnectionClosed` is signaled. A `null` reason
   surfaces a `ConnectionAbortedException`.
-- `ConnectionClosed` fires when **this** end is disposed or aborted; a peer close is observed by reading
-  `Input` (which completes) or writing `Output` (whose flush faults) — exactly how a byte-stream
-  consumer such as an HTTP parser already detects end-of-connection. There is no background watcher.
-- Listener disposal releases the reserved server instance, closes tracked accepted connections, and is
-  terminal. A later bind on the same pipe name uses a new listener instance.
+- `ConnectionClosed` fires on local disposal, abort, and observed peer closure, no later than disposal
+  completes. The receive pump observes an idle peer closing.
+- Listener disposal releases only its reserved server instance and is terminal. Accepted connections
+  remain owned by the callers who accepted them. A later bind uses a new listener instance.
 
 ## Diagnostics
 
@@ -142,14 +141,24 @@ reachable on other operating systems.
 
 ## Relationships
 
-- **`Assimalign.Cohesion.Connections`** — the `Connection` / `ConnectionListener` / `ConnectionFactory`
+- **`Assimalign.Cohesion.Connections`** — the `DuplexConnection` / `DuplexConnectionListener` / `DuplexConnectionFactory`
   guided bases this driver implements, plus `ConnectionCapabilities`, `ConnectionProtocol.NamedPipe`,
   `ConnectionAbortedException`, and `ListenerId`. Diagnostics are this driver's own internal event
   source (see *Diagnostics*), not a seam on the contracts library.
 - **`Assimalign.Cohesion.Connections.Tcp`** — the sibling stream driver whose Unix domain socket path is
   the POSIX counterpart to this Windows-native local IPC transport.
 - **`Assimalign.Cohesion.Http.Connections`** — composes this listener via
-  `UseHttp1/UseHttp2(IConnectionListener)` with no HTTP-layer change (validated by the
+  `UseHttp1/UseHttp2(IDuplexConnectionListener)` with no HTTP-layer change (validated by the
   `HttpOverNamedPipeTests` end-to-end test).
 - **ApplicationModel LocalGateway** — the intended consumer: co-located service processes addressed by a
   named pipe instead of a loopback port.
+
+## Connection hierarchy compatibility
+
+Decision 58 changes the hierarchy shipped in 10.0.0-preview.1 under decision 15's accepted
+preview source and binary breaks. Byte-pipe APIs use `IDuplexConnection` and `DuplexConnection`, with duplex listener/factory bases.
+Their public accept/connect results are interfaces. The generic listener base supplies `Id`,
+`Connections`, and the shared accept core.
+Every connection shares root lifecycle and features. Accepted connections stay in the live set
+until their closed token fires; listener disposal never closes handed-out connections.
+Only the code that accepted a connection reads or writes it.

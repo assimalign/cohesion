@@ -21,7 +21,7 @@ public sealed class DatabaseClientOptions
     /// pipe, in-memory, …). Drivers are composed statically — they are never
     /// named in a connection string.
     /// </summary>
-    public IConnectionFactory? ConnectionFactory { get; set; }
+    public IDuplexConnectionFactory? ConnectionFactory { get; set; }
 
     /// <summary>Gets or sets the model family permanently bound to this pool.
     /// Use the family instance exported by the selected model package.</summary>

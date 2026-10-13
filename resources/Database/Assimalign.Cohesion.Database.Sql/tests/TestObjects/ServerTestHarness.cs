@@ -56,7 +56,7 @@ internal sealed class ServerTestHarness : IAsyncDisposable
     /// </summary>
     public async Task<ProtocolTestClient> DialAsync()
     {
-        Connection connection = await Listener.CreateFactory().ConnectAsync(Listener.EndPoint, TestTimeout.Token());
+        IDuplexConnection connection = await Listener.CreateFactory().ConnectAsync(Listener.EndPoint, TestTimeout.Token());
         return new ProtocolTestClient(connection);
     }
 

@@ -10,13 +10,15 @@ using Assimalign.Cohesion.Connections.InMemory;
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 /// <summary>
-/// A <see cref="ConnectionListener"/> double whose accept waits until a connection is enqueued, as a real
+/// A <see cref="DuplexConnectionListener"/> double whose accept waits until a connection is enqueued, as a real
 /// listener waits for a peer, and which counts the accepts it has started.
 /// </summary>
-internal sealed class BlockingConnectionListener : ConnectionListener
+internal sealed class BlockingConnectionListener : DuplexConnectionListener
 {
-    private readonly Channel<Connection> _pending = Channel.CreateUnbounded<Connection>();
+    private readonly Channel<IDuplexConnection> _pending = Channel.CreateUnbounded<IDuplexConnection>();
     private int _acceptCalls;
+
+    public override ListenerId Id { get; } = ListenerId.New();
 
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 22001);
 
@@ -26,9 +28,9 @@ internal sealed class BlockingConnectionListener : ConnectionListener
     public int AcceptCalls => Volatile.Read(ref _acceptCalls);
 
     /// <summary>Queues a connection for the next accept.</summary>
-    public void Enqueue(Connection connection) => _pending.Writer.TryWrite(connection);
+    public void Enqueue(IDuplexConnection connection) => _pending.Writer.TryWrite(connection);
 
-    public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _acceptCalls);
 

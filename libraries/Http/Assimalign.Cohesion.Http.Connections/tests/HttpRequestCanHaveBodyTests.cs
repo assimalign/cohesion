@@ -46,7 +46,7 @@ public class HttpRequestCanHaveBodyTests
 
         // Act
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connection = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> exchanges = connection.ReceiveAsync().GetAsyncEnumerator();
         (await exchanges.MoveNextAsync().AsTask().WaitAsync(_timeout)).ShouldBeTrue();
 
@@ -110,7 +110,7 @@ public class HttpRequestCanHaveBodyTests
         // Arrange — the request stream's FIN is already in when the request is dispatched.
         CanHaveBodyRecorder recorder = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: options => options.Interceptors.Add(recorder));
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         Dictionary<string, string>? headers = contentLength is null ? null : new() { ["content-length"] = contentLength };
 
         // Act — the head is written unflushed and the stream completed, so its FIN arrives with it.
@@ -133,7 +133,7 @@ public class HttpRequestCanHaveBodyTests
         // Content-Length.
         CanHaveBodyRecorder recorder = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: options => options.Interceptors.Add(recorder));
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         byte[] head = HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a");
 
         // Act
@@ -183,7 +183,7 @@ public class HttpRequestCanHaveBodyTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             configureListener: options => options.Interceptors.Add(recorder),
             decorate: static server => new StreamInputMultiplexedConnection(server));
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
 
         // Act — the FIN arrives with the head, including for a POST without content.
         request.Output.Write(HttpProtocolPayloadFactory.CreateHttp3Request(method, "/", "https", "a"));
@@ -307,7 +307,7 @@ public class HttpRequestCanHaveBodyTests
         // Arrange — RFC 9114 §4.4: the stream stays open, but it carries tunnel traffic, not content.
         CanHaveBodyRecorder recorder = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: options => options.Interceptors.Add(recorder));
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
 
         // Act
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(

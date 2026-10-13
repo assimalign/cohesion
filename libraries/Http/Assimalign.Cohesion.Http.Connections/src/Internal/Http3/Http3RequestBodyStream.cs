@@ -104,7 +104,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 {
     private readonly Http3ConnectionContext _connection;
     private readonly Http3RequestStreamReader _reader;
-    private readonly IMultiplexedStream _streamConnection;
+    private readonly IMultiplexedConnectionStream _streamConnection;
     // Resolve only when a read or end probe needs it, so a known FIN creates no feature collection.
     private IMultiplexedStreamAbort? _directionalAbort;
     private bool _directionalAbortResolved;
@@ -195,7 +195,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     public Http3RequestBodyStream(
         Http3ConnectionContext connection,
         Http3RequestStreamReader reader,
-        IMultiplexedStream streamConnection,
+        IMultiplexedConnectionStream streamConnection,
         long streamId,
         Http3RequestResetState resetState,
         HttpTrailerCollection trailers,

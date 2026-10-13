@@ -623,7 +623,7 @@ public class HttpResponseFieldSyntaxTests
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             configureListener: static options => options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor()));
-        Connection request = await peer.OpenRequestStreamAsync();
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"), (":protocol", "websocket"), (":scheme", "https"), (":path", "/chat"), (":authority", "api.test")));
         IHttpContext context = await peer.NextContextAsync();
@@ -763,7 +763,7 @@ public class HttpResponseFieldSyntaxTests
         options.UseHttp3(new TestMultiplexedConnectionListener(new TestMultiplexedConnection(stream)), static _ => { });
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connection = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = connection.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -798,7 +798,7 @@ public class HttpResponseFieldSyntaxTests
             options.UseHttp1(new TestConnectionListener(transport));
 
             HttpConnectionListener listener = new(options);
-            IHttpConnectionContext connection = await (await listener.AcceptOrListenAsync()).OpenAsync();
+            IHttpConnectionContext connection = await (await listener.AcceptAsync()).OpenAsync();
             IAsyncEnumerator<IHttpContext> exchanges = connection.ReceiveAsync().GetAsyncEnumerator();
             (await exchanges.MoveNextAsync()).ShouldBeTrue();
 

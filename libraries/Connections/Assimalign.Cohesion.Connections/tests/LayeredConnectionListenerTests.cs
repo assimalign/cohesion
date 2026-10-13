@@ -31,10 +31,10 @@ public class LayeredConnectionListenerTests
         BlockingConnectionListener inner = new();
         inner.Enqueue(stalled);
         inner.Enqueue(ready);
-        await using IConnectionListener listener = inner.Use(layer);
+        await using IDuplexConnectionListener listener = inner.Use(layer);
 
         // Act
-        IConnection accepted = await listener.AcceptAsync(timeout.Token);
+        IDuplexConnection accepted = await listener.AcceptAsync(timeout.Token);
 
         // Assert
         accepted.ShouldBeSameAs(ready);
@@ -53,10 +53,10 @@ public class LayeredConnectionListenerTests
         BlockingConnectionListener inner = new();
         inner.Enqueue(rejected);
         inner.Enqueue(ready);
-        await using IConnectionListener listener = inner.Use(layer);
+        await using IDuplexConnectionListener listener = inner.Use(layer);
 
         // Act
-        IConnection accepted = await listener.AcceptAsync(timeout.Token);
+        IDuplexConnection accepted = await listener.AcceptAsync(timeout.Token);
 
         // Assert
         accepted.ShouldBeSameAs(ready);
@@ -74,15 +74,15 @@ public class LayeredConnectionListenerTests
         layer.Hold(upgrading);
         BlockingConnectionListener inner = new();
         inner.Enqueue(upgrading);
-        await using IConnectionListener listener = inner.Use(layer);
-        Task<IConnection> abandoned = listener.AcceptAsync(abandon.Token).AsTask();
+        await using IDuplexConnectionListener listener = inner.Use(layer);
+        Task<IDuplexConnection> abandoned = listener.AcceptAsync(abandon.Token).AsTask();
         await layer.WhenStarted(upgrading).WaitAsync(timeout.Token);
 
         // Act
         abandon.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(() => abandoned);
         layer.Release(upgrading);
-        IConnection accepted = await listener.AcceptAsync(timeout.Token);
+        IDuplexConnection accepted = await listener.AcceptAsync(timeout.Token);
 
         // Assert
         accepted.ShouldBeSameAs(upgrading);
@@ -101,8 +101,8 @@ public class LayeredConnectionListenerTests
         BlockingConnectionListener inner = new();
         inner.Enqueue(first);
         inner.Enqueue(second);
-        await using IConnectionListener listener = inner.Use(layer, maxConcurrentUpgrades: 1);
-        Task<IConnection> firstAccept = listener.AcceptAsync(timeout.Token).AsTask();
+        await using IDuplexConnectionListener listener = inner.Use(layer, maxConcurrentUpgrades: 1);
+        Task<IDuplexConnection> firstAccept = listener.AcceptAsync(timeout.Token).AsTask();
         await layer.WhenStarted(first).WaitAsync(timeout.Token);
 
         // Act — the one slot is held by the stalled upgrade. The pause gives a listener that ignored the
@@ -111,8 +111,8 @@ public class LayeredConnectionListenerTests
         int acceptsWhileFull = inner.AcceptCalls;
         bool secondStartedWhileFull = layer.WhenStarted(second).IsCompleted;
         layer.Release(first);
-        IConnection firstAccepted = await firstAccept;
-        IConnection secondAccepted = await listener.AcceptAsync(timeout.Token);
+        IDuplexConnection firstAccepted = await firstAccept;
+        IDuplexConnection secondAccepted = await listener.AcceptAsync(timeout.Token);
 
         // Assert
         acceptsWhileFull.ShouldBe(1);
@@ -132,14 +132,14 @@ public class LayeredConnectionListenerTests
         layer.Hold(upgrading);
         BlockingConnectionListener inner = new();
         inner.Enqueue(upgrading);
-        await using IConnectionListener listener = inner.Use(layer);
-        Task<IConnection> firstAccept = listener.AcceptAsync(timeout.Token).AsTask();
+        await using IDuplexConnectionListener listener = inner.Use(layer);
+        Task<IDuplexConnection> firstAccept = listener.AcceptAsync(timeout.Token).AsTask();
         await layer.WhenStarted(upgrading).WaitAsync(timeout.Token);
 
         // Act
         inner.Fault(failure);
         layer.Release(upgrading);
-        IConnection accepted = await firstAccept;
+        IDuplexConnection accepted = await firstAccept;
         InvalidOperationException observed = await Should.ThrowAsync<InvalidOperationException>(
             () => listener.AcceptAsync(timeout.Token).AsTask());
 
@@ -162,8 +162,8 @@ public class LayeredConnectionListenerTests
         inner.Enqueue(upgrading);
         inner.Enqueue(first);
         inner.Enqueue(second);
-        IConnectionListener listener = inner.Use(layer);
-        IConnection returned = await listener.AcceptAsync(timeout.Token);
+        IDuplexConnectionListener listener = inner.Use(layer);
+        IDuplexConnection returned = await listener.AcceptAsync(timeout.Token);
         TestConnection queued = ReferenceEquals(returned, first) ? second : first;
         await layer.WhenStarted(upgrading).WaitAsync(timeout.Token);
         await layer.WhenStarted(queued).WaitAsync(timeout.Token);

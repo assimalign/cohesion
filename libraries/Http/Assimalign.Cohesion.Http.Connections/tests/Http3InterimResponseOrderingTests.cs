@@ -296,7 +296,7 @@ public class Http3InterimResponseOrderingTests
         }
     }
 
-    private static async Task<string[]> ReadStatusesAsync(Connection request)
+    private static async Task<string[]> ReadStatusesAsync(IDuplexConnection request)
     {
         IReadOnlyList<(long FrameType, byte[] Payload)> frames =
             HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
@@ -307,7 +307,7 @@ public class Http3InterimResponseOrderingTests
 
     private sealed class Exchange : IAsyncDisposable
     {
-        private Exchange(Http3InMemoryPeer peer, Connection request, IHttpContext context, StallingConnection serverStream)
+        private Exchange(Http3InMemoryPeer peer, IDuplexConnection request, IHttpContext context, StallingConnection serverStream)
         {
             Peer = peer;
             Request = request;
@@ -316,7 +316,7 @@ public class Http3InterimResponseOrderingTests
         }
 
         public Http3InMemoryPeer Peer { get; }
-        public Connection Request { get; }
+        public IDuplexConnection Request { get; }
         public IHttpContext Context { get; }
         public StallingConnection ServerStream { get; }
         public StallingPipeWriter Writer => ServerStream.Writer;
@@ -337,7 +337,7 @@ public class Http3InterimResponseOrderingTests
 
             try
             {
-                Connection request = await peer.OpenRequestStreamAsync();
+                IDuplexConnection request = await peer.OpenRequestStreamAsync();
                 Dictionary<string, string>? headers = expectContinue
                     ? new() { ["content-length"] = "5", ["expect"] = "100-continue" }
                     : null;

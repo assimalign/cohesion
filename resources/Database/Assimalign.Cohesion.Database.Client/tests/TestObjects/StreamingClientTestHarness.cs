@@ -88,7 +88,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
     }
 
-    private async Task ServeAsync(IConnection transport, CancellationToken cancellationToken)
+    private async Task ServeAsync(IDuplexConnection transport, CancellationToken cancellationToken)
     {
         await using (transport)
         await using (var channel = new ProtocolChannel(transport.AsStream(), Family))

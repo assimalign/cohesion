@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Http.Connections;
 
 /// <summary>
 /// Configuration for an HTTP/1.1 listener registered through
-/// <see cref="HttpConnectionListenerOptions.UseHttp1(Assimalign.Cohesion.Connections.IConnectionListener, Action{Http1ConnectionListenerOptions})"/>.
+/// <see cref="HttpConnectionListenerOptions.UseHttp1(Assimalign.Cohesion.Connections.IDuplexConnectionListener, Action{Http1ConnectionListenerOptions})"/>.
 /// HTTP/1.1-specific tunables live here — rather than on the shared
 /// <see cref="HttpConnectionListenerOptions"/> — so each protocol version owns its own
 /// configuration surface, captured per registration.

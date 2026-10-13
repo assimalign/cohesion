@@ -7,9 +7,9 @@ namespace Assimalign.Cohesion.Connections;
 /// </summary>
 /// <remarks>
 /// Each stream owns its lifecycle and features. Its features do not inherit those of the parent
-/// multiplexed connection. Completing <see cref="IConnection.Output"/> cleanly ends only output.
+/// multiplexed connection. Completing <see cref="System.IO.Pipelines.IDuplexPipe.Output"/> cleanly ends only output.
 /// </remarks>
-public interface IMultiplexedStream : IConnection
+public interface IMultiplexedConnectionStream : IDuplexConnection
 {
     /// <summary>
     /// Gets whether the peer ended input cleanly and the transport has delivered every received

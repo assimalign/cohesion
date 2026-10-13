@@ -150,7 +150,7 @@ public class HttpRequestSchemeTests
 
         await using (HttpConnectionListener listener = new(options))
         {
-            await using IHttpConnection connection = await listener.AcceptOrListenAsync();
+            await using IHttpConnection connection = await listener.AcceptAsync();
             IHttpConnectionContext connectionContext = await connection.OpenAsync();
 
             await foreach (IHttpContext exchange in connectionContext.ReceiveAsync())
@@ -172,7 +172,7 @@ public class HttpRequestSchemeTests
         options.UseHttp2(new TestConnectionListener(TestConnection.DefaultCapabilities with { Security = security }, connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();

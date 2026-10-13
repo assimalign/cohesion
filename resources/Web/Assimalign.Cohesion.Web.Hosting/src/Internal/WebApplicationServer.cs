@@ -55,7 +55,6 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
 
     private readonly IWebApplicationPipeline _pipeline;
     private readonly IHttpConnectionListener _listener;
-    private readonly Func<EndPoint>[] _endPointReaders;
 
     // The stop signals: Draining stops accepting and begins every connection's graceful close;
     // Aborted cancels what is still in flight once the stop's budget runs out.
@@ -98,7 +97,6 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             ?? throw new ArgumentException("A pipeline must be configured on the server options.", nameof(options));
         _listener = options.Listener
             ?? throw new ArgumentException("A listener must be configured on the server options.", nameof(options));
-        _endPointReaders = options.EndPointReaders;
         ServerId = Interlocked.Increment(ref _nextServerId);
         _telemetryQueryValues = options.TelemetryQueryValues;
         _drainFeature = new WebServerDrainFeature(_drain.Draining);
@@ -200,7 +198,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 return;
             }
 
-            WebServerEventSource.Log.ServerBound(ServerId, _listener.Protocols, _endPointReaders, MaxConcurrentConnections ?? 0);
+            WebServerEventSource.Log.ServerBound(ServerId, _listener.Protocols, _listener.EndPoints, MaxConcurrentConnections ?? 0);
             CancellationToken drainingToken = _drain.Draining;
             _acceptLoop = Task.Run(() => AcceptLoopAsync(drainingToken));
         }
@@ -392,7 +390,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 IHttpConnection connection;
                 try
                 {
-                    connection = await _listener.AcceptOrListenAsync(cancellationToken).ConfigureAwait(false);
+                    connection = await _listener.AcceptAsync(cancellationToken).ConfigureAwait(false);
                 }
                 catch
                 {

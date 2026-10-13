@@ -19,10 +19,10 @@ namespace Assimalign.Cohesion.Web.WebSockets.Tests.TestObjects;
 /// </summary>
 internal sealed class Http3TestClient : IAsyncDisposable
 {
-    private readonly MultiplexedConnection _connection;
-    private readonly Connection _control;
+    private readonly IMultiplexedConnection _connection;
+    private readonly IDuplexConnection _control;
 
-    private Http3TestClient(MultiplexedConnection connection, Connection control)
+    private Http3TestClient(IMultiplexedConnection connection, IDuplexConnection control)
     {
         _connection = connection;
         _control = control;
@@ -31,11 +31,11 @@ internal sealed class Http3TestClient : IAsyncDisposable
     /// <summary>Connects to <paramref name="listener"/> and opens the client's control stream.</summary>
     public static async Task<Http3TestClient> ConnectAsync(InMemoryMultiplexedConnectionListener listener, CancellationToken cancellationToken)
     {
-        MultiplexedConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, cancellationToken);
+        IMultiplexedConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, cancellationToken);
 
         // RFC 9114 §6.2.1: the control stream (type 0x00) opens with a SETTINGS frame (type 0x04),
         // here an empty one.
-        Connection control = await connection.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken);
+        IDuplexConnection control = await connection.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken);
         await control.Output.WriteAsync(new byte[] { 0x00, 0x04, 0x00 }, cancellationToken);
 
         return new Http3TestClient(connection, control);
@@ -54,7 +54,7 @@ internal sealed class Http3TestClient : IAsyncDisposable
         CancellationToken cancellationToken,
         string path = "/ws")
     {
-        Connection connection = await _connection.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken);
+        IDuplexConnection connection = await _connection.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken);
         List<(string Name, string Value)> fields = new()
         {
             (":method", "CONNECT"),
@@ -116,11 +116,11 @@ internal sealed class Http3ResponseHead
 /// </summary>
 internal sealed class Http3RequestStream : Stream
 {
-    private readonly Connection _connection;
+    private readonly IDuplexConnection _connection;
     private long _dataRemaining;
     private bool _disposed;
 
-    public Http3RequestStream(Connection connection)
+    public Http3RequestStream(IDuplexConnection connection)
     {
         _connection = connection;
     }

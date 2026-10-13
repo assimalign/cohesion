@@ -310,7 +310,7 @@ Public interfaces remain unchanged, and the builder verb references only the are
 
 ## Server lifecycle and failure semantics
 
-`BlobDatabaseServer` owns one generic `IConnectionListener` and a concurrent session table.
+`BlobDatabaseServer` owns one generic `IDuplexConnectionListener` and a concurrent session table.
 It follows the SQL/Graph per-model server placement rather than depending on a shared server
 implementation. The engine stays owned by the composition root. Start binds the listener;
 a bind failure attempts listener cleanup and is terminal. Stop and disposal are idempotent;
@@ -403,3 +403,12 @@ factories, and returns `Build()`; the model package still never sees DI.
 There is no generic production orchestration over `IDatabaseEngineBuilder`;
 the base contract supports model-agnostic worker composition, demonstrated by
 tests exercising the public factory through that base interface.
+
+## Connection contracts
+
+The server accepts `IDuplexConnection` values through `IDuplexConnectionListener`:
+framed database traffic requires the byte-pipe contract. The transport listener's live
+`Connections` collection is observational; the server owns every connection it accepts,
+performs its I/O, and drains, aborts or disposes it during shutdown. Disposing the listener
+alone does not close accepted connections. `ConnectionClosed` signals local close, abort,
+peer close and, at the latest, completion of connection disposal.

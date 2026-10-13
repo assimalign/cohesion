@@ -2,8 +2,8 @@
 
 ## Design Intent
 
-Provides TLS as a *connection layer*: given an established, plaintext `IConnection`, produce a new
-`IConnection` whose duplex pipe is TLS-encrypted. An `IConnection` *is* an `IDuplexPipe` — the
+Provides TLS as a *connection layer*: given an established, plaintext `IDuplexConnection`, produce a new
+`IDuplexConnection` whose duplex pipe is TLS-encrypted. An `IDuplexConnection` *is* an `IDuplexPipe` — the
 consumer reads bytes received from the peer off `Input` and writes bytes to send to `Output` — so
 securing a connection means substituting those pipes with encrypted ones, not attaching a side
 property. This library lives in the Connections area because it composes directly over the
@@ -14,7 +14,7 @@ connection contracts; it does not depend on (or pull in) the Security area's cer
 The previous transport pipeline ran a callback once, after the connection's duplex pipe was already
 constructed and wired to the socket. It could observe the connection but could not *substitute* the
 pipe, so it could never secure the bytes the consumer read. A connection layer avoids this by
-returning a *new* `IConnection`: the inner (plaintext) connection is wrapped in an `SslStream`, and
+returning a *new* `IDuplexConnection`: the inner (plaintext) connection is wrapped in an `SslStream`, and
 the secured connection exposes the encrypted stream as its `Input` / `Output`. The consumer reads
 and writes plaintext transparently; the encryption happens in between.
 
@@ -24,9 +24,9 @@ Two composition styles, both backed by the same decorator:
 
 - **Layered (preferred for servers/clients).** `TlsConnectionLayer` implements `IConnectionLayer`.
   Compose it onto the accept/connect path with the extension members:
-  - `IConnectionListener.UseTls(TlsServerOptions)` — secures every accepted connection (server auth).
-  - `IConnectionFactory.UseTls(TlsClientOptions)` — secures every established connection (client auth).
-- **One-shot.** `IConnection.UpgradeToTlsAsync(TlsServerOptions | TlsClientOptions, …)` performs the
+  - `IDuplexConnectionListener.UseTls(TlsServerOptions)` — secures every accepted connection (server auth).
+  - `IDuplexConnectionFactory.UseTls(TlsClientOptions)` — secures every established connection (client auth).
+- **One-shot.** `IDuplexConnection.UpgradeToTlsAsync(TlsServerOptions | TlsClientOptions, …)` performs the
   handshake on an individual, already-established connection and returns the secured one.
 
 `TlsServerOptions` / `TlsClientOptions` wrap the BCL `SslServerAuthenticationOptions` /
@@ -39,7 +39,7 @@ listener").
 
 - `TlsConnectionLayer.UpgradeAsync` (and the `UpgradeToTlsAsync` extensions) delegate to the internal
   `TlsConnection` decorator.
-- Internally: the inner `IConnection` (itself an `IDuplexPipe`) is adapted to a `Stream` via
+- Internally: the inner `IDuplexConnection` (itself an `IDuplexPipe`) is adapted to a `Stream` via
   `DuplexPipeStream`; an `SslStream` is constructed over it; the handshake runs
   (`AuthenticateAsServerAsync` / `AuthenticateAsClientAsync`); then the `SslStream` is exposed back
   as the connection's pipe via `PipeReader.Create` / `PipeWriter.Create`.
@@ -53,7 +53,7 @@ listener").
   plaintext already buffered in TLS's outer `PipeReader`, so the inner feature cannot guarantee that
   every later read fails. `connection.Features.Get<IMultiplexedStreamAbort>()` therefore returns
   `null` through TLS; the inner connection's collection is unchanged. The TLS result remains an
-  `IConnection`; `DirectionalAbort` is an accessor on `IMultiplexedStream` after #1453. An application protocol reads `connection.Tls`
+  `IDuplexConnection`; `DirectionalAbort` is an accessor on `IMultiplexedConnectionStream` after #1453. An application protocol reads `connection.Tls`
   without referencing this library: the ALPN application protocol, the TLS
   version, the cipher suite, and the peer's certificate (`SslStream.NegotiatedApplicationProtocol`,
   `SslProtocol`, `NegotiatedCipherSuite`, `RemoteCertificate`), captured once when the handshake
@@ -68,9 +68,12 @@ listener").
 ## Lifecycle and Error Model
 
 - Disposing the secured connection disposes the `SslStream`, then the inner connection, then the
-  peer's certificate.
+  peer's certificate. The inner connection and certificate are released even when stream disposal
+  throws. The wrapped `ConnectionClosed` token fires on abort, peer closure, and before disposal
+  finishes.
 - A TLS-layered listener forwards `BindAsync` to its inner listener and owns that listener for
-  disposal, so layering does not change endpoint acquisition or release timing.
+  disposal, so layering does not change endpoint acquisition or release timing. Its `Id` is the
+  inner listener's identity: one bound endpoint, one id.
 - The handshake honors a configurable `HandshakeTimeout` (linked with the caller's cancellation
   token). On failure the `SslStream` is disposed and the exception (typically
   `AuthenticationException` from the platform TLS stack, `IOException` for bytes that are not a TLS
@@ -152,15 +155,15 @@ of scope here.
 
 ```csharp
 // Server: secure every accepted connection.
-IConnectionListener secured = listener.UseTls(serverOptions);
-IConnection connection = await secured.AcceptAsync(cancellationToken);
+IDuplexConnectionListener secured = listener.UseTls(serverOptions);
+IDuplexConnection connection = await secured.AcceptAsync(cancellationToken);
 
 // Or upgrade a single established connection.
-IConnection secure = await connection.UpgradeToTlsAsync(serverOptions, cancellationToken);
+IDuplexConnection secure = await connection.UpgradeToTlsAsync(serverOptions, cancellationToken);
 // hand the secured connection to the application protocol
 ```
 
-Transports remain TLS-agnostic. Application protocols consume an `IConnection` without knowing
+Transports remain TLS-agnostic. Application protocols consume an `IDuplexConnection` without knowing
 whether it is secured; they can inspect `Capabilities.Security` if they need to.
 
 ## AOT Posture
@@ -188,8 +191,8 @@ flowchart LR
     TLS --> CORE["Core"]
 ```
 
-- **`Assimalign.Cohesion.Connections`** — the `IConnection` / `IConnectionLayer` contracts, the
-  `UseTls` composition points (`IConnectionListener` / `IConnectionFactory`), and the
+- **`Assimalign.Cohesion.Connections`** — the `IDuplexConnection` / `IConnectionLayer` contracts, the
+  `UseTls` composition points (`IDuplexConnectionListener` / `IDuplexConnectionFactory`), and the
   `DuplexPipeStream` adapter.
 - **`Assimalign.Cohesion.Connections.Tls`** — the optional handshake-facts contract and accessors.
 - **`Assimalign.Cohesion.Connections.StreamAbort`** — the directional-abort feature name that TLS
@@ -204,5 +207,14 @@ flowchart LR
 Hiding `StreamAbort` corrects the unreleased #1452 feature propagation behavior. It adds no break
 against 10.0.0-preview.1: that release had neither connection features nor directional aborts.
 Consumers of the unreleased behavior must treat a missing `StreamAbort` feature as unsupported on
-the TLS connection. The #1453 multiplexed root changes do not widen the TLS layer's `IConnection`
+the TLS connection. The #1453 multiplexed root changes do not widen the TLS layer's `IDuplexConnection`
 result to a multiplexed stream. Other inner features and TLS handshake facts remain discoverable.
+
+## Connection hierarchy compatibility
+
+Decision 58 changes the hierarchy shipped in 10.0.0-preview.1 under decision 15's accepted
+preview source and binary breaks. TLS composition and upgrade methods accept and return duplex contracts. The secured connection
+inherits `DuplexConnection`; a TLS listener reports its inner listener's `Id`.
+Every connection shares root lifecycle and features. Accepted connections stay in the live set
+until their closed token fires; listener disposal never closes handed-out connections.
+Only the code that accepted a connection reads or writes it.

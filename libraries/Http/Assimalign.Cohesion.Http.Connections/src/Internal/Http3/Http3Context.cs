@@ -14,6 +14,7 @@ internal sealed class Http3Context : TransportHttpContext
     // nothing reached the wire, and the exchange runs until the caller finalizes it again or disposes it.
     // Interlocked: the send path and the host's disposal race to end it.
     private int _exchangeEnded;
+    private readonly CancellationTokenRegistration _streamClosedRegistration;
 
     // Automatic 100, application interims and the final head share one writer (#1385, #1428).
     // Only the active interim owns a completion source; queued writers cannot replace it.
@@ -26,29 +27,36 @@ internal sealed class Http3Context : TransportHttpContext
     /// </summary>
     /// <remarks>
     /// <see cref="HttpContext.RequestCancelled"/> fires on <paramref name="requestAborted"/> and on the
-    /// request stream's <see cref="IMultiplexedStream.ConnectionClosed"/>, which the drivers signal when the
+    /// request stream's <see cref="IMultiplexedConnectionStream.ConnectionClosed"/>, which the drivers signal when the
     /// client resets the request stream (<c>RESET_STREAM</c>), stops the response
     /// (<c>STOP_SENDING</c>), or the stream is aborted or lost. RFC 9114 §4.1.1 — that is how a client
     /// cancels a request, so the application learns of it as an HTTP/2 <c>RST_STREAM</c> tells it,
     /// without having to read or write (#1329). The multiplexed connection's closure also cancels
-    /// the exchange even if the driver has not yet signaled the request stream (#1430).
+    /// the exchange even if the driver has not yet signaled the request stream (#1430). Once the
+    /// complete response is flushed, its FIN and local input cleanup end the stream without
+    /// cancelling the successfully answered exchange.
     /// </remarks>
     public Http3Context(
         in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
-        IMultiplexedStream streamConnection,
+        IMultiplexedConnectionStream streamConnection,
         long streamId,
         Http3RequestBodyStream requestBody,
         int featureCapacity,
         IHttpFeatureCollection? features = null,
         CancellationToken connectionAborted = default)
-        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, featureCapacity, features, streamConnection.ConnectionClosed, connectionAborted)
+        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, featureCapacity, features, connectionAborted: connectionAborted)
     {
         StreamConnection = streamConnection;
         StreamId = streamId;
         RequestBody = requestBody;
         ExtendedConnectProtocol = requestHead.Protocol;
+        _streamClosedRegistration = streamConnection.ConnectionClosed.UnsafeRegister(static state =>
+        {
+            Http3Context context = (Http3Context)state!;
+            _ = context.TripRequestCancelled();
+        }, this);
     }
 
     /// <summary>
@@ -62,7 +70,7 @@ internal sealed class Http3Context : TransportHttpContext
     /// The bidirectional QUIC stream this exchange arrived on; the response is written
     /// back to its output.
     /// </summary>
-    public IMultiplexedStream StreamConnection { get; }
+    public IMultiplexedConnectionStream StreamConnection { get; }
 
     /// <summary>
     /// The request stream's wire ID (client-initiated bidirectional: 0, 4, 8, …), derived when the
@@ -107,6 +115,12 @@ internal sealed class Http3Context : TransportHttpContext
     /// </summary>
     internal override HttpExchangeDirective ExchangeDirective =>
         Tunnel is not null ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
+
+    /// <summary>
+    /// Stops treating request-stream closure as cancellation after the complete response has flushed.
+    /// The final FIN and local refusal of unread input can close the stream successfully.
+    /// </summary>
+    internal void StopObservingStreamClosure() => _streamClosedRegistration.Unregister();
 
     /// <summary>
     /// Claims the end of the exchange: its <c>SendAsync</c> returned or threw, or it was disposed. A
@@ -190,6 +204,7 @@ internal sealed class Http3Context : TransportHttpContext
     {
         try
         {
+            StopObservingStreamClosure();
             Connection?.EndExchange(this);
             await base.DisposeAsync().ConfigureAwait(false);
         }

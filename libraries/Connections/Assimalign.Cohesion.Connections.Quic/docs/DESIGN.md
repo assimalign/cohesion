@@ -24,14 +24,14 @@ correct for the protocols that run over it.
 | `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
 | `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes, and the bound on disposal's wait for stream delivery (`CloseDeliveryTimeout`, see "Lifecycle and teardown"). The listener also exposes `HandshakeTimeout`. Both default ALPN to HTTP/3 (see "Error model"). |
-| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `MultiplexedStream`s and track them for teardown. Registers `Tls` and `StreamLimits` feature objects (see below), and implements the root coded connection close (see "Application error codes"). |
-| `QuicStreamConnection` | `internal` | One QUIC stream as a `MultiplexedStream`: pipes over the stream, direction from the stream's readable/writable halves, whole-stream reset and input completion on the root. Registers itself as the `DirectionalAbort` feature. |
+| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `MultiplexedConnectionStream`s and track them for teardown. Registers `Tls` and `StreamLimits` feature objects (see below), and implements the root coded connection close (see "Application error codes"). |
+| `QuicStreamConnection` | `internal` | One QUIC stream as a `MultiplexedConnectionStream`: pipes over the stream, direction from the stream's readable/writable halves, whole-stream reset and input completion on the root. Registers itself as the `DirectionalAbort` feature. |
 
 `QuicMultiplexedConnection` and the listener/factory are `public sealed`
 concretes (not interface-first `internal` implementations) because they
 *are* the driver's surface: consumers select the driver by constructing
 it, then immediately fall back to the `IMultiplexedConnection` /
-`IMultiplexedStream` contracts. This mirrors the Tcp/Udp sibling drivers.
+`IMultiplexedConnectionStream` contracts. This mirrors the Tcp/Udp sibling drivers.
 
 ## Connection features (#1452)
 
@@ -99,15 +99,15 @@ facts properties remain available, while consumers discover the contracts throug
   connection-first teardown below intact: a bidirectional stream disposed by
   its connection still delivers its FIN before the `CONNECTION_CLOSE`, for
   as long as the connection's `CloseDeliveryTimeout` allows.
-  Neither completion signals the stream's `ConnectionClosed` or changes its
-  `State`: a half the holder ends is a half-close, not an abort. Before
+  One completed direction leaves the stream usable. Once all usable native directions
+  complete or the native stream is released, `ConnectionClosed` fires. Before
   #1330 the pipes were created with `leaveOpen: false`, so completing either
   one disposed the `QuicStream` synchronously, which ended both directions
   and blocked the completing thread until the peer acknowledged the FIN.
 
 ### A FIN already observed (#1427)
 
-Each stream's root `IMultiplexedStream.IsInputCompleted` checks the existing
+Each stream's root `IMultiplexedConnectionStream.IsInputCompleted` checks the existing
 `QuicStream.ReadsClosed` task for successful completion and excludes a locally aborted read.
 .NET 10 completes that task when its final buffered bytes are copied to the caller, before
 returning that final nonzero read. Thus a stream-backed `PipeReader` can expose the fact without
@@ -455,8 +455,8 @@ break is accepted during the previews and recorded here.
    change the value used by subsequent handshakes. It now leaves the bound listener's
    allowance unchanged, keeping its handshake and generic limit facet consistent.
 6. **Multiplexed stream return types change (#1453).** The connection's typed accept/open
-   members now return `ValueTask<MultiplexedStream>` instead of `ValueTask<Connection>`;
-   the interface returns `ValueTask<IMultiplexedStream>`. Assigning the awaited stream to
+   members now return `ValueTask<MultiplexedConnectionStream>` instead of `ValueTask<Connection>`;
+   the interface returns `ValueTask<IMultiplexedConnectionStream>`. Assigning the awaited stream to
    `IConnection` still compiles, but existing binaries and implementations must migrate.
    `Abort(long, Exception?)` is now required on the multiplexed connection root and guided
    base. The new stream root requires whole-stream reset and `IsInputCompleted`.
@@ -484,3 +484,47 @@ peer acknowledges the FIN; that is not expected to break a consumer.
 - **No transport abstraction re-export.** Consumers depend on
   `Assimalign.Cohesion.Connections` contracts; this package is a driver
   selection.
+
+## Root lifecycle and listener ownership
+
+`QuicMultiplexedConnection` derives from the pipe-less `Connection` root; its streams derive
+from `MultiplexedConnectionStream : DuplexConnection`. The listener inherits the generic live
+connection set and exposes the same `ListenerId` its events report. Root and typed accepts consume
+one queue, and listener disposal leaves handed-out connections to their owners.
+
+One inbound-stream accept pump observes idle peer closure: `System.Net.Quic` has no public
+connection-closed task, and refuses native accept when both inbound stream allowances are zero.
+Factory connections therefore grant one concurrent inbound unidirectional stream; listeners use an
+effective native unidirectional allowance of one when `MaxUnidirectionalStreamCount` is zero. The
+bidirectional allowance is unchanged. This wire behavior differs from preview.1: zero no longer
+forbids unidirectional streams. It is the smallest local way to observe idle peer closure through
+the supported runtime API; no synthetic stream or protocol bytes are sent.
+The pending native accept sees loss, completes the application queue with
+the original failure, and signals `ConnectionClosed`. This includes a TLS certificate refusal
+arriving after the client finished its side of the handshake: stream acceptance receives the
+authentication failure, while disposal completes the normal transport cleanup. Queued wrappers retain native stream handles,
+so the negotiated concurrent inbound-stream limit bounds the queue. Native credit returns only
+when a wrapper is disposed. Connection disposal closes the native connection, awaits the pump,
+releases queued wrappers along with tracked streams, and clears the queue. No stream reads are added.
+Stream notifications observe reset, loss, and completion of every usable native direction;
+completing one direction remains a half-close. Local disposal signals closure before returning.
+
+The implementation depends on the common hierarchy as follows:
+
+```mermaid
+flowchart LR
+    Quic["QuicMultiplexedConnection"] --> Mux["MultiplexedConnection"]
+    Mux --> Root["Connection / IConnection"]
+    Stream["QuicStreamConnection"] --> StreamBase["MultiplexedConnectionStream"]
+    StreamBase --> Duplex["DuplexConnection"]
+    Duplex --> Root
+```
+
+## Connection hierarchy compatibility
+
+Decision 58 changes the hierarchy shipped in 10.0.0-preview.1 under decision 15's accepted
+preview source and binary breaks. Listener/factory results are typed interfaces; streams are named `IMultiplexedConnectionStream`
+and `MultiplexedConnectionStream`.
+Every connection shares root lifecycle and features. Accepted connections stay in the live set
+until their closed token fires; listener disposal never closes handed-out connections.
+Only the code that accepted a connection reads or writes it.

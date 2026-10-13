@@ -26,21 +26,23 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
         _publishCompletion = publishCompletion;
     }
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
     public override EndPoint EndPoint => _inner.EndPoint;
 
     public override ConnectionCapabilities Capabilities => _inner.Capabilities;
 
-    public override async ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken)
         => new CompletedInputMultiplexedConnection(await _inner.AcceptAsync(cancellationToken), _publishCompletion);
 
     public override ValueTask DisposeAsync() => _inner.DisposeAsync();
 
-    private sealed class CompletedInputMultiplexedConnection : MultiplexedConnection
+    private sealed class CompletedInputMultiplexedConnection : Connection, IMultiplexedConnection
     {
-        private readonly MultiplexedConnection _inner;
+        private readonly IMultiplexedConnection _inner;
         private readonly bool _publishCompletion;
 
-        public CompletedInputMultiplexedConnection(MultiplexedConnection inner, bool publishCompletion)
+        public CompletedInputMultiplexedConnection(IMultiplexedConnection inner, bool publishCompletion)
         {
             _inner = inner;
             _publishCompletion = publishCompletion;
@@ -60,9 +62,9 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
 
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
-        public override async ValueTask<MultiplexedStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
+        public async ValueTask<IMultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default)
         {
-            MultiplexedStream stream = await _inner.AcceptStreamAsync(cancellationToken);
+            IMultiplexedConnectionStream stream = await _inner.AcceptStreamAsync(cancellationToken);
             if (stream.Direction != ConnectionDirection.Bidirectional)
             {
                 return stream;
@@ -81,23 +83,23 @@ internal sealed class CompletedStreamInputListener : MultiplexedConnectionListen
             return new CompletedInputConnection(stream, payload, _publishCompletion);
         }
 
-        public override ValueTask<MultiplexedStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
+        public ValueTask<IMultiplexedConnectionStream> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
             => _inner.OpenStreamAsync(direction, cancellationToken);
 
-        public override void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
+        public void Abort(long errorCode, Exception? reason = null) => _inner.Abort(errorCode, reason);
 
         public override void Abort(Exception? reason = null) => _inner.Abort(reason);
 
         public override ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
-    private sealed class CompletedInputConnection : MultiplexedStream
+    private sealed class CompletedInputConnection : MultiplexedConnectionStream
     {
-        private readonly MultiplexedStream _inner;
+        private readonly IMultiplexedConnectionStream _inner;
         private readonly MemoryStream _payload;
         private readonly bool _publishCompletion;
 
-        public CompletedInputConnection(MultiplexedStream inner, byte[] payload, bool publishCompletion)
+        public CompletedInputConnection(IMultiplexedConnectionStream inner, byte[] payload, bool publishCompletion)
         {
             _inner = inner;
             _payload = new MemoryStream(payload, writable: false);

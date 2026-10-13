@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Http.ServerSentEvents.Tests.TestObjects;
 /// </summary>
 internal sealed class InMemoryHttp1Loopback : IAsyncDisposable
 {
-    private readonly Connection _client;
+    private readonly IDuplexConnection _client;
     private readonly HttpConnectionListener _listener;
     private IHttpConnection? _connection;
     private IHttpConnectionContext? _connectionContext;
@@ -30,7 +30,7 @@ internal sealed class InMemoryHttp1Loopback : IAsyncDisposable
 
     public InMemoryHttp1Loopback(string requestText)
     {
-        (Connection client, Connection server) = InMemoryConnectionPair.Create(
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create(
             InMemoryConnectionPair.DefaultCapabilities,
             clientEndPoint: new IPEndPoint(IPAddress.Loopback, 8080),
             serverEndPoint: new IPEndPoint(IPAddress.Loopback, 5000));
@@ -52,7 +52,7 @@ internal sealed class InMemoryHttp1Loopback : IAsyncDisposable
     /// <summary>Accepts the connection and returns the first request context.</summary>
     public async Task<IHttpContext> ReadRequestAsync()
     {
-        _connection = await _listener.AcceptOrListenAsync().ConfigureAwait(false);
+        _connection = await _listener.AcceptAsync().ConfigureAwait(false);
         _connectionContext = await _connection.OpenAsync().ConfigureAwait(false);
         _enumerator = _connectionContext.ReceiveAsync().GetAsyncEnumerator();
 
@@ -93,25 +93,27 @@ internal sealed class InMemoryHttp1Loopback : IAsyncDisposable
     }
 
     /// <summary>
-    /// A <see cref="ConnectionListener"/> that yields one pre-built connection then
+    /// A <see cref="DuplexConnectionListener"/> that yields one pre-built connection then
     /// waits (never producing another) so the accept loop parks cleanly.
     /// </summary>
-    private sealed class SingleConnectionListener : ConnectionListener
+    private sealed class SingleConnectionListener : DuplexConnectionListener
     {
-        private Connection? _pending;
+        private IDuplexConnection? _pending;
 
-        public SingleConnectionListener(Connection connection)
+        public SingleConnectionListener(IDuplexConnection connection)
         {
             _pending = connection;
         }
+
+        public override ListenerId Id { get; } = ListenerId.New();
 
         public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 5000);
 
         public override ConnectionCapabilities Capabilities => InMemoryConnectionPair.DefaultCapabilities;
 
-        public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+        protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken)
         {
-            Connection? connection = Interlocked.Exchange(ref _pending, null);
+            IDuplexConnection? connection = Interlocked.Exchange(ref _pending, null);
             if (connection is not null)
             {
                 return connection;

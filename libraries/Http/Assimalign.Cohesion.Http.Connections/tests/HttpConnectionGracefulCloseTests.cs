@@ -36,7 +36,7 @@ public class HttpConnectionGracefulCloseTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> exchanges = context.ReceiveAsync().GetAsyncEnumerator();
         (await exchanges.MoveNextAsync().AsTask().WaitAsync(_timeout)).ShouldBeTrue();
         IHttpContext exchange = exchanges.Current;
@@ -68,7 +68,7 @@ public class HttpConnectionGracefulCloseTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> exchanges = context.ReceiveAsync().GetAsyncEnumerator();
         (await exchanges.MoveNextAsync().AsTask().WaitAsync(_timeout)).ShouldBeTrue();
         exchanges.Current.Response.StatusCode = HttpStatusCode.Ok;
@@ -119,7 +119,7 @@ public class HttpConnectionGracefulCloseTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> exchanges = context.ReceiveAsync().GetAsyncEnumerator();
         (await exchanges.MoveNextAsync().AsTask().WaitAsync(_timeout)).ShouldBeTrue();
         IHttpContext exchange = exchanges.Current;
@@ -172,7 +172,7 @@ public class HttpConnectionGracefulCloseTests
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         using CancellationTokenSource receive = new();
         await using IAsyncEnumerator<IHttpContext> exchanges = context.ReceiveAsync(receive.Token).GetAsyncEnumerator();
         (await exchanges.MoveNextAsync().AsTask().WaitAsync(_timeout)).ShouldBeTrue();
@@ -200,7 +200,7 @@ public class HttpConnectionGracefulCloseTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnection httpConnection = await listener.AcceptAsync();
         IHttpConnectionContext context = await httpConnection.OpenAsync();
         await using IAsyncEnumerator<IHttpContext> exchanges = context.ReceiveAsync().GetAsyncEnumerator();
         (await exchanges.MoveNextAsync().AsTask().WaitAsync(_timeout)).ShouldBeTrue();

@@ -12,12 +12,12 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// Holds an explicit flush after its bytes have been written, so a test can disconnect during an
 /// interim response and choose whether the pipe failure or the cancellation wins the flush.
 /// </summary>
-internal sealed class InterimFlushConnection : Connection
+internal sealed class InterimFlushConnection : DuplexConnection
 {
-    private readonly Connection _inner;
+    private readonly IDuplexConnection _inner;
     private readonly InterimFlushWriter _writer;
 
-    public InterimFlushConnection(Connection inner)
+    public InterimFlushConnection(IDuplexConnection inner)
     {
         _inner = inner;
         _writer = new InterimFlushWriter(inner.Output);

@@ -38,7 +38,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.Headers[HttpHeaderKey.ContentType] = "text/event-stream";
@@ -73,7 +73,7 @@ public class HttpResponseStreamingTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // Streaming is opt-in: with no interceptor registered the feature is absent and the buffered
@@ -95,7 +95,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // Streaming is available, but the handler uses the buffered body.
@@ -124,7 +124,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.Headers[HttpHeaderKey.ContentType] = "text/event-stream";
@@ -177,7 +177,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
         IHttpResponseStreamingFeature streaming = context.Response.Streaming;
 
@@ -214,7 +214,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         Http2ConnectionContext http2Connection = (Http2ConnectionContext)connectionContext;
@@ -243,7 +243,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.Headers[HttpHeaderKey.ContentType] = "text/event-stream";

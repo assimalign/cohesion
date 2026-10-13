@@ -44,7 +44,7 @@ public class Http2ConnectionTimeoutTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnection connection = await listener.AcceptOrListenAsync();
+        IHttpConnection connection = await listener.AcceptAsync();
         IHttpConnectionContext context = await connection.OpenAsync();
         await using IAsyncEnumerator<IHttpContext> receive = context.ReceiveAsync().GetAsyncEnumerator();
 

@@ -9,32 +9,8 @@ namespace Assimalign.Cohesion.Connections;
 /// Represents a message-oriented connection that sends and receives discrete datagrams
 /// (for example, UDP), preserving message boundaries rather than exposing a byte stream.
 /// </summary>
-public interface IDatagramConnection : IAsyncDisposable
+public interface IDatagramConnection : IConnection
 {
-    /// <summary>
-    /// Gets the local endpoint the connection is bound to.
-    /// </summary>
-    EndPoint LocalEndPoint { get; }
-
-    /// <summary>
-    /// Gets the remote endpoint for a connected datagram socket, or <see langword="null"/> when unbound.
-    /// </summary>
-    EndPoint? RemoteEndPoint { get; }
-
-    /// <summary>
-    /// Gets the capabilities (delivery guarantees and security) of the underlying transport.
-    /// </summary>
-    ConnectionCapabilities Capabilities { get; }
-
-    /// <summary>
-    /// Gets the optional capabilities and facts registered for this connection.
-    /// </summary>
-    /// <remarks>
-    /// A layer exposes its wrapped connection's features unless it replaces or removes their names.
-    /// A multiplexed stream has its own features and does not inherit its parent connection's features.
-    /// </remarks>
-    IConnectionFeatureCollection Features { get; }
-
     /// <summary>
     /// Receives the next datagram into the supplied buffer.
     /// </summary>

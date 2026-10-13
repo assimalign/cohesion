@@ -1,30 +1,17 @@
 using System;
-using System.IO.Pipelines;
 using System.Net;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Connections;
 
 /// <summary>
-/// Represents a live, bidirectional byte channel between two endpoints.
+/// Represents the identity, capabilities, features, and lifetime of an established connection.
 /// </summary>
 /// <remarks>
-/// <para>
-/// A connection is the unit of byte transfer in the Cohesion networking stack, and it
-/// <em>is</em> a duplex pipe: <see cref="IDuplexPipe.Input"/> yields the bytes received from the
-/// remote peer, and <see cref="IDuplexPipe.Output"/> accepts the bytes to send to it. Both names
-/// are anchored to the holder of the connection; the mirrored pair a transport uses internally to
-/// pump the wire is an implementation detail and never appears on the contract.
-/// </para>
-/// <para>
-/// For a stream transport (such as TCP) a connection maps to a single socket; for a multiplexed
-/// transport (such as QUIC) each accepted or opened stream is itself an <see cref="IConnection"/>.
-/// A connection is already live when handed to a consumer — read and write immediately. Complete
-/// <see cref="IDuplexPipe.Output"/> to signal a graceful half-close, dispose the connection to
-/// close it, or call <see cref="Abort(Exception)"/> to tear it down immediately.
-/// </para>
+/// The code that accepts or establishes a connection owns its disposal and is the only code
+/// that reads or writes it. Inspecting a listener's connection collection does not transfer ownership.
 /// </remarks>
-public interface IConnection : IDuplexPipe, IAsyncDisposable
+public interface IConnection : IAsyncDisposable
 {
     /// <summary>
     /// Gets the unique identifier for this connection.
@@ -42,28 +29,9 @@ public interface IConnection : IDuplexPipe, IAsyncDisposable
     EndPoint? RemoteEndPoint { get; }
 
     /// <summary>
-    /// Gets which halves of the connection's duplex pipe are usable.
-    /// </summary>
-    /// <remarks>
-    /// Stream transports always report <see cref="ConnectionDirection.Bidirectional"/>; unidirectional
-    /// streams of a multiplexed transport report <see cref="ConnectionDirection.ReadOnly"/> or
-    /// <see cref="ConnectionDirection.WriteOnly"/>.
-    /// </remarks>
-    ConnectionDirection Direction { get; }
-
-    /// <summary>
     /// Gets the capabilities (delivery guarantees, multiplexing, and security) of the underlying transport.
     /// </summary>
     ConnectionCapabilities Capabilities { get; }
-
-    /// <summary>
-    /// Gets the optional capabilities and facts registered for this connection.
-    /// </summary>
-    /// <remarks>
-    /// A layer exposes its wrapped connection's features unless it replaces or removes their names.
-    /// A multiplexed stream has its own features and does not inherit its parent connection's features.
-    /// </remarks>
-    IConnectionFeatureCollection Features { get; }
 
     /// <summary>
     /// Gets the current lifecycle state of the connection.
@@ -71,17 +39,25 @@ public interface IConnection : IDuplexPipe, IAsyncDisposable
     ConnectionState State { get; }
 
     /// <summary>
-    /// Gets a token that is signaled when the connection is closed or aborted.
+    /// Gets the optional capabilities and facts registered for this connection.
     /// </summary>
     /// <remarks>
-    /// For a stream of a multiplexed transport, the token is also signaled when the peer abandons the
-    /// stream (for QUIC, a <c>RESET_STREAM</c> or <c>STOP_SENDING</c>), so a consumer learns of it
-    /// without reading or writing. A half that ends cleanly does not signal it.
+    /// A layer exposes its wrapped connection's features unless it replaces or removes their names.
+    /// A multiplexed stream owns its features independently of its parent connection.
+    /// </remarks>
+    IConnectionFeatureCollection Features { get; }
+
+    /// <summary>
+    /// Gets a token signaled on close, abort, or peer closure, no later than disposal completing.
+    /// </summary>
+    /// <remarks>
+    /// A clean half-close of a multiplexed stream does not end its lifetime. A peer reset or
+    /// abandonment does, even when the owner is not reading or writing the stream.
     /// </remarks>
     CancellationToken ConnectionClosed { get; }
 
     /// <summary>
-    /// Aborts the connection immediately, discarding any in-flight data.
+    /// Ends the connection immediately, discarding in-flight data and signaling <see cref="ConnectionClosed"/>.
     /// </summary>
     /// <param name="reason">An optional exception describing why the connection was aborted.</param>
     void Abort(Exception? reason = null);

@@ -1055,7 +1055,7 @@ the request context carries it as a generic fact, as it carries `Protocol` for a
 - **HTTP/3** — the request stream had not visibly ended with its HEADERS frame, or a positive declared
   content length still requires validation. The transport looks
   for a FIN already buffered behind the frame, without reading or waiting. The QUIC driver publishes
-  a clean transport end through Connections' `IMultiplexedStream.IsInputCompleted` root member (#1427, #1453).
+  a clean transport end through Connections' `IMultiplexedConnectionStream.IsInputCompleted` root member (#1427, #1453).
   The transport samples completion before probing the pipe, so an asynchronous producer publishing
   its final DATA between the two cannot hide those bytes. It combines completion with an empty pipe buffer, so a head followed directly by FIN reports
   `false` even before the stream-backed pipe reads zero bytes, unless a positive content length
@@ -2088,3 +2088,5 @@ runtime codegen, no dynamic dispatch. Builds clean under the trim/AOT analyzers
 - **Field wiring.** Reading `Accept-Query` off a response, emitting it, and the
   content-type negotiation for QUERY content are the consumer's job, consistent
   with the media-type and caching sections.
+
+Transport integrations distinguish the `IConnection` identity/lifetime root from `IDuplexConnection` byte pipes and `IMultiplexedConnectionStream` streams. Core HTTP request/response and connection-info contracts do not acquire a transport dependency.

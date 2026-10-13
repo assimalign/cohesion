@@ -22,10 +22,10 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 
 /// <summary>
 /// A listener double that hands out a fixed queue of connections in order, then parks
-/// <see cref="AcceptOrListenAsync"/> until the accept token is cancelled — exactly how a real
+/// <see cref="AcceptAsync"/> until the accept token is cancelled — exactly how a real
 /// listener idles while waiting for the next connection.
 /// </summary>
-internal sealed class FakeHttpConnectionListener : IHttpConnectionListener
+internal sealed class FakeHttpConnectionListener : ConnectionListener<IHttpConnection>, IHttpConnectionListener
 {
     private readonly Channel<IHttpConnection> _connections = Channel.CreateUnbounded<IHttpConnection>();
 
@@ -60,15 +60,19 @@ internal sealed class FakeHttpConnectionListener : IHttpConnectionListener
     /// </summary>
     public Func<CancellationToken, Task<IHttpConnection>>? AcceptHandler { get; init; }
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
+    public IReadOnlyList<EndPoint> EndPoints { get; init; } = [];
+
     public HttpProtocol Protocols => HttpProtocol.Http11;
 
-    public ValueTask BindAsync(CancellationToken cancellationToken = default)
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _bindCount);
         return BindHandler?.Invoke(cancellationToken) ?? ValueTask.CompletedTask;
     }
 
-    public async Task<IHttpConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IHttpConnection> AcceptCoreAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _acceptCount);
 
@@ -80,7 +84,7 @@ internal sealed class FakeHttpConnectionListener : IHttpConnectionListener
         return await _connections.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         Interlocked.Increment(ref _disposeCount);
         _connections.Writer.TryComplete();
@@ -123,15 +127,28 @@ internal sealed class FakeHttpConnection : IHttpConnection
 
     public ConnectionId Id { get; } = ConnectionId.New();
 
+    public HttpProtocol Protocol => HttpProtocol.Http11;
+
+    public EndPoint? LocalEndPoint => _context.LocalEndPoint;
+
+    public EndPoint? RemoteEndPoint => _context.RemoteEndPoint;
+
+    public ConnectionCapabilities Capabilities => default;
+
+    public IConnectionFeatureCollection Features { get; } = new ConnectionFeatureCollection();
+
+    private readonly CancellationTokenSource _closed = new();
+
     public ConnectionState State { get; private set; } = ConnectionState.Open;
 
-    public CancellationToken ConnectionClosed => CancellationToken.None;
+    public CancellationToken ConnectionClosed => _closed.Token;
 
     public void Abort(Exception? reason = null)
     {
         Interlocked.Increment(ref _abortCount);
         AbortReason = reason;
         State = ConnectionState.Aborted;
+        _closed.Cancel();
     }
 
     public IHttpConnectionContext Open()
@@ -150,6 +167,7 @@ internal sealed class FakeHttpConnection : IHttpConnection
     {
         Interlocked.Increment(ref _disposeCount);
         State = ConnectionState.Closed;
+        _closed.Cancel();
         Disposed.TrySetResult();
         return ValueTask.CompletedTask;
     }

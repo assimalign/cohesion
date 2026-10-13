@@ -142,7 +142,7 @@ internal static class HttpServerConfiguration
         }
 
         options.UseHttp1(
-            () => WebServerEndPoints.Track(options, TcpConnectionListener.Create(tcp => tcp.EndPoint = developmentEndPoint)),
+            () => TcpConnectionListener.Create(tcp => tcp.EndPoint = developmentEndPoint),
             http1 => CopyHttp1Limits(limits.Http1, http1.Limits));
     }
 
@@ -426,12 +426,12 @@ internal static class HttpServerConfiguration
         {
             case EndpointProtocol.Http1:
                 options.UseHttp1(
-                    () => WebServerEndPoints.Track(options, TcpConnectionListener.Create(tcp => tcp.EndPoint = bindEndPoint)),
+                    () => TcpConnectionListener.Create(tcp => tcp.EndPoint = bindEndPoint),
                     http1 => CopyHttp1Limits(limits.Http1, http1.Limits));
                 break;
             case EndpointProtocol.Http2:
                 options.UseHttp2(
-                    () => WebServerEndPoints.Track(options, TcpConnectionListener.Create(tcp => tcp.EndPoint = bindEndPoint)),
+                    () => TcpConnectionListener.Create(tcp => tcp.EndPoint = bindEndPoint),
                     http2 => CopyHttp2Limits(limits, http2.Limits));
                 break;
             case EndpointProtocol.Https:
