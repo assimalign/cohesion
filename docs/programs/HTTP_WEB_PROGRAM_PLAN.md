@@ -399,7 +399,7 @@ The issue list:
 
 ### Stage 14 — Performance, operations and DX
 
-**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation. Decision 57, from the review, adds sessions 20 and 21; the review resumes after them.
+**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation. Decisions 57 and 58, from the review, add sessions 20–22; the review resumes after them.
 - Sessions run in the Codex CLI on Astra 6 at ultra effort, as in Stage 13. A pipeline script drives each session's implement, review, verify and fix runs in its own worktree.
 - Sessions in one row edit the same files, so each runs as one serial session; the rows of a wave run in parallel.
 - Wave 2 needs wave 1 integrated:
@@ -431,7 +431,8 @@ The issue list:
 | 18 | #1453 → #1451: the multiplexed roots, then the in-memory peer close (decision 56) | 2, after 17, ahead of session 7 |
 | 19 | #1455: the HTTP/2 write-scheduler deadlock that session 16 found from a hang dump | 3 |
 | 20 | #1457: `Web.Hosting.Health` and `Web.Hosting.Resources` roll into `Web.Hosting` (decision 57 (a)) | review |
-| 21 | #1458: `WebApplicationServer` moves into `Web.Server`, behind a public host-service wrapper (decision 57 (b)) | review, after 20 |
+| 21 | #1458: `WebApplicationServer` moves into `Web.Server`, behind a public host-service wrapper (decision 57 (b)) | review, after 22 |
+| 22 | #1459: one connection hierarchy under `IConnection`, typed listeners and factories, and `IHttpConnectionListener.EndPoints` (decision 58) | review, after 20 |
 
 Not scheduled in this stage:
 - #1433 belongs to the Security program.
@@ -1503,8 +1504,30 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
       - The server builds its listener from `WebApplicationServerOptions` and installs its own interceptors, so a server constructed directly behaves like a hosted one. Hosting keeps the HTTP default interceptors, configuration binding and the TCP and QUIC listener helpers.
       - The server's EventSource, Meter and ActivitySource take the `Assimalign.Cohesion.Web.Server` name (`event-source.md` rules 4 and 15). None shipped under the old name.
       - The 19 Web feature packages that reference `Web.Server` for its request-feature contracts take the transport into their package closure; every framework already carries it. `Web.Routing` can never reference `Web.Server`, because the server reads the route template.
-      - Pending: the listener seam that replaces Web.Hosting's endpoint capture (Stage 14's `ServerBound` question). The owner proposed `IHttpConnectionListener.Connections`; the recommendation is `EndPoints`, because no connection exists when the server reports its bind.
-    - **Order:** #1457, then #1458.
+      - The listener seam that replaces Web.Hosting's endpoint capture (Stage 14's `ServerBound` question) is settled by decision 58: `IHttpConnectionListener.EndPoints`.
+    - **Order:** #1457, then decision 58's #1459, then #1458.
+58. **One connection hierarchy under `IConnection`, with listeners and factories typed by what they produce (owner, 2026-10-13; #1459).** This came from the owner's sketch and a design round the same day.
+    - **Connections.** `IConnection` becomes the root of every connection and carries no byte pipe: `Id`, the endpoints, `Capabilities`, `State`, `Features`, `ConnectionClosed`, `Abort` and disposal.
+      - `IDuplexConnection : IConnection, IDuplexPipe` adds the pipe and `Direction`.
+      - `IMultiplexedConnection` and `IDatagramConnection` derive from `IConnection`.
+      - `IMultiplexedStream` becomes `IMultiplexedConnectionStream : IDuplexConnection`.
+      - `ConnectionClosed` fires on close, abort and peer close, no later than `DisposeAsync` completing.
+      - The sketch's `IConnectionInfo` is folded back into `IConnection`. `Features` stays on the root, so each feature extension is declared once.
+    - **Listeners.**
+      - `IConnectionListener` carries `Id`, a live `IReadOnlyCollection<IConnection> Connections`, `BindAsync`, and an `AcceptAsync` that returns `IConnection`.
+      - `IConnectionListener<TConnection>` narrows `Connections` and `AcceptAsync` with `new`. It has no `out`, because `ValueTask<T>` is invariant (CS1961).
+      - `IDuplexConnectionListener` and `IMultiplexedConnectionListener` add `EndPoint` and `Capabilities`.
+      - An entry leaves `Connections` when its `ConnectionClosed` fires. The base and typed accept methods return connections from one queue.
+      - Client factories split the same way.
+    - **HTTP.** `IHttpConnection : IConnection` adds `Protocol`. Its `Features` are the wrapped transport connection's, which is the carrier #1454 needs. `IHttpConnectionListener : IConnectionListener<IHttpConnection>` adds `Protocols` and `EndPoints`, the bound endpoints, readable once `BindAsync` completes. `AcceptOrListenAsync` becomes `AcceptAsync`.
+    - **Rejected along the way:**
+      - a multiplexed connection inheriting a byte pipe;
+      - an accept method on the listener root that a listener could not honor;
+      - removing listener `EndPoint` and `Capabilities`, which the HTTP/3 Alt-Svc port, registration-time validation and port-0 binds rely on;
+      - a caller-chosen generic `AcceptAsync<T>()`;
+      - replacing `EndPoints` with the connection collection, which is empty when the server reports its bind.
+    - **Settles Stage 14's `ServerBound` question.** The server reads the listener's `EndPoints`, and Web.Hosting's endpoint capture is deleted.
+    - **Breaking.** Every Connections package shipped in preview.1, so the new hierarchy is a breaking change on decision 15's terms.
 
 ### 7.5 Lineup
 
