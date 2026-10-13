@@ -39,7 +39,7 @@ they need.
 
 - `ResourceContext`, `ResourceMount`, `ResourceRuntime`, `ResourceEntryExitException`
 - `IResourceEntryInvocation`
-- `IResourceControlPlane`, `ResourceControlPlane`
+- `IResourceControlPlane`, `ResourceControlPlane` (public sealed implementation; create with `ResourceControlPlane.Create(kinds)`)
 - `ResourceCommand`
 - `IResourceCredentialVerifier`, `ResourceCredentialPresentation`, `ResourceCredentialVerification`,
   `ResourceCredentialStatus`, `ResourceCaller`, `ResourceCallerKind`, `ResourceCredentialProfile`

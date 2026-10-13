@@ -47,7 +47,7 @@ public class ResourceControlPlaneTests
     public async Task CheckHealthAsync_WithContributors_AggregatesStatus()
     {
         // Arrange
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
         controlPlane.AddHealthContributor(new TestContributor(
             "ready",
             HealthContribution.Healthy("accepting work")));
@@ -69,7 +69,7 @@ public class ResourceControlPlaneTests
     public void ObserveEndpoint_WithNullAddress_ShouldThrowArgumentNullException()
     {
         // Arrange
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
 
         // Act
         Action action = () => controlPlane.ObserveEndpoint("http", null!);
@@ -82,7 +82,7 @@ public class ResourceControlPlaneTests
     public void ObserveEndpoint_WithRelativeAddress_ShouldThrowArgumentException()
     {
         // Arrange
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
 
         // Act
         Action action = () => controlPlane.ObserveEndpoint("http", new Uri("relative", UriKind.Relative));
@@ -96,7 +96,7 @@ public class ResourceControlPlaneTests
     {
         // Arrange
         int followingInvocations = 0;
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
         controlPlane.AddHealthContributor(new CallbackContributor(
             "database",
             _ => ValueTask.FromException<HealthContribution>(
@@ -116,7 +116,7 @@ public class ResourceControlPlaneTests
         report.Status.ShouldBe(HealthStatus.Unhealthy);
         report.Contributions.Count.ShouldBe(2);
         report.Contributions["database"].ShouldBe(
-            HealthContribution.Unhealthy(DefaultResourceControlPlane.ContributorThrewDescription));
+            HealthContribution.Unhealthy(ResourceControlPlane.ContributorThrewDescription));
         report.Contributions["worker"].Status.ShouldBe(HealthStatus.Healthy);
         followingInvocations.ShouldBe(1);
     }
@@ -125,7 +125,7 @@ public class ResourceControlPlaneTests
     public async Task CheckHealthAsync_WhenContributorCancelsIndependently_RecordsFailure()
     {
         // Arrange
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
         controlPlane.AddHealthContributor(new CallbackContributor(
             "queue",
             _ => ValueTask.FromException<HealthContribution>(
@@ -137,7 +137,7 @@ public class ResourceControlPlaneTests
         // Assert
         report.Status.ShouldBe(HealthStatus.Unhealthy);
         report.Contributions["queue"].ShouldBe(
-            HealthContribution.Unhealthy(DefaultResourceControlPlane.ContributorThrewDescription));
+            HealthContribution.Unhealthy(ResourceControlPlane.ContributorThrewDescription));
     }
 
     [Fact(DisplayName = DisplayPrefix + "An exception a contributor places in its data is replaced with fixed text, keeping the other values and their order")]
@@ -157,7 +157,7 @@ public class ResourceControlPlaneTests
             failure = exception;
         }
 
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
         controlPlane.AddHealthContributor(new TestContributor(
             "database",
             HealthContribution.Unhealthy(
@@ -179,7 +179,7 @@ public class ResourceControlPlaneTests
         IReadOnlyDictionary<string, object> data = contribution.Data.ShouldNotBeNull();
         data.Keys.ShouldBe(new[] { "attempts", "error", "endpoint" });
         data["attempts"].ShouldBe(3);
-        data["error"].ShouldBe(DefaultResourceControlPlane.ContributorExceptionDataValue);
+        data["error"].ShouldBe(ResourceControlPlane.ContributorExceptionDataValue);
         data["endpoint"].ShouldBe("primary");
     }
 
@@ -188,7 +188,7 @@ public class ResourceControlPlaneTests
     {
         // Arrange
         var data = new Dictionary<string, object> { ["queued"] = 12, ["note"] = "draining" };
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
         controlPlane.AddHealthContributor(new TestContributor("queue", HealthContribution.Degraded("slow", data)));
 
         // Act
@@ -204,7 +204,7 @@ public class ResourceControlPlaneTests
         // Arrange
         using var cancellation = new CancellationTokenSource();
         int followingInvocations = 0;
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
         controlPlane.AddHealthContributor(new CallbackContributor(
             "blocking",
             cancellationToken =>
@@ -244,7 +244,7 @@ public class ResourceControlPlaneTests
                 [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = endpoint.Scheme,
             });
         using IDisposable scope = ResourceRuntime.CreateScope(context);
-        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create();
         var host = new TestHost(new TestHostOptions());
 
         // Act

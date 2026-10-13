@@ -69,6 +69,20 @@ uses the same dedicated-thread, host-ready, completion, and in-process runner be
 
 ## Control plane
 
+### Public implementation and preview compatibility (#1465)
+
+`ResourceControlPlane` is now the public sealed `IResourceControlPlane` implementation,
+with a private constructor and its own `Create(IEnumerable<string>? acceptedCommandKinds = null)`.
+It replaces the static facade and internal `DefaultResourceControlPlane` under owner decision 59.
+The optional null argument still means no accepted kinds; enumeration, validation and isolation
+are unchanged. Interface-based customization remains available through `IResourceControlPlane`.
+
+In **10.0.0-preview.1**, `ResourceControlPlane.Create` returned `IResourceControlPlane` from
+a static class. Existing calls keep their spelling and remain source-compatible, including
+Database callers. The return type now is `ResourceControlPlane`, so this is **binary-breaking**:
+rebuild consumers against the new package. This preview break is accepted on decision 15's terms.
+
+
 `ResourceControlPlane.Create` returns a fresh control plane configured with area-defined command
 kinds. Contributor names and endpoint names are stable keys. A health query snapshots contributors,
 runs their asynchronous checks, and returns `ResourceHealthReport` with the least healthy status;

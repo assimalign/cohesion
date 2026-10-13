@@ -59,7 +59,7 @@ public sealed class HostingResourceEventSourceTests
 
         // Assert
         HostingResourceEventSource.Log.ContributorFailures.ShouldBe(before + 1);
-        report.Contributions[contributorName].Description.ShouldBe(DefaultResourceControlPlane.ContributorThrewDescription);
+        report.Contributions[contributorName].Description.ShouldBe(ResourceControlPlane.ContributorThrewDescription);
         report.Contributions[contributorName].Data.ShouldBeNull();
         EventWrittenEventArgs failed = recorder.Events.Where(item => IsContributorFailure(item, contributorName)).ShouldHaveSingleItem();
         failed.EventId.ShouldBe(1);
@@ -87,7 +87,7 @@ public sealed class HostingResourceEventSourceTests
 
         // Assert
         HostingResourceEventSource.Log.ContributorFailures.ShouldBe(before + 1);
-        report.Contributions[contributorName].Description.ShouldBe(DefaultResourceControlPlane.ContributorThrewDescription);
+        report.Contributions[contributorName].Description.ShouldBe(ResourceControlPlane.ContributorThrewDescription);
         report.Contributions[contributorName].Data.ShouldBeNull();
         EventWrittenEventArgs failed = recorder.Events.Where(item => IsContributorFailure(item, contributorName)).ShouldHaveSingleItem();
         failed.Payload![1].ShouldBe(typeof(ThrowingMessageException).FullName);
