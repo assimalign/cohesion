@@ -108,5 +108,6 @@ fires on abort, observed peer closure, and no later than local disposal.
 
 QUIC connections keep an inbound stream accept pending to observe idle peer closure. Factory
 connections grant one concurrent inbound unidirectional stream. A listener configured with
-`MaxUnidirectionalStreamCount = 0` also grants one; zero does not forbid unidirectional streams.
-The configured bidirectional allowance is unchanged.
+`MaxUnidirectionalStreamCount = 0` preserves zero when its bound bidirectional allowance is
+positive. Only when both inbound allowances are zero does the listener grant one unidirectional
+stream to keep native acceptance available. The configured bidirectional allowance is unchanged.

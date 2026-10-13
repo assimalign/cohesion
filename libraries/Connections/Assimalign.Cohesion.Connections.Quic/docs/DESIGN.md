@@ -495,9 +495,11 @@ one queue, and listener disposal leaves handed-out connections to their owners.
 One inbound-stream accept pump observes idle peer closure: `System.Net.Quic` has no public
 connection-closed task, and refuses native accept when both inbound stream allowances are zero.
 Factory connections therefore grant one concurrent inbound unidirectional stream; listeners use an
-effective native unidirectional allowance of one when `MaxUnidirectionalStreamCount` is zero. The
-bidirectional allowance is unchanged. This wire behavior differs from preview.1: zero no longer
-forbids unidirectional streams. It is the smallest local way to observe idle peer closure through
+effective native unidirectional allowance of one only when both the bound bidirectional allowance
+and `MaxUnidirectionalStreamCount` are zero. With positive bidirectional credit, a configured zero
+unidirectional allowance stays zero: native accept already observes idle closure in that case.
+The bidirectional allowance is unchanged. The all-zero fallback differs from preview.1 by
+permitting one unidirectional stream. It is the smallest local way to observe idle peer closure through
 the supported runtime API; no synthetic stream or protocol bytes are sent.
 The pending native accept sees loss, completes the application queue with
 the original failure, and signals `ConnectionClosed`. This includes a TLS certificate refusal

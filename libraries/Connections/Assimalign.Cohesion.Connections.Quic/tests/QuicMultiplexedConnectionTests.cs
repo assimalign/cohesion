@@ -96,6 +96,41 @@ public class QuicMultiplexedConnectionTests
         ((QuicMultiplexedConnection)observing).InboundBidirectionalStreamLimit.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - OpenStreamAsync: Zero unidirectional credit stays blocked while idle peer closure is observed")]
+    [InlineData(1)]
+    [InlineData(100)]
+    public async Task OpenStreamAsync_WithZeroUnidirectionalAndPositiveBidirectionalLimit_ShouldBlockAndObserveIdleClosure(int bidirectionalLimit)
+    {
+        // Arrange
+        QuicListener.IsSupported.ShouldBeTrue();
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token,
+            configureListener: options =>
+            {
+                options.MaxBidirectionalStreamCount = bidirectionalLimit;
+                options.MaxUnidirectionalStreamCount = 0;
+            });
+        using CancellationTokenSource opening = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+        opening.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        // Act / Assert — the peer cannot open a unidirectional stream without advertised credit.
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+        {
+            await using MultiplexedConnectionStream stream = await pair.Client.OpenStreamAsync(ConnectionDirection.WriteOnly, opening.Token);
+        });
+        pair.Server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+        pair.Client.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+
+        // Act — no stream was opened, but the pending native accept must still observe closure.
+        await pair.Client.DisposeAsync();
+        await WaitForClosedAsync(pair.Server.ConnectionClosed, cancellation.Token);
+
+        // Assert
+        pair.Server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        ((QuicMultiplexedConnection)pair.Server).InboundBidirectionalStreamLimit.ShouldBe((long)bidirectionalLimit);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - DisposeAsync: Every completed concurrent call signals connection closure")]
     public async Task DisposeAsync_WhileFirstCallWaitsForDelivery_ShouldSignalBeforeSecondReturns()
     {

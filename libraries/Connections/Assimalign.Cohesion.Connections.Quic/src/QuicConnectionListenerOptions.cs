@@ -100,9 +100,10 @@ public sealed class QuicConnectionListenerOptions
     /// Gets or sets the maximum number of concurrent inbound unidirectional streams per connection.
     /// </summary>
     /// <remarks>
-    /// Defaults to ten. Zero grants one concurrent inbound unidirectional stream at the transport
-    /// layer so a pending native accept can observe idle peer closure. Zero does not forbid
-    /// unidirectional streams. Negative values are rejected when the connection options are used.
+    /// Defaults to ten. Zero forbids inbound unidirectional streams when the bound bidirectional
+    /// allowance is positive. Only when both allowances are zero does the transport grant one
+    /// unidirectional stream so a pending native accept can observe idle peer closure.
+    /// Negative values are rejected when the connection options are used.
     /// </remarks>
     public int MaxUnidirectionalStreamCount { get; set; } = 10;
 
@@ -222,7 +223,7 @@ public sealed class QuicConnectionListenerOptions
         {
             ServerAuthenticationOptions = ServerAuthenticationOptions,
             MaxInboundBidirectionalStreams = maxInboundBidirectionalStreams,
-            MaxInboundUnidirectionalStreams = MaxUnidirectionalStreamCount == 0 ? 1 : MaxUnidirectionalStreamCount,
+            MaxInboundUnidirectionalStreams = maxInboundBidirectionalStreams == 0 && MaxUnidirectionalStreamCount == 0 ? 1 : MaxUnidirectionalStreamCount,
             DefaultCloseErrorCode = DefaultCloseErrorCode,
             DefaultStreamErrorCode = DefaultStreamErrorCode,
             HandshakeTimeout = HandshakeTimeout
