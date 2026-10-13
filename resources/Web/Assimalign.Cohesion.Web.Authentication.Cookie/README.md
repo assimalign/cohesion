@@ -21,8 +21,9 @@ login / logout / access-denied flow.
   `Assimalign.Cohesion.Web.Authentication` (the scheme model).
 - Seals tickets through `Assimalign.Cohesion.Security.DataProtection`
   &mdash; keys are never hand-rolled.
-- Keys its redirect-vs-`401`/`403` decision on the `IApiEndpointMetadata`
-  endpoint marker resolved through `Assimalign.Cohesion.Web.Routing`.
+- Keys its redirect-vs-`401`/`403` decision on the sealed `ApiEndpointMetadata`
+  marker resolved through `Assimalign.Cohesion.Web.Routing`; attach `ApiEndpointMetadata.Instance`
+  to an API endpoint.
 
 Register it at the composition root, not here:
 

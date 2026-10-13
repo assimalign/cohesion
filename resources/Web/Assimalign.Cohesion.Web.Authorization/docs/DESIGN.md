@@ -288,7 +288,7 @@ calls `context.ChallengeAsync`/`context.ForbidAsync` for each of the policy's sc
 with the default challenge or forbid scheme when the policy names none. The handlers write the
 response: JWT Bearer answers `401` with a `WWW-Authenticate` challenge and `403` with
 `insufficient_scope` (RFC 6750 §3.1); Cookie redirects a browser endpoint to its login or access-denied
-page and answers an endpoint marked `IApiEndpointMetadata` with a bare `401` or `403`. When several
+page and answers an endpoint carrying `ApiEndpointMetadata.Instance` with a bare `401` or `403`. When several
 schemes answer, each writes in turn. Bearer and Certificate append `WWW-Authenticate`,
 preserving every earlier challenge. Bearer's append behavior corrects 10.0.0-preview.1,
 which replaced earlier schemes' challenges (#1450); custom handlers must also append.
@@ -459,3 +459,16 @@ requirement without the middleware and a protected route in an anonymous group w
 the shipped handlers: JWT Bearer `401`/`403 insufficient_scope`, Cookie redirects for a browser endpoint
 and a bare `401` for an API endpoint, and a Bearer-only endpoint that ignores the cookie the default
 scheme accepted.
+
+## API endpoint marker compatibility (#1466)
+
+Cookie challenge/forbid decisions now read the sealed `ApiEndpointMetadata` marker from
+Web.Authentication. Attach `ApiEndpointMetadata.Instance` to an API endpoint; authorization
+continues to delegate its failed policy response to the selected authentication handler.
+Marked cookie endpoints receive bare 401/403, while unmarked endpoints are redirected.
+
+10.0.0-preview.1 exposed the empty `IApiEndpointMetadata` interface, now removed by owner
+decision 59. That authentication API removal is source- and binary-breaking, accepted on
+decision 15's preview terms: replace a custom marker implementation or interface lookup with
+the sealed marker and rebuild. Existing `ApiEndpointMetadata.Instance` declarations remain
+source-compatible, and this change adds or removes no authorization API.

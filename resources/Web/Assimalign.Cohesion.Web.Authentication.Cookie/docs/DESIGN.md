@@ -78,7 +78,7 @@ default) so tests drive expiry and renewal deterministically.
 
 `ChallengeAsync`/`ForbidAsync` must behave differently for a browser page
 and a JSON API sharing one cookie scheme. The handler resolves the
-`IApiEndpointMetadata` marker from the matched route's metadata (the #150
+sealed `ApiEndpointMetadata` marker from the matched route's metadata (the #150
 bag surfaced by `Web.Routing`'s `context.GetEndpointMetadata<T>()`,
 reflection-free):
 
@@ -87,8 +87,9 @@ reflection-free):
 - **Otherwise** &rarr; `302` redirect to `LoginPath` (with an
   encoded `ReturnUrl`) / `AccessDeniedPath`.
 
-This mirrors the .NET 10 cookie handler's `IApiEndpointMetadata`-keyed
-decision. The return URL is the request path; the query string is omitted
+Endpoints attach `ApiEndpointMetadata.Instance`. The cookie handler reads that concrete
+marker directly; no empty interface or custom marker implementation is needed.
+The return URL is the request path; the query string is omitted
 in v1 (the redirect targets and the parameter name are configurable). The
 path is written percent-encoded (`HttpPath.ToUriComponent`, #1324's review):
 the transports hand it over decoded, and the login page redirects to the
@@ -243,3 +244,15 @@ Every allocating payload and request-id read is inside the Verbose enable check.
 uses `IWebRequestIdFeature`, never `Activity.Current`. No cookie value, plaintext, principal,
 claim, return URL or request path is written. This is additive diagnostics with no public
 API or response behavior change from 10.0.0-preview.1.
+
+## API endpoint marker compatibility (#1466)
+
+In 10.0.0-preview.1 the handler looked up `IApiEndpointMetadata`. Owner decision 59 removes
+that empty interface from Web.Authentication and changes this handler to look up the sealed
+`ApiEndpointMetadata` marker. Existing endpoints attaching `ApiEndpointMetadata.Instance`
+retain bare 401/403 responses without a Location header or response body; unmarked endpoints
+retain their login/access-denied redirects. Tests pin both paths.
+
+Removing the preview.1 interface is source- and binary-breaking on decision 15's terms.
+Applications with a custom interface implementation must attach `ApiEndpointMetadata.Instance`
+instead and rebuild; an unrelated custom metadata object no longer suppresses a redirect.

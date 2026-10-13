@@ -294,18 +294,18 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
         // Arrange
         CookieAuthenticationOptions options = CreateOptions();
         TestHttpContext context = TestHttpContext.Create("/secure/data");
+        context.SetEndpointMetadata();
         IAuthenticationSignInHandler handler = await InitializeAsync(options, context);
 
         // Act
-        await handler.ChallengeAsync(properties: null);
+        await handler.ChallengeAsync(properties: null, CancellationToken.None);
 
         // Assert
         context.Response.StatusCode.Value.ShouldBe(302);
         string? location = context.Response.Headers.GetValue(HttpHeaderKey.Location);
         location.ShouldNotBeNull();
-        location!.ShouldStartWith(options.LoginPath);
-        location.ShouldContain("ReturnUrl=");
-        location.ShouldContain(Uri.EscapeDataString("/secure/data"));
+        location.ShouldBe($"{options.LoginPath}?{options.ReturnUrlParameter}={Uri.EscapeDataString("/secure/data")}");
+        context.Response.Body.Length.ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Challenge should carry the request path percent-encoded in the return URL")]
@@ -354,11 +354,12 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
         IAuthenticationSignInHandler handler = await InitializeAsync(options, context);
 
         // Act
-        await handler.ChallengeAsync(properties: null);
+        await handler.ChallengeAsync(properties: null, CancellationToken.None);
 
         // Assert
         context.Response.StatusCode.Value.ShouldBe(401);
         context.Response.Headers.GetValue(HttpHeaderKey.Location).ShouldBeNull();
+        context.Response.Body.Length.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Forbid on an API endpoint returns 403 without redirect")]
@@ -371,11 +372,12 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
         IAuthenticationSignInHandler handler = await InitializeAsync(options, context);
 
         // Act
-        await handler.ForbidAsync(properties: null);
+        await handler.ForbidAsync(properties: null, CancellationToken.None);
 
         // Assert
         context.Response.StatusCode.Value.ShouldBe(403);
         context.Response.Headers.GetValue(HttpHeaderKey.Location).ShouldBeNull();
+        context.Response.Body.Length.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Forbid on a browser endpoint redirects to access denied")]
@@ -384,14 +386,17 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
         // Arrange
         CookieAuthenticationOptions options = CreateOptions();
         TestHttpContext context = TestHttpContext.Create("/secure/data");
+        context.SetEndpointMetadata();
         IAuthenticationSignInHandler handler = await InitializeAsync(options, context);
 
         // Act
-        await handler.ForbidAsync(properties: null);
+        await handler.ForbidAsync(properties: null, CancellationToken.None);
 
         // Assert
         context.Response.StatusCode.Value.ShouldBe(302);
-        context.Response.Headers.GetValue(HttpHeaderKey.Location)!.ShouldStartWith(options.AccessDeniedPath);
+        context.Response.Headers.GetValue(HttpHeaderKey.Location).ShouldBe(
+            $"{options.AccessDeniedPath}?{options.ReturnUrlParameter}={Uri.EscapeDataString("/secure/data")}");
+        context.Response.Body.Length.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - SignOut deletes the cookie")]

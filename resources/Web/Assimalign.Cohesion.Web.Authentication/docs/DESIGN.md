@@ -184,14 +184,13 @@ a challenge reuses one initialized instance.
 which holds only `context.User`. This mirrors ASP.NET Core's
 `IAuthenticateResultFeature`.
 
-**`IApiEndpointMetadata` is the redirect-vs-status seam.** A cookie
+**`ApiEndpointMetadata` is the redirect-vs-status marker.** A cookie
 challenge on a browser endpoint redirects to a login page; on an API
 endpoint it must emit a bare `401`. The decision keys on the endpoint
-metadata marker `IApiEndpointMetadata` (mirroring the .NET 10 cookie
-handler), resolved reflection-free through the #150 metadata bag surfaced
-by `Web.Routing`. The marker is defined here (an empty interface) but read
-only by the cookie handler; the bearer handler is always an API scheme and
-needs no check.
+sealed metadata marker `ApiEndpointMetadata`, resolved reflection-free through the #150
+metadata bag surfaced by `Web.Routing`. Attach `ApiEndpointMetadata.Instance` to the
+endpoint. The marker carries no data and needs no interface; only the cookie handler reads
+it, while the bearer handler is always an API scheme and needs no check.
 
 **Builder-time registration lives with the model, not in `*.Hosting`.**
 (Revised 2026-07-10 with the Web-area dependency rule — the original #790
@@ -328,3 +327,14 @@ The static entry point shipped in 10.0.0-preview.1. Existing calls keep the same
 remain source-compatible; assigning the returned value to `IAuthenticationService` still works.
 The concrete return type changes the CLR method signature, so this is binary-breaking and
 consumers must rebuild. The break is accepted during previews on decision 15's terms.
+
+## API endpoint marker and preview.1 compatibility (#1466)
+
+Owner decision 59 removes the empty `IApiEndpointMetadata` interface that shipped in
+10.0.0-preview.1. The sealed `ApiEndpointMetadata` type and its shared `Instance` remain.
+This is source- and binary-breaking for consumers of the removed interface, accepted during
+previews on decision 15's terms. Replace custom marker implementations and interface lookups
+with `ApiEndpointMetadata.Instance` and `GetEndpointMetadata<ApiEndpointMetadata>()`,
+then rebuild. Existing endpoint declarations attaching `ApiEndpointMetadata.Instance`
+keep their spelling and behavior: Cookie sends bare 401/403 for a marked endpoint and redirects
+an unmarked endpoint.

@@ -87,20 +87,27 @@ internal sealed class TestHttpContext : HttpContext
 
     /// <summary>Marks the context's matched endpoint as an API endpoint (suppresses redirects).</summary>
     public void MarkApiEndpoint()
-        => Features.Set<IRouteMatchFeature>(new TestApiRouteMatchFeature());
+        => SetEndpointMetadata(ApiEndpointMetadata.Instance);
+
+    /// <summary>Supplies a matched endpoint with the given metadata, including an unmarked endpoint.</summary>
+    public void SetEndpointMetadata(params object[] metadata)
+        => Features.Set<IRouteMatchFeature>(new TestRouteMatchFeature(metadata));
 }
 
 /// <summary>
-/// A minimal route-match feature carrying the <see cref="ApiEndpointMetadata"/> marker so the
-/// cookie handler's endpoint-metadata check resolves to "API endpoint".
+/// A minimal route-match feature that exposes the supplied endpoint metadata.
 /// </summary>
-internal sealed class TestApiRouteMatchFeature : IRouteMatchFeature
+internal sealed class TestRouteMatchFeature : IRouteMatchFeature
 {
+    public TestRouteMatchFeature(object[] metadata)
+    {
+        Metadata = new RouterRouteMetadataCollection(metadata);
+    }
+
     public string Name => nameof(IRouteMatchFeature);
     public IRouterRoute? Route => null;
     public RouteValueDictionary? Values => null;
-    public IRouterRouteMetadataCollection Metadata { get; } =
-        new RouterRouteMetadataCollection(ApiEndpointMetadata.Instance);
+    public IRouterRouteMetadataCollection Metadata { get; }
 }
 
 /// <summary>

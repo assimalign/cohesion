@@ -317,7 +317,7 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     }
 
     private bool IsApiEndpoint()
-        => _context.GetEndpointMetadata<IApiEndpointMetadata>() is not null;
+        => _context.GetEndpointMetadata<ApiEndpointMetadata>() is not null;
 
     // The return URL is a URL: the login page redirects to it, so the path is written percent-encoded, as the
     // request carried it. The transports hand the path over decoded, and "/café" or "/100%" in a Location is not
