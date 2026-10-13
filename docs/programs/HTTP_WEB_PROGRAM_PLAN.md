@@ -399,7 +399,7 @@ The issue list:
 
 ### Stage 14 — Performance, operations and DX
 
-**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation. Decisions 57 and 58, from the review, added sessions 20–22, delivered on 2026-10-13; the review resumes with them included.
+**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation. Decisions 57 and 58, from the review, added sessions 20–22, delivered on 2026-10-13. The owner answered the review on 2026-10-13 (decision 59) and paused further stages for the PR #1094 cleanup (#1463).
 - Sessions run in the Codex CLI on Astra 6 at ultra effort, as in Stage 13. A pipeline script drives each session's implement, review, verify and fix runs in its own worktree.
 - Sessions in one row edit the same files, so each runs as one serial session; the rows of a wave run in parallel.
 - Wave 2 needs wave 1 integrated:
@@ -1562,6 +1562,20 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
       - replacing `EndPoints` with the connection collection, which is empty when the server reports its bind.
     - **Settles Stage 14's `ServerBound` question.** The server reads the listener's `EndPoints`, and Web.Hosting's endpoint capture is deleted.
     - **Breaking.** Every Connections package shipped in preview.1, so the new hierarchy is a breaking change on decision 15's terms.
+59. **Stage 14's review answered; no further stages until PR #1094 is cleaned up (owner, 2026-10-13; #1463).**
+    - **The review's questions:**
+      - Every public addition is approved: the seams sessions reported, `IWebResponseClientFaultFeature`, and decision 58's base classes.
+      - Advisories keep listing only library packages.
+      - #1454 is approved and follows the cleanup.
+      - Http work keeps landing as tasks under features (#314's sub-issue cap).
+    - **The cleanup (#1463):**
+      - #1464: `HttpAntiforgery` becomes the public implementation, replacing a static factory over an internal class (PR comment).
+      - #1465: the same shape for the other static factory classes over hidden implementations, on a list the owner signs off.
+      - #1466: no empty `IApiEndpointMetadata`.
+      - #1467: exception messages move into .resx files.
+      - #1468: where reusable throw members live, starting with FileSystem's (PR comment).
+      - #1469: analyzer projects by area.
+    - **Analyzer placement (owner rule).** Analyzers for `libraries/Core` go into `Assimalign.Cohesion.SourceGeneration` or `Assimalign.Cohesion.CodeFixes`. Analyzers for `libraries/<Area>` and `resources/<Area>` go into `Assimalign.Cohesion.SourceGeneration.<Area>` or `Assimalign.Cohesion.CodeFixes.<Area>`.
 
 ### 7.5 Lineup
 
