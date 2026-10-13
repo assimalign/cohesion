@@ -1174,6 +1174,11 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
       - Each session: the Web NativeAOT guard for win-arm64, with 37/37 smoke checks and only the 11 IL warnings from Configuration and DependencyInjection (#1220, #1177), which CI already shows.
       - Database.Testing and the SDK package tests need packed SDKs and run only in CI.
     - **Measured:** tracking a listener's live connections costs 103 bytes per accepted TCP connection (+1.2%).
+  - **CI repair (session 23, 2026-10-13).** Stage 14 was recorded as verified on local runs, while four workflows were already red on the branch. This win-arm64 machine has msquic and runs no package-only consumers, so none of the four could fail locally.
+    - #1460 `ddc10b6b`: real-QUIC tests failed on Linux runners without msquic instead of skipping. #1452 added one such test and #1459 nine more. They now skip at discovery (`QuicFact`, `QuicTheory`).
+    - #1461 `b21d3199`: the SDK Smoke and Templates feeds lacked `Connections.Tls`, `.StreamAbort` and `.StreamLimits`. All four feed lists now carry them.
+    - #1462 `45ca3055`, `617f4905`: #1389's allocation test measured 160 B on x64 because the JIT placed the test's own setup allocation inside the measured window. The setup moved into a non-inlined factory, and the product was never at fault. Five runs on each architecture measure 32 B.
+    - Stage verification now reads every workflow for the final commit, and allocation tests also run under `--arch x64`.
 
   Behavior changes for the review (decision 15's terms):
   - **Client faults:**
