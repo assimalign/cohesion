@@ -98,9 +98,10 @@ registration order: every `IHostService` registration (the application services)
 every `IWebApplicationServer` registration (the servers). Because the phases are distinct
 service types, registration order across them is irrelevant, so the default server
 (registered when the builder is constructed) never precedes a later `AddService` call.
-`WebApplicationContext.HostedServices` concatenates the two snapshots, adapting each
-server that is not itself an `IHostService` exactly once. The Web host rejects concurrent
-service start or stop, so every application service starts before any Web server and
+`WebApplicationContext.HostedServices` concatenates the two snapshots, wrapping each
+server exactly once in `WebApplicationServerHostService`, including servers that implement
+`IHostService`. The Web host rejects concurrent service start or stop, so every application
+service starts before any Web server and
 reverse shutdown drains every server before stopping application services. Before this
 registry held everything, `AddService` kept a private list beside the DI-owned server
 slot to get the same guarantee.
@@ -139,9 +140,11 @@ transport exception inside; custom servers' errors and cancellation pass through
 It implements neither disposal interface and never disposes its server. Factory registrations
 remain owned by the provider, while instance registrations remain borrowed.
 
-`WebApplicationContext` creates one wrapper for every server that is not already an
-`IHostService`, once when resolving the server phase. `Servers` still contains original
-objects. Both `WebApplicationServerBuilder.UseServer<TServer>` overloads accept any
+`WebApplicationContext` creates one wrapper for every server, once when resolving the
+server phase. A server that also implements `IHostService` still goes through the wrapper,
+so start and stop always dispatch through `IWebApplicationServer`, even when the server
+implements the two interfaces separately. `Servers` still contains original objects. Both
+`WebApplicationServerBuilder.UseServer<TServer>` overloads accept any
 `IWebApplicationServer`; the `IHostService` constraint is removed. The inert default placeholder
 still disappears from both snapshots when no default listener was configured.
 
@@ -152,6 +155,13 @@ Application services still start before servers and stop after their drain.
 
 **Compatibility with 10.0.0-preview.1 (decision 15).** Making the engine/options and wrapper public
 is additive; relaxing `UseServer` accepts more implementations. No shipped public type is moved.
+
+**Breaking lifecycle behavior:** preview.1 bypassed the adapter for a server implementing
+`IHostService`, invoking that interface's start and stop methods. Every server registration now
+uses `IWebApplicationServer.StartAsync` and `StopAsync` through its own wrapper and service id.
+Custom servers with separate interface implementations must put server lifecycle behavior on
+`IWebApplicationServer`; instance/factory disposal ownership is unchanged.
+
 The server EventSource, Meter and ActivitySource now use `Assimalign.Cohesion.Web.Server`;
 none of these names shipped in preview.1. Configuration callbacks now see the hosting defaults
 and application feature count; the server adds its own hooks and capacity afterward. Clearing

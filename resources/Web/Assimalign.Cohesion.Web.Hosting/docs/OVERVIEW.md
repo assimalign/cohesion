@@ -26,6 +26,12 @@ reports lifecycle and failures, with `serverId` identifying each server in the p
 request content in its payloads. See [Diagnostics](DESIGN.md#diagnostics). Disposing the application
 disposes the service provider and every factory-created service.
 
+Every server registration uses a non-owning `WebApplicationServerHostService` wrapper, including
+servers that also implement `IHostService`. Custom servers must implement their server startup
+and shutdown on `IWebApplicationServer`; a separate `IHostService` implementation is no longer
+used for the server phase. This is a behavioral break from 10.0.0-preview.1. Instance registrations
+remain caller-owned, and factory registrations remain provider-owned.
+
 The control-plane middleware registers its retained bootstrap verification handle directly with
 WebApplicationContext's internal disposal owner (#1412, decision 57). Final application disposal
 releases registered resources after the service provider, in reverse registration order;

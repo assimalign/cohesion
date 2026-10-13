@@ -310,7 +310,8 @@ stored accept-loop task and return. A direct server reports and propagates the o
 transport exception. In the hosted path, `WebApplicationServerHostService` wraps a default
 server's bind failure in `HostStartupException`, retaining the original inner exception for
 host startup classification. The wrapper has its own service id and does not own or dispose
-the server. `WebApplicationContext` wraps every server that is not already an `IHostService`.
+the server. `WebApplicationContext` wraps every server, including one that also implements
+`IHostService`, and always invokes its `IWebApplicationServer` lifecycle methods.
 See [hosting lifecycle composition](../../Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#application-lifecycle-composition)
 for registration, ordering and inactive default servers.
 

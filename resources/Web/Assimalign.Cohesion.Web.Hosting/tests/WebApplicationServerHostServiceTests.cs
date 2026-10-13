@@ -76,6 +76,41 @@ public class WebApplicationServerHostServiceTests
         server.DisposeCount.ShouldBe(useFactory ? 1 : 0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - UseServer: Wraps dual-interface servers and invokes their Web lifecycle")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UseServer_WithDualInterfaceServer_ShouldInvokeWebLifecycleThroughWrapper(bool useFactory)
+    {
+        // Arrange
+        DualInterfaceServer server = new();
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        if (useFactory)
+        {
+            builder.Server.UseServer(_ => server);
+        }
+        else
+        {
+            builder.Server.UseServer(server);
+        }
+        await using WebApplication application = builder.Build();
+
+        // Act
+        await ((IWebApplication)application).StartAsync(CancellationToken.None);
+        IHostService hostedService = application.Context.HostedServices.Single();
+        await ((IWebApplication)application).StopAsync(CancellationToken.None);
+        await ((IAsyncDisposable)application).DisposeAsync();
+
+        // Assert
+        server.WebStartCount.ShouldBe(1);
+        server.WebStopCount.ShouldBe(1);
+        server.HostStartCount.ShouldBe(0);
+        server.HostStopCount.ShouldBe(0);
+        hostedService.ShouldBeOfType<WebApplicationServerHostService>().Server.ShouldBeSameAs(server);
+        application.Context.HostedServices.Single().ShouldBeSameAs(hostedService);
+        application.Context.Servers.Single().ShouldBeSameAs(server);
+        server.DisposeCount.ShouldBe(useFactory ? 1 : 0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server wrapper: Preserves a custom server failure")]
     public async Task StartAsync_WithCustomFailure_ShouldPreserveException()
     {
@@ -90,6 +125,42 @@ public class WebApplicationServerHostServiceTests
 
         // Assert
         actual.ShouldBeSameAs(failure);
+    }
+
+    private sealed class DualInterfaceServer : IWebApplicationServer, IHostService, IDisposable
+    {
+        public ServiceId Id { get; } = ServiceId.New();
+        public int WebStartCount { get; private set; }
+        public int WebStopCount { get; private set; }
+        public int HostStartCount { get; private set; }
+        public int HostStopCount { get; private set; }
+        public int DisposeCount { get; private set; }
+
+        Task IWebApplicationServer.StartAsync(CancellationToken cancellationToken)
+        {
+            WebStartCount++;
+            return Task.CompletedTask;
+        }
+
+        Task IWebApplicationServer.StopAsync(CancellationToken cancellationToken)
+        {
+            WebStopCount++;
+            return Task.CompletedTask;
+        }
+
+        Task IHostService.StartAsync(CancellationToken cancellationToken)
+        {
+            HostStartCount++;
+            return Task.CompletedTask;
+        }
+
+        Task IHostService.StopAsync(CancellationToken cancellationToken)
+        {
+            HostStopCount++;
+            return Task.CompletedTask;
+        }
+
+        public void Dispose() => DisposeCount++;
     }
 
     private sealed class RecordingServer : IWebApplicationServer, IDisposable
