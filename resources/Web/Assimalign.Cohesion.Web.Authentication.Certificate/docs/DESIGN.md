@@ -4,8 +4,8 @@
 
 Turn a validated TLS client certificate into the `ClaimsPrincipal` used by Web authentication and
 authorization. Owner decision 31 places the scheme in its own package, alongside Cookie and Bearer.
-`IAuthenticationHandler` remains the public contract; `CertificateAuthenticationHandler` is internal
-and `CertificateAuthenticationHandler.Create` provides the container-free factory.
+`IAuthenticationHandler` remains the public contract; `CertificateAuthenticationHandler` is public and sealed
+with a private constructor. `CertificateAuthenticationHandler.Create(options)` provides the container-free factory.
 
 The package references the scheme model, TLS feature and Web.Server for its request-id contract.
 Web.Server also carries the server engine and Http.Connections in the package closure, with no
