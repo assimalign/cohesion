@@ -348,7 +348,7 @@ internal static class HttpServerConfiguration
         if (maxConcurrentConnections <= 0)
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredConnectionCountMustBePositive, path, maxConcurrentConnections));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredConnectionCountInvalid, path, maxConcurrentConnections));
         }
 
         limitConcurrentConnections?.Invoke(maxConcurrentConnections);
@@ -419,7 +419,7 @@ internal static class HttpServerConfiguration
             && ParseClientCertificateMode(endpoint, endpointName) is not ClientCertificateMode.NoCertificate)
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientCertificateRequiresTls, endpointName));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientCertificateTlsRequired, endpointName));
         }
 
         switch (protocol)
@@ -463,7 +463,7 @@ internal static class HttpServerConfiguration
                 }
 
                 throw new PlatformNotSupportedException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequiresQuic, endpointName));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3QuicRequired, endpointName));
         }
 
         return protocol;

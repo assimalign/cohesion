@@ -122,7 +122,7 @@ internal sealed class CookiePolicyRules
         if (options.ConsentCookie.MaxAge is TimeSpan maxAge && maxAge <= TimeSpan.Zero)
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConsentCookieMaxAgeMustBePositive, maxAge),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConsentCookieMaxAgeInvalid, maxAge),
                 paramName);
         }
 

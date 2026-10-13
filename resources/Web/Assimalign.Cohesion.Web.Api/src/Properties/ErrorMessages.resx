@@ -117,10 +117,10 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="DescribedContentTypeMustBeConcrete" xml:space="preserve">
+  <data name="DescribedContentTypeInvalid" xml:space="preserve">
     <value>A described content type must be a concrete (wildcard-free) media type.</value>
   </data>
-  <data name="EndpointTagMustNotBeBlank" xml:space="preserve">
+  <data name="EndpointTagInvalid" xml:space="preserve">
     <value>Tags must not be null, empty, or whitespace.</value>
   </data>
   <data name="EndpointTagsRequired" xml:space="preserve">
@@ -132,7 +132,7 @@
   <data name="StatusCodeOutOfRange" xml:space="preserve">
     <value>The status code must be between 100 and 599.</value>
   </data>
-  <data name="TypedEndpointRequiresSourceGenerator" xml:space="preserve">
+  <data name="EndpointSourceGeneratorMissing" xml:space="preserve">
     <value>This typed endpoint overload is a placeholder that the Cohesion Web source generator (Assimalign.Cohesion.SourceGeneration.Web) rewrites at the call site. Reaching it at run time means the generator did not intercept the call: reference the generator with &lt;CohesionAnalyzerReference Include=&quot;Assimalign.Cohesion.SourceGeneration.Web&quot; /&gt; and allow-list its generated namespace with &lt;InterceptorsNamespaces&gt;$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated&lt;/InterceptorsNamespaces&gt;.</value>
   </data>
   <data name="UndefinedEndpointParameterSource" xml:space="preserve">

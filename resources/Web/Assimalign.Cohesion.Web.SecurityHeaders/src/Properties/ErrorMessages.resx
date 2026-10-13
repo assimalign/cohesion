@@ -120,13 +120,13 @@
   <data name="ContentSecurityPolicyDigestInvalid" xml:space="preserve">
     <value>&apos;{0}&apos; is not a base64 digest (ALPHA / DIGIT / &apos;+&apos; / &apos;/&apos; / &apos;-&apos; / &apos;_&apos;, up to two &apos;=&apos; of padding).</value>
   </data>
-  <data name="ContentSecurityPolicyDirectiveNameInvalid" xml:space="preserve">
+  <data name="CspDirectiveNameInvalid" xml:space="preserve">
     <value>&apos;{0}&apos; is not a CSP directive name (letters, digits and &apos;-&apos;).</value>
   </data>
   <data name="ContentSecurityPolicyDirectiveRequired" xml:space="preserve">
     <value>A Content Security Policy needs at least one directive.</value>
   </data>
-  <data name="ContentSecurityPolicyDirectiveValueInvalid" xml:space="preserve">
+  <data name="CspDirectiveValueInvalid" xml:space="preserve">
     <value>The value of {0} contains a character the CSP directive-value grammar excludes (&apos;,&apos;, &apos;;&apos;, a control character, or non-ASCII).</value>
   </data>
   <data name="ContentSecurityPolicyHostSourceInvalid" xml:space="preserve">
@@ -135,7 +135,7 @@
   <data name="ContentSecurityPolicyNonceInvalid" xml:space="preserve">
     <value>The Content Security Policy nonce supplied by the installed ISecurityHeadersFeature is not a CSP base64-value (ALPHA / DIGIT / &apos;+&apos; / &apos;/&apos; / &apos;-&apos; / &apos;_&apos;, up to two &apos;=&apos; of padding), so it cannot be written into a header.</value>
   </data>
-  <data name="ContentSecurityPolicyNoneMustBeAlone" xml:space="preserve">
+  <data name="ContentSecurityPolicyNoneConflict" xml:space="preserve">
     <value>The {0} source list combines &apos;none&apos; with other sources, and user agents ignore &apos;none&apos; beside them. Use None() alone, or remove it.</value>
   </data>
   <data name="ContentSecurityPolicySchemeInvalid" xml:space="preserve">
@@ -180,7 +180,7 @@
   <data name="SecurityHeadersEnumValueUndefined" xml:space="preserve">
     <value>&apos;{0}&apos; is not a defined {1} value.</value>
   </data>
-  <data name="SecurityHeadersResponseStartingFeatureRequired" xml:space="preserve">
+  <data name="ResponseStartingFeatureRequired" xml:space="preserve">
     <value>UseSecurityHeaders requires IWebResponseStartingFeature. Use the default Web.Hosting server or implement the response-starting feature in the custom server.</value>
   </data>
 </root>

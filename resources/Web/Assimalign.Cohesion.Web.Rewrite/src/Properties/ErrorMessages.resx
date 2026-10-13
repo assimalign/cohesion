@@ -120,7 +120,7 @@
   <data name="AbsoluteRewriteTargetNotAllowed" xml:space="preserve">
     <value>The rewrite target &apos;{0}&apos; is an absolute URL. A rewrite changes the path and query of the request; only a redirect can send the client to another origin.</value>
   </data>
-  <data name="DomainMustNotBeBlank" xml:space="preserve">
+  <data name="DomainInvalid" xml:space="preserve">
     <value>A domain cannot be null, empty or white space.</value>
   </data>
   <data name="RedirectLocationInvalid" xml:space="preserve">
@@ -141,7 +141,7 @@
   <data name="RewriteCaptureGroupNumberUndefined" xml:space="preserve">
     <value>The target &apos;{0}&apos; references capture group {1}, which the pattern &apos;{2}&apos; does not define. Use &apos;$$&apos; for a literal &apos;$&apos;.</value>
   </data>
-  <data name="RewriteCaptureRequiresPattern" xml:space="preserve">
+  <data name="RewriteCapturePatternRequired" xml:space="preserve">
     <value>The target &apos;{0}&apos; substitutes a capture group, but the rule has no pattern to capture one. Use &apos;$$&apos; for a literal &apos;$&apos;.</value>
   </data>
   <data name="RewriteExchangeAlreadyEnded" xml:space="preserve">

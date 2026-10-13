@@ -114,7 +114,7 @@ public sealed class WebApplicationServerBuilder
             throw new ArgumentOutOfRangeException(
                 nameof(maxConcurrentConnections),
                 maxConcurrentConnections,
-                ErrorMessages.ConcurrentConnectionCountMustBePositive);
+                ErrorMessages.ConcurrentConnectionCountInvalid);
         }
 
         _maxConcurrentConnections = maxConcurrentConnections;
@@ -192,7 +192,7 @@ public sealed class WebApplicationServerBuilder
             TServer server = factory.Invoke(serviceProvider);
 
             return server is null
-                ? throw new InvalidOperationException(ErrorMessages.ApplicationServerFactoryReturnedNull)
+                ? throw new InvalidOperationException(ErrorMessages.ApplicationServerFactoryResultNull)
                 : server;
         });
 

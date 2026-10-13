@@ -1196,7 +1196,10 @@ security/CORS fields now stage at commit, including error responses caught by an
 Custom servers must publish and drive the contract for middleware that requires it. The server always installs its response-starting interceptor, including when the caller supplies
 no listener interceptors. Web.Server is already an App.Web member and the Hosting closure gains no assembly.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

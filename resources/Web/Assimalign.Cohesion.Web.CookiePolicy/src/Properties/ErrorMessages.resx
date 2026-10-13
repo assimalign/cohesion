@@ -120,7 +120,7 @@
   <data name="ConsentCookieExpiresNotSupported" xml:space="preserve">
     <value>The consent cookie must not set Expires: one fixed date would be stamped on every grant. Set its lifetime with Max-Age.</value>
   </data>
-  <data name="ConsentCookieMaxAgeMustBePositive" xml:space="preserve">
+  <data name="ConsentCookieMaxAgeInvalid" xml:space="preserve">
     <value>The consent cookie&apos;s Max-Age must be positive when set; got {0}. A zero or negative Max-Age would delete the consent it records.</value>
   </data>
   <data name="ConsentCookieNameOrValueInvalid" xml:space="preserve">

@@ -38,7 +38,7 @@ public static class WebApplicationExtensions
                     if (resourceContext.GatewayName is not null)
                     {
                         throw new InvalidOperationException(
-                            ErrorMessages.ManagedControlPlaneRequiresHostingContext);
+                            ErrorMessages.ControlPlaneHostingContextRequired);
                     }
                     return context => ResourceControlPlaneMiddleware.InvokeAsync(
                         controlPlane, resourceContext, isApplicationReady(), controlPlanePort, context, next);

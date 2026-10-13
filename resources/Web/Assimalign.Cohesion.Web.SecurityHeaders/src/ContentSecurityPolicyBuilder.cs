@@ -265,7 +265,7 @@ public sealed class ContentSecurityPolicyBuilder
 
         if (!SecurityHeadersGrammar.IsDirectiveName(name))
         {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyDirectiveNameInvalid, name), nameof(name));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CspDirectiveNameInvalid, name), nameof(name));
         }
 
         string normalized = name.ToLowerInvariant();
@@ -280,7 +280,7 @@ public sealed class ContentSecurityPolicyBuilder
         if (!SecurityHeadersGrammar.IsDirectiveValue(trimmed))
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyDirectiveValueInvalid, normalized),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CspDirectiveValueInvalid, normalized),
                 nameof(value));
         }
 

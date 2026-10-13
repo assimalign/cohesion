@@ -120,7 +120,7 @@
   <data name="ResponseCompletionCallbacksFailed" xml:space="preserve">
     <value>One or more response completion callbacks failed.</value>
   </data>
-  <data name="ServerConnectionCountMustBePositive" xml:space="preserve">
+  <data name="ServerConnectionCountInvalid" xml:space="preserve">
     <value>The maximum concurrent connection count, when set, must be greater than zero.</value>
   </data>
   <data name="ServerDrainBudgetExceeded" xml:space="preserve">

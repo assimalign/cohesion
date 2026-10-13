@@ -123,10 +123,10 @@
   <data name="InvalidPlannedVolumesOrServices" xml:space="preserve">
     <value>Web resource &apos;{0}&apos; must produce no volumes and exactly one service per endpoint.</value>
   </data>
-  <data name="PlannedServiceHasNoEndpoint" xml:space="preserve">
+  <data name="PlannedServiceEndpointMissing" xml:space="preserve">
     <value>Web resource &apos;{0}&apos; produced a non-endpoint service &apos;{1}&apos;.</value>
   </data>
-  <data name="PlannedWorkloadMustBeStateless" xml:space="preserve">
+  <data name="PlannedWorkloadNotStateless" xml:space="preserve">
     <value>Web resource &apos;{0}&apos; did not produce a stateless Deployment workload.</value>
   </data>
   <data name="PlanningContextResourceMismatch" xml:space="preserve">

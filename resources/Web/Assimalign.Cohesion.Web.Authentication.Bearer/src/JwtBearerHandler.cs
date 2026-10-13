@@ -21,14 +21,14 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// </summary>
 public sealed class JwtBearerHandler : IAuthenticationHandler
 {
-    private static readonly string _bearerCredentialHasNoTokenMessage = ErrorMessages.BearerCredentialHasNoToken;
+    private static readonly string _bearerCredentialTokenMissingMessage = ErrorMessages.BearerCredentialTokenMissing;
     private static readonly string _bearerTokenAudienceRejectedMessage = ErrorMessages.BearerTokenAudienceRejected;
     private static readonly string _bearerTokenIssuerRejectedMessage = ErrorMessages.BearerTokenIssuerRejected;
     private static readonly string _bearerTokenMalformedMessage = ErrorMessages.BearerTokenMalformed;
     private static readonly string _bearerTokenNotCompactJwsMessage = ErrorMessages.BearerTokenNotCompactJws;
     private static readonly string _bearerTokenSignatureEncodingInvalidMessage = ErrorMessages.BearerTokenSignatureEncodingInvalid;
     private static readonly string _bearerTokenSignatureInvalidMessage = ErrorMessages.BearerTokenSignatureInvalid;
-    private static readonly string _bearerTokenUsesUnsecuredAlgorithmMessage = ErrorMessages.BearerTokenUsesUnsecuredAlgorithm;
+    private static readonly string _bearerTokenAlgorithmUnsecuredMessage = ErrorMessages.BearerTokenAlgorithmUnsecured;
     private static readonly string _bearerTokenValidationFailedMessage = ErrorMessages.BearerTokenValidationFailed;
 
     private readonly JwtBearerOptions _options;
@@ -128,7 +128,7 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
 
         if (string.IsNullOrEmpty(token))
         {
-            return Reject("EmptyCredential", _bearerCredentialHasNoTokenMessage);
+            return Reject("EmptyCredential", _bearerCredentialTokenMissingMessage);
         }
 
         if (!JsonWebToken.TryParse(token, out JsonWebToken? jwt) || jwt is null)
@@ -200,7 +200,7 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
 
         if (string.Equals(algorithm, JoseAlgorithms.None, StringComparison.Ordinal))
         {
-            return Reject("UnsecuredAlgorithm", _bearerTokenUsesUnsecuredAlgorithmMessage, jwt);
+            return Reject("UnsecuredAlgorithm", _bearerTokenAlgorithmUnsecuredMessage, jwt);
         }
 
         byte[] signature;

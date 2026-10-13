@@ -228,19 +228,19 @@ internal static class CorsOrigin
 
         if (string.IsNullOrEmpty(value))
         {
-            error = ErrorMessages.OriginMustNotBeEmpty;
+            error = ErrorMessages.OriginRequired;
             return false;
         }
 
         if (value == "*")
         {
-            error = ErrorMessages.OriginWildcardRequiresAllowAny;
+            error = ErrorMessages.OriginWildcardOptionRequired;
             return false;
         }
 
         if (value.Equals(Opaque, StringComparison.OrdinalIgnoreCase))
         {
-            error = ErrorMessages.OpaqueOriginRequiresPredicate;
+            error = ErrorMessages.OpaqueOriginPredicateRequired;
             return false;
         }
 
@@ -248,7 +248,7 @@ internal static class CorsOrigin
         {
             if (character <= ' ' || character >= '\u007F')
             {
-                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginContainsInvalidCharacter, value);
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginCharacterInvalid, value);
                 return false;
             }
         }

@@ -117,16 +117,16 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AnyHeaderConflictsWithHeaders" xml:space="preserve">
+  <data name="AnyHeaderPolicyConflict" xml:space="preserve">
     <value>AllowAnyHeader() cannot be combined with WithHeaders: a policy that allows every header has no header to list.</value>
   </data>
-  <data name="AnyMethodConflictsWithMethods" xml:space="preserve">
+  <data name="AnyMethodPolicyConflict" xml:space="preserve">
     <value>AllowAnyMethod() cannot be combined with WithMethods: a policy that allows every method has no method to list.</value>
   </data>
-  <data name="AnyOriginConflictsWithCredentials" xml:space="preserve">
+  <data name="AnyOriginCredentialsConflict" xml:space="preserve">
     <value>AllowAnyOrigin() cannot be combined with AllowCredentials(). The Fetch standard forbids &apos;Access-Control-Allow-Origin: *&apos; on a response to a credentialed request, and echoing every origin instead would let any site read responses with the user&apos;s credentials. List the trusted origins with WithOrigins, or decide per origin with SetIsOriginAllowed.</value>
   </data>
-  <data name="AnyOriginConflictsWithOriginRestrictions" xml:space="preserve">
+  <data name="AnyOriginPolicyConflict" xml:space="preserve">
     <value>AllowAnyOrigin() cannot be combined with WithOrigins or SetIsOriginAllowed: a policy that allows every origin has no origin to restrict.</value>
   </data>
   <data name="CorsOriginRequired" xml:space="preserve">
@@ -144,22 +144,22 @@
   <data name="CorsTokenInvalid" xml:space="preserve">
     <value>&apos;{0}&apos; is not a {1}: it must be an RFC 9110 token.</value>
   </data>
-  <data name="CorsTokenMustNotBeEmpty" xml:space="preserve">
+  <data name="CorsTokenRequired" xml:space="preserve">
     <value>A {0} must not be null or empty.</value>
   </data>
-  <data name="CorsWildcardMustBeExplicitNames" xml:space="preserve">
+  <data name="CorsWildcardNotSupported" xml:space="preserve">
     <value>&apos;*&apos; is not a {0}. List the names explicitly.</value>
   </data>
-  <data name="CorsWildcardRequiresAllowAny" xml:space="preserve">
+  <data name="CorsWildcardOptionRequired" xml:space="preserve">
     <value>&apos;*&apos; is not a {0}. Call {1}() to allow every one.</value>
   </data>
   <data name="DefaultCorsPolicyAlreadyRegistered" xml:space="preserve">
     <value>A default CORS policy is already registered.</value>
   </data>
-  <data name="OpaqueOriginRequiresPredicate" xml:space="preserve">
+  <data name="OpaqueOriginPredicateRequired" xml:space="preserve">
     <value>The &apos;null&apos; origin cannot be allowed by value: sandboxed documents, local files and cross-origin redirects all send it, so allowing it would allow all of them. Call SetIsOriginAllowed to accept it deliberately.</value>
   </data>
-  <data name="OriginContainsInvalidCharacter" xml:space="preserve">
+  <data name="OriginCharacterInvalid" xml:space="preserve">
     <value>&apos;{0}&apos; is not an origin: it contains whitespace, a control character or a non-ASCII character. Write an internationalized host in its ASCII (punycode) form, which is what the browser sends.</value>
   </data>
   <data name="OriginHostInvalid" xml:space="preserve">
@@ -174,7 +174,7 @@
   <data name="OriginIpv6PortSeparatorRequired" xml:space="preserve">
     <value>&apos;{0}&apos; is not an origin: expected &apos;:port&apos; after the IPv6 address.</value>
   </data>
-  <data name="OriginMustNotBeEmpty" xml:space="preserve">
+  <data name="OriginRequired" xml:space="preserve">
     <value>An origin must not be empty.</value>
   </data>
   <data name="OriginPathQueryOrFragmentNotAllowed" xml:space="preserve">
@@ -198,7 +198,7 @@
   <data name="OriginWildcardNotSupported" xml:space="preserve">
     <value>&apos;{0}&apos; is not an origin: wildcards are not supported. Call SetIsOriginAllowed to match a pattern, or AllowAnyOrigin() to allow every origin.</value>
   </data>
-  <data name="OriginWildcardRequiresAllowAny" xml:space="preserve">
+  <data name="OriginWildcardOptionRequired" xml:space="preserve">
     <value>&apos;*&apos; is not an origin. Call AllowAnyOrigin() to allow every origin.</value>
   </data>
 </root>

@@ -80,7 +80,7 @@ internal sealed class ForwardedHeadersResolver
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ForwardLimit,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardLimitMustBePositive, nameof(ForwardedHeadersOptions.ForwardLimit)));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardLimitInvalid, nameof(ForwardedHeadersOptions.ForwardLimit)));
         }
 
         var proxies = new List<IPAddress>(options.KnownProxies.Count);
@@ -89,7 +89,7 @@ internal sealed class ForwardedHeadersResolver
             if (proxy is null)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.KnownProxyMustNotBeNull, nameof(ForwardedHeadersOptions.KnownProxies)), nameof(options));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.KnownProxyNull, nameof(ForwardedHeadersOptions.KnownProxies)), nameof(options));
             }
             proxies.Add(Normalize(proxy));
         }

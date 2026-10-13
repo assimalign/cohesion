@@ -239,13 +239,13 @@ public sealed class CorsPolicyBuilder
             if (_origins.Count > 0 || _originPredicate is not null)
             {
                 throw new InvalidOperationException(
-                    ErrorMessages.AnyOriginConflictsWithOriginRestrictions);
+                    ErrorMessages.AnyOriginPolicyConflict);
             }
 
             if (_supportsCredentials)
             {
                 throw new InvalidOperationException(
-                    ErrorMessages.AnyOriginConflictsWithCredentials);
+                    ErrorMessages.AnyOriginCredentialsConflict);
             }
         }
         else if (_origins.Count == 0 && _originPredicate is null)
@@ -257,13 +257,13 @@ public sealed class CorsPolicyBuilder
         if (_allowAnyMethod && _methods.Count > 0)
         {
             throw new InvalidOperationException(
-                ErrorMessages.AnyMethodConflictsWithMethods);
+                ErrorMessages.AnyMethodPolicyConflict);
         }
 
         if (_allowAnyHeader && _headers.Count > 0)
         {
             throw new InvalidOperationException(
-                ErrorMessages.AnyHeaderConflictsWithHeaders);
+                ErrorMessages.AnyHeaderPolicyConflict);
         }
 
         return new CorsPolicy(
@@ -283,15 +283,15 @@ public sealed class CorsPolicyBuilder
     {
         if (string.IsNullOrEmpty(value))
         {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenMustNotBeEmpty, kind), parameterName);
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenRequired, kind), parameterName);
         }
 
         if (value == "*")
         {
             throw new ArgumentException(
                 wildcardAlternative is null
-                    ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardMustBeExplicitNames, kind)
-                    : string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardRequiresAllowAny, kind, wildcardAlternative),
+                    ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardNotSupported, kind)
+                    : string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardOptionRequired, kind, wildcardAlternative),
                 parameterName);
         }
 

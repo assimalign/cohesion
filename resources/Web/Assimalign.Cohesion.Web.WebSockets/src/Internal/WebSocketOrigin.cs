@@ -44,20 +44,20 @@ internal static class WebSocketOrigin
     {
         if (string.IsNullOrEmpty(origin))
         {
-            throw new ArgumentException(ErrorMessages.AllowedOriginMustNotBeEmpty, nameof(WebSocketOptions.AllowedOrigins));
+            throw new ArgumentException(ErrorMessages.AllowedOriginRequired, nameof(WebSocketOptions.AllowedOrigins));
         }
 
         if (origin == "*")
         {
             throw new ArgumentException(
-                ErrorMessages.OriginWildcardRequiresAllowAny,
+                ErrorMessages.OriginWildcardOptionRequired,
                 nameof(WebSocketOptions.AllowedOrigins));
         }
 
         if (string.Equals(origin, Opaque, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                ErrorMessages.OpaqueOriginRequiresAllowAny,
+                ErrorMessages.OpaqueOriginOptionRequired,
                 nameof(WebSocketOptions.AllowedOrigins));
         }
 

@@ -126,22 +126,22 @@
   <data name="ExecutableEntryPointMissing" xml:space="preserve">
     <value>Assembly &apos;{0}&apos; has no executable entry point.</value>
   </data>
-  <data name="ProbeIntervalMustBePositive" xml:space="preserve">
+  <data name="ProbeIntervalInvalid" xml:space="preserve">
     <value>The probe interval must be greater than zero.</value>
   </data>
   <data name="ResourceEntryPointHostNotWeb" xml:space="preserve">
     <value>Resource entry point &apos;{0}&apos; built a non-Web host.</value>
   </data>
-  <data name="ResourceProgramExitedBeforeReady" xml:space="preserve">
+  <data name="ResourceProgramPrematureExit" xml:space="preserve">
     <value>The resource program exited before its Web control plane reported ready.</value>
   </data>
   <data name="ResourceProgramNotStarted" xml:space="preserve">
     <value>The resource Program has not started. Call StartAsync or CreateClient first.</value>
   </data>
-  <data name="ShutdownTimeoutMustBePositive" xml:space="preserve">
+  <data name="ShutdownTimeoutInvalid" xml:space="preserve">
     <value>The shutdown timeout must be greater than zero.</value>
   </data>
-  <data name="StartupTimeoutMustBePositive" xml:space="preserve">
+  <data name="StartupTimeoutInvalid" xml:space="preserve">
     <value>The startup timeout must be greater than zero.</value>
   </data>
   <data name="TestProtocolUnsupported" xml:space="preserve">

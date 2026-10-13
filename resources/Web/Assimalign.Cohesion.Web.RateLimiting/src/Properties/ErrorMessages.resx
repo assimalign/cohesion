@@ -117,7 +117,7 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="PermitCountMustBePositive" xml:space="preserve">
+  <data name="PermitCountInvalid" xml:space="preserve">
     <value>The permit count must be a positive integer.</value>
   </data>
   <data name="RateLimitingPolicyAlreadyRegistered" xml:space="preserve">

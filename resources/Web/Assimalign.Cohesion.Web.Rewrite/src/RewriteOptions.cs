@@ -540,7 +540,7 @@ public sealed class RewriteOptions
         {
             if (string.IsNullOrWhiteSpace(domains[i]))
             {
-                throw new ArgumentException(ErrorMessages.DomainMustNotBeBlank, nameof(domains));
+                throw new ArgumentException(ErrorMessages.DomainInvalid, nameof(domains));
             }
 
             copy[i] = domains[i].Trim();

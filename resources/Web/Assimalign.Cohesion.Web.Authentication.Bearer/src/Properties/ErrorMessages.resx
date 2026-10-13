@@ -117,7 +117,7 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="BearerCredentialHasNoToken" xml:space="preserve">
+  <data name="BearerCredentialTokenMissing" xml:space="preserve">
     <value>The Bearer credential carries no token.</value>
   </data>
   <data name="BearerTokenAudienceRejected" xml:space="preserve">
@@ -138,7 +138,7 @@
   <data name="BearerTokenSignatureInvalid" xml:space="preserve">
     <value>The bearer token signature could not be verified.</value>
   </data>
-  <data name="BearerTokenUsesUnsecuredAlgorithm" xml:space="preserve">
+  <data name="BearerTokenAlgorithmUnsecured" xml:space="preserve">
     <value>The bearer token uses the unsecured &apos;none&apos; algorithm.</value>
   </data>
   <data name="BearerTokenValidationFailed" xml:space="preserve">

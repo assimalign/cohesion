@@ -339,7 +339,10 @@ then rebuild. Existing endpoint declarations attaching `ApiEndpointMetadata.Inst
 keep their spelling and behavior: Cookie sends bare 401/403 for a marked endpoint and redirects
 an unmarked endpoint.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

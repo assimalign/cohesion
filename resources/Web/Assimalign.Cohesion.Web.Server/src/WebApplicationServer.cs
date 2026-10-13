@@ -158,7 +158,7 @@ public sealed class WebApplicationServer : IWebApplicationServer
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.MaxConcurrentConnections,
-                ErrorMessages.ServerConnectionCountMustBePositive);
+                ErrorMessages.ServerConnectionCountInvalid);
         }
 
         if (options.Listener.ExchangeFeatureCapacity > int.MaxValue - HostFeatureCount)

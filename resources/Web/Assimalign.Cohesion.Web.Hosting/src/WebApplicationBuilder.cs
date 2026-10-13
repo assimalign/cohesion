@@ -95,7 +95,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
-                ErrorMessages.ControlPlaneFactoryReturnedNull);
+                ErrorMessages.ControlPlaneFactoryResultNull);
             resourceContext = ResourceRuntime.Current;
             _resourceContext = resourceContext;
             options.Environment = resourceContext.EnvironmentName;
@@ -242,7 +242,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ArgumentNullException.ThrowIfNull(factory);
 
         Services.AddSingleton<IHostService>(_ => factory.Invoke(_context)
-            ?? throw new InvalidOperationException(ErrorMessages.ApplicationServiceFactoryReturnedNull));
+            ?? throw new InvalidOperationException(ErrorMessages.ApplicationServiceFactoryResultNull));
         return this;
     }
 
@@ -497,7 +497,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                 if (descriptor.Lifetime != ServiceLifetime.Singleton)
                 {
                     throw new InvalidOperationException(
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestFeatureMustBeSingleton, DescribeRegistration(descriptor, index), descriptor.Lifetime));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestFeatureLifetimeInvalid, DescribeRegistration(descriptor, index), descriptor.Lifetime));
                 }
 
                 if (IsDisposableImplementation(descriptor))
@@ -633,7 +633,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ArgumentNullException.ThrowIfNull(server);
 
         Services.AddSingleton<IWebApplicationServer>(_ => server.Invoke(_context)
-            ?? throw new InvalidOperationException(ErrorMessages.ApplicationServerFactoryReturnedNull));
+            ?? throw new InvalidOperationException(ErrorMessages.ApplicationServerFactoryResultNull));
         return this;
     }
 
@@ -660,7 +660,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ArgumentNullException.ThrowIfNull(configure);
 
         Services.AddSingleton<IHttpFeature>(_ => configure.Invoke(_context)
-            ?? throw new InvalidOperationException(ErrorMessages.ApplicationFeatureFactoryReturnedNull));
+            ?? throw new InvalidOperationException(ErrorMessages.ApplicationFeatureFactoryResultNull));
         return this;
     }
 }

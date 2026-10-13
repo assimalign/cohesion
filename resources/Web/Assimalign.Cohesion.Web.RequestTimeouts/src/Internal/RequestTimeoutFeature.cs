@@ -93,7 +93,7 @@ internal sealed class RequestTimeoutFeature : IRequestTimeoutFeature, IDisposabl
             throw new ArgumentOutOfRangeException(
                 nameof(timeout),
                 timeout,
-                ErrorMessages.RequestTimeoutMustBePositive);
+                ErrorMessages.RequestTimeoutInvalid);
         }
 
         // Match CancelAfter's range validation even when the timer has already fired.

@@ -53,7 +53,7 @@ public sealed class RouteHostMetadata
         {
             if (hosts[index] is null)
             {
-                throw new ArgumentException(ErrorMessages.HostPatternMustNotBeNull, nameof(hosts));
+                throw new ArgumentException(ErrorMessages.HostPatternNull, nameof(hosts));
             }
 
             _hosts[index] = RouteHostConstraint.Parse(hosts[index]);
@@ -78,7 +78,7 @@ public sealed class RouteHostMetadata
         {
             if (_hosts[index].Host.Length == 0)
             {
-                throw new ArgumentException(ErrorMessages.HostConstraintMustBeInitialized, nameof(hosts));
+                throw new ArgumentException(ErrorMessages.HostConstraintNotInitialized, nameof(hosts));
             }
         }
     }

@@ -254,7 +254,10 @@ request-feature correlation despite an unrelated ambient activity, payload priva
 shapes, throttled committed-head aborts with exact counts, disabled-listener lazy payload reads, and
 counter publication. Event assertions use request ids and counters use deltas.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

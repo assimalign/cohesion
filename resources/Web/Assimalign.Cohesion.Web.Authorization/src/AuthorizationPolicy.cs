@@ -66,7 +66,7 @@ public sealed class AuthorizationPolicy
         {
             if (copy[i] is null)
             {
-                throw new ArgumentException(ErrorMessages.AuthorizationRequirementMustNotBeNull, nameof(requirements));
+                throw new ArgumentException(ErrorMessages.AuthorizationRequirementNull, nameof(requirements));
             }
         }
 
@@ -172,7 +172,7 @@ public sealed class AuthorizationPolicy
             if (string.IsNullOrWhiteSpace(scheme))
             {
                 throw new ArgumentException(
-                    ErrorMessages.AuthenticationSchemeNameMustNotBeBlank,
+                    ErrorMessages.AuthenticationSchemeNameInvalid,
                     nameof(authenticationSchemes));
             }
 

@@ -117,16 +117,16 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="CacheBodySizeMustBePositive" xml:space="preserve">
+  <data name="CacheBodySizeInvalid" xml:space="preserve">
     <value>The maximum body size must be positive.</value>
   </data>
-  <data name="CacheDurationMustBePositive" xml:space="preserve">
+  <data name="CacheDurationInvalid" xml:space="preserve">
     <value>The cache duration must be positive.</value>
   </data>
-  <data name="CacheSizeLimitMustBePositive" xml:space="preserve">
+  <data name="CacheSizeLimitInvalid" xml:space="preserve">
     <value>The size limit must be positive.</value>
   </data>
-  <data name="CacheTimeToLiveMustBePositive" xml:space="preserve">
+  <data name="CacheTimeToLiveInvalid" xml:space="preserve">
     <value>The time-to-live must be positive.</value>
   </data>
   <data name="OutputCachePolicyAlreadyRegistered" xml:space="preserve">

@@ -117,10 +117,10 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="RequestTimeoutMustBePositive" xml:space="preserve">
+  <data name="RequestTimeoutInvalid" xml:space="preserve">
     <value>The request timeout must be a positive interval. Use Disable() to turn enforcement off.</value>
   </data>
-  <data name="RequestTimeoutPolicyMustBePositive" xml:space="preserve">
+  <data name="RequestTimeoutPolicyInvalid" xml:space="preserve">
     <value>The request timeout must be a positive interval. Use a null timeout to disable enforcement.</value>
   </data>
 </root>

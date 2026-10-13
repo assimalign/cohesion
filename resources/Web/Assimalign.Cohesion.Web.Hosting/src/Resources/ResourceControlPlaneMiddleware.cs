@@ -404,11 +404,11 @@ public static class ResourceControlPlaneMiddleware
             JsonElement root = document.RootElement;
             if (root.ValueKind is not JsonValueKind.Object)
             {
-                throw new JsonException(ErrorMessages.ResourceCommandMustBeObject);
+                throw new JsonException(ErrorMessages.ResourceCommandTypeInvalid);
             }
             if (root.TryGetProperty("payload", out JsonElement rawPayload) && rawPayload.ValueKind is not JsonValueKind.String)
             {
-                throw new JsonException(ErrorMessages.CommandPayloadMustBeBase64);
+                throw new JsonException(ErrorMessages.CommandPayloadEncodingInvalid);
             }
             byte[] payload = root.TryGetProperty("payload", out JsonElement payloadElement)
                 ? payloadElement.GetBytesFromBase64()

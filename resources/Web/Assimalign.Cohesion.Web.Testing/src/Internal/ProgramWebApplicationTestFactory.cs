@@ -50,21 +50,21 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.StartupTimeout,
-                ErrorMessages.StartupTimeoutMustBePositive);
+                ErrorMessages.StartupTimeoutInvalid);
         }
         if (options.ShutdownTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ShutdownTimeout,
-                ErrorMessages.ShutdownTimeoutMustBePositive);
+                ErrorMessages.ShutdownTimeoutInvalid);
         }
         if (options.ProbeInterval <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ProbeInterval,
-                ErrorMessages.ProbeIntervalMustBePositive);
+                ErrorMessages.ProbeIntervalInvalid);
         }
 
         _assembly = programType.Assembly;
@@ -287,7 +287,7 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
             {
                 await program.ConfigureAwait(false);
                 throw new InvalidOperationException(
-                    ErrorMessages.ResourceProgramExitedBeforeReady);
+                    ErrorMessages.ResourceProgramPrematureExit);
             }
 
             try

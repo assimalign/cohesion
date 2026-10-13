@@ -90,7 +90,7 @@ public static class HttpResponseSerializationExtensions
 
             if (contentType.IsEmpty || contentType.HasWildcard)
             {
-                throw new ArgumentException(ErrorMessages.ResponseContentTypeMustBeConcrete, nameof(contentType));
+                throw new ArgumentException(ErrorMessages.ResponseContentTypeInvalid, nameof(contentType));
             }
 
             IHttpContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(response.HttpContext);

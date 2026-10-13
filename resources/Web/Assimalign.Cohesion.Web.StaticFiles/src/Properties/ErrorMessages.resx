@@ -117,16 +117,16 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="ContentEndedBeforeDeclaredLength" xml:space="preserve">
+  <data name="ContentShorterThanDeclaredLength" xml:space="preserve">
     <value>The content ended before its declared length was fully written.</value>
   </data>
-  <data name="ContentEndedBeforeSelectedRange" xml:space="preserve">
+  <data name="ContentShorterThanSelectedRange" xml:space="preserve">
     <value>The content ended before the selected byte range was reached.</value>
   </data>
   <data name="DefaultDocumentNameInvalid" xml:space="preserve">
     <value>Default-document names must be bare file names: &apos;{0}&apos;.</value>
   </data>
-  <data name="EntityTagMustNotBeEmpty" xml:space="preserve">
+  <data name="EntityTagRequired" xml:space="preserve">
     <value>The entity-tag must not be empty.</value>
   </data>
   <data name="FallbackContentTypeRequired" xml:space="preserve">
@@ -141,7 +141,7 @@
   <data name="FileContentTypeInvalid" xml:space="preserve">
     <value>The content type must be a concrete media type, such as &apos;application/pdf&apos;: &apos;{0}&apos;.</value>
   </data>
-  <data name="FileStreamMustBeReadable" xml:space="preserve">
+  <data name="FileStreamNotReadable" xml:space="preserve">
     <value>The stream must be readable.</value>
   </data>
   <data name="StaticFilesCacheControlInvalid" xml:space="preserve">

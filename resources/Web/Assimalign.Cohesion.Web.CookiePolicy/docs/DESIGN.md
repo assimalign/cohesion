@@ -383,7 +383,10 @@ package; its DESIGN records the factory source and binary breaks against 10.0.0-
 decision 15's terms. This cleanup changes no Web.CookiePolicy API, consent or emission behavior,
 or shipped dependency. Advisory: not applicable: API shape.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

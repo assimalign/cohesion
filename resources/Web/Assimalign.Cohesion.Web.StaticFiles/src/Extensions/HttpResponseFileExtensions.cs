@@ -218,11 +218,11 @@ public static class HttpResponseFileExtensions
 
             if (!stream.CanRead)
             {
-                throw new ArgumentException(ErrorMessages.FileStreamMustBeReadable, nameof(stream));
+                throw new ArgumentException(ErrorMessages.FileStreamNotReadable, nameof(stream));
             }
             if (entityTag is { IsEmpty: true })
             {
-                throw new ArgumentException(ErrorMessages.EntityTagMustNotBeEmpty, nameof(entityTag));
+                throw new ArgumentException(ErrorMessages.EntityTagRequired, nameof(entityTag));
             }
 
             RepresentationMetadata representation = new()

@@ -83,7 +83,7 @@ public sealed class EndpointValidationOptions
         if (types.Count == 0)
         {
             throw new ArgumentException(
-                ErrorMessages.ValidatorHasNoProfiles,
+                ErrorMessages.ValidatorProfilesMissing,
                 nameof(validator));
         }
 

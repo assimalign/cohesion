@@ -108,7 +108,7 @@ public sealed class AuthenticationService : IAuthenticationService
         if (handler is not IAuthenticationSignInHandler signInHandler)
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationSchemeCannotSignIn, schemeName, nameof(IAuthenticationSignInHandler)));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.SchemeSignInNotSupported, schemeName, nameof(IAuthenticationSignInHandler)));
         }
 
         await signInHandler.SignInAsync(user, properties, cancellationToken).ConfigureAwait(false);
@@ -126,7 +126,7 @@ public sealed class AuthenticationService : IAuthenticationService
         if (handler is not IAuthenticationSignInHandler signInHandler)
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationSchemeCannotSignOut, schemeName, nameof(IAuthenticationSignInHandler)));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.SchemeSignOutNotSupported, schemeName, nameof(IAuthenticationSignInHandler)));
         }
 
         await signInHandler.SignOutAsync(properties, cancellationToken).ConfigureAwait(false);

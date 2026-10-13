@@ -62,7 +62,7 @@ public static class HstsExtensions
             if (options.MaxAge < TimeSpan.Zero)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HstsMaxAgeMustNotBeNegative, options.MaxAge),
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HstsMaxAgeInvalid, options.MaxAge),
                     nameof(configure));
             }
 

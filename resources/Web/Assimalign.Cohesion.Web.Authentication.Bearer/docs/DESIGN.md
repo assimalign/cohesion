@@ -188,7 +188,10 @@ previews on decision 15's terms. Migrate and rebuild:
 
 Authentication and cryptographic verification behavior are unchanged by this conversion.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

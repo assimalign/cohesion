@@ -123,19 +123,19 @@
   <data name="AbsoluteUriSchemeInvalid" xml:space="preserve">
     <value>An absolute URI requires the http or https scheme.</value>
   </data>
-  <data name="CatchAllParameterCannotBeOptional" xml:space="preserve">
+  <data name="OptionalCatchAllParameterNotSupported" xml:space="preserve">
     <value>The catch-all parameter &apos;{0}&apos; cannot be optional: a catch-all already matches when the rest of the path is empty. Remove the &apos;?&apos;.</value>
   </data>
-  <data name="CatchAllParameterMustBeLast" xml:space="preserve">
+  <data name="CatchAllParameterPositionInvalid" xml:space="preserve">
     <value>The catch-all parameter &apos;{0}&apos; must be the last segment of the template, but more segments follow it. Move the catch-all to the end, or remove the segments after it.</value>
   </data>
-  <data name="CatchAllParameterMustBeOnlyPart" xml:space="preserve">
+  <data name="CatchAllParameterSegmentInvalid" xml:space="preserve">
     <value>The segment &apos;{0}&apos; combines the catch-all parameter &apos;{1}&apos; with other text. A catch-all parameter must be the only content of its segment.</value>
   </data>
   <data name="ComplexRouteDelimiterRequired" xml:space="preserve">
     <value>Complex route segments must contain a literal or separator delimiter after parameter parts.</value>
   </data>
-  <data name="EndpointMetadataMustNotBeNull" xml:space="preserve">
+  <data name="EndpointMetadataNull" xml:space="preserve">
     <value>Endpoint metadata items must not be null.</value>
   </data>
   <data name="EndpointPolicyMiddlewareMissing" xml:space="preserve">
@@ -144,10 +144,10 @@
   <data name="GroupParameterPoliciesFrozen" xml:space="preserve">
     <value>The route group&apos;s parameter policies are frozen because a child route or nested group has already been registered, and child templates resolve their inline policies when they are mapped. Declare group-level parameter policies before mapping children so they apply to all child routes.</value>
   </data>
-  <data name="HostConstraintMustBeInitialized" xml:space="preserve">
+  <data name="HostConstraintNotInitialized" xml:space="preserve">
     <value>Host constraints must be created through RouteHostConstraint.Parse or TryParse; a default-initialized constraint matches nothing.</value>
   </data>
-  <data name="HostPatternMustNotBeNull" xml:space="preserve">
+  <data name="HostPatternNull" xml:space="preserve">
     <value>Host patterns must not be null.</value>
   </data>
   <data name="LengthPolicyArgumentInvalid" xml:space="preserve">
@@ -174,7 +174,7 @@
   <data name="MaximumPolicyArgumentInvalid" xml:space="preserve">
     <value>The &apos;max&apos; route parameter policy requires an integer argument, but was &apos;{0}&apos;.</value>
   </data>
-  <data name="MinimumExceedsMaximum" xml:space="preserve">
+  <data name="MinimumAboveMaximum" xml:space="preserve">
     <value>The minimum value must be less than or equal to the maximum value.</value>
   </data>
   <data name="MinimumLengthPolicyArgumentInvalid" xml:space="preserve">
@@ -189,16 +189,16 @@
   <data name="OptionalParameterDefaultNotAllowed" xml:space="preserve">
     <value>The parameter &apos;{0}&apos; is both optional (&apos;?&apos;) and has a default value (&apos;=&apos;). Use one or the other: a parameter with a default value can already be left out of the path.</value>
   </data>
-  <data name="OptionalParameterDirectlyFollowsPart" xml:space="preserve">
+  <data name="OptionalParameterDelimiterMissing" xml:space="preserve">
     <value>In the segment &apos;{0}&apos;, the optional parameter &apos;{1}&apos; directly follows &apos;{2}&apos;. {3}</value>
   </data>
-  <data name="OptionalParameterFollowsInvalidSeparator" xml:space="preserve">
+  <data name="OptionalParameterSeparatorInvalid" xml:space="preserve">
     <value>In the segment &apos;{0}&apos;, the optional parameter &apos;{1}&apos; follows &apos;{2}&apos;. {3}</value>
   </data>
-  <data name="OptionalParameterMustBeLastPart" xml:space="preserve">
+  <data name="OptionalParameterPositionInvalid" xml:space="preserve">
     <value>In the segment &apos;{0}&apos;, the optional parameter &apos;{1}&apos; is followed by &apos;{2}&apos;. An optional parameter must be the last part of its segment.</value>
   </data>
-  <data name="OptionalParameterRequiresPeriod" xml:space="preserve">
+  <data name="OptionalParameterDelimiterInvalid" xml:space="preserve">
     <value>In a segment with several parts, only a period (&apos;.&apos;) may come directly before an optional parameter, for example &apos;{name}.{ext?}&apos;.</value>
   </data>
   <data name="OptionalRouteParameterDefaultNotAllowed" xml:space="preserve">
@@ -228,7 +228,7 @@
   <data name="RouteHostConstraintInvalid" xml:space="preserve">
     <value>The value is not a valid route host constraint: &apos;{0}&apos;. Expected &apos;host&apos;, &apos;*.host&apos;, or &apos;*&apos;, optionally followed by &apos;:port&apos; (1-65535).</value>
   </data>
-  <data name="RouteLiteralContainsQueryMarker" xml:space="preserve">
+  <data name="RouteLiteralQueryMarkerNotAllowed" xml:space="preserve">
     <value>The literal text &apos;{0}&apos; contains &apos;?&apos;. A &apos;?&apos; may only end a parameter to make it optional (for example &apos;{{id?}}&apos;); a route template never includes a query string.</value>
   </data>
   <data name="RouteNameAlreadyRegistered" xml:space="preserve">
@@ -246,7 +246,7 @@
   <data name="RouteParameterEmpty" xml:space="preserve">
     <value>It contains an empty parameter &apos;{}&apos;. Name the parameter, for example &apos;{id}&apos;.</value>
   </data>
-  <data name="RouteParameterEndsWithOpeningBrace" xml:space="preserve">
+  <data name="RouteParameterTrailingBraceUnclosed" xml:space="preserve">
     <value>The parameter &apos;{0}&apos; is not closed: the template ends after an unescaped &apos;{{&apos;. Close the parameter with &apos;}}&apos;, and write a literal &apos;{{&apos; inside it as &apos;{{{{&apos;.</value>
   </data>
   <data name="RouteParameterNameInvalid" xml:space="preserve">

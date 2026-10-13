@@ -198,7 +198,7 @@ public sealed class ContentSecurityPolicySourceListBuilder
         if (_sources.Count > 1 && _sources.Contains(noneSource))
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyNoneMustBeAlone, directiveName),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyNoneConflict, directiveName),
                 "configure");
         }
 

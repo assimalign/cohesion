@@ -117,7 +117,7 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="HstsMaxAgeMustNotBeNegative" xml:space="preserve">
+  <data name="HstsMaxAgeInvalid" xml:space="preserve">
     <value>The HSTS max-age must not be negative; got {0}.</value>
   </data>
   <data name="HttpsPortOutOfRange" xml:space="preserve">

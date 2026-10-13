@@ -59,5 +59,5 @@ public sealed class AuthenticationScheme
     /// <exception cref="InvalidOperationException">The factory returned <see langword="null"/>.</exception>
     public IAuthenticationHandler CreateHandler()
         => _handlerFactory() ?? throw new InvalidOperationException(
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationHandlerFactoryReturnedNull, Name));
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationHandlerFactoryResultNull, Name));
 }

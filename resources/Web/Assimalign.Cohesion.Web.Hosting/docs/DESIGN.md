@@ -1525,7 +1525,10 @@ Compared with 10.0.0-preview.1, entry-point applications now forward these frame
 their existing sinks. The built application owns its logger factory and disposes its providers and
 forwarders at final teardown; a factory obtained from its service provider cannot outlive the app.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

@@ -126,7 +126,7 @@
   <data name="SessionCookiePathInvalid" xml:space="preserve">
     <value>HttpSessionOptions.CookiePath is not an RFC 6265 path-value: it must be US-ASCII with no &apos;;&apos; and no control characters. Percent-encode any other character.</value>
   </data>
-  <data name="SessionIdleTimeoutMustBePositive" xml:space="preserve">
+  <data name="SessionIdleTimeoutInvalid" xml:space="preserve">
     <value>HttpSessionOptions.IdleTimeout must be positive; got {0}.</value>
   </data>
   <data name="SessionRegenerationAfterResponseStarted" xml:space="preserve">

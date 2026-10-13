@@ -473,7 +473,10 @@ decision 15's preview terms: replace a custom marker implementation or interface
 the sealed marker and rebuild. Existing `ApiEndpointMetadata.Instance` declarations remain
 source-compatible, and this change adds or removes no authorization API.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

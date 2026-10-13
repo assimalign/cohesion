@@ -120,10 +120,10 @@
   <data name="ForwardingHeaderSelectionRequired" xml:space="preserve">
     <value>{0} must select at least one forwarding header. Header selection is part of the trust model — enable exactly the headers your trusted proxy manages.</value>
   </data>
-  <data name="ForwardLimitMustBePositive" xml:space="preserve">
+  <data name="ForwardLimitInvalid" xml:space="preserve">
     <value>{0} must be at least 1, or null for no limit.</value>
   </data>
-  <data name="KnownProxyMustNotBeNull" xml:space="preserve">
+  <data name="KnownProxyNull" xml:space="preserve">
     <value>{0} contains a null entry.</value>
   </data>
 </root>

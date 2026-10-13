@@ -188,7 +188,7 @@ public sealed class RoutePatternParser
                     // This is a dangling open-brace, which is not allowed
                     // Example: "{p1:regex(^\d{"
                     context.Error =
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteParameterEndsWithOpeningBrace, context.MarkedText());
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteParameterTrailingBraceUnclosed, context.MarkedText());
                     return false;
                 }
             }
@@ -241,7 +241,7 @@ public sealed class RoutePatternParser
         if (decoded.StartsWith('*') && decoded.EndsWith('?'))
         {
             context.Error =
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatchAllParameterCannotBeOptional, text);
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionalCatchAllParameterNotSupported, text);
             return false;
         }
 
@@ -354,7 +354,7 @@ public sealed class RoutePatternParser
                     (i != segments.Count - 1 || j != segment.Segments.Count - 1))
                 {
                     context.Error =
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatchAllParameterMustBeLast, parameter.DebuggerToString());
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatchAllParameterPositionInvalid, parameter.DebuggerToString());
                     return false;
                 }
             }
@@ -372,7 +372,7 @@ public sealed class RoutePatternParser
             if (part is RoutePatternParameterSegment parameter && parameter.IsCatchAll && parts.Count > 1)
             {
                 context.Error =
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatchAllParameterMustBeOnlyPart, RoutePatternPathSegment.DebuggerToString(parts), parameter.DebuggerToString());
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatchAllParameterSegmentInvalid, RoutePatternPathSegment.DebuggerToString(parts), parameter.DebuggerToString());
                 return false;
             }
         }
@@ -395,7 +395,7 @@ public sealed class RoutePatternParser
                         // The optional parameter is preceded by something that is not a literal or separator,
                         // for example another parameter: '{name}{ext?}'.
                         context.Error =
-                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionalParameterDirectlyFollowsPart, RoutePatternPathSegment.DebuggerToString(parts), parameter.Name, previousPart.DebuggerToString(), ErrorMessages.OptionalParameterRequiresPeriod);
+                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionalParameterDelimiterMissing, RoutePatternPathSegment.DebuggerToString(parts), parameter.Name, previousPart.DebuggerToString(), ErrorMessages.OptionalParameterDelimiterInvalid);
 
                         return false;
                     }
@@ -404,7 +404,7 @@ public sealed class RoutePatternParser
                         // The optional parameter is preceded by a literal other than period, for example
                         // '{name}-{ext?}'.
                         context.Error =
-                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionalParameterFollowsInvalidSeparator, RoutePatternPathSegment.DebuggerToString(parts), parameter.Name, literal.Content, ErrorMessages.OptionalParameterRequiresPeriod);
+                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionalParameterSeparatorInvalid, RoutePatternPathSegment.DebuggerToString(parts), parameter.Name, literal.Content, ErrorMessages.OptionalParameterDelimiterInvalid);
 
                         return false;
                     }
@@ -416,7 +416,7 @@ public sealed class RoutePatternParser
                     // This optional parameter is not the last one in the segment, for example
                     // '{name?}.{ext}'.
                     context.Error =
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionalParameterMustBeLastPart, RoutePatternPathSegment.DebuggerToString(parts), parameter.Name, parts[i + 1].DebuggerToString());
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionalParameterPositionInvalid, RoutePatternPathSegment.DebuggerToString(parts), parameter.Name, parts[i + 1].DebuggerToString());
 
                     return false;
                 }
@@ -478,7 +478,7 @@ public sealed class RoutePatternParser
         if (literal.Contains(QuestionMark))
         {
             context.Error =
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteLiteralContainsQueryMarker, literal);
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteLiteralQueryMarkerNotAllowed, literal);
             return false;
         }
 

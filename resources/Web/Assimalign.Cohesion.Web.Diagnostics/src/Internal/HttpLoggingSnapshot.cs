@@ -73,7 +73,7 @@ internal sealed class HttpLoggingSnapshot
         if (options.Level == LogLevel.None)
         {
             throw new ArgumentException(
-                ErrorMessages.HttpLoggingLevelCannotBeNone,
+                ErrorMessages.HttpLoggingLevelInvalid,
                 nameof(options));
         }
 

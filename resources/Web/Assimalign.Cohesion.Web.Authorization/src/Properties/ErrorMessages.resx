@@ -117,13 +117,13 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AuthenticationSchemeNameMustNotBeBlank" xml:space="preserve">
+  <data name="AuthenticationSchemeNameInvalid" xml:space="preserve">
     <value>Authentication scheme names must not be null, empty, or whitespace.</value>
   </data>
-  <data name="AuthorizationNameMustNotBeBlank" xml:space="preserve">
+  <data name="AuthorizationNameInvalid" xml:space="preserve">
     <value>A {0} must not be null, empty, or whitespace.</value>
   </data>
-  <data name="AuthorizationNameMustNotBeNull" xml:space="preserve">
+  <data name="AuthorizationNameNull" xml:space="preserve">
     <value>A {0} must not be null.</value>
   </data>
   <data name="AuthorizationNotRegistered" xml:space="preserve">
@@ -135,13 +135,13 @@
   <data name="AuthorizationPolicyAlreadyRegistered" xml:space="preserve">
     <value>An authorization policy named &apos;{0}&apos; is already registered.</value>
   </data>
-  <data name="AuthorizationPolicyBuilderRequiresRequirement" xml:space="preserve">
+  <data name="PolicyBuilderRequirementMissing" xml:space="preserve">
     <value>An authorization policy needs at least one requirement; a policy with none would authorize every request. Add one, for example RequireAuthenticatedUser().</value>
   </data>
   <data name="AuthorizationPolicyNotRegistered" xml:space="preserve">
     <value>No authorization policy named &apos;{0}&apos; has been registered. Register it with authorization.Options.AddPolicy(name, policy) in AddAuthorization.</value>
   </data>
-  <data name="AuthorizationRequirementMustNotBeNull" xml:space="preserve">
+  <data name="AuthorizationRequirementNull" xml:space="preserve">
     <value>Authorization requirements must not be null.</value>
   </data>
   <data name="AuthorizationRequirementRequired" xml:space="preserve">

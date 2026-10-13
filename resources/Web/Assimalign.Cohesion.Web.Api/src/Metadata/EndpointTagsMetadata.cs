@@ -46,7 +46,7 @@ public sealed class EndpointTagsMetadata
         {
             if (string.IsNullOrWhiteSpace(tags[i]))
             {
-                throw new ArgumentException(ErrorMessages.EndpointTagMustNotBeBlank, nameof(tags));
+                throw new ArgumentException(ErrorMessages.EndpointTagInvalid, nameof(tags));
             }
 
             copy[i] = tags[i];

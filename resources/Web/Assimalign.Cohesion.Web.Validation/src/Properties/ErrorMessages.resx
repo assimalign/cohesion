@@ -120,7 +120,7 @@
   <data name="ValidatorAlreadyRegistered" xml:space="preserve">
     <value>A validator is already registered for &apos;{0}&apos;.</value>
   </data>
-  <data name="ValidatorHasNoProfiles" xml:space="preserve">
+  <data name="ValidatorProfilesMissing" xml:space="preserve">
     <value>The validator has no profiles, so it validates no type. Register it for a model type with AddValidator&lt;T&gt;.</value>
   </data>
 </root>

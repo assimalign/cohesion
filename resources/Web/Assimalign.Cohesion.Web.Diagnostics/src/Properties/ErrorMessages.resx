@@ -123,7 +123,7 @@
   <data name="AccessLogFormatUnknown" xml:space="preserve">
     <value>Unknown access log format &apos;{0}&apos;.</value>
   </data>
-  <data name="HttpLoggingLevelCannotBeNone" xml:space="preserve">
+  <data name="HttpLoggingLevelInvalid" xml:space="preserve">
     <value>The HTTP logging level must not be LogLevel.None - it could never emit. To silence logging for specific endpoints attach HttpLoggingMetadata with HttpLoggingFields.None; to silence it globally do not call UseHttpLogging.</value>
   </data>
 </root>

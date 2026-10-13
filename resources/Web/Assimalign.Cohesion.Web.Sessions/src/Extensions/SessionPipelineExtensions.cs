@@ -74,7 +74,7 @@ public static class SessionPipelineExtensions
             if (options.IdleTimeout <= TimeSpan.Zero)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.SessionIdleTimeoutMustBePositive, options.IdleTimeout),
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.SessionIdleTimeoutInvalid, options.IdleTimeout),
                     nameof(configure));
             }
 

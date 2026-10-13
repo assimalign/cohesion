@@ -51,7 +51,7 @@ internal static class WebPlanner
         if (plan.Workload.Kind is not WorkloadKind.Deployment || plan.Workload.StableIdentity)
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PlannedWorkloadMustBeStateless, manifest.Name));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PlannedWorkloadNotStateless, manifest.Name));
         }
 
         if (plan.Volumes.Count is not 0 || plan.Services.Count != manifest.Endpoints.Count)
@@ -66,7 +66,7 @@ internal static class WebPlanner
             if (service.Endpoint is null || service.Headless || service.Governing)
             {
                 throw new InvalidOperationException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.PlannedServiceHasNoEndpoint, manifest.Name, service.Name));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.PlannedServiceEndpointMissing, manifest.Name, service.Name));
             }
         }
     }

@@ -117,16 +117,16 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AllowedOriginMustNotBeEmpty" xml:space="preserve">
+  <data name="AllowedOriginRequired" xml:space="preserve">
     <value>An allowed origin must not be null or empty.</value>
   </data>
   <data name="AllowedOriginSyntaxInvalid" xml:space="preserve">
     <value>&apos;{0}&apos; is not an origin: expected scheme://host[:port], for example https://app.example, with no path (not even a trailing &apos;/&apos;), query, fragment, user information or wildcard.</value>
   </data>
-  <data name="OpaqueOriginRequiresAllowAny" xml:space="preserve">
+  <data name="OpaqueOriginOptionRequired" xml:space="preserve">
     <value>The &apos;null&apos; origin cannot be allowed by value: sandboxed pages, local files and cross-origin redirects all send it, so allowing it would allow all of them. Set AllowAnyOrigin to accept it deliberately.</value>
   </data>
-  <data name="OriginWildcardRequiresAllowAny" xml:space="preserve">
+  <data name="OriginWildcardOptionRequired" xml:space="preserve">
     <value>&apos;*&apos; is not an origin. Set AllowAnyOrigin to allow every origin.</value>
   </data>
   <data name="RouterBuilderNotRegistered" xml:space="preserve">

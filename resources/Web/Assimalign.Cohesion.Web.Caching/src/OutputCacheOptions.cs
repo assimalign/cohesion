@@ -51,7 +51,7 @@ public sealed class OutputCacheOptions
         {
             if (value <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.CacheBodySizeMustBePositive);
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.CacheBodySizeInvalid);
             }
 
             _maximumBodySize = value;
@@ -70,7 +70,7 @@ public sealed class OutputCacheOptions
         {
             if (value <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.CacheSizeLimitMustBePositive);
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.CacheSizeLimitInvalid);
             }
 
             _sizeLimit = value;

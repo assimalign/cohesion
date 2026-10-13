@@ -67,7 +67,7 @@ public sealed class EndpointResponseMetadata
 
         if (contentType is { } mediaType && (mediaType.IsEmpty || mediaType.HasWildcard))
         {
-            throw new ArgumentException(ErrorMessages.DescribedContentTypeMustBeConcrete, nameof(contentType));
+            throw new ArgumentException(ErrorMessages.DescribedContentTypeInvalid, nameof(contentType));
         }
 
         StatusCode = statusCode;

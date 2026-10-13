@@ -477,7 +477,10 @@ break against `10.0.0-preview.1`, accepted on decision 15's terms and documented
 [Http.Streaming's design](../../../../libraries/Http/Assimalign.Cohesion.Http.Streaming/docs/DESIGN.md#public-interceptor-and-breaking-changes-since-1000-preview1-1465).
 This consumer update changes no API or response behavior owned by this package.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

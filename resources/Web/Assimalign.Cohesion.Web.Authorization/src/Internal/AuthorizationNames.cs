@@ -33,7 +33,7 @@ internal static class AuthorizationNames
             if (name is null || (!allowBlank && string.IsNullOrWhiteSpace(name)))
             {
                 throw new ArgumentException(
-                    allowBlank ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorizationNameMustNotBeNull, kind) : string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorizationNameMustNotBeBlank, kind),
+                    allowBlank ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorizationNameNull, kind) : string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorizationNameInvalid, kind),
                     parameterName);
             }
 

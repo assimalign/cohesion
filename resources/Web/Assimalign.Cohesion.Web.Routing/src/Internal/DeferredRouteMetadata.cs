@@ -126,7 +126,7 @@ internal sealed class DeferredRouteMetadata : IRouterRouteMetadataCollection
         {
             if (item is null)
             {
-                throw new ArgumentException(ErrorMessages.EndpointMetadataMustNotBeNull, nameof(items));
+                throw new ArgumentException(ErrorMessages.EndpointMetadataNull, nameof(items));
             }
         }
     }

@@ -52,7 +52,7 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 /// </remarks>
 internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
 {
-    private static readonly string _clientAbandonedResponseMessage = ErrorMessages.ClientAbandonedResponse;
+    private static readonly string _responseAbandonedByClientMessage = ErrorMessages.ResponseAbandonedByClient;
 
     private readonly ExceptionBoundaryOptions _options;
 
@@ -80,7 +80,7 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
         {
             ErrorHandlingEventSource.Log.ResponseAbortedByPeer(context, exception);
             await context.CancelAsync().ConfigureAwait(false);
-            throw new OperationCanceledException(_clientAbandonedResponseMessage, exception, context.RequestCancelled);
+            throw new OperationCanceledException(_responseAbandonedByClientMessage, exception, context.RequestCancelled);
         }
         catch (OperationCanceledException) when (context.RequestCancelled.IsCancellationRequested)
         {

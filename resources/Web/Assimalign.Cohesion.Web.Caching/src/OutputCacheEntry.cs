@@ -55,7 +55,7 @@ public sealed class OutputCacheEntry
 
         if (validFor <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(validFor), validFor, ErrorMessages.CacheTimeToLiveMustBePositive);
+            throw new ArgumentOutOfRangeException(nameof(validFor), validFor, ErrorMessages.CacheTimeToLiveInvalid);
         }
 
         StatusCode = statusCode;

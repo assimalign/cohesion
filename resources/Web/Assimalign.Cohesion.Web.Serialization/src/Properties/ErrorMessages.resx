@@ -123,7 +123,7 @@
   <data name="ContentSerializationNotRegistered" xml:space="preserve">
     <value>No content-serialization registry is composed on this application. Register one with builder.Services.AddJsonSerialization(...) or builder.Services.AddContentSerialization(...).</value>
   </data>
-  <data name="ContentWriterCanonicalMediaTypeMustBeConcrete" xml:space="preserve">
+  <data name="ContentWriterCanonicalMediaTypeInvalid" xml:space="preserve">
     <value>A content writer&apos;s first media type is its canonical content type and must be concrete (wildcard-free).</value>
   </data>
   <data name="ContentWriterMediaTypeRequired" xml:space="preserve">
@@ -147,7 +147,7 @@
   <data name="RequestContentTypeMissingOrInvalid" xml:space="preserve">
     <value>The request carries no parseable Content-Type header, so no content reader can be selected. Typed reads require the client to declare the body&apos;s media type.</value>
   </data>
-  <data name="ResponseContentTypeMustBeConcrete" xml:space="preserve">
+  <data name="ResponseContentTypeInvalid" xml:space="preserve">
     <value>A concrete (wildcard-free) media type is required to write content.</value>
   </data>
 </root>

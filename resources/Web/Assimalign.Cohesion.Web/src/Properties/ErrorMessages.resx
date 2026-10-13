@@ -117,7 +117,7 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="PipelineBranchCannotBuildIndependently" xml:space="preserve">
+  <data name="IndependentPipelineBranchNotSupported" xml:space="preserve">
     <value>A pipeline branch is composed by the pipeline that contains it, when that pipeline is built; it cannot be built on its own.</value>
   </data>
 </root>

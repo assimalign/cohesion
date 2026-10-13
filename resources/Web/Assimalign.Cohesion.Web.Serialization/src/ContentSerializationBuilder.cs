@@ -74,7 +74,7 @@ public sealed class ContentSerializationBuilder
         if (writer.MediaTypes[0].HasWildcard)
         {
             throw new ArgumentException(
-                ErrorMessages.ContentWriterCanonicalMediaTypeMustBeConcrete,
+                ErrorMessages.ContentWriterCanonicalMediaTypeInvalid,
                 nameof(writer));
         }
 

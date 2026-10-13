@@ -255,7 +255,10 @@ converted into a timeout response. Existing public interfaces and timeout policy
 unchanged. A queued callback from an older arm now respects a replacement deadline instead
 of cancelling it early. NativeAOT listeners require `EventSourceSupport=true` in the application.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

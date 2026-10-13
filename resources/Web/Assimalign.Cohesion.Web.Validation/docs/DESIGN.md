@@ -231,7 +231,10 @@ payload is written by `Web.ProblemDetails`' `Utf8JsonWriter` writer.
 - **Describing the `400`** in the endpoint description metadata. Like the binding `400`, it is an outcome
   the thunk produces on its own; a documentation adapter adds it by policy.
 
-## Exception messages (#1467)
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
 
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
 an internal `ErrorMessages` accessor in this project's root namespace under the intermediate

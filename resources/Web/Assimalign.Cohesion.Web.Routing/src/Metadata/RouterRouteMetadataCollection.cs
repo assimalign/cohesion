@@ -60,7 +60,7 @@ public sealed class RouterRouteMetadataCollection : IRouterRouteMetadataCollecti
         {
             if (_items[index] is null)
             {
-                throw new ArgumentException(ErrorMessages.EndpointMetadataMustNotBeNull, nameof(items));
+                throw new ArgumentException(ErrorMessages.EndpointMetadataNull, nameof(items));
             }
         }
     }

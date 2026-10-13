@@ -31,5 +31,5 @@ internal static class EndpointMapping
     /// <returns>The exception to throw.</returns>
     public static NotSupportedException RequiresSourceGenerator()
         => new(
-            ErrorMessages.TypedEndpointRequiresSourceGenerator);
+            ErrorMessages.EndpointSourceGeneratorMissing);
 }

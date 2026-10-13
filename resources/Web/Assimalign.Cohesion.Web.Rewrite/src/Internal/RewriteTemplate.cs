@@ -416,7 +416,7 @@ internal sealed class RewriteTemplate
     }
 
     private static ArgumentException NoPattern(string template, string parameterName) => new(
-        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteCaptureRequiresPattern, template),
+        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteCapturePatternRequired, template),
         parameterName);
 
     private static bool TryGetScheme(string literal, out string? scheme, out int length)

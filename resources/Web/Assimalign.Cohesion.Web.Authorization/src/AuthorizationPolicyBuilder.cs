@@ -58,7 +58,7 @@ public sealed class AuthorizationPolicyBuilder
         {
             if (requirement is null)
             {
-                throw new ArgumentException(ErrorMessages.AuthorizationRequirementMustNotBeNull, nameof(requirements));
+                throw new ArgumentException(ErrorMessages.AuthorizationRequirementNull, nameof(requirements));
             }
         }
 
@@ -217,7 +217,7 @@ public sealed class AuthorizationPolicyBuilder
         if (_requirements.Count == 0)
         {
             throw new InvalidOperationException(
-                ErrorMessages.AuthorizationPolicyBuilderRequiresRequirement);
+                ErrorMessages.PolicyBuilderRequirementMissing);
         }
 
         return new AuthorizationPolicy(_requirements, _authenticationSchemes);

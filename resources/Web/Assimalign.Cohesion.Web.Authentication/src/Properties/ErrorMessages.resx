@@ -120,7 +120,7 @@
   <data name="AuthenticationDefaultSchemeMissing" xml:space="preserve">
     <value>No scheme was specified for {0} and no matching default scheme is configured.</value>
   </data>
-  <data name="AuthenticationHandlerFactoryReturnedNull" xml:space="preserve">
+  <data name="AuthenticationHandlerFactoryResultNull" xml:space="preserve">
     <value>The handler factory for scheme &apos;{0}&apos; returned null.</value>
   </data>
   <data name="AuthenticationNotConfigured" xml:space="preserve">
@@ -129,10 +129,10 @@
   <data name="AuthenticationSchemeAlreadyRegistered" xml:space="preserve">
     <value>Scheme &apos;{0}&apos; has already been registered.</value>
   </data>
-  <data name="AuthenticationSchemeCannotSignIn" xml:space="preserve">
+  <data name="SchemeSignInNotSupported" xml:space="preserve">
     <value>Scheme &apos;{0}&apos; does not support sign-in; its handler is not an {1}.</value>
   </data>
-  <data name="AuthenticationSchemeCannotSignOut" xml:space="preserve">
+  <data name="SchemeSignOutNotSupported" xml:space="preserve">
     <value>Scheme &apos;{0}&apos; does not support sign-out; its handler is not an {1}.</value>
   </data>
   <data name="AuthenticationSchemeNotRegistered" xml:space="preserve">
