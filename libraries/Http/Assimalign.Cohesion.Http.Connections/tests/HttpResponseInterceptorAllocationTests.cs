@@ -141,7 +141,7 @@ public class HttpResponseInterceptorAllocationTests
         IReadOnlyList<IHttpExchangeInterceptor> added = request.ResponseInterceptors;
         long addedBytes = GC.GetAllocatedBytesForCurrentThread() - beforeAdd;
 
-        MeasurementContext context = new() { AddedResponseInterceptors = added };
+        MeasurementContext context = CreateMeasurementContext(added);
         long beforeResolve = GC.GetAllocatedBytesForCurrentThread();
         IHttpExchangeInterceptor[] resolved = context.ResolveResponseInterceptors(Array.Empty<IHttpExchangeInterceptor>());
         long resolvedBytes = GC.GetAllocatedBytesForCurrentThread() - beforeResolve;
@@ -151,6 +151,13 @@ public class HttpResponseInterceptorAllocationTests
         CompleteSynchronously(context.DisposeAsync());
         return (addedBytes, resolvedBytes);
     }
+
+    // Release IL leaves the closing GC counter expression on the evaluation stack. The x64
+    // JIT can allocate a following newobj before spilling that expression, even without tiering.
+    // This call boundary keeps the test context's 128-byte allocation outside the add sample.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static MeasurementContext CreateMeasurementContext(IReadOnlyList<IHttpExchangeInterceptor> added)
+        => new() { AddedResponseInterceptors = added };
 
     private static long MeasureSingletonArray(IHttpExchangeInterceptor interceptor)
     {

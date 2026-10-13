@@ -651,6 +651,32 @@ changes to `d47169452` made this regression fail: add allocated 64 B and resolut
 The test calibrates the expected array size so it does not assume a particular object header.
 The equality guard in core Http pins existing behavior and passes with the fix reverted too.
 
+The allocation guard isolates its test-only `MeasurementContext` construction behind a
+`NoInlining` factory (#1462). Release IL leaves the ending counter subtraction on the
+evaluation stack. The [.NET 10 JIT importer](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/importer.cpp#L8317-L8325)
+can emit the raw allocation for a following `newobj` before spilling that expression.
+On x64, this places the 128-byte context allocation ahead of the preceding
+`GC.GetAllocatedBytesForCurrentThread` counter, even though the constructor stays afterward.
+Disassembly confirms this in both tier-0 and fully optimized code with tiering disabled:
+the add sample includes the 32-byte interceptor array plus the unrelated 128-byte test object.
+The factory keeps the allocation after the add sample and before the resolve sample on both
+architectures. Warming longer or disabling tiering does not establish that boundary. Product
+storage and resolution are unchanged, and the exact singleton-array assertion remains intact.
+This corrects test measurement only; it changes no behavior from 10.0.0-preview.1.
+
+Verification on Windows ARM64 with SDK 10.0.401 / runtime 10.0.12, Release builds, using
+`dotnet test --arch x64` (emulated) and `--arch arm64`, with default tiering. Each independent
+run measures 1,000 exchanges after 100 warmups; resolution is 0 B in every run:
+
+| Architecture | Add B/exchange, runs 1–5 | Calibrated singleton B |
+|---|---|---:|
+| x64 | 32, 32, 32, 32, 32 | 32 |
+| arm64 | 32, 32, 32, 32, 32 | 32 |
+
+Reverting the factory call reproduces 160 B/exchange on x64; restoring it gives 32 B.
+A separate x64 run with `DOTNET_TieredCompilation=0` also gives 32 B after the fix
+(160 B before it), confirming that the boundary is independent of tier promotion.
+
 The body measurement uses
 `ReceiveAndSend_WithBodyAndOneAddedInterceptor_ShouldReportBytesPerRequest`: one preloaded
 HTTP/1.1 keep-alive connection, `POST /` with `Content-Length: 3`, the consumed body `abc`,
