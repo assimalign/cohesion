@@ -100,6 +100,12 @@ factories share one public type, as owner decision 59 (#1464) requires;
 `IHttpAntiforgery` remains the contract for consumers and custom implementations.
 Token helpers remain internal, and nested helpers remain private.
 
+All five context-taking operations reject a null `httpContext` with
+`ArgumentNullException`, including `ValidateRequestAsync` through
+`IsRequestValidAsync`. The exception is documented on `IHttpAntiforgery`,
+whose member documentation the public implementation inherits. This records
+the existing error behavior; it does not change request validation.
+
 The `IHttpAntiforgeryFeature` carries the shared service on a context so
 downstream handlers resolve the *same* configured service — and therefore the
 same signing key — via `context.Antiforgery` / `context.RequireAntiforgery`.

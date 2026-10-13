@@ -27,6 +27,7 @@ public interface IHttpAntiforgery
     /// This method has a side effect:
     /// A response cookie is set if there is no valid cookie associated with the request.
     /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="httpContext"/> is <see langword="null"/>.</exception>
     HttpAntiforgeryTokenSet GetAndStoreTokens(IHttpContext httpContext);
 
     /// <summary>
@@ -39,6 +40,7 @@ public interface IHttpAntiforgery
     /// is responsible for setting the response cookie and injecting the returned
     /// form token as appropriate.
     /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="httpContext"/> is <see langword="null"/>.</exception>
     HttpAntiforgeryTokenSet GetTokens(IHttpContext httpContext);
 
     /// <summary>
@@ -50,6 +52,7 @@ public interface IHttpAntiforgery
     /// A <see cref="Task{Boolean}"/> that, when completed, returns <c>true</c> if the request uses a safe HTTP
     /// method or contains a valid antiforgery token, otherwise returns <c>false</c>.
     /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="httpContext"/> is <see langword="null"/>.</exception>
     Task<bool> IsRequestValidAsync(IHttpContext httpContext);
 
     /// <summary>
@@ -57,6 +60,7 @@ public interface IHttpAntiforgery
     /// </summary>
     /// <param name="httpContext">The <see cref="IHttpContext"/> associated with the current request.</param>
     /// <returns>A <see cref="Task"/> that completes when validation has completed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="httpContext"/> is <see langword="null"/>.</exception>
     /// <exception cref="AntiforgeryValidationException">
     /// Thrown when the request does not include a valid antiforgery token.
     /// </exception>
@@ -66,5 +70,6 @@ public interface IHttpAntiforgery
     /// Generates and stores an antiforgery cookie token if one is not available or not valid.
     /// </summary>
     /// <param name="httpContext">The <see cref="IHttpContext"/> associated with the current request.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="httpContext"/> is <see langword="null"/>.</exception>
     void SetCookieTokenAndHeader(IHttpContext httpContext);
 }
