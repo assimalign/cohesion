@@ -20,6 +20,6 @@
 	<ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
-        <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
+        <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
     </ItemGroup>
 </Project>

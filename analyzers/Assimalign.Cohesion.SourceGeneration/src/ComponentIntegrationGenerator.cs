@@ -10,9 +10,9 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 
-using Assimalign.Cohesion.SourceGeneration.ComponentModel.Internal;
+using Assimalign.Cohesion.SourceGeneration.Internal;
 
-namespace Assimalign.Cohesion.SourceGeneration.ComponentModel;
+namespace Assimalign.Cohesion.SourceGeneration;
 
 /// <summary>
 /// Projects assembly-declared component factories onto composition seams that are present in the

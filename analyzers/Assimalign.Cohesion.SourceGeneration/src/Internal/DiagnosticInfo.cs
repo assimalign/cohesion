@@ -3,7 +3,7 @@ using System;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 
-namespace Assimalign.Cohesion.SourceGeneration.ComponentModel.Internal;
+namespace Assimalign.Cohesion.SourceGeneration.Internal;
 
 /// <summary>
 /// A value-equatable capture of a diagnostic to report, holding a serializable location rather than a

@@ -1,9 +1,13 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.SourceGeneration</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
+	</ItemGroup>
+	<ItemGroup>
+		<AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+		<AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
 	</ItemGroup>
 </Project>

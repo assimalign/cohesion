@@ -4,6 +4,7 @@ on:
     paths:
       - "analyzers/**"
       - "build/**"
+      - "libraries/Core/**"
       - "libraries/ObjectMapping/**"
       - "libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/**"
       - "libraries/Http/Assimalign.Cohesion.Http.ClientFactory/**"
@@ -33,7 +34,6 @@ jobs:
             "Assimalign.Cohesion.SourceGeneration.OpenApi",
             "Assimalign.Cohesion.SourceGeneration.ObjectMapping",
             "Assimalign.Cohesion.SourceGeneration",
-            "Assimalign.Cohesion.SourceGeneration.ComponentModel",
             "Assimalign.Cohesion.SourceGeneration.Database",
             "Assimalign.Cohesion.SourceGeneration.Web"
           ]

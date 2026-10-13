@@ -64,13 +64,6 @@
 	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration/src/">
 		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration/src/Assimalign.Cohesion.SourceGeneration.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/" />
-	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/src/">
-		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/src/Assimalign.Cohesion.SourceGeneration.ComponentModel.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/tests/">
-		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/tests/Assimalign.Cohesion.SourceGeneration.ComponentModelTests.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.Web/" />
 	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.Web/src/">
 		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration.Web/src/Assimalign.Cohesion.SourceGeneration.Web.csproj" />
@@ -3403,5 +3396,12 @@
 	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/">
 		<File Path="analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/DESIGN.md" />
 		<File Path="analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration/tests/">
+		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration/tests/Assimalign.Cohesion.SourceGeneration.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration/docs/">
+		<File Path="analyzers/Assimalign.Cohesion.SourceGeneration/docs/DESIGN.md" />
+		<File Path="analyzers/Assimalign.Cohesion.SourceGeneration/docs/OVERVIEW.md" />
 	</Folder>
 </Solution>

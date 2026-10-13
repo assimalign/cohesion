@@ -5,7 +5,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
-		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

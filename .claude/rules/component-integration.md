@@ -5,7 +5,7 @@ paths:
   - "**/ComponentIntegrations.cs"
   - "**/*Components.cs"
   - "libraries/DependencyInjection/**"
-  - "analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/**"
+  - "analyzers/Assimalign.Cohesion.SourceGeneration/**"
   - "build/IntegrationCheck/**"
 ---
 
@@ -16,7 +16,7 @@ How a library contributes a registration verb to a composition surface it does *
 `Assimalign.Cohesion.DependencyInjection`. This is the repo's answer to "where do DI extension
 methods live?": **never** in the feature library via a hard DI reference, and **never** in a
 per-integration glue project. Both were considered and rejected (owner decision, 2026-09-01;
-rationale in `analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/docs/DESIGN.md`).
+rationale in `analyzers/Assimalign.Cohesion.SourceGeneration/docs/DESIGN.md`).
 
 ## The mechanism
 
@@ -25,7 +25,7 @@ rationale in `analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/docs
   method `F` can be projected onto the seam type named `"Ns.ISeam"` via its sink method `S`".
   The seam is named as a **string** — expressing it as a `Type` would create the very reference
   the mechanism exists to prevent.
-- The `Assimalign.Cohesion.SourceGeneration.ComponentModel` incremental generator runs in each
+- The `Assimalign.Cohesion.SourceGeneration` incremental generator runs in each
   **consuming** compilation. It reads the attributes off referenced-assembly metadata and emits an
   `internal` C# 14 `extension(...)` verb **only when the named seam type actually resolves in that
   compilation** (`GetTypesByMetadataName` — the plural; the singular returns null on ambiguity).
@@ -34,7 +34,7 @@ rationale in `analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/docs
   (`CohesionAnalyzerReference` in Core's csproj → `analyzers/dotnet/cs`, picked up transitively)
   and with the App shared framework (`CohesionFrameworkAnalyzer` in
   `libraries/App/Assimalign.Cohesion.App.props`). In-repo test/consumer projects opt in with one
-  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />`.
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />`.
 
 ## Adding an integration — the whole recipe
 

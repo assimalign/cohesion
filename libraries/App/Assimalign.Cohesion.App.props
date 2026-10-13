@@ -156,7 +156,7 @@
             analyzers travel with their ordinary NuGet packages or area packs.
         -->
         <!-- Projects [assembly: ComponentIntegration] declarations into consuming-compilation extension verbs. -->
-        <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
+        <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration" />
     </ItemGroup>
 
     <!-- ================================================================

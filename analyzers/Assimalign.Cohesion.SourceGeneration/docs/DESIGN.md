@@ -1,4 +1,4 @@
-# Assimalign.Cohesion.SourceGeneration.ComponentModel Design
+# Assimalign.Cohesion.SourceGeneration Design
 
 ## Design intent
 
@@ -9,9 +9,28 @@ an extension member only when it also references the named composition seam. The
 does not reference the seam owner, and the generator contains no knowledge of particular libraries,
 containers, or lifetimes.
 
+The root generator project serves declarations owned by `libraries/Core` (owner decision 59,
+2026-10-13). `ComponentIntegrationAttribute` lives in Core, so its generator lives here. Generators
+for declarations owned by other areas live in their own `Assimalign.Cohesion.SourceGeneration.<Area>`
+projects; ObjectMapping owns its separate generator project.
+
 Like every project under `analyzers/`, it targets `netstandard2.0`, is loaded by Roslyn, and is not a
 standalone package. Cohesion delivers it through the Core package for PackageReference consumers and
 through the App targeting pack for SDK consumers.
+
+Core's analyzer reference and App's framework analyzer both select this project:
+
+```mermaid
+flowchart LR
+    Core["Assimalign.Cohesion.Core"] --> Generator["Assimalign.Cohesion.SourceGeneration"]
+    App["App targeting pack"] --> Generator
+```
+
+The 2026-10-13 tooling move changes the public Roslyn entry-point type to
+`Assimalign.Cohesion.SourceGeneration.ComponentIntegrationGenerator` in the root analyzer assembly.
+Diagnostic ids, generated sources (including the historical generator attribution comment), and
+generated integration APIs remain unchanged. `AnalyzerReleases.Shipped.md` and
+`AnalyzerReleases.Unshipped.md` travel with the generator and retain its diagnostic history.
 
 ## Mechanism
 

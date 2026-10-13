@@ -234,7 +234,7 @@ emits no interceptor; the others in the compilation are still emitted.
 | COHWEB0006 | An anonymous delegate type with no parameter-level cause (more than 16 parameters), or an explicitly created delegate type generated code cannot name |
 | COHWEB0007 | A body parameter or a serialized result, but the compilation cannot name `Web.Serialization`'s request reader or negotiated writer |
 
-Mechanics, following the house convention (`SourceGeneration.OpenApi`, `SourceGeneration.ComponentModel`):
+Mechanics, following the house convention (`SourceGeneration.OpenApi`, `SourceGeneration`):
 
 - **Descriptors** live in `Internal/EndpointBindingDiagnostics.cs`, category `Web`, all `Error`.
   Messages name the endpoint (`MapGet("/orders/{id}")`), the problem, and what to write instead. Each

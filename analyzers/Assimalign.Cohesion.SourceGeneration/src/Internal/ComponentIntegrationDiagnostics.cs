@@ -1,6 +1,6 @@
 using Microsoft.CodeAnalysis;
 
-namespace Assimalign.Cohesion.SourceGeneration.ComponentModel.Internal;
+namespace Assimalign.Cohesion.SourceGeneration.Internal;
 
 /// <summary>
 /// Compiler diagnostics reported by the component-integration generator.

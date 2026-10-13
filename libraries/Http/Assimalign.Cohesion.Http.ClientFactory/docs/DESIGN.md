@@ -105,7 +105,7 @@ integration, so the declaration contributes the verb with zero added public surf
 source assembly continues to reference only its own HTTP family.
 
 When a consuming compilation references both libraries, `ComponentIntegrationGenerator` from
-`Assimalign.Cohesion.SourceGeneration.ComponentModel` recognizes the instance method as a builder
+`Assimalign.Cohesion.SourceGeneration` recognizes the instance method as a builder
 template and projects `AddHttpClientFactory(Action<HttpClientFactoryBuilder>? configure = null)` into
 that consumer. The callback is optional for every builder template (owner decision 39, #1395), but a
 bare `AddHttpClientFactory()` still fails at registration: `Build()` rejects a factory with no named

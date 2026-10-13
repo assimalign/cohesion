@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/Core/**"
+      - "analyzers/Assimalign.Cohesion.SourceGeneration/**"
+      - "!analyzers/Assimalign.Cohesion.SourceGeneration/**/*.md"
       - "!libraries/Core/**/*.slnx"
       - "!libraries/Core/**/*.md"
       - "libraries/Hosting/**/src/**/*.cs"

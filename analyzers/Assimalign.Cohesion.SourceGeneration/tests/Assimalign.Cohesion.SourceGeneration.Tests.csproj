@@ -7,15 +7,21 @@
 		<EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
 		<IncludeBuildOutput>true</IncludeBuildOutput>
 		<IsPackable>false</IsPackable>
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
-		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
-		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp"  />
-		<CohesionPackageReference Include="Microsoft.CodeAnalysis.Analyzers" />
-		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp.SourceGenerators.Testing"  />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 </Project>

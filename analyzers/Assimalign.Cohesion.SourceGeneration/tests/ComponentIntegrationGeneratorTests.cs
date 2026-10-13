@@ -14,7 +14,7 @@ using Xunit;
 
 using Assimalign.Cohesion;
 
-namespace Assimalign.Cohesion.SourceGeneration.ComponentModel.Tests;
+namespace Assimalign.Cohesion.SourceGeneration.Tests;
 
 /// <summary>
 /// Two-stage generator-driver coverage for component integrations declared in referenced assembly

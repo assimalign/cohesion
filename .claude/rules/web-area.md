@@ -116,7 +116,7 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
   members on the target's static classes work too, when a package needs to extend a plain-static
   surface.
 - In-repo projects that call a projected verb opt into the generator with
-  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />`
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />`
   (tests, the AOT guard); `Sdk.Web` applications receive it through the App framework analyzer.
   `build/IntegrationCheck` exercises every verb and overload.
 - **Composition model (2026-07-10 direction):** the Web area is middleware-first — fluent
