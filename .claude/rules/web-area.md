@@ -118,7 +118,7 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
 - In-repo projects that call a projected verb opt into the generator with
   `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />`
   (tests, the AOT guard); `Sdk.Web` applications receive it through the App framework analyzer.
-  `build/IntegrationCheck` exercises every verb and overload.
+  `build/IntegrationCheck` exercises every verb and overload. Analyzer placement and naming follow [analyzers.md](analyzers.md).
 - **Composition model (2026-07-10 direction):** the Web area is middleware-first — fluent
   `.Use(...)` and `IWebApplicationMiddleware` over a return-value result model. The IResult
   abstraction was withdrawn before merge; request/response formatting and error handling are

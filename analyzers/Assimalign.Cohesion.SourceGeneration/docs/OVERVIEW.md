@@ -20,4 +20,4 @@ executable test-host defaults from `analyzers/Directory.Build.props`. Diagnostic
 in the project's `AnalyzerReleases` files.
 
 Area-owned generators live in `Assimalign.Cohesion.SourceGeneration.<Area>`. See [DESIGN.md](DESIGN.md)
-for the integration model, diagnostics, generated code, and delivery constraints.
+for the integration model, diagnostics, generated code, and delivery constraints. The repository's [analyzer rule](../../../.claude/rules/analyzers.md) governs placement, project/test naming and release tracking.

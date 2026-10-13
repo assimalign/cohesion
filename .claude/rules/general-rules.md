@@ -51,7 +51,7 @@ become customer projects.
 
 ### Target framework
 - Libraries target `net10.0` — but the target framework is centrally managed via `TargetFrameworkLatest` in `build/Targets/Build.TargetFramework.props`, so per-project overrides are normally not needed.
-- Sanctioned exception: `analyzers/` projects (Roslyn analyzers/codefixes/generators) target `netstandard2.0` with `IsAotCompatible=false` via `analyzers/Directory.Build.props`, because Roslyn components load inside the compiler.
+- Sanctioned exception: `analyzers/` projects (Roslyn analyzers/codefixes/generators) target `netstandard2.0` with `IsAotCompatible=false` via `analyzers/Directory.Build.props`, because Roslyn components load inside the compiler. Placement, naming and diagnostic tracking follow [analyzers.md](analyzers.md).
 
 ### Preview language features
 ```xml

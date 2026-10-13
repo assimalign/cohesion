@@ -18,6 +18,9 @@ methods live?": **never** in the feature library via a hard DI reference, and **
 per-integration glue project. Both were considered and rejected (owner decision, 2026-09-01;
 rationale in `analyzers/Assimalign.Cohesion.SourceGeneration/docs/DESIGN.md`).
 
+The generator lives in the root analyzer project because its attribute lives in `libraries/Core`
+(owner decision 59, 2026-10-13); placement and diagnostic tracking follow [analyzers.md](analyzers.md).
+
 ## The mechanism
 
 - `Assimalign.Cohesion.ComponentIntegrationAttribute` (public, assembly-target, in
