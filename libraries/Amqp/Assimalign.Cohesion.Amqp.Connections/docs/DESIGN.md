@@ -198,3 +198,20 @@ byte-pipe members of `IDuplexConnection`; a multiplexed carrier supplies those t
 `IMultiplexedConnectionStream`. Listener tracking is observational and does not replace the
 AMQP transport's ownership of its accepted connections. `ConnectionClosed` signals closure,
 abort and peer close, no later than carrier disposal completing.
+
+### Breaking changes from 10.0.0-preview.1 (#1459)
+
+The single-stream constructor signatures change with the carrier hierarchy:
+
+| Preview.1 signature | Replacement |
+| --- | --- |
+| `AmqpServerTransport(IConnectionListener, AmqpTransportOptions?)` | `AmqpServerTransport(IDuplexConnectionListener, AmqpTransportOptions?)` |
+| `AmqpClientTransport(IConnectionFactory, EndPoint, AmqpTransportOptions?)` | `AmqpClientTransport(IDuplexConnectionFactory, EndPoint, AmqpTransportOptions?)` |
+
+These are source and binary breaks, accepted during previews under owner decisions 15 and 58.
+Rebuild callers and type their single-stream listeners/factories as `IDuplexConnectionListener`
+and `IDuplexConnectionFactory`. Custom carriers implement the duplex contracts and produce
+`IDuplexConnection`, or derive from `DuplexConnectionListener`, `DuplexConnectionFactory` and
+`DuplexConnection`; the listener/factory bases use `AcceptCoreAsync`/`ConnectCoreAsync` returning
+`ValueTask<IDuplexConnection>`. The multiplexed constructor overloads retain their parameter
+types and use the updated multiplexed contracts. AMQP wire framing and negotiation are unchanged.
