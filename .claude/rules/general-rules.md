@@ -78,6 +78,9 @@ These are also centrally managed. Don't duplicate per project unless the project
 
 - Store exception message literals and format strings in `src/Properties/ErrorMessages.resx`.
   Name each entry after the failure in PascalCase and reuse one entry for identical text.
+  A name is a short noun phrase for what went wrong, about five words and 40 characters at most:
+  `CookieNameInvalid`, `RequestBodyTooLarge`, `StreamingNotEnabled`. Never use the message text
+  itself, or a truncation of it, as the name.
 - `build/Targets/Build.ErrorMessages.targets`, imported by the shared build, configures MSBuild's
   `GenerateResource` task with `StronglyTypedLanguage`, `StronglyTypedClassName`,
   `StronglyTypedNamespace` and `StronglyTypedFileName`. It generates an **internal** `ErrorMessages`
@@ -314,7 +317,10 @@ namespace Assimalign.Cohesion.Database;
 
 ## Access modifiers
 
-1. **Implementation classes:** `internal` by default.
+1. **Implementation classes:** `internal` by default. An implementation that consumers construct
+   directly is `public sealed`, with a private constructor and static `Create` methods. It is never
+   an internal type behind a static factory class (see "Creation-only facades become public
+   implementations" below; owner decision 59, #1465).
    ```csharp
    internal class DatabaseConnectionPool { }
    ```
