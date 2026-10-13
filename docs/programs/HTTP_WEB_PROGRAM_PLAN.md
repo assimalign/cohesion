@@ -399,7 +399,7 @@ The issue list:
 
 ### Stage 14 — Performance, operations and DX
 
-**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation. Decisions 57 and 58, from the review, add sessions 20–22; the review resumes after them.
+**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation. Decisions 57 and 58, from the review, added sessions 20–22, delivered on 2026-10-13; the review resumes with them included.
 - Sessions run in the Codex CLI on Astra 6 at ultra effort, as in Stage 13. A pipeline script drives each session's implement, review, verify and fix runs in its own worktree.
 - Sessions in one row edit the same files, so each runs as one serial session; the rows of a wave run in parallel.
 - Wave 2 needs wave 1 integrated:
@@ -1146,6 +1146,34 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - **Follow-ups filed:**
     - In this stage: #1450 (Bearer challenges), #1451 (in-memory peer close) and #1455 (the HTTP/2 deadlock).
     - For a later stage: #1454 (certificate rejection reasons that TLS decides before HTTP).
+  - **Review refactors (decisions 57 and 58), delivered 2026-10-13.** Three more sessions ran on Codex with the same review pipeline, in the order 20, 22, 21.
+    - **Session 20, #1457** `44413b4f`, `d6d30b7c`, `fc527db1`: Web.Hosting absorbs Web.Hosting.Health and Web.Hosting.Resources.
+      - Their public types keep their namespaces under `src/Health/` and `src/Resources/`.
+      - `ResourceControlPlaneEventSource` merges into Web.Hosting's source, and `IWebApplicationLifetime` is deleted.
+      - The rules now let an area's hosting module integrate Hosting.Health and Hosting.Resources itself.
+      - Sixteen area frameworks gain Web.Health, and the release inventory drops from 225 to 223 packages.
+      - The review found nothing. `fc527db1` tightens decision 57's wording on separate hosting packages.
+    - **Session 22, #1459** `0ecd9900` … `fd3d249a`: one connection hierarchy under `IConnection` (decision 58), starting from the owner's sketch.
+      - The review found two regressions the refactor itself introduced. Both skeptics confirmed them, and each fix has a test that fails without it:
+        - cleanly finished HTTP/3 extended CONNECT tunnels were classified as cancelled, so their completion callbacks never ran;
+        - a QUIC listener configured with zero unidirectional streams granted one.
+      - Three smaller fixes: endpoint reads moved inside the diagnostics guard, the AMQP and Database breaking-change notes, and an InMemory doc.
+    - **Session 21, #1458** `b7a44503`, `4bc0df50`: `WebApplicationServer` and `WebApplicationServerOptions` are public in Web.Server, and Web.Hosting's `WebApplicationServerHostService` wraps any server.
+      - The server installs its own interceptors, now ahead of the HTTP defaults; tests pin the order.
+      - The server's EventSource, Meter and ActivitySource are named `Assimalign.Cohesion.Web.Server`. Web.Hosting keeps `WebHostingEventSource`.
+      - Web.Server has its first test project.
+      - The review found that a server implementing `IHostService` bypassed the wrapper. Every server is now wrapped.
+    - **Reported public surface beyond the sketches:**
+      - generic `ConnectionListener<TConnection>` and `ConnectionFactory<TConnection>` bases, with protected `AcceptCoreAsync` and `ConnectCoreAsync`;
+      - a `DuplexConnectionFactory` base, and abstract members on the `HttpConnection` base;
+      - the signature changes that follow in AMQP, the Database options, the HTTP registration overloads and the generated `ReferenceEndpoint.ConnectionFactory()`.
+    - **Verification:**
+      - Session 20: 20 suites, including the 13 area hosting modules and the release inventory's 53 Pester tests.
+      - Session 22: 6,524 tests across Connections, Http, AMQP, Database, Web and the gateway control plane, and a 181-project build.
+      - Session 21: 3,384 tests across 48 projects.
+      - Each session: the Web NativeAOT guard for win-arm64, with 37/37 smoke checks and only the 11 IL warnings from Configuration and DependencyInjection (#1220, #1177), which CI already shows.
+      - Database.Testing and the SDK package tests need packed SDKs and run only in CI.
+    - **Measured:** tracking a listener's live connections costs 103 bytes per accepted TCP connection (+1.2%).
 
   Behavior changes for the review (decision 15's terms):
   - **Client faults:**
@@ -1159,12 +1187,15 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - **Authentication:** Bearer appends its challenge.
   - **Connections:**
     - `Features` is on every connection interface.
-    - `AcceptStreamAsync` and `OpenStreamAsync` return `IMultiplexedStream`.
+    - `AcceptStreamAsync` and `OpenStreamAsync` return `IMultiplexedConnectionStream`, the name decision 58 gave `IMultiplexedStream`.
     - `Abort(code, reason)` is on the multiplexed roots.
     - The four capability interfaces moved or were deleted; all of them postdate preview.1.
+    - Decision 58: `IConnection` no longer carries a byte pipe, and code that reads or writes bytes takes `IDuplexConnection`. Listeners and factories are typed by the connection they produce, `IHttpConnection` is an `IConnection`, and the HTTP listener's `AcceptOrListenAsync` is `AcceptAsync`. Every Connections package shipped in preview.1.
+  - **Packages:** `Web.Hosting.Health` and `Web.Hosting.Resources` are gone; both shipped in preview.1. Their namespaces live on in Web.Hosting (decision 57).
+  - **Server:** its own interceptors run ahead of the HTTP defaults. A registered server that also implements `IHostService` is started through `IWebApplicationServer`.
   - **Diagnostics:**
     - `WebApplicationServerLog` and `WebApplicationServerOptions.Logger` are deleted.
-    - The server's category is now `Assimalign.Cohesion.Web.Hosting`, with camelCase payload names.
+    - The server's category is now `Assimalign.Cohesion.Web.Server`, with camelCase payload names. Control-plane events report under `Assimalign.Cohesion.Web.Hosting`.
     - Entry-point Web builders forward Web and transport events by default. `EnableEventSourceForwarding` opts out.
     - Sdk.Web turns `EventSourceSupport` on.
   - **Sessions:** the built-in stores skip the commit for an unchanged session.
@@ -1175,13 +1206,11 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
       - `IHttpExchangeControl.ResponseAbortedByClient` (#1432);
       - `HttpFormLimit` and `HttpFormLimitExceededException.Limit` (#1435);
       - `ILoggerFactoryBuilder.HasForwarders` and `WebApplicationBuilder.EnableEventSourceForwarding` (#1399, decision 49 (a)).
-    - The two that sessions did not report:
-      - `IWebResponseClientFaultFeature` (Web.Server, #1432);
-      - `IWebApplicationLifetime` (Web root, #1412). The control plane needs it to dispose its key, because `Web.Hosting.Resources` may not reference `Web.Hosting`.
+    - The one a session did not report: `IWebResponseClientFaultFeature` (Web.Server, #1432). The other, `IWebApplicationLifetime` (#1412), is gone: decision 57 (a) moved the control plane into Web.Hosting.
     - `QuicMultiplexedConnection` no longer implements the TLS and stream-limit contracts itself; it registers them as features (decision 56).
   - **Advisory packages.** Should every draft also list the `App.<Area>` runtime packs, so Dependabot flags applications that get these libraries only through the shared frameworks? It would apply to all 24 drafts.
-  - **#1454.** Untrusted-chain, expired and not-yet-valid certificate rejections need a validation contract from TLS to the handler. A connection feature is the obvious carrier.
-  - **`ServerBound` endpoints.** It lists the endpoints it can see. Raw `HttpConnectionListenerOptions` registrations stay omitted until a listener exposes its endpoints. Add that seam?
+  - **#1454.** Untrusted-chain, expired and not-yet-valid certificate rejections need a validation contract from TLS to the handler. Decision 58 supplies the carrier, `IHttpConnection.Features`, which exposes the transport's features. The contract itself is still to be written.
+  - **`ServerBound` endpoints:** settled by decision 58. The server reads `IHttpConnectionListener.EndPoints`, so raw registrations report their endpoints too.
   - **The Http epic.** #314 hit GitHub's 100-sub-issue cap, so new Http work is filed as tasks under features. Keep that, or split the epic?
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
