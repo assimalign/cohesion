@@ -467,3 +467,12 @@ preflight with no candidate, with and without a default policy; a preflight for 
 request to an endpoint with a policy; `UseCors` registered ahead of `UseRouting` and missing altogether, both
 failing closed at dispatch; the real exception boundary on either side of `UseCors` keeping the CORS
 headers on its `500`; streamed heads enforcing the policy after handler changes; and a preflight over HTTP/2.
+
+## HTTP interceptor consumer compatibility (#1465)
+
+The streamed-response test hosts now register `HttpResponseStreamingInterceptor.Create()` in place
+of `HttpResponseStreaming.CreateInterceptor()`. Applications that register this Http.Streaming
+interceptor directly make the same replacement and rebuild for its upstream source and binary
+break against `10.0.0-preview.1`, accepted on decision 15's terms and documented in
+[Http.Streaming's design](../../../../libraries/Http/Assimalign.Cohesion.Http.Streaming/docs/DESIGN.md#public-interceptor-and-breaking-changes-since-1000-preview1-1465).
+This consumer update changes no API or response behavior owned by this package.

@@ -30,7 +30,7 @@ internal static class SecurityHeadersTestHost
 
         if (streaming)
         {
-            factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+            factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         }
 
         return factory;

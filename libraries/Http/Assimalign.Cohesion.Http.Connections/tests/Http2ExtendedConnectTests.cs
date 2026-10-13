@@ -282,7 +282,7 @@ public class Http2ExtendedConnectTests
     {
         // Arrange — the streaming feature commits the response head with its first write.
         HttpConnectionListenerOptions options = WithExtendedConnect();
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: false, ExtendedConnect());
         IHttpContext context = await peer.ReceiveContextAsync();
@@ -422,7 +422,7 @@ public class Http2ExtendedConnectTests
     {
         // Arrange
         HttpConnectionListenerOptions options = WithExtendedConnect();
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         (IHttpContext context, _) = await AcceptTunnelAsync(peer);
 
@@ -438,7 +438,7 @@ public class Http2ExtendedConnectTests
     private static HttpConnectionListenerOptions WithExtendedConnect()
     {
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
         return options;
     }
 

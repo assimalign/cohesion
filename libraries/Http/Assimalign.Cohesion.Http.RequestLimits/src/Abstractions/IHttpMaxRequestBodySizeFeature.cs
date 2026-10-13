@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The max-request-body-size interceptor (<see cref="HttpRequestLimits"/>) attaches this feature
+/// The max-request-body-size interceptor (<see cref="HttpMaxRequestBodySizeInterceptor"/>) attaches this feature
 /// on every request as a write-through view over the parse context's body-size knob — the value
 /// the transport actually enforces. An endpoint or middleware can read
 /// <see cref="MaxRequestBodySize"/> to discover the effective cap, or assign it &#8212; to raise

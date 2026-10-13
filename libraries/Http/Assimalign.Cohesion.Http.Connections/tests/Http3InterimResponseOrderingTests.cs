@@ -329,9 +329,9 @@ public class Http3InterimResponseOrderingTests
                 options => options.Limits.MinResponseDataRate = rate,
                 static options =>
                 {
-                    options.Interceptors.Add(HttpInterimResponses.CreateInterceptor());
-                    options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
-                    options.Interceptors.Add(HttpRequestLimits.CreateInterceptor());
+                    options.Interceptors.Add(HttpInterimResponseInterceptor.Create());
+                    options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+                    options.Interceptors.Add(HttpRequestLimitsInterceptor.Create());
                 },
                 inner => server = new StallingMultiplexedConnection(inner));
 

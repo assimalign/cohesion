@@ -279,7 +279,7 @@ public class Http3ResponseClientFaultTests
 
     private static void ConfigureInterceptors(HttpConnectionListenerOptions options)
     {
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         options.Interceptors.Add(new CaptureControlInterceptor());
     }
 

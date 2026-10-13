@@ -48,10 +48,10 @@ seams (the same seams `Http.RequestLimits` and `Http.Streaming` consume):
 
 One stateless class (`HttpProtocolUpgradeInterceptor`) implements both hooks; per-exchange state
 crosses seams only through the feature collection, per the interceptor contract. A host enables
-the whole capability by registering the pair:
+the whole capability by registering the interceptor:
 
 ```csharp
-options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
 ```
 
 The transport installs nothing: a host registers the interceptor on each listener it wants
@@ -98,13 +98,13 @@ on an upgrade; the Web.Hosting DESIGN records the measured allocations.
 - `HttpContextProtocolUpgradeExtensions` — `context.Upgrade`, a plain nullable feature read (the
   interceptors install the feature eagerly, so the accessor allocates nothing and never throws
   for ordinary exchanges).
-- `HttpProtocolUpgrade` — the public entry point: `CreateInterceptor()` (mirrors
-  `HttpResponseStreaming.CreateInterceptor()`); the one instance declares the request
+- `HttpProtocolUpgradeInterceptor` — the public sealed implementation: `Create()` (mirrors
+  `HttpResponseStreamingInterceptor.Create()`); the one instance declares the request
   scope (`HttpInterceptorScopes.Request`) and joins the response phase of a transition's
   exchange only (see "The cost of a default-on interceptor").
-- Internal: `HttpProtocolUpgradeInterceptor` (both hooks), `HttpProtocolUpgradeCandidate`
+- Internal: `HttpProtocolUpgradeCandidate`
   (parse-time marker), `Http1ProtocolUpgrade` (accept path), `HttpProtocolUpgradeFeature`
-  (feature holder). Interface-first: all implementations are internal.
+  (feature holder). The interceptor is public; the per-exchange implementations remain internal.
 
 The package surfaces its types under the `Assimalign.Cohesion.Http` namespace (not the assembly
 name) so the `IHttpContext` extension members are discoverable without an extra `using` —
@@ -193,3 +193,20 @@ transport's DESIGN.md.)
 Pure managed code — no reflection, no dynamic code generation, no runtime type inspection.
 Detection is token scanning over parsed headers; the accept path is string and buffer work over
 the surrendered stream. Trimming- and NativeAOT-safe.
+
+## Public interceptor and breaking changes since 10.0.0-preview.1 (#1465)
+
+`HttpProtocolUpgradeInterceptor` is the public sealed implementation of the existing
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its constructor is private;
+`HttpProtocolUpgradeInterceptor.Create()` creates a new stateless instance and returns its concrete type.
+The interface remains the contract for listener registration and custom interceptors. Feature
+implementations remain internal. This is the factory-to-implementation convention approved by
+owner decision 59.
+
+The `v10.0.0-preview.1` tag shipped `HttpProtocolUpgrade.CreateInterceptor()` returning
+`IHttpExchangeInterceptor`. That static factory class is removed. Consumers must replace the call
+with `HttpProtocolUpgradeInterceptor.Create()` and rebuild. Removing the old type and method is a
+**source- and binary-breaking change**, accepted during previews on decision 15's terms.
+Assignments to `IHttpExchangeInterceptor` continue to work after the call is renamed. The
+interceptor's registration order, scopes, feature installation, and request/response behavior
+are unchanged.

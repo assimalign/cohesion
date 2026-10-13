@@ -24,13 +24,13 @@ coupling:
   the core.
 
 Streaming is therefore **opt-in**: a host enables it by registering
-`HttpResponseStreaming.CreateInterceptor()` on the transport's response
+`HttpResponseStreamingInterceptor.Create()` on the transport's response
 interceptors. Where it is not registered, the transport uses its buffered response
 path with zero streaming overhead.
 
 ## How it works
 
-1. A host adds `HttpResponseStreaming.CreateInterceptor()` to
+1. A host adds `HttpResponseStreamingInterceptor.Create()` to
    `HttpConnectionListenerOptions.Interceptors`.
 2. Per exchange, the transport creates its per-protocol raw response body sink and
    runs the registered response interceptors, exposing the sink as
@@ -116,3 +116,20 @@ failure must use the corrected `HasStarted` value to decide whether a replacemen
 
 No reflection, no runtime code generation. The feature wraps a `Stream` and the optional core
 `IHttpExchangeControl`; the interceptor installs it through `Features.Set`.
+
+## Public interceptor and breaking changes since 10.0.0-preview.1 (#1465)
+
+`HttpResponseStreamingInterceptor` is the public sealed implementation of the existing
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its constructor is private;
+`HttpResponseStreamingInterceptor.Create()` creates a new stateless instance and returns its concrete type.
+The interface remains the contract for listener registration and custom interceptors. Feature
+implementations remain internal. This is the factory-to-implementation convention approved by
+owner decision 59.
+
+The `v10.0.0-preview.1` tag shipped `HttpResponseStreaming.CreateInterceptor()` returning
+`IHttpExchangeInterceptor`. That static factory class is removed. Consumers must replace the call
+with `HttpResponseStreamingInterceptor.Create()` and rebuild. Removing the old type and method is a
+**source- and binary-breaking change**, accepted during previews on decision 15's terms.
+Assignments to `IHttpExchangeInterceptor` continue to work after the call is renamed. The
+interceptor's registration order, scopes, feature installation, and request/response behavior
+are unchanged.

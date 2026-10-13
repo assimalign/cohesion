@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Surfaces the protocol-upgrade capability for the current exchange on
 /// <see cref="IHttpContext"/>, backed by the <see cref="IHttpProtocolUpgradeFeature"/> the
-/// package's interceptors install on the exchange's feature collection.
+/// package's interceptor installs on the exchange's feature collection.
 /// </summary>
 public static class HttpContextProtocolUpgradeExtensions
 {
@@ -24,9 +24,8 @@ public static class HttpContextProtocolUpgradeExtensions
         /// </value>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         /// <remarks>
-        /// The feature is installed at parse time by the interceptor pair registered through
-        /// <see cref="HttpProtocolUpgrade.CreateRequestInterceptor"/> /
-        /// <see cref="HttpProtocolUpgrade.CreateResponseInterceptor"/>, so this accessor is a
+        /// The feature is installed at parse time by the interceptor registered through
+        /// <see cref="HttpProtocolUpgradeInterceptor.Create"/>, so this accessor is a
         /// plain feature read: without that registration — or on transports that cannot
         /// surrender their connection (HTTP/2, HTTP/3) — it reads <see langword="null"/> rather
         /// than throwing.

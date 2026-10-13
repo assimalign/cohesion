@@ -881,7 +881,7 @@ public class Http1TransportTests
     {
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+        options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
         return options;
     }
 

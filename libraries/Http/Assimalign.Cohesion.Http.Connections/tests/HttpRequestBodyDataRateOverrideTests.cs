@@ -343,7 +343,7 @@ public class HttpRequestBodyDataRateOverrideTests
 
     private static void AddRequestLimits(HttpConnectionListenerOptions options)
     {
-        options.Interceptors.Add(HttpRequestLimits.CreateInterceptor());
+        options.Interceptors.Add(HttpRequestLimitsInterceptor.Create());
     }
 
     private static async Task<byte[]> ReadToEndAsync(Stream body)

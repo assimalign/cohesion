@@ -52,7 +52,7 @@ public class HttpResponseDateTransportTests
         bool custom = mode.Contains("custom", StringComparison.Ordinal);
         bool streamed = mode.StartsWith("streamed", StringComparison.Ordinal);
         HttpConnectionListenerOptions options = new() { AddDateHeader = enabled, DateTimeProvider = clock };
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         byte[] request = protocol switch
         {
             1 => HttpProtocolPayloadFactory.CreateHttp1Request("GET / HTTP/1.1\r\nHost: api.test\r\nConnection: close\r\n\r\n"),
@@ -120,7 +120,7 @@ public class HttpResponseDateTransportTests
         // Arrange
         HttpConnectionListenerOptions options = new() { AddDateHeader = true, DateTimeProvider = new ManualTimeProvider() };
         options.Interceptors.Add(new HeaderClearingInterceptor());
-        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+        options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
         TestConnection transport = new(HttpProtocolPayloadFactory.CreateHttp1Request(
             "CONNECT api.test:443 HTTP/1.1\r\nHost: api.test:443\r\n\r\n"));
         options.UseHttp1(new TestConnectionListener(transport));

@@ -1,4 +1,6 @@
-namespace Assimalign.Cohesion.Http.Internal;
+using Assimalign.Cohesion.Http.Internal;
+
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// Attaches a per-request <see cref="IHttpMaxRequestBodySizeFeature"/> — a write-through view
@@ -10,11 +12,25 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// read-only lifecycle delegates to the context's transport-owned freeze flag rather than being
 /// copied at a fixed point in the parse.
 /// </remarks>
-internal sealed class HttpMaxRequestBodySizeInterceptor : HttpExchangeInterceptor
+public sealed class HttpMaxRequestBodySizeInterceptor : HttpExchangeInterceptor
 {
+    private HttpMaxRequestBodySizeInterceptor()
+    {
+    }
+
+    /// <summary>
+    /// Creates the interceptor that surfaces the transport's effective per-request body-size cap
+    /// as a typed <see cref="IHttpMaxRequestBodySizeFeature"/> on every exchange, allowing the
+    /// cap to be observed — and, while the request body has not started to be read, adjusted —
+    /// per request.
+    /// </summary>
+    /// <returns>A stateless interceptor to register on the server's listener options.</returns>
+    public static HttpMaxRequestBodySizeInterceptor Create() => new HttpMaxRequestBodySizeInterceptor();
+
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
 
+    /// <inheritdoc />
     public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
     {
         context.Features.Set<IHttpMaxRequestBodySizeFeature>(new HttpMaxRequestBodySizeFeature(context));

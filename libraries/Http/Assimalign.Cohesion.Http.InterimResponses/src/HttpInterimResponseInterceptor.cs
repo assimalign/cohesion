@@ -1,4 +1,6 @@
-namespace Assimalign.Cohesion.Http.Internal;
+using Assimalign.Cohesion.Http.Internal;
+
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// The response interceptor that makes interim (<c>1xx</c>) responses available on an exchange. It
@@ -8,11 +10,23 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// the seam by which interim responses plug into the transport without the transport depending on
 /// this package.
 /// </summary>
-internal sealed class HttpInterimResponseInterceptor : HttpExchangeInterceptor
+public sealed class HttpInterimResponseInterceptor : HttpExchangeInterceptor
 {
+    private HttpInterimResponseInterceptor()
+    {
+    }
+
+    /// <summary>
+    /// Creates the response interceptor that makes <see cref="IHttpInterimResponseFeature"/>
+    /// available on every exchange served by the transport it is registered on.
+    /// </summary>
+    /// <returns>The response interceptor to add to the transport's response-interceptor list.</returns>
+    public static HttpInterimResponseInterceptor Create() => new HttpInterimResponseInterceptor();
+
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;
 
+    /// <inheritdoc />
     public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
     {
         // A transport that does not offer exchange control (a foreign IHttpContext, a hand-built

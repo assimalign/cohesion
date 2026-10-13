@@ -1,4 +1,6 @@
-namespace Assimalign.Cohesion.Http.Internal;
+using Assimalign.Cohesion.Http.Internal;
+
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// The exchange interceptor that makes extended CONNECT (RFC 8441, RFC 9220) available on an
@@ -32,8 +34,20 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// fields.
 /// </para>
 /// </remarks>
-internal sealed class HttpExtendedConnectInterceptor : HttpExchangeInterceptor
+public sealed class HttpExtendedConnectInterceptor : HttpExchangeInterceptor
 {
+    private HttpExtendedConnectInterceptor()
+    {
+    }
+
+    /// <summary>
+    /// Creates the exchange interceptor that surfaces an HTTP/2 or HTTP/3 extended CONNECT as an
+    /// <see cref="IHttpExtendedConnectFeature"/> over the transport's exchange control. Add it to
+    /// the transport's interceptor list.
+    /// </summary>
+    /// <returns>The interceptor to add to the transport's interceptor list.</returns>
+    public static HttpExtendedConnectInterceptor Create() => new HttpExtendedConnectInterceptor();
+
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
 

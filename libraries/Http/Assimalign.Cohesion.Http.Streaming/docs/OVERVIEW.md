@@ -14,7 +14,7 @@ depending on this package.
 
 - `IHttpResponseStreamingFeature` — the typed streaming API (`StartAsync`,
   `WriteAsync`, `FlushAsync`, `CompleteAsync`, `HasStarted`).
-- `HttpResponseStreaming.CreateInterceptor()` — the `IHttpExchangeInterceptor` a
+- `HttpResponseStreamingInterceptor.Create()` — the `IHttpExchangeInterceptor` a
   host registers to make streaming available on every exchange.
 - `Response.Streaming` / `Response.SupportsStreaming` — ergonomic accessors on
   `IHttpResponse`.
@@ -28,7 +28,7 @@ depending on this package.
 
 ```csharp
 // Host / composition root — opt into streaming:
-options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
 
 // Handler:
 context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain";

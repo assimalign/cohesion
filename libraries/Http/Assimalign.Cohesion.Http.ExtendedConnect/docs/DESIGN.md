@@ -34,9 +34,8 @@ flowchart LR
 | Type | Visibility | Role |
 | --- | --- | --- |
 | `IHttpExtendedConnectFeature` | public | The contract: `Protocol` and `AcceptAsync`. |
-| `HttpExtendedConnect` | public | `CreateInterceptor()`, the entry point a listener registers. |
 | `HttpExtendedConnectExtensions` | public | `context.ExtendedConnect` (the feature, or `null`) and `context.IsExtendedConnect`. |
-| `HttpExtendedConnectInterceptor` | internal | Installs the feature on an extended CONNECT and binds it to the exchange control. |
+| `HttpExtendedConnectInterceptor` | public sealed | `Create()` returns a new stateless interceptor; it installs the feature on an extended CONNECT and binds it to the exchange control. |
 | `HttpExtendedConnectFeature` | internal | The feature: `Protocol`, and an `AcceptAsync` that calls the control's `AcceptTunnelAsync`. |
 
 The package surfaces its types under the `Assimalign.Cohesion.Http` namespace (not the assembly name)
@@ -67,7 +66,7 @@ package.
 
 ## The interceptor
 
-`HttpExtendedConnect.CreateInterceptor()` returns a new instance on each call. It is not a singleton,
+`HttpExtendedConnectInterceptor.Create()` returns a new instance on each call. It is not a singleton,
 but it is stateless, so the listener that registers it shares it across all of its exchanges, and
 per-exchange state lives in the exchange's features. It declares `HttpInterceptorScopes.Request`:
 
@@ -95,8 +94,8 @@ regardless, so a listener without it receives extended CONNECT requests and surf
 `CONNECT` requests: WebSockets over HTTP/2 and HTTP/3 cannot be accepted there. The Web host
 registers it by default, after the protocol-upgrade interceptor (Web.Hosting DESIGN); a host that
 clears `options.Interceptors` loses it, as it loses HTTP/1.1 WebSockets with the upgrade interceptor.
-Because the advertisement is unconditional, a listener that registers `HttpProtocolUpgrade` but not
-`HttpExtendedConnect` receives HTTP/2 and HTTP/3 extended CONNECT handshakes and dispatches them as
+Because the advertisement is unconditional, a listener that registers `HttpProtocolUpgradeInterceptor` but not
+`HttpExtendedConnectInterceptor` receives HTTP/2 and HTTP/3 extended CONNECT handshakes and dispatches them as
 plain `CONNECT` requests it cannot answer with a tunnel: a WebSocket client that chose HTTP/2 or HTTP/3 on the strength of the setting then fails, instead of
 falling back to HTTP/1.1, where that listener would have served it.
 
@@ -111,7 +110,7 @@ Checked against the `v10.0.0-preview.1` tag:
   accessor ignored it (#1369 now rejects it). Extended CONNECT
   detection therefore worked on a bare listener, with nothing registered, although the feature
   could only report `Protocol`. The transport now publishes nothing to `Items`, and the feature
-  exists only on a listener that registers `HttpExtendedConnect.CreateInterceptor()`. The Web host
+  exists only on a listener that registers `HttpExtendedConnectInterceptor.Create()`. The Web host
   registers it by default; a listener built directly on `Http.Connections` must add it, and code
   that read `Items[":protocol"]` reads `context.ExtendedConnect` instead.
 - **`IHttpExchangeControl` gained `CanAcceptTunnel` and `AcceptTunnelAsync`.** The interface
@@ -186,3 +185,19 @@ on the validator alone.
 Pure managed code with no reflection, dynamic code generation, or runtime type inspection. The
 interceptor's hooks are a null check, a version and a method check, a feature set and a type test,
 and the accessors are one feature lookup each, so the package is trimming- and NativeAOT-safe.
+## Public interceptor and compatibility against 10.0.0-preview.1 (#1465)
+
+`HttpExtendedConnectInterceptor` is the public sealed implementation of the existing
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its private constructor is
+reached through `HttpExtendedConnectInterceptor.Create()`, which returns its concrete type. The
+interface remains the listener registration contract and the per-exchange feature remains internal.
+This is the factory-to-implementation convention approved by owner decision 59.
+
+The `v10.0.0-preview.1` tag shipped neither `HttpExtendedConnect` nor the interceptor: #1368 added
+the factory after that tag. Removing the current `HttpExtendedConnect.CreateInterceptor()` API is
+therefore a **source- and binary-breaking change** for consumers of the intervening branch, accepted
+on decision 15's preview terms, but removes no preview.1 factory API. Those consumers replace the
+call with `HttpExtendedConnectInterceptor.Create()` and rebuild. For preview.1 consumers, the
+registration migration remains the one described above under "Behavior change from
+10.0.0-preview.1". Registration order, scope, feature installation, and tunnel behavior are unchanged
+by this API-shape change.

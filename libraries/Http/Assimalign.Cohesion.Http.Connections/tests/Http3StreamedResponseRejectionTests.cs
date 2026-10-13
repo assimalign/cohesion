@@ -31,7 +31,7 @@ public class Http3StreamedResponseRejectionTests
         // Arrange — a streamed response is on the wire before any of the body is read.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             http3 => http3.Limits.MaxRequestBodySize = 16,
-            static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+            static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         (IDuplexConnection request, IHttpContext context) = await StartStreamedResponseAsync(peer);
 
         // Act — the body crosses the cap, the read fails, and the exchange is finalized.
@@ -50,7 +50,7 @@ public class Http3StreamedResponseRejectionTests
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             http3 => http3.Limits.MinRequestBodyDataRate = new HttpMinDataRate(bytesPerSecond: 100, gracePeriod: TimeSpan.FromMilliseconds(300)),
-            static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+            static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         (IDuplexConnection request, IHttpContext context) = await StartStreamedResponseAsync(peer);
 
         // Act — the peer sends none of the body, so the read fails once the grace period runs out.
@@ -68,7 +68,7 @@ public class Http3StreamedResponseRejectionTests
         // Arrange — the application streams a 413 of its own.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             http3 => http3.Limits.MaxRequestBodySize = 16,
-            static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+            static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         (IDuplexConnection request, IHttpContext context) = await StartStreamedResponseAsync(peer, HttpStatusCode.RequestEntityTooLarge);
 
         // Act

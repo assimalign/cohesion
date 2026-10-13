@@ -263,7 +263,7 @@ public class Http3RequestStreamTests
         // Arrange — a streamed response is on the wire while the request body is still open, and the
         // exchange then faults: the server resets it through CancelAsync followed by SendAsync.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
-            configureListener: static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+            configureListener: static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/stream", "https", "a"),
@@ -617,7 +617,7 @@ public class Http3RequestStreamTests
         TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("HEAD", "/feed", "https", "a"));
         (IHttpConnectionContext connectionContext, IHttpContext context) = await ReceiveSingleAsync(
             stream,
-            configureListener: static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+            configureListener: static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
 
         IHttpResponseStreamingFeature streaming = context.Response.Streaming;
         await streaming.WriteAsync(Encoding.ASCII.GetBytes("chunk"));

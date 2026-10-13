@@ -219,7 +219,7 @@ public class Http2ResponseFlowControlTests
     {
         // Arrange — the streaming sink shares the same credit mechanism as the buffered path.
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(
             options,
             initialWindowSize: 4);

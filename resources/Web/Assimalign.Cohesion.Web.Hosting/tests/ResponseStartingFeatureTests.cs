@@ -876,7 +876,7 @@ public class ResponseStartingFeatureTests
         {
             Protocol = protocol == 2 ? WebApplicationTestProtocol.Http2 : WebApplicationTestProtocol.Http1,
         });
-        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         InMemoryMultiplexedConnectionListener? multiplexed = protocol == 3 ? new() : null;
 
         if (multiplexed is not null)

@@ -318,7 +318,7 @@ public class Http2ResponseClientFaultTests
     private static HttpConnectionListenerOptions CreateOptions(CaptureControlInterceptor capture)
     {
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         options.Interceptors.Add(capture);
         return options;
     }

@@ -213,7 +213,7 @@ public class InterceptorLifecycleTests
         };
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
@@ -268,7 +268,7 @@ public class InterceptorLifecycleTests
         };
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);

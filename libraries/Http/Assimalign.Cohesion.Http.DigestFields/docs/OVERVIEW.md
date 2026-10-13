@@ -15,7 +15,7 @@ request verifier.
 - **Algorithms:** `HttpDigestAlgorithm` — `sha-256` and `sha-512` are supported for compute and
   verify; the deprecated registry entries (`md5`, `sha`, `unixsum`, `unixcksum`) are recognized on
   parse but never used (RFC 9530 §5).
-- **Server verification:** `HttpDigestFields.CreateContentDigestVerifier()` returns an
+- **Server verification:** `HttpContentDigestInterceptor.Create()` returns an
   `IHttpExchangeInterceptor` the composition root registers on its listener; it verifies an inbound
   `Content-Digest` against the request body. On HTTP/1.1 verification is eager and a mismatch is
   rejected with `400 Bad Request` before dispatch; on HTTP/2 and HTTP/3 (whose bodies stream in
@@ -32,7 +32,7 @@ Usage:
 
 ```csharp
 // Server: verify inbound Content-Digest (register before any content-decoding interceptor).
-listenerOptions.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+listenerOptions.Interceptors.Add(HttpContentDigestInterceptor.Create());
 
 // Response: stamp Content-Digest, honoring the client's Want-Content-Digest.
 context.Response.SetContentDigest(body);

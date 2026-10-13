@@ -157,7 +157,7 @@ public class HttpResponseContentFramingTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
@@ -223,7 +223,7 @@ public class HttpResponseContentFramingTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
@@ -314,7 +314,7 @@ public class HttpResponseContentFramingTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/events"));
         IHttpContext exchange = await peer.ReceiveContextAsync();
@@ -405,7 +405,7 @@ public class HttpResponseContentFramingTests
         TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/events", "https", "api.test"));
         (IHttpConnectionContext connectionContext, IHttpContext context) = await ReceiveSingleHttp3Async(
             stream,
-            static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+            static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         context.Response.StatusCode = HttpStatusCode.NoContent;
 
         // Act

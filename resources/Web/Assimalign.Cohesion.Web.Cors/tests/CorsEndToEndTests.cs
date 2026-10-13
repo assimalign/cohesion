@@ -512,7 +512,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App)));
         factory.Application.Use(async (context, next) =>
         {
@@ -540,7 +540,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
         factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
         int calls = 0;
         HttpErrorCode? refusalCode = null;

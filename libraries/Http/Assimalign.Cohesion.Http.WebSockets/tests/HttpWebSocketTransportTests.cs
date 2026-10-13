@@ -33,7 +33,7 @@ public class HttpWebSocketTransportTests
         await using HttpConnectionListener listener = HttpConnectionListener.Create(options =>
         {
             options.UseHttp1(tcp);
-            options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+            options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
         });
         await listener.BindAsync(cancellationToken);
         int port = ((IPEndPoint)tcp.EndPoint).Port;

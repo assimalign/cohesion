@@ -274,8 +274,8 @@ public sealed class WebApplicationServerBuilder
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
     {
-        options.Interceptors.Add(HttpRequestLimits.CreateInterceptor());
-        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
-        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        options.Interceptors.Add(HttpRequestLimitsInterceptor.Create());
+        options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
+        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
     }
 }

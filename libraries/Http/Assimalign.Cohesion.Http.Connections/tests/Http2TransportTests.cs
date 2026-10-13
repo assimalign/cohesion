@@ -542,7 +542,7 @@ public class Http2TransportTests
         TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
@@ -574,7 +574,7 @@ public class Http2TransportTests
         TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
@@ -592,7 +592,7 @@ public class Http2TransportTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
@@ -618,7 +618,7 @@ public class Http2TransportTests
         TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();

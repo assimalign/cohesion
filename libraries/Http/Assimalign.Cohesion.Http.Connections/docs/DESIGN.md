@@ -485,7 +485,7 @@ any version:
 
 ```csharp
 HttpConnectionListenerOptions options = new();
-options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+options.Interceptors.Add(HttpMaxRequestBodySizeInterceptor.Create());
 options.Interceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
 ```
 
@@ -1570,7 +1570,7 @@ The `Http.ProtocolUpgrade` package owns everything else — detection over the
 parsed head (via `IHttpExchangeInterceptor.AfterRequestHead`), the
 `context.Upgrade` feature surface, the 101/200 accept path, and the
 RFC-mandated framing-header scrub — wired by registering its single exchange
-interceptor on the listener options (`HttpProtocolUpgrade.CreateInterceptor()`),
+interceptor on the listener options (`HttpProtocolUpgradeInterceptor.Create()`),
 exactly how `Http.RequestLimits` and
 `Http.Streaming` plug in. HTTP/2 / HTTP/3 controls report
 `CanTakeOver == false` (their `TakeOver()` throws): their exchanges are
@@ -2603,7 +2603,7 @@ assembly, so:
 
 An exchange with interceptors pays one more reference field on its parse context (8 B) and nothing
 else: `Http.RequestLimits` puts the rate contract on the same feature object as the body-size contract
-(`HttpRequestLimits.CreateInterceptor()`), so the web host's exchanges carry no extra feature and its
+(`HttpRequestLimitsInterceptor.Create()`), so the web host's exchanges carry no extra feature and its
 presized collection (#1381) keeps its size. An HTTP/2 connection allocates its rate policy and three
 delegates once, configured or not. The zero-interceptor fast path is unchanged.
 

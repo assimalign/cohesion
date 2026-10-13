@@ -244,7 +244,7 @@ public class Http3ExtendedConnectTests
             configureListener: static options =>
             {
                 WithExtendedConnect(options);
-                options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+                options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
             });
         await OpenExtendedConnectAsync(peer);
         IHttpContext context = await peer.NextContextAsync();
@@ -262,7 +262,7 @@ public class Http3ExtendedConnectTests
             configureListener: static options =>
             {
                 WithExtendedConnect(options);
-                options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+                options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
             });
         await OpenExtendedConnectAsync(peer);
         IHttpContext context = await peer.NextContextAsync();
@@ -331,7 +331,7 @@ public class Http3ExtendedConnectTests
 
     // The extended CONNECT feature is installed by its interceptor (#1368), which a host registers.
     private static void WithExtendedConnect(HttpConnectionListenerOptions options)
-        => options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        => options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
 
     private static async Task<IDuplexConnection> OpenExtendedConnectAsync(Http3InMemoryPeer peer)
     {

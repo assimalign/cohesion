@@ -91,7 +91,7 @@ reflection" mandate literally:
 
 ## Server-side verification (the interceptor)
 
-`HttpDigestFields.CreateContentDigestVerifier()` returns a stateless `IHttpExchangeInterceptor` — the
+`HttpContentDigestInterceptor.Create()` returns a stateless `IHttpExchangeInterceptor` — the
 #818 request-parse seam is the natural hook for request-digest validation. It hooks
 `AfterRequestBody`:
 
@@ -217,3 +217,20 @@ one `IncrementalHash` per supported entry — and **no body copy at all** — on
   content; the signature layer itself is out of scope.
 - **Client-side response-digest verification** — this package's verifier is a server-side request
   surface; the value model and `VerifyContent` are reusable by a future client consumer.
+
+## Public interceptor and breaking changes since 10.0.0-preview.1 (#1465)
+
+`HttpContentDigestInterceptor` is the public sealed implementation of the existing
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its constructor is private;
+`HttpContentDigestInterceptor.Create()` creates a new stateless instance and returns its concrete type.
+The interface remains the contract for listener registration and custom interceptors. Feature
+implementations remain internal. This is the factory-to-implementation convention approved by
+owner decision 59.
+
+The `v10.0.0-preview.1` tag shipped `HttpDigestFields.CreateContentDigestVerifier()` returning
+`IHttpExchangeInterceptor`. That static factory class is removed. Consumers must replace the call
+with `HttpContentDigestInterceptor.Create()` and rebuild. Removing the old type and method is a
+**source- and binary-breaking change**, accepted during previews on decision 15's terms.
+Assignments to `IHttpExchangeInterceptor` continue to work after the call is renamed. The
+interceptor's registration order, scopes, feature installation, and request/response behavior
+are unchanged.

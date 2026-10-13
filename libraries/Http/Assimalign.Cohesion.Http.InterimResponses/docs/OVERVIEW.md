@@ -15,7 +15,7 @@ depending on this package.
 
 - `IHttpInterimResponseFeature` — the typed interim-response API
   (`IsInterimResponseSupported`, `SendInterimResponseAsync`).
-- `HttpInterimResponses.CreateInterceptor()` — the `IHttpExchangeInterceptor` a
+- `HttpInterimResponseInterceptor.Create()` — the `IHttpExchangeInterceptor` a
   host registers to make interim responses available on every exchange.
 - `context.InterimResponse` / `context.SendEarlyHintsAsync(...)` /
   `context.SendContinueAsync()` — ergonomic accessors on `IHttpContext`.
@@ -41,7 +41,7 @@ and an explicit, handler-driven `100 Continue`.
 
 ```csharp
 // Host / composition root — opt into interim responses:
-options.Interceptors.Add(HttpInterimResponses.CreateInterceptor());
+options.Interceptors.Add(HttpInterimResponseInterceptor.Create());
 
 // Handler — send 103 Early Hints before doing the slow work:
 await context.SendEarlyHintsAsync(["</style.css>; rel=preload; as=style"]);

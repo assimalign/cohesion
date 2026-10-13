@@ -45,7 +45,7 @@ public class Http2ContentDigestVerificationTests
         // exist yet as far as the server can observe.
         TestConnection connection = new(opening, completeInput: false);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+        options.Interceptors.Add(HttpContentDigestInterceptor.Create());
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
@@ -103,7 +103,7 @@ public class Http2ContentDigestVerificationTests
 
         TestConnection connection = new(opening, completeInput: false);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+        options.Interceptors.Add(HttpContentDigestInterceptor.Create());
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
@@ -147,7 +147,7 @@ public class Http2ContentDigestVerificationTests
 
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+        options.Interceptors.Add(HttpContentDigestInterceptor.Create());
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
@@ -175,7 +175,7 @@ public class Http2ContentDigestVerificationTests
 
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+        options.Interceptors.Add(HttpContentDigestInterceptor.Create());
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);

@@ -1,11 +1,13 @@
 using System.IO;
 
-namespace Assimalign.Cohesion.Http.Internal;
+using Assimalign.Cohesion.Http.Internal;
+
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// A request-parse interceptor that verifies an inbound <c>Content-Digest</c> against the request
 /// body. Opt-in: the composition root installs it via
-/// <see cref="HttpDigestFields.CreateContentDigestVerifier"/>.
+/// <see cref="HttpContentDigestInterceptor.Create"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,11 +43,38 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <c>Content-Digest</c>, or only deprecated/unknown algorithms, passes through untouched.
 /// </para>
 /// </remarks>
-internal sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
+public sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
 {
+    private HttpContentDigestInterceptor()
+    {
+    }
+
+    /// <summary>
+    /// Creates the stateless <see cref="IHttpExchangeInterceptor"/> that verifies an inbound
+    /// <c>Content-Digest</c> against the request body. On HTTP/1.1 verification is eager and a
+    /// mismatch (or a malformed field) is rejected with <c>400 Bad Request</c> before the request is
+    /// dispatched; on HTTP/2 and HTTP/3, whose bodies stream in after dispatch, the body is verified
+    /// lazily as the application reads it, and a mismatch surfaces as
+    /// <see cref="HttpContentDigestMismatchException"/> from the terminal body read (the
+    /// malformed-field <c>400</c> stays pre-dispatch there too).
+    /// </summary>
+    /// <remarks>
+    /// Register it <em>before</em> any content-decoding interceptor, because <c>Content-Digest</c>
+    /// is taken over the message content as received. A request with no <c>Content-Digest</c>, or
+    /// one offering only deprecated/unregistered algorithms, is passed through unverified — as is
+    /// (on the lazy path) any part of a body the application never reads: verification can only
+    /// cover what is consumed. An application that catches
+    /// <see cref="HttpContentDigestMismatchException"/> must treat the body as corrupt and abort
+    /// the exchange (<see cref="IHttpContext.Cancel"/>).
+    /// </remarks>
+    /// <returns>The content-digest verification interceptor.</returns>
+    public static HttpContentDigestInterceptor Create() => new HttpContentDigestInterceptor();
+
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
 
+    /// <inheritdoc />
+    /// <exception cref="HttpRequestRejectedException">The digest field is malformed or the HTTP/1.1 body does not match it.</exception>
     public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
     {
         if (!context.Headers.TryGetValue(HttpHeaderKey.ContentDigest, out HttpHeaderValue raw) || raw.IsEmpty)

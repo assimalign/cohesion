@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The request-limits interceptor (<see cref="HttpRequestLimits.CreateInterceptor"/>) attaches this
+/// The request-limits interceptor (<see cref="HttpRequestLimitsInterceptor.Create"/>) attaches this
 /// feature on every request as a write-through view over the parse context's rate knob
 /// (<see cref="HttpExchangeInterceptorRequestContext.MinResponseDataRate"/>), the value the transport
 /// actually enforces. An endpoint or middleware reads <see cref="MinDataRate"/> to discover the rate,

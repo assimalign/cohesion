@@ -334,7 +334,7 @@ public class Http3FieldSectionLimitTests
         TestConnection stream = new(CreateRequestWithOversizedTrailers());
         TestMultiplexedConnection connection = new(stream);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), static http3 => http3.QPack.MaxFieldSectionSize = 256);
 
         await using HttpConnectionListener listener = new(options);

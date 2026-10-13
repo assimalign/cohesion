@@ -73,8 +73,8 @@ listener's interceptors loses WebSockets on the protocols whose interceptor it r
 HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 {
     options.UseHttp1AndHttp2(tlsListener); // ALPN picks HTTP/1.1 or HTTP/2 per connection
-    options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
-    options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+    options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
+    options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
 });
 ```
 
