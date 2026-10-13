@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
@@ -107,9 +108,7 @@ internal sealed class RouteMatchFeature : IRouteMatchFeature, IWebEndpointFeatur
                 && !IsSuperseded(metadata, i))
             {
                 throw new InvalidOperationException(
-                    $"The endpoint '{Describe(Route)}' declares {metadata[i].GetType().Name}, which only " +
-                    $"{middleware}() applies, but {middleware}() did not process this request. Register " +
-                    $"{middleware}() after UseRouting() so it runs before the endpoint.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointPolicyMiddlewareMissing, Describe(Route), metadata[i].GetType().Name, middleware, middleware, middleware));
             }
         }
     }

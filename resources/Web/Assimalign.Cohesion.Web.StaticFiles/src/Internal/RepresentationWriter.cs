@@ -472,7 +472,7 @@ internal static class RepresentationWriter
                     // The content shrank after the head (with its Content-Length and any
                     // Content-Range) was computed: completing the response would silently serve
                     // wrong bytes, so abort it.
-                    throw new EndOfStreamException("The content ended before its declared length was fully written.");
+                    throw new EndOfStreamException(ErrorMessages.ContentEndedBeforeDeclaredLength);
                 }
                 await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 remaining -= read;
@@ -497,7 +497,7 @@ internal static class RepresentationWriter
                     .ConfigureAwait(false);
                 if (read <= 0)
                 {
-                    throw new EndOfStreamException("The content ended before the selected byte range was reached.");
+                    throw new EndOfStreamException(ErrorMessages.ContentEndedBeforeSelectedRange);
                 }
                 remaining -= read;
             }

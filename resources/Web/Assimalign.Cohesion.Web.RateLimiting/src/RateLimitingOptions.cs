@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -64,7 +65,7 @@ public sealed class RateLimitingOptions
 
         if (!_policies.TryAdd(name, policy))
         {
-            throw new InvalidOperationException($"A rate limiting policy named '{name}' is already registered.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RateLimitingPolicyAlreadyRegistered, name));
         }
 
         return this;

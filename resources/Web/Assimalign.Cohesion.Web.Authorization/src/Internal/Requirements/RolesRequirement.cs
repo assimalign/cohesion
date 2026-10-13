@@ -31,7 +31,7 @@ internal sealed class RolesRequirement : IAuthorizationRequirement
         if (_roles.Length == 0)
         {
             throw new ArgumentException(
-                "At least one role is required; a role requirement with none could never be satisfied.",
+                ErrorMessages.RoleRequired,
                 nameof(roles));
         }
     }

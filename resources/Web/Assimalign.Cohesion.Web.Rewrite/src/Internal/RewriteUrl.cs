@@ -319,7 +319,7 @@ internal static class RewriteUrl
             if (character <= ' ' || character == '\u007F')
             {
                 throw new ArgumentException(
-                    "A redirect location cannot contain a control character or a space; percent-encode it.",
+                    ErrorMessages.RedirectLocationInvalid,
                     nameof(location));
             }
         }

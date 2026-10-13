@@ -338,8 +338,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
     {
         string contentType = GetReaderMediaType(body.Type)
             ?? throw new InvalidOperationException(
-                $"The request body '{body.Name}' is a '{body.Type}', but no registered content reader can read it. " +
-                $"Add the type to the application's JsonSerializerContext ([JsonSerializable(typeof({body.Type.Name}))]) passed to AddJsonSerialization.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestBodyReaderNotRegistered, body.Name, body.Type, body.Type.Name));
 
         return new OpenApiRequestBodyMetadata
         {
@@ -466,8 +465,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         {
             contentType = GetWriterMediaType(type)
                 ?? throw new InvalidOperationException(
-                    $"The endpoint returns a '{type}' for status {statusCode}, but no registered content writer can serialize it. " +
-                    $"Add the type to the application's JsonSerializerContext ([JsonSerializable(typeof({type.Name}))]) passed to AddJsonSerialization.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResponseBodyWriterNotRegistered, type, statusCode, type.Name));
         }
 
         return new OpenApiResponseMetadata
@@ -633,7 +631,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         string verbs = string.Join(", ", methods).ToUpperInvariant();
 
         return new InvalidOperationException(
-            $"The OpenAPI description of the endpoint {verbs} {path} could not be generated. {exception.Message}",
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointDescriptionFailed, verbs, path, exception.Message),
             exception);
     }
 

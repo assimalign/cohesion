@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
 
 using Assimalign.Cohesion.Http;
@@ -71,8 +72,7 @@ internal sealed class ForwardedHeadersResolver
         if (options.Headers == ForwardedHeaderNames.None)
         {
             throw new ArgumentException(
-                $"{nameof(ForwardedHeadersOptions.Headers)} must select at least one forwarding header. " +
-                "Header selection is part of the trust model — enable exactly the headers your trusted proxy manages.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardingHeaderSelectionRequired, nameof(ForwardedHeadersOptions.Headers)),
                 nameof(options));
         }
         if (options.ForwardLimit is < 1)
@@ -80,7 +80,7 @@ internal sealed class ForwardedHeadersResolver
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ForwardLimit,
-                $"{nameof(ForwardedHeadersOptions.ForwardLimit)} must be at least 1, or null for no limit.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardLimitMustBePositive, nameof(ForwardedHeadersOptions.ForwardLimit)));
         }
 
         var proxies = new List<IPAddress>(options.KnownProxies.Count);
@@ -89,7 +89,7 @@ internal sealed class ForwardedHeadersResolver
             if (proxy is null)
             {
                 throw new ArgumentException(
-                    $"{nameof(ForwardedHeadersOptions.KnownProxies)} contains a null entry.", nameof(options));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.KnownProxyMustNotBeNull, nameof(ForwardedHeadersOptions.KnownProxies)), nameof(options));
             }
             proxies.Add(Normalize(proxy));
         }

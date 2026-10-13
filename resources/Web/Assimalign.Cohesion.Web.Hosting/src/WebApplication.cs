@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
@@ -87,7 +88,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         }
         if (failures is not null)
         {
-            throw new AggregateException("One or more application teardown operations failed.", failures);
+            throw new AggregateException(ErrorMessages.ApplicationTeardownFailed, failures);
         }
     }
 
@@ -139,11 +140,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
             if (feature is IDisposable or IAsyncDisposable)
             {
                 throw new InvalidOperationException(
-                    $"The application feature '{feature.Name}' ({feature.GetType().FullName}) is disposable. " +
-                    "The host stamps the same feature instance onto every exchange, and an exchange disposes the " +
-                    "disposable features it carries when it ends, so this instance would be disposed after its " +
-                    "first request. Keep disposable per-request state in a feature that middleware installs on " +
-                    "each exchange.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ApplicationFeatureDisposable, feature.Name, feature.GetType().FullName));
             }
         }
 

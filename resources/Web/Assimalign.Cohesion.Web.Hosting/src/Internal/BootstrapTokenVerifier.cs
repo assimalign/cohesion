@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 
@@ -28,13 +29,13 @@ internal sealed class BootstrapTokenVerifier
     {
         ArgumentNullException.ThrowIfNull(context);
         _application = context.ApplicationName ?? throw new InvalidOperationException(
-            "A gateway-managed resource requires an application name.");
+            ErrorMessages.ManagedResourceApplicationNameRequired);
         _gateway = context.GatewayName ?? throw new InvalidOperationException(
-            "A gateway-managed resource requires a gateway name.");
+            ErrorMessages.ManagedResourceGatewayNameRequired);
         if (context.ApplicationTrustKey.IsEmpty)
         {
             throw new InvalidOperationException(
-                "A gateway-managed resource requires a public application trust key.");
+                ErrorMessages.ManagedResourceTrustKeyRequired);
         }
 
         JsonWebKey key = ReadApplicationTrustKey(context.ApplicationTrustKey.Span);
@@ -123,6 +124,6 @@ internal sealed class BootstrapTokenVerifier
             key.TryValidateEcdsaVerificationKey("P-256", out failure)
                 ? key
                 : throw new InvalidOperationException(
-                    $"The application trust key is not a valid EC P-256 JWK. {failure}".TrimEnd());
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ApplicationTrustKeyInvalid, failure).TrimEnd());
     }
 }

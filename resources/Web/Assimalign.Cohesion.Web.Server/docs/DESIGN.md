@@ -1195,3 +1195,16 @@ Compared with 10.0.0-preview.1, the contract is additive. Callback exceptions ab
 security/CORS fields now stage at commit, including error responses caught by an outer boundary.
 Custom servers must publish and drive the contract for middleware that requires it. The server always installs its response-starting interceptor, including when the caller supplies
 no listener interceptors. Web.Server is already an App.Web member and the Hosting closure gains no assembly.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.
+
+The expected rejection or cancellation messages are cached in static readonly fields: `ServerDrainBudgetExceeded`. Their ordinary lifecycle paths perform no resource lookup per exception.

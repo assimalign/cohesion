@@ -53,7 +53,7 @@ public sealed class RouteHostMetadata
         {
             if (hosts[index] is null)
             {
-                throw new ArgumentException("Host patterns must not be null.", nameof(hosts));
+                throw new ArgumentException(ErrorMessages.HostPatternMustNotBeNull, nameof(hosts));
             }
 
             _hosts[index] = RouteHostConstraint.Parse(hosts[index]);
@@ -78,7 +78,7 @@ public sealed class RouteHostMetadata
         {
             if (_hosts[index].Host.Length == 0)
             {
-                throw new ArgumentException("Host constraints must be created through RouteHostConstraint.Parse or TryParse; a default-initialized constraint matches nothing.", nameof(hosts));
+                throw new ArgumentException(ErrorMessages.HostConstraintMustBeInitialized, nameof(hosts));
             }
         }
     }

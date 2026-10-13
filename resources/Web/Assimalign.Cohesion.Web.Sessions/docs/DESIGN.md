@@ -240,3 +240,14 @@ Http.Sessions owns load/commit failures (see above), with no duplicate report he
 Since 10.0.0-preview.1, diagnostics become observable but cookie and persistence behavior are
 unchanged. The Web.Server dependency provides request correlation and adds
 no hosting dependency or framework member.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

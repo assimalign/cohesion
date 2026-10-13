@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
@@ -51,7 +52,7 @@ public static class WebApplicationBranchingExtensions
             if (prefix.Length == 0 || prefix[0] != '/')
             {
                 throw new ArgumentException(
-                    $"A path branch needs an origin-form prefix below the root, such as '/static': '{path.Value}'.", nameof(path));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.PathBranchPrefixInvalid, path.Value), nameof(path));
             }
 
             HttpPath prefixPath = new(prefix);

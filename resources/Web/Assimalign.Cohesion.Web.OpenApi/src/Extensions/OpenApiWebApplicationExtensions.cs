@@ -101,7 +101,7 @@ public static class OpenApiWebApplicationExtensions
 
             if (!Enum.IsDefined(specVersion))
             {
-                throw new ArgumentOutOfRangeException(nameof(specVersion), specVersion, "The value is not a defined OpenApiSpecVersion.");
+                throw new ArgumentOutOfRangeException(nameof(specVersion), specVersion, ErrorMessages.UndefinedOpenApiSpecVersion);
             }
 
             OpenApiDocumentFeature feature = GetFeature(builder.Context);
@@ -139,7 +139,7 @@ public static class OpenApiWebApplicationExtensions
     private static OpenApiDocumentFeature GetFeature(IWebApplicationContext context)
         => context.Features.OfType<OpenApiDocumentFeature>().LastOrDefault()
             ?? throw new InvalidOperationException(
-                "OpenAPI has not been registered. Call builder.Services.AddOpenApi() before mapping or reading the document.");
+                ErrorMessages.OpenApiNotRegistered);
 
     private static OpenApiFormat GetFormat(string pattern)
         => pattern.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || pattern.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)

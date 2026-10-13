@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 using Assimalign.Cohesion.Web.Cors.Internal;
 
@@ -238,35 +239,31 @@ public sealed class CorsPolicyBuilder
             if (_origins.Count > 0 || _originPredicate is not null)
             {
                 throw new InvalidOperationException(
-                    "AllowAnyOrigin() cannot be combined with WithOrigins or SetIsOriginAllowed: a policy that " +
-                    "allows every origin has no origin to restrict.");
+                    ErrorMessages.AnyOriginConflictsWithOriginRestrictions);
             }
 
             if (_supportsCredentials)
             {
                 throw new InvalidOperationException(
-                    "AllowAnyOrigin() cannot be combined with AllowCredentials(). The Fetch standard forbids " +
-                    "'Access-Control-Allow-Origin: *' on a response to a credentialed request, and echoing every " +
-                    "origin instead would let any site read responses with the user's credentials. List the " +
-                    "trusted origins with WithOrigins, or decide per origin with SetIsOriginAllowed.");
+                    ErrorMessages.AnyOriginConflictsWithCredentials);
             }
         }
         else if (_origins.Count == 0 && _originPredicate is null)
         {
             throw new InvalidOperationException(
-                "A CORS policy must allow at least one origin. Call WithOrigins, SetIsOriginAllowed or AllowAnyOrigin().");
+                ErrorMessages.CorsOriginRequired);
         }
 
         if (_allowAnyMethod && _methods.Count > 0)
         {
             throw new InvalidOperationException(
-                "AllowAnyMethod() cannot be combined with WithMethods: a policy that allows every method has no method to list.");
+                ErrorMessages.AnyMethodConflictsWithMethods);
         }
 
         if (_allowAnyHeader && _headers.Count > 0)
         {
             throw new InvalidOperationException(
-                "AllowAnyHeader() cannot be combined with WithHeaders: a policy that allows every header has no header to list.");
+                ErrorMessages.AnyHeaderConflictsWithHeaders);
         }
 
         return new CorsPolicy(
@@ -286,21 +283,21 @@ public sealed class CorsPolicyBuilder
     {
         if (string.IsNullOrEmpty(value))
         {
-            throw new ArgumentException($"A {kind} must not be null or empty.", parameterName);
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenMustNotBeEmpty, kind), parameterName);
         }
 
         if (value == "*")
         {
             throw new ArgumentException(
                 wildcardAlternative is null
-                    ? $"'*' is not a {kind}. List the names explicitly."
-                    : $"'*' is not a {kind}. Call {wildcardAlternative}() to allow every one.",
+                    ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardMustBeExplicitNames, kind)
+                    : string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardRequiresAllowAny, kind, wildcardAlternative),
                 parameterName);
         }
 
         if (!CorsSyntax.IsToken(value))
         {
-            throw new ArgumentException($"'{value}' is not a {kind}: it must be an RFC 9110 token.", parameterName);
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenInvalid, value, kind), parameterName);
         }
     }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 
 using Assimalign.Cohesion.Web.Routing;
 
@@ -103,7 +104,7 @@ public sealed class AuthorizationOptions
 
         if (!_policies.TryAdd(name, policy))
         {
-            throw new InvalidOperationException($"An authorization policy named '{name}' is already registered.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorizationPolicyAlreadyRegistered, name));
         }
 
         return this;
@@ -225,8 +226,7 @@ public sealed class AuthorizationOptions
                 if (!_policies.TryGetValue(policyName, out AuthorizationPolicy? named))
                 {
                     throw new InvalidOperationException(
-                        $"No authorization policy named '{policyName}' has been registered. " +
-                        "Register it with authorization.Options.AddPolicy(name, policy) in AddAuthorization.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorizationPolicyNotRegistered, policyName));
                 }
 
                 builder.Combine(named);
@@ -270,8 +270,7 @@ public sealed class AuthorizationOptions
         if (_isReadOnly)
         {
             throw new InvalidOperationException(
-                "Authorization options are read-only once AddAuthorization has captured them. " +
-                "Configure every policy inside the AddAuthorization callback.");
+                ErrorMessages.AuthorizationOptionsReadOnly);
         }
     }
 }

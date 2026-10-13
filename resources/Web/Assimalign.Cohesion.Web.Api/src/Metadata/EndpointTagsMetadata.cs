@@ -37,7 +37,7 @@ public sealed class EndpointTagsMetadata
 
         if (tags.Length == 0)
         {
-            throw new ArgumentException("At least one tag is required.", nameof(tags));
+            throw new ArgumentException(ErrorMessages.EndpointTagsRequired, nameof(tags));
         }
 
         string[] copy = new string[tags.Length];
@@ -46,7 +46,7 @@ public sealed class EndpointTagsMetadata
         {
             if (string.IsNullOrWhiteSpace(tags[i]))
             {
-                throw new ArgumentException("Tags must not be null, empty, or whitespace.", nameof(tags));
+                throw new ArgumentException(ErrorMessages.EndpointTagMustNotBeBlank, nameof(tags));
             }
 
             copy[i] = tags[i];

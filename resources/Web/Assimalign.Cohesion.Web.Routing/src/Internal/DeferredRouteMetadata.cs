@@ -126,7 +126,7 @@ internal sealed class DeferredRouteMetadata : IRouterRouteMetadataCollection
         {
             if (item is null)
             {
-                throw new ArgumentException("Endpoint metadata items must not be null.", nameof(items));
+                throw new ArgumentException(ErrorMessages.EndpointMetadataMustNotBeNull, nameof(items));
             }
         }
     }
@@ -136,7 +136,5 @@ internal sealed class DeferredRouteMetadata : IRouterRouteMetadataCollection
     /// </summary>
     /// <returns>The exception to throw.</returns>
     public static InvalidOperationException RouteTableBuilt() => new(
-        "Endpoint metadata cannot be added: the route table has already been built, so it would not apply. " +
-        "A web application builds its router when its request pipeline is built at startup, so attach metadata " +
-        "to routes and groups before the application starts.");
+        ErrorMessages.RouteTableAlreadyBuilt);
 }

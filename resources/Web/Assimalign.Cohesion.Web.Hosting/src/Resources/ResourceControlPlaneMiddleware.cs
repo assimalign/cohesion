@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -283,7 +284,7 @@ public static class ResourceControlPlaneMiddleware
         {
             if (string.IsNullOrWhiteSpace(resourceContext.ResourceName))
             {
-                throw new InvalidOperationException("A gateway-managed resource requires an ambient resource name.");
+                throw new InvalidOperationException(ErrorMessages.ManagedResourceNameRequired);
             }
             _ = GetVerifier(resourceContext);
         }
@@ -403,11 +404,11 @@ public static class ResourceControlPlaneMiddleware
             JsonElement root = document.RootElement;
             if (root.ValueKind is not JsonValueKind.Object)
             {
-                throw new JsonException("A resource command must be a JSON object.");
+                throw new JsonException(ErrorMessages.ResourceCommandMustBeObject);
             }
             if (root.TryGetProperty("payload", out JsonElement rawPayload) && rawPayload.ValueKind is not JsonValueKind.String)
             {
-                throw new JsonException("The command payload must be a base64 string.");
+                throw new JsonException(ErrorMessages.CommandPayloadMustBeBase64);
             }
             byte[] payload = root.TryGetProperty("payload", out JsonElement payloadElement)
                 ? payloadElement.GetBytesFromBase64()
@@ -465,7 +466,7 @@ public static class ResourceControlPlaneMiddleware
         if (!element.TryGetProperty(name, out JsonElement property) ||
             property.ValueKind is not JsonValueKind.String || string.IsNullOrWhiteSpace(property.GetString()))
         {
-            throw new JsonException($"The command property '{name}' is required.");
+            throw new JsonException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CommandPropertyRequired, name));
         }
 
         return property.GetString()!;

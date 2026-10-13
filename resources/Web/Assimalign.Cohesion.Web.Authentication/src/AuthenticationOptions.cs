@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.Authentication;
 
@@ -77,7 +78,7 @@ public sealed class AuthenticationOptions
 
         if (!_schemes.TryAdd(scheme.Name, scheme))
         {
-            throw new InvalidOperationException($"Scheme '{scheme.Name}' has already been registered.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationSchemeAlreadyRegistered, scheme.Name));
         }
     }
 

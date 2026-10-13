@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Certificate;
 /// <summary>Authenticates requests with a TLS client certificate and optional application validation.</summary>
 public sealed class CertificateAuthenticationHandler : IAuthenticationHandler
 {
+    private static readonly string _certificatePrincipalNotAuthenticatedMessage = ErrorMessages.CertificatePrincipalNotAuthenticated;
+
     private readonly Func<CertificateValidatedContext, CancellationToken, ValueTask>? _onCertificateValidated;
     private AuthenticationScheme _scheme = null!;
     private IHttpContext _context = null!;
@@ -94,7 +96,7 @@ public sealed class CertificateAuthenticationHandler : IAuthenticationHandler
         if (validation.Principal?.Identity?.IsAuthenticated != true)
         {
             ReportRejection("ValidationFailed");
-            return AuthenticateResult.Fail("The certificate mapping did not produce an authenticated principal.");
+            return AuthenticateResult.Fail(_certificatePrincipalNotAuthenticatedMessage);
         }
 
         return AuthenticateResult.Success(new AuthenticationTicket(

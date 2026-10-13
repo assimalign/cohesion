@@ -61,7 +61,7 @@ public sealed class InMemoryOutputCacheStore : IOutputCacheStore, IDisposable
     {
         if (sizeLimit <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(sizeLimit), sizeLimit, "The size limit must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(sizeLimit), sizeLimit, ErrorMessages.CacheSizeLimitMustBePositive);
         }
 
         TimeProvider = timeProvider ?? TimeProvider.System;

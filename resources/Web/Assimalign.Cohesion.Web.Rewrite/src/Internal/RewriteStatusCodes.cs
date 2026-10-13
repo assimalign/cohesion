@@ -23,7 +23,7 @@ internal static class RewriteStatusCodes
             throw new ArgumentOutOfRangeException(
                 parameterName,
                 statusCode.Value,
-                "A redirect status must be 301, 302, 307 or 308.");
+                ErrorMessages.RedirectStatusInvalid);
         }
     }
 }

@@ -56,7 +56,7 @@ internal sealed class ResponseCompletionFeature : IWebResponseCompletionFeature
 
         if (failures is not null)
         {
-            throw new AggregateException("One or more response completion callbacks failed.", failures);
+            throw new AggregateException(ErrorMessages.ResponseCompletionCallbacksFailed, failures);
         }
     }
 }

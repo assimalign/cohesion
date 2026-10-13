@@ -199,3 +199,14 @@ Custom managed contexts must supply a matching JWT and public trust key.
 The socketless client transport consumes `IDuplexConnection` for its input/output pipe.
 Identity and lifetime remain available through the shared `IConnection` root; HTTP listener
 accepts use `AcceptAsync` and retain their accepted connections until `ConnectionClosed` fires.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

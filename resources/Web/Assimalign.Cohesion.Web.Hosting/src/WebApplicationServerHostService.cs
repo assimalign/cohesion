@@ -44,7 +44,7 @@ public sealed class WebApplicationServerHostService : IHostService
         {
             // This hosting boundary translates the default engine's bind failure. Custom
             // servers forward unchanged, and the engine requires no Hosting reference.
-            throw new HostStartupException("The web application server failed to bind its configured listener.", exception);
+            throw new HostStartupException(ErrorMessages.ApplicationServerBindFailed, exception);
         }
     }
 

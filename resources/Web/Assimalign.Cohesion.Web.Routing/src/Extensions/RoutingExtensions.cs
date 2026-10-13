@@ -92,7 +92,7 @@ public static class RoutingExtensions
 
             IRouterFeature feature = builder.Context.Features.OfType<IRouterFeature>().FirstOrDefault()
                 ?? throw new InvalidOperationException(
-                    "Routing has not been registered. Call builder.Services.AddRouting() before UseRouting().");
+                    ErrorMessages.RoutingNotRegistered);
 
             builder.Use((WebApplicationMiddleware next) =>
             {

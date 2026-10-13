@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.SecurityHeaders.Internal;
@@ -85,7 +86,7 @@ public sealed class PermissionsPolicyBuilder
 
         if (origins.Length == 0)
         {
-            throw new ArgumentException("Name at least one origin; use Disable() to allow none.", nameof(origins));
+            throw new ArgumentException(ErrorMessages.PermissionsPolicyOriginRequired, nameof(origins));
         }
 
         return Set(feature, CreateAllowlist(includeSelf: false, origins));
@@ -100,7 +101,7 @@ public sealed class PermissionsPolicyBuilder
     {
         if (_features.Count == 0)
         {
-            throw new InvalidOperationException("A Permissions Policy needs at least one feature.");
+            throw new InvalidOperationException(ErrorMessages.PermissionsPolicyFeatureRequired);
         }
 
         return new PermissionsPolicy(new StructuredFieldDictionary(_features).Serialize());
@@ -120,7 +121,7 @@ public sealed class PermissionsPolicyBuilder
             if (origin is null || !SecurityHeadersGrammar.IsOrigin(origin))
             {
                 throw new ArgumentException(
-                    $"'{origin}' is not a serialized origin (scheme://host[:port], no path); use AllowAll() for every origin.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.PermissionsPolicyOriginInvalid, origin),
                     nameof(origins));
             }
 
@@ -141,7 +142,7 @@ public sealed class PermissionsPolicyBuilder
         if (!SecurityHeadersGrammar.IsFeatureName(feature))
         {
             throw new ArgumentException(
-                $"'{feature}' is not a policy-controlled feature name (lowercase letters, digits, '_', '-', '.' and '*', starting with a letter).",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PermissionsPolicyFeatureNameInvalid, feature),
                 nameof(feature));
         }
 

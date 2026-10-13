@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -217,11 +218,11 @@ public static class HttpResponseFileExtensions
 
             if (!stream.CanRead)
             {
-                throw new ArgumentException("The stream must be readable.", nameof(stream));
+                throw new ArgumentException(ErrorMessages.FileStreamMustBeReadable, nameof(stream));
             }
             if (entityTag is { IsEmpty: true })
             {
-                throw new ArgumentException("The entity-tag must not be empty.", nameof(entityTag));
+                throw new ArgumentException(ErrorMessages.EntityTagMustNotBeEmpty, nameof(entityTag));
             }
 
             RepresentationMetadata representation = new()
@@ -276,7 +277,7 @@ public static class HttpResponseFileExtensions
             || mediaType.HasWildcard)
         {
             throw new ArgumentException(
-                $"The content type must be a concrete media type, such as 'application/pdf': '{contentType}'.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.FileContentTypeInvalid, contentType),
                 nameof(contentType));
         }
 

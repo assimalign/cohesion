@@ -44,8 +44,7 @@ internal sealed class ClaimsRequirement : IAuthorizationRequirement
             if (_allowedValues.Length == 0)
             {
                 throw new ArgumentException(
-                    "At least one allowed value is required. To accept a claim of the type with any value, " +
-                    "use RequireClaim(claimType).",
+                    ErrorMessages.ClaimAllowedValueRequired,
                     nameof(allowedValues));
             }
         }

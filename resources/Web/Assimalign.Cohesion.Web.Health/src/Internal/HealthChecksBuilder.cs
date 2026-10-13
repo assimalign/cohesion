@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.Health.Internal;
 
@@ -22,7 +23,7 @@ internal sealed class HealthChecksBuilder : IHealthChecksBuilder
         if (!_names.Add(registration.Name))
         {
             throw new InvalidOperationException(
-                $"A health check named '{registration.Name}' has already been registered.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.HealthCheckAlreadyRegistered, registration.Name));
         }
 
         _registrations.Add(registration);

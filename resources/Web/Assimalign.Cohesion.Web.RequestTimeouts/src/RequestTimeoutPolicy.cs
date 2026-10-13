@@ -54,7 +54,7 @@ public sealed class RequestTimeoutPolicy
                 throw new ArgumentOutOfRangeException(
                     nameof(value),
                     timeout,
-                    "The request timeout must be a positive interval. Use a null timeout to disable enforcement.");
+                    ErrorMessages.RequestTimeoutPolicyMustBePositive);
             }
 
             _timeout = value;

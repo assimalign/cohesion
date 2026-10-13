@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 using Assimalign.Cohesion.OpenApi;
 using Assimalign.Cohesion.OpenApi.Attributes;
@@ -118,7 +119,7 @@ public sealed class OpenApiOptions
         {
             if (!Enum.IsDefined(value))
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "The value is not a defined OpenApiSpecVersion.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.UndefinedOpenApiSpecVersion);
             }
 
             ThrowIfReadOnly();
@@ -168,7 +169,7 @@ public sealed class OpenApiOptions
         {
             if (string.Equals(existing.Name, scheme.Name, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException($"An OpenAPI security scheme named '{scheme.Name}' is already declared.");
+                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.OpenApiSecuritySchemeAlreadyDeclared, scheme.Name));
             }
         }
 
@@ -195,7 +196,7 @@ public sealed class OpenApiOptions
         {
             if (string.Equals(existing.Name, tag.Name, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException($"An OpenAPI tag named '{tag.Name}' is already declared.");
+                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.OpenApiTagAlreadyDeclared, tag.Name));
             }
         }
 
@@ -257,7 +258,7 @@ public sealed class OpenApiOptions
         if (_isReadOnly)
         {
             throw new InvalidOperationException(
-                "OpenAPI options are read-only once AddOpenApi has captured them. Configure the document inside the AddOpenApi callback.");
+                ErrorMessages.OpenApiOptionsReadOnly);
         }
     }
 

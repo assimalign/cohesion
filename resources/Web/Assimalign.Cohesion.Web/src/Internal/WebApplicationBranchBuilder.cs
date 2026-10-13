@@ -50,7 +50,7 @@ internal sealed class WebApplicationBranchBuilder : IWebApplicationPipelineBuild
     /// <returns>Never returns.</returns>
     /// <exception cref="InvalidOperationException">Always.</exception>
     public IWebApplicationPipeline Build() => throw new InvalidOperationException(
-        "A pipeline branch is composed by the pipeline that contains it, when that pipeline is built; it cannot be built on its own.");
+        ErrorMessages.PipelineBranchCannotBuildIndependently);
 
     /// <summary>
     /// Composes the branch's middleware around <paramref name="terminal"/>, last registration innermost,

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,13 +63,12 @@ public static class HttpRequestSerializationExtensions
                 || !HttpMediaType.TryParse(header.Value, out HttpMediaType contentType))
             {
                 throw new HttpContentSerializationException(
-                    "The request carries no parseable Content-Type header, so no content reader can be selected. " +
-                    "Typed reads require the client to declare the body's media type.");
+                    ErrorMessages.RequestContentTypeMissingOrInvalid);
             }
 
             IHttpContentReader reader = feature.GetReader(contentType)
                 ?? throw new HttpContentSerializationException(
-                    $"No content reader is registered for the request media type '{contentType}'.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestContentReaderNotRegistered, contentType));
 
             return reader.ReadAsync(request, type, cancellationToken);
         }

@@ -58,7 +58,7 @@ public sealed class AuthorizationPolicy
         if (copy.Count == 0)
         {
             throw new ArgumentException(
-                "An authorization policy needs at least one requirement; a policy with none would authorize every request.",
+                ErrorMessages.AuthorizationRequirementRequired,
                 nameof(requirements));
         }
 
@@ -66,7 +66,7 @@ public sealed class AuthorizationPolicy
         {
             if (copy[i] is null)
             {
-                throw new ArgumentException("Authorization requirements must not be null.", nameof(requirements));
+                throw new ArgumentException(ErrorMessages.AuthorizationRequirementMustNotBeNull, nameof(requirements));
             }
         }
 
@@ -172,7 +172,7 @@ public sealed class AuthorizationPolicy
             if (string.IsNullOrWhiteSpace(scheme))
             {
                 throw new ArgumentException(
-                    "Authentication scheme names must not be null, empty, or whitespace.",
+                    ErrorMessages.AuthenticationSchemeNameMustNotBeBlank,
                     nameof(authenticationSchemes));
             }
 

@@ -228,21 +228,19 @@ internal static class CorsOrigin
 
         if (string.IsNullOrEmpty(value))
         {
-            error = "An origin must not be empty.";
+            error = ErrorMessages.OriginMustNotBeEmpty;
             return false;
         }
 
         if (value == "*")
         {
-            error = "'*' is not an origin. Call AllowAnyOrigin() to allow every origin.";
+            error = ErrorMessages.OriginWildcardRequiresAllowAny;
             return false;
         }
 
         if (value.Equals(Opaque, StringComparison.OrdinalIgnoreCase))
         {
-            error = "The 'null' origin cannot be allowed by value: sandboxed documents, local files and " +
-                "cross-origin redirects all send it, so allowing it would allow all of them. Call " +
-                "SetIsOriginAllowed to accept it deliberately.";
+            error = ErrorMessages.OpaqueOriginRequiresPredicate;
             return false;
         }
 
@@ -250,9 +248,7 @@ internal static class CorsOrigin
         {
             if (character <= ' ' || character >= '\u007F')
             {
-                error = $"'{value}' is not an origin: it contains whitespace, a control character or a non-ASCII " +
-                    "character. Write an internationalized host in its ASCII (punycode) form, which is what the " +
-                    "browser sends.";
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginContainsInvalidCharacter, value);
                 return false;
             }
         }
@@ -261,7 +257,7 @@ internal static class CorsOrigin
 
         if (schemeEnd <= 0)
         {
-            error = $"'{value}' is not an origin: expected scheme://host[:port], for example https://app.example.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginSyntaxInvalid, value);
             return false;
         }
 
@@ -269,7 +265,7 @@ internal static class CorsOrigin
 
         if (!char.IsAsciiLetter(scheme[0]) || scheme.ContainsAnyExcept(_schemeCharacters))
         {
-            error = $"'{value}' is not an origin: '{scheme}' is not a URL scheme.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginSchemeInvalid, value, scheme.ToString());
             return false;
         }
 
@@ -280,21 +276,20 @@ internal static class CorsOrigin
         {
             ReadOnlySpan<char> extra = authority[pathStart..];
             error = extra is "/"
-                ? $"'{value}' is not an origin: an origin has no path. Remove the trailing '/'."
-                : $"'{value}' is not an origin: an origin has no path, query or fragment. Remove '{extra}'.";
+                ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginTrailingSlashNotAllowed, value)
+                : string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginPathQueryOrFragmentNotAllowed, value, extra.ToString());
             return false;
         }
 
         if (authority.Contains('@'))
         {
-            error = $"'{value}' is not an origin: an origin has no user information.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginUserInformationNotAllowed, value);
             return false;
         }
 
         if (authority.Contains('*'))
         {
-            error = $"'{value}' is not an origin: wildcards are not supported. Call SetIsOriginAllowed to match " +
-                "a pattern, or AllowAnyOrigin() to allow every origin.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginWildcardNotSupported, value);
             return false;
         }
 
@@ -314,7 +309,7 @@ internal static class CorsOrigin
                 || !int.TryParse(port, NumberStyles.None, CultureInfo.InvariantCulture, out int number)
                 || number > ushort.MaxValue)
             {
-                error = $"'{value}' is not an origin: '{port}' is not a port number.";
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginPortInvalid, value, port.ToString());
                 return false;
             }
 
@@ -343,7 +338,7 @@ internal static class CorsOrigin
 
         if (authority.IsEmpty)
         {
-            error = $"'{value}' is not an origin: it has no host.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginHostRequired, value);
             return false;
         }
 
@@ -357,7 +352,7 @@ internal static class CorsOrigin
                 || !IPAddress.TryParse(literal, out IPAddress? address)
                 || address.AddressFamily != AddressFamily.InterNetworkV6)
             {
-                error = $"'{value}' is not an origin: its host is not an IPv6 address.";
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginIpv6AddressInvalid, value);
                 return false;
             }
 
@@ -365,7 +360,7 @@ internal static class CorsOrigin
 
             if (!rest.IsEmpty && rest[0] != ':')
             {
-                error = $"'{value}' is not an origin: expected ':port' after the IPv6 address.";
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginIpv6PortSeparatorRequired, value);
                 return false;
             }
 
@@ -381,13 +376,13 @@ internal static class CorsOrigin
 
         if (name.IsEmpty)
         {
-            error = $"'{value}' is not an origin: it has no host.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginHostRequired, value);
             return false;
         }
 
         if (name.ContainsAnyExcept(_hostCharacters))
         {
-            error = $"'{value}' is not an origin: '{name}' is not a host name.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.OriginHostInvalid, value, name.ToString());
             return false;
         }
 

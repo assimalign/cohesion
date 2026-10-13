@@ -70,8 +70,7 @@ public static class AuthorizationWebApplicationExtensions
                 if (!application.TryGetAuthorizationOptions(out AuthorizationOptions? options))
                 {
                     throw new InvalidOperationException(
-                        "Authorization has not been registered. Call builder.Services.AddAuthorization() before " +
-                        "UseAuthorization().");
+                        ErrorMessages.AuthorizationNotRegistered);
                 }
 
                 AuthorizationMiddleware middleware = new(options);

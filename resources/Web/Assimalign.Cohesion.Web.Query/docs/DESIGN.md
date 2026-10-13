@@ -135,3 +135,14 @@ code, no serialization.
   advertisement rides the responses of the resource itself.
 - **No DI, no configuration binding, no request-time service location** — options and
   delegates only, per the Web-area feature-package rules.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

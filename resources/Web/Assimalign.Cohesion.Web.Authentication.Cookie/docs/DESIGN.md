@@ -256,3 +256,16 @@ retain their login/access-denied redirects. Tests pin both paths.
 Removing the preview.1 interface is source- and binary-breaking on decision 15's terms.
 Applications with a custom interface implementation must attach `ApiEndpointMetadata.Instance`
 instead and rebuild; an unrelated custom metadata object no longer suppresses a redirect.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.
+
+The expected rejection or cancellation messages are cached in static readonly fields: `AuthenticationCookieEncodingInvalid`, `AuthenticationCookiePayloadMalformed`, `AuthenticationCookieUnprotectFailed`, `AuthenticationTicketExpired`. Their ordinary lifecycle paths perform no resource lookup per exception.

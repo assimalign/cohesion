@@ -82,7 +82,7 @@ public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
         {
             throw new RoutePatternException(
                 pattern,
-                $"The value is not a valid route host constraint: '{pattern}'. Expected 'host', '*.host', or '*', optionally followed by ':port' (1-65535).");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteHostConstraintInvalid, pattern));
         }
 
         return constraint;

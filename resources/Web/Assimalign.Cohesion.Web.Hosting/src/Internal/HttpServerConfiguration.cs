@@ -222,7 +222,7 @@ internal static class HttpServerConfiguration
 
         if (!bool.TryParse(raw, out value))
         {
-            throw new InvalidOperationException($"The configured value at '{path}' ('{raw}') is not a valid boolean.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredBooleanInvalid, path, raw));
         }
 
         return true;
@@ -348,7 +348,7 @@ internal static class HttpServerConfiguration
         if (maxConcurrentConnections <= 0)
         {
             throw new InvalidOperationException(
-                $"The configured value at '{path}' ('{maxConcurrentConnections}') must be greater than zero.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredConnectionCountMustBePositive, path, maxConcurrentConnections));
         }
 
         limitConcurrentConnections?.Invoke(maxConcurrentConnections);
@@ -410,7 +410,7 @@ internal static class HttpServerConfiguration
         if (!int.TryParse(portText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int port) || port is < 0 or > 65535)
         {
             throw new InvalidOperationException(
-                $"The HTTP endpoint '{endpointName}' declares an invalid or missing 'Port' ('{portText}').");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointPortInvalid, endpointName, portText));
         }
 
         IPEndPoint bindEndPoint = new(ResolveHost(host), port);
@@ -419,7 +419,7 @@ internal static class HttpServerConfiguration
             && ParseClientCertificateMode(endpoint, endpointName) is not ClientCertificateMode.NoCertificate)
         {
             throw new InvalidOperationException(
-                $"The HTTP endpoint '{endpointName}' declares a 'ClientCertificateMode', but client certificates need TLS: use Protocol Https, Http1s, Http2s, or Http3.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientCertificateRequiresTls, endpointName));
         }
 
         switch (protocol)
@@ -463,7 +463,7 @@ internal static class HttpServerConfiguration
                 }
 
                 throw new PlatformNotSupportedException(
-                    $"The HTTP endpoint '{endpointName}' declares 'Protocol' Http3, which requires QUIC (Windows, Linux, or macOS).");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequiresQuic, endpointName));
         }
 
         return protocol;
@@ -560,7 +560,7 @@ internal static class HttpServerConfiguration
         }
 
         throw new InvalidOperationException(
-            $"The HTTP endpoint '{endpointName}' declares an invalid 'HandshakeTimeout' ('{raw}'). Expected a TimeSpan, a whole number of seconds, or 'infinite'.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointHandshakeTimeoutInvalid, endpointName, raw));
     }
 
     private static ClientCertificateMode ParseClientCertificateMode(IConfigurationSection endpoint, string endpointName)
@@ -583,7 +583,7 @@ internal static class HttpServerConfiguration
         }
 
         throw new InvalidOperationException(
-            $"The HTTP endpoint '{endpointName}' declares an unsupported 'ClientCertificateMode' ('{mode}'). Supported values: NoCertificate, AllowCertificate, RequireCertificate.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointClientCertificateModeUnsupported, endpointName, mode));
     }
 
     /// <summary>
@@ -602,7 +602,7 @@ internal static class HttpServerConfiguration
             if (string.IsNullOrWhiteSpace(path))
             {
                 throw new InvalidOperationException(
-                    $"The HTTPS endpoint '{endpointName}' declares a 'Certificate' section without a 'Path'.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificatePathRequired, endpointName));
             }
 
             string? keyPath = GetString(certificate, "KeyPath");
@@ -617,7 +617,7 @@ internal static class HttpServerConfiguration
         if (!ResourceRuntime.Current.TryGetEndpointCertificate(endpointName, GetString(endpoint, "Certificate"), out X509Certificate2? leaf, out X509Certificate2Collection chain))
         {
             throw new InvalidOperationException(
-                $"The HTTPS endpoint '{endpointName}' requires its Certificate Secret mount (default 'tls') or a 'Certificate:Path' file.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateRequired, endpointName));
         }
 
         return (leaf, chain);
@@ -645,7 +645,7 @@ internal static class HttpServerConfiguration
         catch (Exception exception) when (exception is System.IO.IOException or UnauthorizedAccessException or CryptographicException)
         {
             throw new InvalidOperationException(
-                $"The HTTPS endpoint '{endpointName}' could not load its certificate from '{path}': {exception.Message}",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateLoadFailed, endpointName, path, exception.Message),
                 exception);
         }
 
@@ -659,7 +659,7 @@ internal static class HttpServerConfiguration
             }
 
             throw new InvalidOperationException(
-                $"The HTTPS endpoint '{endpointName}' certificate '{path}' requires a currently valid leaf and its private key.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateInvalid, endpointName, path));
         }
 
         return (leaf, chain);
@@ -699,7 +699,7 @@ internal static class HttpServerConfiguration
                 certificate.Dispose();
             }
 
-            throw new CryptographicException("The PKCS#12 file contains no certificate with a private key.");
+            throw new CryptographicException(ErrorMessages.Pkcs12PrivateKeyRequired);
         }
 
         return (leaf, chain);
@@ -826,7 +826,7 @@ internal static class HttpServerConfiguration
         }
 
         throw new InvalidOperationException(
-            $"The HTTP endpoint '{endpointName}' declares an unsupported 'Protocol' ('{protocol}'). Supported values: Http1, Http2, Https, Http1s, Http2s, Http3.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointProtocolUnsupported, endpointName, protocol));
     }
 
     private static bool IsHttp1(string? protocol)
@@ -879,7 +879,7 @@ internal static class HttpServerConfiguration
         }
 
         throw new InvalidOperationException(
-            $"The HTTP endpoint 'Host' value '{host}' is not a literal IP address, 'localhost', or a wildcard. DNS resolution is not performed at bind time.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointHostInvalid, host));
     }
 
     private static long? ParseMaxRequestBodySize(string value)
@@ -896,7 +896,7 @@ internal static class HttpServerConfiguration
         }
 
         throw new InvalidOperationException(
-            $"The configured MaxRequestBodySize value '{value}' is not a non-negative integer or 'unbounded'.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredRequestBodySizeInvalid, value));
     }
 
     private static bool TryGetInt(IConfiguration configuration, string path, out int value)
@@ -910,7 +910,7 @@ internal static class HttpServerConfiguration
 
         if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
         {
-            throw new InvalidOperationException($"The configured value at '{path}' ('{raw}') is not a valid integer.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredIntegerInvalid, path, raw));
         }
 
         return true;
@@ -943,7 +943,7 @@ internal static class HttpServerConfiguration
         }
 
         throw new InvalidOperationException(
-            $"The configured timeout at '{path}' ('{raw}') is not a valid TimeSpan, a whole number of seconds, or 'infinite'.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredTimeoutInvalid, path, raw));
     }
 
     /// <summary>
@@ -972,7 +972,7 @@ internal static class HttpServerConfiguration
             }
 
             throw new InvalidOperationException(
-                $"The configured data rate at '{path}' ('{scalar}') is not 'none' or a section with BytesPerSecond and GracePeriod.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredDataRateInvalid, path, scalar));
         }
 
         string bytesPerSecondPath = $"{path}:BytesPerSecond";
@@ -997,7 +997,7 @@ internal static class HttpServerConfiguration
                 || bytesPerSecond <= 0)
             {
                 throw new InvalidOperationException(
-                    $"The configured value at '{bytesPerSecondPath}' ('{rawBytesPerSecond}') is not a positive number of octets per second.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredBytesPerSecondInvalid, bytesPerSecondPath, rawBytesPerSecond));
             }
         }
 
@@ -1007,7 +1007,7 @@ internal static class HttpServerConfiguration
                 || gracePeriod <= TimeSpan.Zero)
             {
                 throw new InvalidOperationException(
-                    $"The configured grace period at '{gracePeriodPath}' ('{rawGracePeriod}') is not a positive TimeSpan.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredGracePeriodInvalid, gracePeriodPath, rawGracePeriod));
             }
         }
 

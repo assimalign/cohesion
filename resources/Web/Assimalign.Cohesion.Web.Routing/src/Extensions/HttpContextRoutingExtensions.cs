@@ -154,7 +154,7 @@ public static class HttpContextRoutingExtensions
 
             IRouterFeature feature = context.Features.Get<IRouterFeature>()
                 ?? throw new InvalidOperationException(
-                    "Routing has not been registered. Call builder.Services.AddRouting() before generating links.");
+                    ErrorMessages.LinkGenerationRoutingNotRegistered);
 
             return feature.Router.LinkGenerator;
         }

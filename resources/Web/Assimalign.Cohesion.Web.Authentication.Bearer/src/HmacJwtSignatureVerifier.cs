@@ -20,7 +20,7 @@ public sealed class HmacJwtSignatureVerifier : IJwtSignatureVerifier
         ArgumentNullException.ThrowIfNull(key);
         if (key.Length == 0)
         {
-            throw new ArgumentException("The HMAC key must not be empty.", nameof(key));
+            throw new ArgumentException(ErrorMessages.HmacKeyRequired, nameof(key));
         }
 
         _key = (byte[])key.Clone();

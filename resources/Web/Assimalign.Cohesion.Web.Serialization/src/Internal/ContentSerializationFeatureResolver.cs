@@ -12,7 +12,6 @@ internal static class ContentSerializationFeatureResolver
     {
         return context.Features.Get<IHttpContentSerializationFeature>()
             ?? throw new HttpContentSerializationException(
-                "No content-serialization registry is composed on this application. " +
-                "Register one with builder.Services.AddJsonSerialization(...) or builder.Services.AddContentSerialization(...).");
+                ErrorMessages.ContentSerializationNotRegistered);
     }
 }

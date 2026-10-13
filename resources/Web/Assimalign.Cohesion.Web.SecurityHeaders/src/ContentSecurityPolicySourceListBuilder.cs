@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 using Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 
@@ -123,7 +124,7 @@ public sealed class ContentSecurityPolicySourceListBuilder
         if (!SecurityHeadersGrammar.IsScheme(name))
         {
             throw new ArgumentException(
-                $"'{scheme}' is not a scheme source; a scheme is ALPHA *( ALPHA / DIGIT / '+' / '-' / '.' ), optionally followed by ':'.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicySchemeInvalid, scheme),
                 nameof(scheme));
         }
 
@@ -149,8 +150,7 @@ public sealed class ContentSecurityPolicySourceListBuilder
         if (!SecurityHeadersGrammar.IsHostSource(source))
         {
             throw new ArgumentException(
-                $"'{source}' is not a CSP host source ([scheme://]host[:port][/path], no whitespace, ',' or ';'). " +
-                "Use Scheme() for a scheme-only source and the keyword methods for quoted keywords.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyHostSourceInvalid, source),
                 nameof(source));
         }
 
@@ -175,7 +175,7 @@ public sealed class ContentSecurityPolicySourceListBuilder
         if (!SecurityHeadersGrammar.IsBase64Value(base64Digest))
         {
             throw new ArgumentException(
-                $"'{base64Digest}' is not a base64 digest (ALPHA / DIGIT / '+' / '/' / '-' / '_', up to two '=' of padding).",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyDigestInvalid, base64Digest),
                 nameof(base64Digest));
         }
 
@@ -191,15 +191,14 @@ public sealed class ContentSecurityPolicySourceListBuilder
         if (_sources.Count == 0)
         {
             throw new ArgumentException(
-                $"The {directiveName} source list is empty. Add a source, or call None() to match nothing.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicySourceRequired, directiveName),
                 "configure");
         }
 
         if (_sources.Count > 1 && _sources.Contains(noneSource))
         {
             throw new ArgumentException(
-                $"The {directiveName} source list combines 'none' with other sources, and user agents ignore 'none' " +
-                "beside them. Use None() alone, or remove it.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyNoneMustBeAlone, directiveName),
                 "configure");
         }
 

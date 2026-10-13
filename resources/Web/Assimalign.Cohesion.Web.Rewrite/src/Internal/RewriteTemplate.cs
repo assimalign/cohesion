@@ -90,7 +90,7 @@ internal sealed class RewriteTemplate
                 if (!redirect)
                 {
                     throw new ArgumentException(
-                        $"The rewrite target '{template}' is an absolute URL. A rewrite changes the path and query of the request; only a redirect can send the client to another origin.",
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.AbsoluteRewriteTargetNotAllowed, template),
                         parameterName);
                 }
 
@@ -101,8 +101,8 @@ internal sealed class RewriteTemplate
             {
                 throw new ArgumentException(
                     redirect
-                        ? $"The redirect target '{template}' must start with '/', a substitution, or 'http://' or 'https://'."
-                        : $"The rewrite target '{template}' must start with '/' or a substitution.",
+                        ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.RedirectTargetPrefixInvalid, template)
+                        : string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteTargetPrefixInvalid, template),
                     parameterName);
             }
         }
@@ -134,7 +134,7 @@ internal sealed class RewriteTemplate
                 if (next == Section.Fragment && !redirect)
                 {
                     throw new ArgumentException(
-                        $"The rewrite target '{template}' has a fragment ('#'). A fragment never reaches the server, so a rewrite cannot set one.",
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteTargetFragmentNotAllowed, template),
                         parameterName);
                 }
 
@@ -163,7 +163,7 @@ internal sealed class RewriteTemplate
 
         if (scheme is not null && authority.Count == 0)
         {
-            throw new ArgumentException($"The redirect target '{template}' is an absolute URL without a host.", parameterName);
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RedirectTargetHostRequired, template), parameterName);
         }
 
         RewriteTemplateToken[] normalizedPath = Normalize(path, RewriteUrl.PathCharacters);
@@ -315,7 +315,7 @@ internal sealed class RewriteTemplate
                 if (close < 0)
                 {
                     throw new ArgumentException(
-                        $"The substitution at position {i} of the target '{template}' has no closing '}}'.",
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteSubstitutionNotClosed, i, template),
                         parameterName);
                 }
 
@@ -359,7 +359,7 @@ internal sealed class RewriteTemplate
         if (!int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out int number) || Array.IndexOf(groups, number) < 0)
         {
             throw new ArgumentException(
-                $"The target '{template}' references capture group {digits}, which the pattern '{pattern}' does not define. Use '$$' for a literal '$'.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteCaptureGroupNumberUndefined, template, digits, pattern),
                 parameterName);
         }
 
@@ -377,7 +377,7 @@ internal sealed class RewriteTemplate
         if (number < 0)
         {
             throw new ArgumentException(
-                $"The target '{template}' references the capture group '{name}', which the pattern '{pattern}' does not define.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteCaptureGroupNameUndefined, template, name, pattern),
                 parameterName);
         }
 
@@ -398,7 +398,7 @@ internal sealed class RewriteTemplate
             if (token.IsLiteral && Uri.UnescapeDataString(token.Literal!).AsSpan().ContainsAny(_invalidPathCharacters))
             {
                 throw new ArgumentException(
-                    $"The rewrite target '{template}' has a path no request can carry: it decodes to a space, '?', '#', a control character or NUL.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteTargetDecodedPathInvalid, template),
                     parameterName);
             }
         }
@@ -409,14 +409,14 @@ internal sealed class RewriteTemplate
             if (!RewriteUrl.TryParseQuery(text, out _))
             {
                 throw new ArgumentException(
-                    $"The rewrite target '{template}' has a query entry without a key ('=value').",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteTargetQueryKeyRequired, template),
                     parameterName);
             }
         }
     }
 
     private static ArgumentException NoPattern(string template, string parameterName) => new(
-        $"The target '{template}' substitutes a capture group, but the rule has no pattern to capture one. Use '$$' for a literal '$'.",
+        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewriteCaptureRequiresPattern, template),
         parameterName);
 
     private static bool TryGetScheme(string literal, out string? scheme, out int length)

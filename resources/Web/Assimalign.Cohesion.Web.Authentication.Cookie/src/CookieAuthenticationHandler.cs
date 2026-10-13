@@ -28,6 +28,11 @@ namespace Assimalign.Cohesion.Web.Authentication.Cookie;
 /// </remarks>
 public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
 {
+    private static readonly string _authenticationCookieEncodingInvalidMessage = ErrorMessages.AuthenticationCookieEncodingInvalid;
+    private static readonly string _authenticationCookiePayloadMalformedMessage = ErrorMessages.AuthenticationCookiePayloadMalformed;
+    private static readonly string _authenticationCookieUnprotectFailedMessage = ErrorMessages.AuthenticationCookieUnprotectFailed;
+    private static readonly string _authenticationTicketExpiredMessage = ErrorMessages.AuthenticationTicketExpired;
+
     private readonly CookieAuthenticationOptions _options;
     private readonly IDataProtector _protector;
 
@@ -41,8 +46,7 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         _options = options;
         _protector = options.TicketProtector
             ?? throw new InvalidOperationException(
-                "CookieAuthenticationOptions.TicketProtector must be set. The composition root wires it " +
-                "from the application data-protection key ring.");
+                ErrorMessages.TicketProtectorRequired);
     }
 
     /// <summary>
@@ -96,7 +100,7 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         }
         catch (FormatException exception)
         {
-            return Reject("NotBase64Url", "The authentication cookie is not valid base64url.", exception);
+            return Reject("NotBase64Url", _authenticationCookieEncodingInvalidMessage, exception);
         }
 
         byte[] plaintext;
@@ -107,7 +111,7 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         catch (DataProtectionException exception)
         {
             // Tampered, foreign-purpose, or aged-out-of-grace ticket.
-            return Reject("UnprotectFailed", "The authentication cookie could not be unprotected.", exception);
+            return Reject("UnprotectFailed", _authenticationCookieUnprotectFailedMessage, exception);
         }
 
         AuthenticationTicket ticket;
@@ -117,14 +121,14 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         }
         catch (FormatException exception)
         {
-            return Reject("PayloadMalformed", "The authentication cookie payload is malformed.", exception);
+            return Reject("PayloadMalformed", _authenticationCookiePayloadMalformedMessage, exception);
         }
 
         DateTimeOffset now = _options.TimeProvider.GetUtcNow();
         DateTimeOffset? expiresUtc = ticket.Properties.ExpiresUtc;
         if (expiresUtc.HasValue && expiresUtc.Value <= now)
         {
-            return Reject("Expired", "The authentication ticket has expired.");
+            return Reject("Expired", _authenticationTicketExpiredMessage);
         }
 
         RenewIfNeeded(ticket, now);

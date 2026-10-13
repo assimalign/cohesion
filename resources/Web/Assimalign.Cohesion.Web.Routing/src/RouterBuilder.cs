@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 
 using Assimalign.Cohesion.Web.Routing.Internal;
@@ -102,8 +103,7 @@ public sealed class RouterBuilder : IRouterBuilder
                 string description = route.Pattern is { } pattern ? $"The route '{pattern.RawText}'" : "A route";
 
                 throw new InvalidOperationException(
-                    $"{description} cannot be mapped: the router has already been built from this builder, and its route table is fixed. " +
-                    "A web application builds its router when its request pipeline is built at startup, so map every route before the application starts.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouterAlreadyBuilt, description));
             }
 
             _routes.Add(route);

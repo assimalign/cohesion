@@ -55,7 +55,7 @@ public sealed class OutputCacheEntry
 
         if (validFor <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(validFor), validFor, "The time-to-live must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(validFor), validFor, ErrorMessages.CacheTimeToLiveMustBePositive);
         }
 
         StatusCode = statusCode;

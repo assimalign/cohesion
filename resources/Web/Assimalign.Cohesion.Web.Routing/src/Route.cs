@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -564,7 +565,7 @@ public sealed class Route : IRouterRoute
             }
         }
 
-        throw new InvalidOperationException("Complex route segments must contain a literal or separator delimiter after parameter parts.");
+        throw new InvalidOperationException(ErrorMessages.ComplexRouteDelimiterRequired);
     }
 
     private static bool TryAssignParameter(
@@ -667,7 +668,7 @@ public sealed class Route : IRouterRoute
                 if (!policyMap.TryResolve(reference, out RouteParameterPolicy? policy) || policy is null)
                 {
                     string policyText = reference.Content ?? reference.ParameterPolicy?.GetType().Name ?? "<unknown>";
-                    throw new InvalidOperationException($"Route parameter '{parameter.Name}' references an unknown route policy '{policyText}'.");
+                    throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteParameterPolicyUnknown, parameter.Name, policyText));
                 }
             }
         }

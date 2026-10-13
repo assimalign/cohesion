@@ -102,8 +102,7 @@ internal sealed class ContentSecurityPolicyTemplate
         if (nonce is null || !SecurityHeadersGrammar.IsBase64Value(nonce))
         {
             throw new InvalidOperationException(
-                "The Content Security Policy nonce supplied by the installed ISecurityHeadersFeature is not a CSP base64-value " +
-                "(ALPHA / DIGIT / '+' / '/' / '-' / '_', up to two '=' of padding), so it cannot be written into a header.");
+                ErrorMessages.ContentSecurityPolicyNonceInvalid);
         }
 
         return string.Join(nonce, _segments);

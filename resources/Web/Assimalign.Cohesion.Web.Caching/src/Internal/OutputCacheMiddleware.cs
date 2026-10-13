@@ -285,8 +285,7 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
                 }
 
                 throw new InvalidOperationException(
-                    $"No output cache policy named '{name}' has been registered. " +
-                    "Register it with options.AddPolicy(name, configure) in UseOutputCache.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.OutputCachePolicyNotRegistered, name));
             }
 
             if (metadata.IsEnabledOptIn)

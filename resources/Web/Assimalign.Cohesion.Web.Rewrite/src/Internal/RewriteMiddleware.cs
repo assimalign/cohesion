@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
@@ -78,8 +79,7 @@ internal sealed class RewriteMiddleware : IWebApplicationMiddleware
             if (pass > _maxPasses)
             {
                 throw new InvalidOperationException(
-                    $"URL rewriting did not finish within {_maxPasses} rule passes: a rule restarted rule evaluation on every pass. " +
-                    $"Check the rules that restart evaluation ({nameof(RewriteFlow)}.{nameof(RewriteFlow.Restart)}), or raise {nameof(RewriteOptions)}.{nameof(RewriteOptions.MaxPasses)}.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RewritePassLimitExceeded, _maxPasses, nameof(RewriteFlow), nameof(RewriteFlow.Restart), nameof(RewriteOptions), nameof(RewriteOptions.MaxPasses)));
             }
 
             bool restart = false;

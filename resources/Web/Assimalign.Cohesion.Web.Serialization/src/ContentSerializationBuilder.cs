@@ -45,7 +45,7 @@ public sealed class ContentSerializationBuilder
 
         if (reader.MediaTypes is not { Count: > 0 })
         {
-            throw new ArgumentException("A content reader must declare at least one media type.", nameof(reader));
+            throw new ArgumentException(ErrorMessages.ContentReaderMediaTypeRequired, nameof(reader));
         }
 
         _readers.Add(reader);
@@ -69,12 +69,12 @@ public sealed class ContentSerializationBuilder
 
         if (writer.MediaTypes is not { Count: > 0 })
         {
-            throw new ArgumentException("A content writer must declare at least one media type.", nameof(writer));
+            throw new ArgumentException(ErrorMessages.ContentWriterMediaTypeRequired, nameof(writer));
         }
         if (writer.MediaTypes[0].HasWildcard)
         {
             throw new ArgumentException(
-                "A content writer's first media type is its canonical content type and must be concrete (wildcard-free).",
+                ErrorMessages.ContentWriterCanonicalMediaTypeMustBeConcrete,
                 nameof(writer));
         }
 

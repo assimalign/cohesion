@@ -105,7 +105,7 @@ internal sealed class RewriteContext : IRewriteContext
 
         if (path.Value is not { Length: > 0 } value || value[0] != '/')
         {
-            throw new ArgumentException("A rewritten path must be an origin-form path that starts with '/'.", nameof(path));
+            throw new ArgumentException(ErrorMessages.RewrittenPathInvalid, nameof(path));
         }
 
         _outcome = flow switch
@@ -113,7 +113,7 @@ internal sealed class RewriteContext : IRewriteContext
             RewriteFlow.Continue => RewriteOutcome.Continue,
             RewriteFlow.SkipRemainingRules => RewriteOutcome.SkipRemainingRules,
             RewriteFlow.Restart => RewriteOutcome.Restart,
-            _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, "The flow is not a defined RewriteFlow value."),
+            _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, ErrorMessages.UndefinedRewriteFlow),
         };
 
         if (!_path.Equals(path))
@@ -169,7 +169,7 @@ internal sealed class RewriteContext : IRewriteContext
     {
         if (_outcome is RewriteOutcome.Redirect or RewriteOutcome.EndResponse or RewriteOutcome.BadRequest)
         {
-            throw new InvalidOperationException("The rule already ended the exchange with a redirect or a response; it can take no further action.");
+            throw new InvalidOperationException(ErrorMessages.RewriteExchangeAlreadyEnded);
         }
     }
 }

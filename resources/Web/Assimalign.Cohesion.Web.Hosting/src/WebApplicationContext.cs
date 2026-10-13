@@ -76,7 +76,7 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
     /// </summary>
     /// <exception cref="InvalidOperationException">The application has not been built.</exception>
     public IServiceProvider ServiceProvider => _serviceProvider
-        ?? throw new InvalidOperationException("The service provider is created when the web application is built.");
+        ?? throw new InvalidOperationException(ErrorMessages.ServiceProviderNotCreated);
 
     public override IHostEnvironment Environment => ServiceProvider.GetRequiredService<IHostEnvironment>();
 
@@ -180,7 +180,7 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
             {
                 ExceptionDispatchInfo.Capture(failures[0]).Throw();
             }
-            throw new AggregateException("One or more application resources failed to dispose.", failures);
+            throw new AggregateException(ErrorMessages.ApplicationResourceDisposalFailed, failures);
         }
     }
 }

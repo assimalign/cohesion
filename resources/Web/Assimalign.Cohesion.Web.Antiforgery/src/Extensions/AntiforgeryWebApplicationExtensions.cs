@@ -69,7 +69,7 @@ public static class AntiforgeryWebApplicationExtensions
                 // replace earlier ones in the same slot.
                 AntiforgeryFeature registration = application.Features.OfType<AntiforgeryFeature>().LastOrDefault()
                     ?? throw new InvalidOperationException(
-                        "Antiforgery has not been registered. Call builder.Services.AddAntiforgery() before UseAntiforgery().");
+                        ErrorMessages.AntiforgeryNotRegistered);
 
                 AntiforgeryMiddleware middleware = new(registration);
                 return context => middleware.InvokeAsync(context, next);

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
@@ -60,14 +61,14 @@ public static class HttpsRedirectionExtensions
             if (status is not (307 or 308))
             {
                 throw new ArgumentException(
-                    $"HTTPS redirection requires a method-preserving status of 307 or 308; got {status}.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpsRedirectStatusInvalid, status),
                     nameof(configure));
             }
 
             if (options.HttpsPort is < 1 or > 65535)
             {
                 throw new ArgumentException(
-                    $"The HTTPS port must be in the range 1-65535; got {options.HttpsPort}.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpsPortOutOfRange, options.HttpsPort),
                     nameof(configure));
             }
 

@@ -133,8 +133,7 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
         }
 
         throw new InvalidOperationException(
-            $"No rate limiting policy named '{metadata.PolicyName}' has been registered. " +
-            "Register it with options.AddPolicy(name, policy) in UseRateLimiting.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.RateLimitingPolicyNotRegistered, metadata.PolicyName));
     }
 
     private async Task RejectAsync(IHttpContext context, RateLimitLease lease, string gate, string? policyName, TimeSpan? retryAfter)

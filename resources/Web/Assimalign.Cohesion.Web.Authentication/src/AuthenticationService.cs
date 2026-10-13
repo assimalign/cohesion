@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -107,7 +108,7 @@ public sealed class AuthenticationService : IAuthenticationService
         if (handler is not IAuthenticationSignInHandler signInHandler)
         {
             throw new InvalidOperationException(
-                $"Scheme '{schemeName}' does not support sign-in; its handler is not an {nameof(IAuthenticationSignInHandler)}.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationSchemeCannotSignIn, schemeName, nameof(IAuthenticationSignInHandler)));
         }
 
         await signInHandler.SignInAsync(user, properties, cancellationToken).ConfigureAwait(false);
@@ -125,7 +126,7 @@ public sealed class AuthenticationService : IAuthenticationService
         if (handler is not IAuthenticationSignInHandler signInHandler)
         {
             throw new InvalidOperationException(
-                $"Scheme '{schemeName}' does not support sign-out; its handler is not an {nameof(IAuthenticationSignInHandler)}.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationSchemeCannotSignOut, schemeName, nameof(IAuthenticationSignInHandler)));
         }
 
         await signInHandler.SignOutAsync(properties, cancellationToken).ConfigureAwait(false);
@@ -137,7 +138,7 @@ public sealed class AuthenticationService : IAuthenticationService
         if (string.IsNullOrWhiteSpace(schemeName))
         {
             throw new InvalidOperationException(
-                $"No scheme was specified for {verb} and no matching default scheme is configured.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationDefaultSchemeMissing, verb));
         }
 
         return schemeName;
@@ -152,7 +153,7 @@ public sealed class AuthenticationService : IAuthenticationService
         }
 
         AuthenticationScheme scheme = _options.GetScheme(schemeName)
-            ?? throw new InvalidOperationException($"Scheme '{schemeName}' is not registered.");
+            ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationSchemeNotRegistered, schemeName));
 
         IAuthenticationHandler handler = scheme.CreateHandler();
         await handler.InitializeAsync(scheme, context, cancellationToken).ConfigureAwait(false);

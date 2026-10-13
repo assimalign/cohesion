@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 using Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 
@@ -171,7 +172,7 @@ public sealed class ContentSecurityPolicyBuilder
         {
             if (token is null || !SecurityHeadersGrammar.IsToken(token))
             {
-                throw new ArgumentException($"'{token}' is not a sandbox keyword (an RFC 9110 token).", nameof(allowTokens));
+                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.SandboxKeywordInvalid, token), nameof(allowTokens));
             }
 
             string normalized = token.ToLowerInvariant();
@@ -205,7 +206,7 @@ public sealed class ContentSecurityPolicyBuilder
 
         if (!SecurityHeadersGrammar.IsToken(endpointName))
         {
-            throw new ArgumentException($"'{endpointName}' is not a reporting endpoint name (an RFC 9110 token).", nameof(endpointName));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReportingEndpointNameInvalid, endpointName), nameof(endpointName));
         }
 
         return Set(new ContentSecurityPolicyDirective("report-to", null, endpointName));
@@ -229,7 +230,7 @@ public sealed class ContentSecurityPolicyBuilder
 
         if (uris.Length == 0)
         {
-            throw new ArgumentException("report-uri needs at least one URL.", nameof(uris));
+            throw new ArgumentException(ErrorMessages.ReportUriRequired, nameof(uris));
         }
 
         foreach (string uri in uris)
@@ -237,7 +238,7 @@ public sealed class ContentSecurityPolicyBuilder
             if (uri is null || !SecurityHeadersGrammar.IsReportUri(uri))
             {
                 throw new ArgumentException(
-                    $"'{uri}' is not a report URL (a URI reference without whitespace, ',' or ';').",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReportUriInvalid, uri),
                     nameof(uris));
             }
         }
@@ -264,14 +265,14 @@ public sealed class ContentSecurityPolicyBuilder
 
         if (!SecurityHeadersGrammar.IsDirectiveName(name))
         {
-            throw new ArgumentException($"'{name}' is not a CSP directive name (letters, digits and '-').", nameof(name));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyDirectiveNameInvalid, name), nameof(name));
         }
 
         string normalized = name.ToLowerInvariant();
         if (normalized == "frame-ancestors")
         {
             throw new ArgumentException(
-                "frame-ancestors is owned by SecurityHeadersPolicy.Framing, which emits it together with a matching X-Frame-Options field.",
+                ErrorMessages.FrameAncestorsOwnedByFramingPolicy,
                 nameof(name));
         }
 
@@ -279,7 +280,7 @@ public sealed class ContentSecurityPolicyBuilder
         if (!SecurityHeadersGrammar.IsDirectiveValue(trimmed))
         {
             throw new ArgumentException(
-                $"The value of {normalized} contains a character the CSP directive-value grammar excludes (',', ';', a control character, or non-ASCII).",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentSecurityPolicyDirectiveValueInvalid, normalized),
                 nameof(value));
         }
 
@@ -295,7 +296,7 @@ public sealed class ContentSecurityPolicyBuilder
     {
         if (_directives.Count == 0)
         {
-            throw new InvalidOperationException("A Content Security Policy needs at least one directive.");
+            throw new InvalidOperationException(ErrorMessages.ContentSecurityPolicyDirectiveRequired);
         }
 
         return new ContentSecurityPolicy(_directives.ToArray());

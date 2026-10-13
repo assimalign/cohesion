@@ -202,3 +202,14 @@ Contracts and delegate plumbing only — no reflection, no runtime codegen
 - **DI/configuration/logging integration.** `Web.Hosting` composes those, builder-time
   only.
 - **A return-value result model.** Withdrawn by design; the pipeline is middleware-first.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

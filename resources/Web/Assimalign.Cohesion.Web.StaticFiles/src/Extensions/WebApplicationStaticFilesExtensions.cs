@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
@@ -105,7 +106,7 @@ public static class WebApplicationStaticFilesExtensions
         if (options.RequestPath.Value.Length == 0 || options.RequestPath.Value[0] != '/')
         {
             throw new ArgumentException(
-                $"The static-files request path must begin with '/': '{options.RequestPath.Value}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.StaticFilesRequestPathInvalid, options.RequestPath.Value));
         }
 
         foreach (string document in options.DefaultDocuments)
@@ -115,7 +116,7 @@ public static class WebApplicationStaticFilesExtensions
                 || document.AsSpan().IndexOfAnyExcept('.') < 0)
             {
                 throw new ArgumentException(
-                    $"Default-document names must be bare file names: '{document}'.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultDocumentNameInvalid, document));
             }
         }
 
@@ -123,13 +124,13 @@ public static class WebApplicationStaticFilesExtensions
             && !HttpCacheControl.TryParse(options.CacheControl, out _))
         {
             throw new ArgumentException(
-                $"The Cache-Control value is not a valid RFC 9111 field value: '{options.CacheControl}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.StaticFilesCacheControlInvalid, options.CacheControl));
         }
 
         if (options.ServeUnknownContentTypes && string.IsNullOrWhiteSpace(options.FallbackContentType))
         {
             throw new ArgumentException(
-                "A fallback content type is required when unknown content types are served.");
+                ErrorMessages.FallbackContentTypeRequired);
         }
     }
 }

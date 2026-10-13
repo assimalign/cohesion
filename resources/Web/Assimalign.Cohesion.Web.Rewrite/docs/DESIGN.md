@@ -363,3 +363,14 @@ and a redirect rule with trim and AOT warnings as errors and exercises both over
 A rule the built-in kinds cannot express implements `IRewriteRule` and registers with `RewriteOptions.Add`. It
 keeps no per-request state: one instance serves every request. It reads `IRewriteContext.Path` and `Query`,
 never `HttpContext.Request.Path`, which keeps the value the middleware received.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

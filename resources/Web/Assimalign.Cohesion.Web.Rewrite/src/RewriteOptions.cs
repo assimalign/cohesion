@@ -540,7 +540,7 @@ public sealed class RewriteOptions
         {
             if (string.IsNullOrWhiteSpace(domains[i]))
             {
-                throw new ArgumentException("A domain cannot be null, empty or white space.", nameof(domains));
+                throw new ArgumentException(ErrorMessages.DomainMustNotBeBlank, nameof(domains));
             }
 
             copy[i] = domains[i].Trim();
@@ -553,7 +553,7 @@ public sealed class RewriteOptions
     {
         if (flow is not (RewriteFlow.Continue or RewriteFlow.SkipRemainingRules or RewriteFlow.Restart))
         {
-            throw new ArgumentOutOfRangeException(nameof(flow), flow, "The flow is not a defined RewriteFlow value.");
+            throw new ArgumentOutOfRangeException(nameof(flow), flow, ErrorMessages.UndefinedRewriteFlow);
         }
     }
 
@@ -561,7 +561,7 @@ public sealed class RewriteOptions
     {
         if (target is not (RewriteMatchTarget.Path or RewriteMatchTarget.PathAndQuery))
         {
-            throw new ArgumentOutOfRangeException(nameof(target), target, "The match target is not a defined RewriteMatchTarget value.");
+            throw new ArgumentOutOfRangeException(nameof(target), target, ErrorMessages.UndefinedRewriteMatchTarget);
         }
     }
 }

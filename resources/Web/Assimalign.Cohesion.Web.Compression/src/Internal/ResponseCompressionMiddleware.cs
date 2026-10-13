@@ -120,7 +120,7 @@ internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
         }
 
         throw new ArgumentException(
-            "Response compression requires at least one coding; both EnableGzip and EnableBrotli are disabled.",
+            ErrorMessages.ResponseCompressionCodingRequired,
             nameof(options));
     }
 }

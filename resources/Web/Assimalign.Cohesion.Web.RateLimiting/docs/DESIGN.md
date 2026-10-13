@@ -253,3 +253,14 @@ limiter still gates; an endpoint with a policy fails at dispatch).
 request-feature correlation despite an unrelated ambient activity, payload privacy, both retry-hint
 shapes, throttled committed-head aborts with exact counts, disabled-listener lazy payload reads, and
 counter publication. Event assertions use request ids and counters use deltas.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.Authorization.Internal;
 
@@ -32,7 +33,7 @@ internal static class AuthorizationNames
             if (name is null || (!allowBlank && string.IsNullOrWhiteSpace(name)))
             {
                 throw new ArgumentException(
-                    allowBlank ? $"A {kind} must not be null." : $"A {kind} must not be null, empty, or whitespace.",
+                    allowBlank ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorizationNameMustNotBeNull, kind) : string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorizationNameMustNotBeBlank, kind),
                     parameterName);
             }
 

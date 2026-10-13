@@ -21,6 +21,16 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// </summary>
 public sealed class JwtBearerHandler : IAuthenticationHandler
 {
+    private static readonly string _bearerCredentialHasNoTokenMessage = ErrorMessages.BearerCredentialHasNoToken;
+    private static readonly string _bearerTokenAudienceRejectedMessage = ErrorMessages.BearerTokenAudienceRejected;
+    private static readonly string _bearerTokenIssuerRejectedMessage = ErrorMessages.BearerTokenIssuerRejected;
+    private static readonly string _bearerTokenMalformedMessage = ErrorMessages.BearerTokenMalformed;
+    private static readonly string _bearerTokenNotCompactJwsMessage = ErrorMessages.BearerTokenNotCompactJws;
+    private static readonly string _bearerTokenSignatureEncodingInvalidMessage = ErrorMessages.BearerTokenSignatureEncodingInvalid;
+    private static readonly string _bearerTokenSignatureInvalidMessage = ErrorMessages.BearerTokenSignatureInvalid;
+    private static readonly string _bearerTokenUsesUnsecuredAlgorithmMessage = ErrorMessages.BearerTokenUsesUnsecuredAlgorithm;
+    private static readonly string _bearerTokenValidationFailedMessage = ErrorMessages.BearerTokenValidationFailed;
+
     private readonly JwtBearerOptions _options;
 
     private AuthenticationScheme _scheme = null!;
@@ -67,21 +77,19 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
         if (options.RequireSignedTokens && options.SigningKeys.Count == 0)
         {
             throw new InvalidOperationException(
-                "JwtBearerOptions requires at least one signing key when RequireSignedTokens is true.");
+                ErrorMessages.SigningKeysRequired);
         }
 
         if (options.ValidateIssuer && options.ValidIssuers.Count == 0)
         {
             throw new InvalidOperationException(
-                "JwtBearerOptions requires at least one entry in ValidIssuers while ValidateIssuer is true. " +
-                "Add the issuer (the token's 'iss') the scheme accepts, or set ValidateIssuer = false to accept any issuer a signing key verifies.");
+                ErrorMessages.ValidIssuersRequired);
         }
 
         if (options.ValidateAudience && options.ValidAudiences.Count == 0)
         {
             throw new InvalidOperationException(
-                "JwtBearerOptions requires at least one entry in ValidAudiences while ValidateAudience is true. " +
-                "Add the audience (the token's 'aud') this service answers to, or set ValidateAudience = false to accept tokens minted for any audience.");
+                ErrorMessages.ValidAudiencesRequired);
         }
     }
 
@@ -120,12 +128,12 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
 
         if (string.IsNullOrEmpty(token))
         {
-            return Reject("EmptyCredential", "The Bearer credential carries no token.");
+            return Reject("EmptyCredential", _bearerCredentialHasNoTokenMessage);
         }
 
         if (!JsonWebToken.TryParse(token, out JsonWebToken? jwt) || jwt is null)
         {
-            return Reject("Malformed", "The bearer token is malformed.");
+            return Reject("Malformed", _bearerTokenMalformedMessage);
         }
 
         if (_options.RequireSignedTokens)
@@ -146,12 +154,12 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
 
         if (!IssuerIsValid(jwt))
         {
-            return Reject("IssuerRejected", "The bearer token issuer is not accepted.", jwt);
+            return Reject("IssuerRejected", _bearerTokenIssuerRejectedMessage, jwt);
         }
 
         if (!AudienceIsValid(jwt))
         {
-            return Reject("AudienceRejected", "The bearer token audience is not accepted.", jwt);
+            return Reject("AudienceRejected", _bearerTokenAudienceRejectedMessage, jwt);
         }
 
         var principal = JwtClaimsPrincipalMapper.Map(jwt, _scheme.Name, _options);
@@ -187,12 +195,12 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
 
         if (parts is null || jwt.SigningInput is null || algorithm is null)
         {
-            return Reject("NotCompactJws", "The bearer token cannot be verified: it is not in compact JWS form.", jwt);
+            return Reject("NotCompactJws", _bearerTokenNotCompactJwsMessage, jwt);
         }
 
         if (string.Equals(algorithm, JoseAlgorithms.None, StringComparison.Ordinal))
         {
-            return Reject("UnsecuredAlgorithm", "The bearer token uses the unsecured 'none' algorithm.", jwt);
+            return Reject("UnsecuredAlgorithm", _bearerTokenUsesUnsecuredAlgorithmMessage, jwt);
         }
 
         byte[] signature;
@@ -202,7 +210,7 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
         }
         catch (FormatException)
         {
-            return Reject("SignatureEncoding", "The bearer token signature is not valid base64url.", jwt);
+            return Reject("SignatureEncoding", _bearerTokenSignatureEncodingInvalidMessage, jwt);
         }
 
         byte[] signingInput = Encoding.ASCII.GetBytes(jwt.SigningInput);
@@ -224,7 +232,7 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
         }
 
         return Reject(matchingKey ? "SignatureInvalid" : "NoMatchingKey",
-            "The bearer token signature could not be verified.", jwt);
+            _bearerTokenSignatureInvalidMessage, jwt);
     }
 
     private AuthenticateResult Reject(string reason, string message, JsonWebToken? jwt = null, TokenValidationResult? validation = null)
@@ -318,7 +326,7 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
     }
 
     private static string DescribeFailure(TokenValidationResult validation)
-        => validation.Errors.Count > 0 ? validation.Errors[0].Message : "The bearer token failed validation.";
+        => validation.Errors.Count > 0 ? validation.Errors[0].Message : _bearerTokenValidationFailedMessage;
 
     private static bool ContainsOrdinal(IList<string> values, string candidate)
     {

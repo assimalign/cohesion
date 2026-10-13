@@ -82,7 +82,7 @@ public static class HealthChecksBuilderExtensions
             _ => throw new ArgumentOutOfRangeException(
                 nameof(contribution),
                 contribution.Status,
-                "The contributor returned an unsupported health status.")
+                ErrorMessages.HealthContributorStatusUnsupported)
         };
     }
 }

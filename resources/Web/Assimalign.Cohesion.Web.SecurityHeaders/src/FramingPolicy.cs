@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 using Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 
@@ -79,7 +80,7 @@ public sealed class FramingPolicy
 
         if (ancestorSources.Length == 0)
         {
-            throw new ArgumentException("Name at least one ancestor source; use FramingPolicy.Deny to forbid every frame.", nameof(ancestorSources));
+            throw new ArgumentException(ErrorMessages.FrameAncestorRequired, nameof(ancestorSources));
         }
 
         List<string> sources = new(ancestorSources.Length);
@@ -88,8 +89,7 @@ public sealed class FramingPolicy
             if (source is null || !SecurityHeadersGrammar.IsAncestorSource(source))
             {
                 throw new ArgumentException(
-                    $"'{source}' is not a frame-ancestors source; use 'self', a scheme source (https:), or a host source " +
-                    "(https://partner.example.com). Use FramingPolicy.Deny for 'none'.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.FrameAncestorSourceInvalid, source),
                     nameof(ancestorSources));
             }
 

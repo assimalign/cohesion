@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Frozen;
+using System.Globalization;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
@@ -117,8 +118,7 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
     {
         IWebResponseStartingFeature starting = context.Features.Get<IWebResponseStartingFeature>()
             ?? throw new InvalidOperationException(
-                "UseCors requires IWebResponseStartingFeature for actual responses. Use the default Web.Hosting " +
-                "server or implement the response-starting feature in the custom server.");
+                ErrorMessages.CorsResponseStartingFeatureRequired);
         string? allowedOrigin = CorsResponseHeaders.ResolveAllowedOrigin(policy, context.Request);
 
         // Output caching reads Vary before transport commit. Publish the cache partition now, while
@@ -164,8 +164,7 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
         }
 
         throw new InvalidOperationException(
-            $"No CORS policy named '{metadata.PolicyName}' has been registered. " +
-            "Register it with options.AddPolicy(name, configure) in UseCors.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsPolicyNotRegistered, metadata.PolicyName));
     }
 
     // Whether the route routing matched for the OPTIONS request also serves the actual request's method, with

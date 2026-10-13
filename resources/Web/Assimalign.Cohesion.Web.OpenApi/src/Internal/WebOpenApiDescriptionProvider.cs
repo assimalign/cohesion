@@ -40,12 +40,12 @@ internal sealed class WebOpenApiDescriptionProvider : IOpenApiDescriptionProvide
     {
         if (!Enum.IsDefined(version))
         {
-            throw new ArgumentOutOfRangeException(nameof(version), version, "The value is not a defined OpenApiSpecVersion.");
+            throw new ArgumentOutOfRangeException(nameof(version), version, ErrorMessages.UndefinedOpenApiSpecVersion);
         }
 
         IRouterFeature routing = _application.Features.OfType<IRouterFeature>().LastOrDefault()
             ?? throw new InvalidOperationException(
-                "Routing has not been registered. Call builder.Services.AddRouting(): the OpenAPI document describes the routes it maps.");
+                ErrorMessages.OpenApiRoutingNotRegistered);
 
         if (!_application.TryGetAuthorizationOptions(out AuthorizationOptions? authorization))
         {

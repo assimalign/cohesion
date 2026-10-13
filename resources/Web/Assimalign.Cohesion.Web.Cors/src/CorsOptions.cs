@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.Cors;
 
@@ -44,7 +45,7 @@ public sealed class CorsOptions
 
         if (DefaultPolicy is not null)
         {
-            throw new InvalidOperationException("A default CORS policy is already registered.");
+            throw new InvalidOperationException(ErrorMessages.DefaultCorsPolicyAlreadyRegistered);
         }
 
         DefaultPolicy = policy;
@@ -86,7 +87,7 @@ public sealed class CorsOptions
 
         if (!_policies.TryAdd(name, policy))
         {
-            throw new InvalidOperationException($"A CORS policy named '{name}' is already registered.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsPolicyAlreadyRegistered, name));
         }
 
         return this;

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -60,7 +61,7 @@ public static class StaticFilesFallbackExtensions
             string file = "/" + filePath.TrimStart('/');
             if (StaticFilePath.HasUnsafeSegments(file))
             {
-                throw new ArgumentException($"The fallback file must be a path inside the web root: '{filePath}'.", nameof(filePath));
+                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FallbackFileOutsideRoot, filePath), nameof(filePath));
             }
 
             StaticFilesOptions options = new();
@@ -70,7 +71,7 @@ public static class StaticFilesFallbackExtensions
 
             IRouterBuilder routes = builder.Context.Features.OfType<IRouterFeature>().FirstOrDefault()?.Builder
                 ?? throw new InvalidOperationException(
-                    "No router builder was registered. Call builder.Services.AddRouting() before mapping a fallback.");
+                    ErrorMessages.FallbackRouterNotRegistered);
 
             // Resolve the mount with the containing pipeline, including its lifecycle diagnostic.
             // The route is registered now; its handler runs only after composition has completed.

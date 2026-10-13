@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 
 using Assimalign.Cohesion.Http;
 
@@ -71,65 +72,64 @@ internal sealed class CookiePolicyRules
         if (!Enum.IsDefined(options.MinimumSameSitePolicy))
         {
             throw new ArgumentException(
-                $"'{options.MinimumSameSitePolicy}' is not a defined SameSite mode for the minimum SameSite policy.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.UndefinedMinimumSameSitePolicy, options.MinimumSameSitePolicy),
                 paramName);
         }
 
         if (!Enum.IsDefined(options.Secure))
         {
-            throw new ArgumentException($"'{options.Secure}' is not a defined Secure policy.", paramName);
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.UndefinedSecurePolicy, options.Secure), paramName);
         }
 
         if (!Enum.IsDefined(options.HttpOnly))
         {
-            throw new ArgumentException($"'{options.HttpOnly}' is not a defined HttpOnly policy.", paramName);
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.UndefinedHttpOnlyPolicy, options.HttpOnly), paramName);
         }
 
         if (!Enum.IsDefined(options.SameSiteNoneWithoutSecure))
         {
             throw new ArgumentException(
-                $"'{options.SameSiteNoneWithoutSecure}' is not a defined action for SameSite=None without Secure.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.UndefinedSameSiteNoneAction, options.SameSiteNoneWithoutSecure),
                 paramName);
         }
 
         if (!Enum.IsDefined(options.PrefixViolation))
         {
             throw new ArgumentException(
-                $"'{options.PrefixViolation}' is not a defined action for a cookie prefix violation.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.UndefinedCookiePrefixAction, options.PrefixViolation),
                 paramName);
         }
 
         if (options.MaxLifetime <= TimeSpan.Zero || options.MaxLifetime > HttpCookieLimits.DefaultMaxLifetime)
         {
             throw new ArgumentException(
-                $"The maximum cookie lifetime must be greater than zero and at most {HttpCookieLimits.DefaultMaxLifetime.TotalDays} days, " +
-                $"the limit a user agent enforces (RFC 6265bis 5.5); got {options.MaxLifetime}.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CookieLifetimeOutOfRange, HttpCookieLimits.DefaultMaxLifetime.TotalDays, options.MaxLifetime),
                 paramName);
         }
 
         if (options.TimeProvider is null)
         {
-            throw new ArgumentException("The cookie policy's time provider must not be null.", paramName);
+            throw new ArgumentException(ErrorMessages.CookieTimeProviderRequired, paramName);
         }
 
         if (string.IsNullOrEmpty(options.ConsentCookieValue))
         {
             throw new ArgumentException(
-                "The consent cookie value must not be empty: an empty value cannot be told apart from a deleted consent cookie.",
+                ErrorMessages.ConsentCookieValueRequired,
                 paramName);
         }
 
         if (options.ConsentCookie.MaxAge is TimeSpan maxAge && maxAge <= TimeSpan.Zero)
         {
             throw new ArgumentException(
-                $"The consent cookie's Max-Age must be positive when set; got {maxAge}. A zero or negative Max-Age would delete the consent it records.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConsentCookieMaxAgeMustBePositive, maxAge),
                 paramName);
         }
 
         if (options.ConsentCookie.Expires is not null)
         {
             throw new ArgumentException(
-                "The consent cookie must not set Expires: one fixed date would be stamped on every grant. Set its lifetime with Max-Age.",
+                ErrorMessages.ConsentCookieExpiresNotSupported,
                 paramName);
         }
 
@@ -148,7 +148,7 @@ internal sealed class CookiePolicyRules
         catch (ArgumentException exception)
         {
             throw new ArgumentException(
-                "The consent cookie name or value is not a valid RFC 6265 cookie name or value.",
+                ErrorMessages.ConsentCookieNameOrValueInvalid,
                 paramName,
                 exception);
         }

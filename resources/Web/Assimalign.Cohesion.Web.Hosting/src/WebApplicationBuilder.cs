@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Security;
@@ -94,7 +95,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
-                "The registered Web resource control-plane factory returned null.");
+                ErrorMessages.ControlPlaneFactoryReturnedNull);
             resourceContext = ResourceRuntime.Current;
             _resourceContext = resourceContext;
             options.Environment = resourceContext.EnvironmentName;
@@ -241,7 +242,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ArgumentNullException.ThrowIfNull(factory);
 
         Services.AddSingleton<IHostService>(_ => factory.Invoke(_context)
-            ?? throw new InvalidOperationException("The web application service factory returned null."));
+            ?? throw new InvalidOperationException(ErrorMessages.ApplicationServiceFactoryReturnedNull));
         return this;
     }
 
@@ -393,7 +394,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"The ambient Web endpoint '{endpointName}' must use http or https, not '{endpoint.Scheme}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AmbientEndpointSchemeInvalid, endpointName, endpoint.Scheme));
         }
 
         IPAddress address = ResolveBindAddress(endpoint.IdnHost);
@@ -401,7 +402,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         {
             if (!resourceContext.TryGetEndpointCertificate(endpointName, out X509Certificate2? leaf, out X509Certificate2Collection chain))
             {
-                throw new InvalidOperationException($"The ambient Web https endpoint '{endpointName}' requires its certificate Secret mount (default 'tls').");
+                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AmbientHttpsCertificateRequired, endpointName));
             }
             _context.EndpointCertificates.Add(leaf);
             foreach (X509Certificate2 issuer in chain)
@@ -431,7 +432,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return IPAddress.TryParse(host, out IPAddress? address)
             ? address
             : throw new InvalidOperationException(
-                $"The ambient Web endpoint host '{host}' is not a bindable IP address.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AmbientEndpointHostInvalid, host));
     }
 
     private static object? CreateConnectionFactory(string protocol)
@@ -496,32 +497,20 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                 if (descriptor.Lifetime != ServiceLifetime.Singleton)
                 {
                     throw new InvalidOperationException(
-                        $"The request feature registration {DescribeRegistration(descriptor, index)} is " +
-                        $"{descriptor.Lifetime}. A Web application feature must be a singleton: the host stamps " +
-                        "the same feature instances onto every exchange, and middleware such as UseRouting reads " +
-                        "them while the pipeline is composed. Register it with AddSingleton<IHttpFeature>, " +
-                        "IWebApplicationBuilder.AddFeature, or the feature package's builder.Services.Add<Feature> verb.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestFeatureMustBeSingleton, DescribeRegistration(descriptor, index), descriptor.Lifetime));
                 }
 
                 if (IsDisposableImplementation(descriptor))
                 {
                     string name = descriptor.ImplementationInstance is IHttpFeature feature ? $" '{feature.Name}'" : string.Empty;
                     throw new InvalidOperationException(
-                        $"The request feature registration{name} {DescribeRegistration(descriptor, index)} is " +
-                        "disposable. The host stamps the same feature instance onto every exchange, and an exchange " +
-                        "disposes the disposable features it carries when it ends, so this instance would be disposed " +
-                        "after its first request. Keep disposable per-request state in a feature that middleware " +
-                        "installs on each exchange.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestFeatureRegistrationDisposable, name, DescribeRegistration(descriptor, index)));
                 }
             }
             else if (typeof(IHttpFeature).IsAssignableFrom(descriptor.ServiceType))
             {
                 throw new InvalidOperationException(
-                    $"The registration {DescribeRegistration(descriptor, index)} uses the service type " +
-                    $"{descriptor.ServiceType.FullName}, which derives from IHttpFeature but is not IHttpFeature. " +
-                    "The host stamps only IHttpFeature registrations onto exchanges, so this feature would never " +
-                    "reach a request. Register it as IHttpFeature, with AddSingleton<IHttpFeature> or " +
-                    "IWebApplicationBuilder.AddFeature.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestFeatureServiceTypeInvalid, DescribeRegistration(descriptor, index), descriptor.ServiceType.FullName));
             }
 
             index++;
@@ -644,7 +633,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ArgumentNullException.ThrowIfNull(server);
 
         Services.AddSingleton<IWebApplicationServer>(_ => server.Invoke(_context)
-            ?? throw new InvalidOperationException("The web application server factory returned null."));
+            ?? throw new InvalidOperationException(ErrorMessages.ApplicationServerFactoryReturnedNull));
         return this;
     }
 
@@ -671,7 +660,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ArgumentNullException.ThrowIfNull(configure);
 
         Services.AddSingleton<IHttpFeature>(_ => configure.Invoke(_context)
-            ?? throw new InvalidOperationException("The web application feature factory returned null."));
+            ?? throw new InvalidOperationException(ErrorMessages.ApplicationFeatureFactoryReturnedNull));
         return this;
     }
 }

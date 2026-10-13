@@ -44,29 +44,27 @@ internal static class WebSocketOrigin
     {
         if (string.IsNullOrEmpty(origin))
         {
-            throw new ArgumentException("An allowed origin must not be null or empty.", nameof(WebSocketOptions.AllowedOrigins));
+            throw new ArgumentException(ErrorMessages.AllowedOriginMustNotBeEmpty, nameof(WebSocketOptions.AllowedOrigins));
         }
 
         if (origin == "*")
         {
             throw new ArgumentException(
-                "'*' is not an origin. Set AllowAnyOrigin to allow every origin.",
+                ErrorMessages.OriginWildcardRequiresAllowAny,
                 nameof(WebSocketOptions.AllowedOrigins));
         }
 
         if (string.Equals(origin, Opaque, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                "The 'null' origin cannot be allowed by value: sandboxed pages, local files and cross-origin redirects " +
-                "all send it, so allowing it would allow all of them. Set AllowAnyOrigin to accept it deliberately.",
+                ErrorMessages.OpaqueOriginRequiresAllowAny,
                 nameof(WebSocketOptions.AllowedOrigins));
         }
 
         if (!TryNormalize(origin, out string? serialized))
         {
             throw new ArgumentException(
-                $"'{origin}' is not an origin: expected scheme://host[:port], for example https://app.example, " +
-                "with no path (not even a trailing '/'), query, fragment, user information or wildcard.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AllowedOriginSyntaxInvalid, origin),
                 nameof(WebSocketOptions.AllowedOrigins));
         }
 

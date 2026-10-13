@@ -472,3 +472,14 @@ decision 59. That authentication API removal is source- and binary-breaking, acc
 decision 15's preview terms: replace a custom marker implementation or interface lookup with
 the sealed marker and rebuild. Existing `ApiEndpointMetadata.Instance` declarations remain
 source-compatible, and this change adds or removes no authorization API.
+
+## Exception messages (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

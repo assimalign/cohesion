@@ -143,7 +143,7 @@ public sealed class RouteParameterPolicyMap
     {
         if (string.IsNullOrWhiteSpace(argument))
         {
-            throw new InvalidOperationException("The 'regex' route parameter policy requires a regular expression pattern.");
+            throw new InvalidOperationException(ErrorMessages.RegexPolicyPatternRequired);
         }
 
         return new RegexRouteParameterPolicy(argument);
@@ -153,7 +153,7 @@ public sealed class RouteParameterPolicyMap
     {
         if (string.IsNullOrWhiteSpace(argument))
         {
-            throw new InvalidOperationException("The 'range' route parameter policy requires a 'min,max' argument.");
+            throw new InvalidOperationException(ErrorMessages.RangePolicyArgumentRequired);
         }
 
         string[] boundaries = argument.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
@@ -161,7 +161,7 @@ public sealed class RouteParameterPolicyMap
             !long.TryParse(boundaries[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out long minimum) ||
             !long.TryParse(boundaries[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out long maximum))
         {
-            throw new InvalidOperationException($"The 'range' route parameter policy argument '{argument}' is invalid.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RangePolicyArgumentInvalid, argument));
         }
 
         return new RangeRouteParameterPolicy(minimum, maximum);
@@ -171,7 +171,7 @@ public sealed class RouteParameterPolicyMap
     {
         if (string.IsNullOrWhiteSpace(argument))
         {
-            throw new InvalidOperationException("The 'length' route parameter policy requires an 'n' or 'min,max' argument.");
+            throw new InvalidOperationException(ErrorMessages.LengthPolicyArgumentRequired);
         }
 
         string[] parts = argument.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
@@ -192,14 +192,14 @@ public sealed class RouteParameterPolicyMap
             return new LengthRouteParameterPolicy(minLength, maxLength);
         }
 
-        throw new InvalidOperationException($"The 'length' route parameter policy argument '{argument}' is invalid.");
+        throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.LengthPolicyArgumentInvalid, argument));
     }
 
     private static MinLengthRouteParameterPolicy CreateMinLengthPolicy(string? argument)
     {
         if (!TryParseNonNegativeInt(argument, out int minLength))
         {
-            throw new InvalidOperationException($"The 'minlength' route parameter policy requires a non-negative integer argument, but was '{argument}'.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MinimumLengthPolicyArgumentInvalid, argument));
         }
 
         return new MinLengthRouteParameterPolicy(minLength);
@@ -209,7 +209,7 @@ public sealed class RouteParameterPolicyMap
     {
         if (!TryParseNonNegativeInt(argument, out int maxLength))
         {
-            throw new InvalidOperationException($"The 'maxlength' route parameter policy requires a non-negative integer argument, but was '{argument}'.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MaximumLengthPolicyArgumentInvalid, argument));
         }
 
         return new MaxLengthRouteParameterPolicy(maxLength);
@@ -220,7 +220,7 @@ public sealed class RouteParameterPolicyMap
         if (string.IsNullOrWhiteSpace(argument) ||
             !long.TryParse(argument.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long min))
         {
-            throw new InvalidOperationException($"The 'min' route parameter policy requires an integer argument, but was '{argument}'.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MinimumPolicyArgumentInvalid, argument));
         }
 
         return new MinRouteParameterPolicy(min);
@@ -231,7 +231,7 @@ public sealed class RouteParameterPolicyMap
         if (string.IsNullOrWhiteSpace(argument) ||
             !long.TryParse(argument.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long max))
         {
-            throw new InvalidOperationException($"The 'max' route parameter policy requires an integer argument, but was '{argument}'.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MaximumPolicyArgumentInvalid, argument));
         }
 
         return new MaxRouteParameterPolicy(max);
@@ -254,13 +254,13 @@ public sealed class RouteParameterPolicyMap
     {
         if (string.IsNullOrWhiteSpace(argument))
         {
-            throw new InvalidOperationException("The 'when' route parameter policy requires a 'key=value' argument.");
+            throw new InvalidOperationException(ErrorMessages.WhenPolicyArgumentRequired);
         }
 
         int separatorIndex = argument.IndexOf('=');
         if (separatorIndex <= 0 || separatorIndex == argument.Length - 1)
         {
-            throw new InvalidOperationException($"The 'when' route parameter policy argument '{argument}' is invalid.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.WhenPolicyArgumentInvalid, argument));
         }
 
         string routeKey = argument[..separatorIndex].Trim();

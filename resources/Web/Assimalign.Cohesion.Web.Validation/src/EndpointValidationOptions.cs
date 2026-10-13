@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 using Assimalign.Cohesion.ObjectValidation;
 
@@ -82,7 +83,7 @@ public sealed class EndpointValidationOptions
         if (types.Count == 0)
         {
             throw new ArgumentException(
-                "The validator has no profiles, so it validates no type. Register it for a model type with AddValidator<T>.",
+                ErrorMessages.ValidatorHasNoProfiles,
                 nameof(validator));
         }
 
@@ -145,7 +146,7 @@ public sealed class EndpointValidationOptions
     {
         if (_validators.ContainsKey(type))
         {
-            throw new InvalidOperationException($"A validator is already registered for '{type}'.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValidatorAlreadyRegistered, type));
         }
     }
 }

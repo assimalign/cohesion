@@ -88,9 +88,7 @@ public sealed class AuthenticationBuilder
         if (_isDataProtectionProviderResolved && !ReferenceEquals(_dataProtectionProvider, dataProtectionProvider))
         {
             throw new InvalidOperationException(
-                "The data-protection provider has already been read, by a registered scheme or by a caller of " +
-                "AuthenticationBuilder.DataProtectionProvider. Call UseDataProtection before registering the " +
-                "schemes that derive ticket protectors from it and before reading DataProtectionProvider.");
+                ErrorMessages.DataProtectionProviderAlreadyRead);
         }
 
         _dataProtectionProvider = dataProtectionProvider;

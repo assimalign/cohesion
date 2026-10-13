@@ -142,13 +142,13 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         if (_storeSession is null)
         {
             throw new InvalidOperationException(
-                "No managed session is current on this request; establish the session and do not replace it before regenerating its id.");
+                ErrorMessages.ManagedSessionRequired);
         }
 
         if (ResponseHeadStarted())
         {
             throw new InvalidOperationException(
-                "The session id cannot be regenerated after the response has started; regenerate it before writing the response.");
+                ErrorMessages.SessionRegenerationAfterResponseStarted);
         }
 
         string oldId = _storeSession.Id;

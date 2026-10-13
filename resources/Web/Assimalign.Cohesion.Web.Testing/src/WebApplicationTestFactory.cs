@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -138,7 +139,7 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
         if (options.Protocol is not (WebApplicationTestProtocol.Http1 or WebApplicationTestProtocol.Http2))
         {
             throw new ArgumentException(
-                $"'{options.Protocol}' is not a supported test protocol. HTTP/3 is out of scope for the in-memory factory (see docs/DESIGN.md).",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TestProtocolUnsupported, options.Protocol),
                 nameof(options));
         }
 

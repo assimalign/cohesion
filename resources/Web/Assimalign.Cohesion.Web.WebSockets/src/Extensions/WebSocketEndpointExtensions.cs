@@ -88,7 +88,7 @@ public static class WebSocketEndpointExtensions
 
             IRouterFeature routing = builder.Context.Features.OfType<IRouterFeature>().FirstOrDefault()
                 ?? throw new InvalidOperationException(
-                    "No router builder was registered. Call builder.Services.AddRouting() before mapping endpoints.");
+                    ErrorMessages.RouterBuilderNotRegistered);
 
             return routing.Builder.Map(WebSocketEndpoint.Methods, pattern, CreateHandler(handler, acceptOptions));
         }

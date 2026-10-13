@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Sessions.Internal;
@@ -73,7 +74,7 @@ public static class SessionPipelineExtensions
             if (options.IdleTimeout <= TimeSpan.Zero)
             {
                 throw new ArgumentException(
-                    $"HttpSessionOptions.IdleTimeout must be positive; got {options.IdleTimeout}.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.SessionIdleTimeoutMustBePositive, options.IdleTimeout),
                     nameof(configure));
             }
 
@@ -85,7 +86,7 @@ public static class SessionPipelineExtensions
             catch (ArgumentException exception)
             {
                 throw new ArgumentException(
-                    "HttpSessionOptions.CookieName must be a non-empty RFC 6265 token with no control characters, whitespace, or separators.",
+                    ErrorMessages.SessionCookieNameInvalid,
                     nameof(configure),
                     exception);
             }
@@ -101,7 +102,7 @@ public static class SessionPipelineExtensions
             {
                 // The value is not echoed: it may hold the control character that made it invalid.
                 throw new ArgumentException(
-                    "HttpSessionOptions.CookiePath is not an RFC 6265 path-value: it must be US-ASCII with no ';' and no control characters. Percent-encode any other character.",
+                    ErrorMessages.SessionCookiePathInvalid,
                     nameof(configure),
                     exception);
             }

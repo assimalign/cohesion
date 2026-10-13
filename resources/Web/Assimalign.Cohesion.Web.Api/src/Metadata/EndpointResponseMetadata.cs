@@ -62,12 +62,12 @@ public sealed class EndpointResponseMetadata
     {
         if (statusCode.Value is < 100 or > 599)
         {
-            throw new ArgumentOutOfRangeException(nameof(statusCode), statusCode.Value, "The status code must be between 100 and 599.");
+            throw new ArgumentOutOfRangeException(nameof(statusCode), statusCode.Value, ErrorMessages.StatusCodeOutOfRange);
         }
 
         if (contentType is { } mediaType && (mediaType.IsEmpty || mediaType.HasWildcard))
         {
-            throw new ArgumentException("A described content type must be a concrete (wildcard-free) media type.", nameof(contentType));
+            throw new ArgumentException(ErrorMessages.DescribedContentTypeMustBeConcrete, nameof(contentType));
         }
 
         StatusCode = statusCode;

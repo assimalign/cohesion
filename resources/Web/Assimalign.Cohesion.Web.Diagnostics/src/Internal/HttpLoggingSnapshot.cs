@@ -73,9 +73,7 @@ internal sealed class HttpLoggingSnapshot
         if (options.Level == LogLevel.None)
         {
             throw new ArgumentException(
-                "The HTTP logging level must not be LogLevel.None - it could never emit. To silence " +
-                "logging for specific endpoints attach HttpLoggingMetadata with HttpLoggingFields.None; " +
-                "to silence it globally do not call UseHttpLogging.",
+                ErrorMessages.HttpLoggingLevelCannotBeNone,
                 nameof(options));
         }
 

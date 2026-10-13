@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 
@@ -61,6 +62,6 @@ internal static class SecurityHeadersTokens
         return new ArgumentOutOfRangeException(
             nameof(value),
             value,
-            $"'{value}' is not a defined {typeName} value.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.SecurityHeadersEnumValueUndefined, value, typeName));
     }
 }

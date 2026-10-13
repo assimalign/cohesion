@@ -113,7 +113,7 @@ public sealed class WebSocketOptions
             throw new ArgumentOutOfRangeException(
                 propertyName,
                 value,
-                "The interval must be zero or positive, or Timeout.InfiniteTimeSpan.");
+                ErrorMessages.WebSocketIntervalInvalid);
         }
 
         return value;

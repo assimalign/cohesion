@@ -58,7 +58,7 @@ public sealed class EndpointParameterMetadata
 
         if (!Enum.IsDefined(source))
         {
-            throw new ArgumentOutOfRangeException(nameof(source), source, "The parameter source is not a defined EndpointParameterSource value.");
+            throw new ArgumentOutOfRangeException(nameof(source), source, ErrorMessages.UndefinedEndpointParameterSource);
         }
 
         Name = name;

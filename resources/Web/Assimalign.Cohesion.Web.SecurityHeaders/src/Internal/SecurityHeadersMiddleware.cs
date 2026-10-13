@@ -49,8 +49,7 @@ internal sealed class SecurityHeadersMiddleware : IWebApplicationMiddleware
 
         IWebResponseStartingFeature starting = context.Features.Get<IWebResponseStartingFeature>()
             ?? throw new InvalidOperationException(
-                "UseSecurityHeaders requires IWebResponseStartingFeature. Use the default Web.Hosting server " +
-                "or implement the response-starting feature in the custom server.");
+                ErrorMessages.SecurityHeadersResponseStartingFeatureRequired);
 
         // One nonce per exchange: a nested registration, or an application-supplied feature, is reused.
         ISecurityHeadersFeature feature = context.Features.Get<ISecurityHeadersFeature>() ?? InstallFeature(context);

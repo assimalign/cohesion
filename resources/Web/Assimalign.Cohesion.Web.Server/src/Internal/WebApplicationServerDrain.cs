@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// </remarks>
 internal sealed class WebApplicationServerDrain : IDisposable
 {
+    private static readonly string _serverDrainBudgetExceededMessage = ErrorMessages.ServerDrainBudgetExceeded;
+
     private readonly CancellationTokenSource _draining = new();
     private readonly CancellationTokenSource _aborted = new();
 
@@ -81,7 +83,7 @@ internal sealed class WebApplicationServerDrain : IDisposable
         return new Registration(
             Draining.UnsafeRegister(static state => ((IHttpConnectionContext)state!).BeginGracefulClose(), context),
             Aborted.UnsafeRegister(static state => ((IHttpConnection)state!).Abort(new ConnectionAbortedException(
-                "The connection was aborted because the server's stop budget ran out before its exchanges finished.")),
+                _serverDrainBudgetExceededMessage)),
                 connection));
     }
 

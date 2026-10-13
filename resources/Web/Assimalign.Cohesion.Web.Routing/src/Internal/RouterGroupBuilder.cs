@@ -208,9 +208,7 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
         if (_policiesFrozen)
         {
             throw new InvalidOperationException(
-                "The route group's parameter policies are frozen because a child route or nested group has " +
-                "already been registered, and child templates resolve their inline policies when they are mapped. " +
-                "Declare group-level parameter policies before mapping children so they apply to all child routes.");
+                ErrorMessages.GroupParameterPoliciesFrozen);
         }
     }
 

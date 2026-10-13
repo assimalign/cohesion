@@ -145,12 +145,12 @@ public sealed class WebApplicationServer : IWebApplicationServer
 
         if (options.Pipeline is null)
         {
-            throw new ArgumentException("A pipeline must be configured on the server options.", nameof(options));
+            throw new ArgumentException(ErrorMessages.ServerPipelineRequired, nameof(options));
         }
 
         if (options.Listener is null)
         {
-            throw new ArgumentException("Listener options must be configured on the server options.", nameof(options));
+            throw new ArgumentException(ErrorMessages.ServerListenerOptionsRequired, nameof(options));
         }
 
         if (options.MaxConcurrentConnections is <= 0)
@@ -158,7 +158,7 @@ public sealed class WebApplicationServer : IWebApplicationServer
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.MaxConcurrentConnections,
-                "The maximum concurrent connection count, when set, must be greater than zero.");
+                ErrorMessages.ServerConnectionCountMustBePositive);
         }
 
         if (options.Listener.ExchangeFeatureCapacity > int.MaxValue - HostFeatureCount)
@@ -166,7 +166,7 @@ public sealed class WebApplicationServer : IWebApplicationServer
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.Listener.ExchangeFeatureCapacity,
-                "The exchange feature count must leave room for the server's features.");
+                ErrorMessages.ServerExchangeFeatureCountTooLarge);
         }
 
         foreach (string name in options.TelemetryQueryValues)

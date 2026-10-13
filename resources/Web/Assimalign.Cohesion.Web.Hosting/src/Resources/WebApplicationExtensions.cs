@@ -38,8 +38,7 @@ public static class WebApplicationExtensions
                     if (resourceContext.GatewayName is not null)
                     {
                         throw new InvalidOperationException(
-                            "Managed control-plane middleware requires a Web.Hosting application context. " +
-                            "Manual hosts can own ResourceControlPlaneMiddleware.CreateLifetime and compose InvokeAsync.");
+                            ErrorMessages.ManagedControlPlaneRequiresHostingContext);
                     }
                     return context => ResourceControlPlaneMiddleware.InvokeAsync(
                         controlPlane, resourceContext, isApplicationReady(), controlPlanePort, context, next);
