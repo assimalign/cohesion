@@ -8,8 +8,6 @@ contract (owner decision 33, #1379).
 
 - **Application/builder contracts** — `IWebApplication`, `IWebApplicationBuilder`,
   `IWebApplicationContext`, and the server seam `IWebApplicationServer`.
-- **Composition lifetime** — the optional `IWebApplicationLifetime` context capability accepts
-  disposable middleware resources for final application teardown, after requests drain.
 - **The middleware-first pipeline** — `IWebApplicationPipeline`,
   `IWebApplicationPipelineBuilder`, `IWebApplicationMiddleware`, and the
   `WebApplicationMiddleware` delegate.

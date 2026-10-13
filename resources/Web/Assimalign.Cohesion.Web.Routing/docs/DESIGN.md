@@ -294,7 +294,7 @@ Protect an internal endpoint with something the client cannot assert:
 - authorization on the route or its group (`RequireAuthorization`, `Web.Authorization`), or
 - the connection's local endpoint (`context.ConnectionInfo.LocalPort` or `LocalIp`), which the
   transport takes from the socket: an internal listener that only internal callers can reach.
-  Check it in a middleware or branch on it with `MapWhen` (the `Web.Hosting.Resources` control plane
+  Check it in a middleware or branch on it with `MapWhen` (the `Web.Hosting` control plane
   gates its port this way), or serve internal endpoints from a separate application bound only to
   that listener.
 

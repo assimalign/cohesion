@@ -3,9 +3,9 @@ using Xunit;
 namespace Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 
 /// <summary>
-/// Serializes the tests that observe the server's telemetry: activity and meter listeners are
-/// process-wide, so a request another test sends concurrently would show up in them, and a listener
-/// one test attaches would make another test's "no listener" request create an activity.
+/// Serializes tests that observe hosting telemetry: activity, meter, and event-source listeners
+/// are process-wide, including the control-plane events on the hosting source. A concurrent request
+/// would show up in them, and a listener could affect another test's "no listener" assertions.
 /// </summary>
 [CollectionDefinition(nameof(TelemetryCollection), DisableParallelization = true)]
 public sealed class TelemetryCollection

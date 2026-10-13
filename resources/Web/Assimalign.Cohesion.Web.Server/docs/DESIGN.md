@@ -16,7 +16,7 @@ The package exists because of two rules that point in opposite directions:
   root until then.
 - **No feature library may reference the runtime module** (COHRES001). The contracts cannot live in
   `Web.Hosting`, which publishes them, because their readers are feature libraries: `Web.WebSockets`
-  reads the drain signal and `Web.Hosting.Resources` the completion callbacks.
+  reads the drain signal and `Web.Caching` the completion callbacks.
 
 A package between the two satisfies both. `Web.Hosting` references it, which decision 32's
 relaxation of COHRES002 allows, and every reader references it like any other feature package.
@@ -31,7 +31,6 @@ flowchart LR
     Server --> Http["Assimalign.Cohesion.Http"]
     Hosting["Web.Hosting — publishes all seven"] --> Server
     WebSockets["Web.WebSockets — reads the drain"] --> Server
-    Resources["Web.Hosting.Resources — reads completion"] --> Server
     Caching["Web.Caching — stores after completion"] --> Server
     Logging["Web.Diagnostics — reads correlation and client fault"] --> Server
     Faults["Web.ErrorHandling, Web.Compression — read the client fault"] --> Server
@@ -42,9 +41,8 @@ flowchart LR
 | Package | Role | Reference to `Web.Server` |
 |---|---|---|
 | `Assimalign.Cohesion.Web.Server` | declares the seven contracts | — |
-| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all seven (the request client fault on a request that can have a body, on every version) | project reference (COHRES002, relaxed by decision 32) |
+| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all seven (the request client fault on a request that can have a body, on every version); its resource control plane defers stop until the `202` is written | project reference (COHRES002, relaxed by decision 32) |
 | `Assimalign.Cohesion.Web.WebSockets` | closes open sockets with `1001 Going Away` when `Draining` fires | project reference |
-| `Assimalign.Cohesion.Web.Hosting.Resources` | defers a control-plane stop until its `202` is written | project reference |
 | `Assimalign.Cohesion.Web.Caching` | stores the final response only after successful completion | project reference |
 | `Assimalign.Cohesion.Web.Diagnostics` | reads the request id and server activity for correlation; logs a client fault at the configured level with the status sent | project reference |
 | `Assimalign.Cohesion.Web.ErrorHandling` | skips `OnException` and the `500` problem for a client fault | project reference |

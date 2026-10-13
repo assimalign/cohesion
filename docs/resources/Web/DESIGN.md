@@ -2,23 +2,43 @@
 
 ## Control-plane integration
 
-Web.Hosting.Resources is a hosting-family integration over the root pipeline seam. It references the Web root, Web.Server, Hosting.Resources, Hosting.Health, and IdentityModel.Token.JsonWebToken, and never Web.Hosting. COHRES001 prevents roots and features from consuming this integration; O35 lets the exact Web.Hosting module consume its own hosting family under COHRES002. Web.Hosting and Database.Hosting now use this single terminal, with Web.Server's IWebResponseCompletionFeature seam for deferred stop. The seam lived in the Web root until #1379 moved the server's per-exchange contracts to Web.Server (owner decision 33). A real Program factory compares the Web wrapper with the direct verb as a composition regression. Web.Testing names both runtime and terminal in its explicit exemption.
+Web.Hosting integrates Hosting.Resources and Hosting.Health itself (owner decision 57,
+2026-10-13). Its public middleware stays in the `Assimalign.Cohesion.Web.Hosting.Resources`
+namespace under `src/Resources/`; the health adapter stays in
+`Assimalign.Cohesion.Web.Hosting.Health` under `src/Health/`. There are no separate packages
+for either integration. The module references the Web root, Web.Server, Web.Health,
+Hosting.Resources, Hosting.Health, and IdentityModel.Token.JsonWebToken for these integrations.
+COHRES001 prevents Web roots and features from referencing it. Web.Testing names only
+Web.Hosting in its explicit exemption.
 
-The integration is public in App.Web and private in each generic resource framework. Area ApplicationModel packages remain NuGet-only. Cross-area hosting implementation references use the coordinated CohesionPrivateProjectReference / CohesionFrameworkPrivateAssembly pair. The integration owns authentication and AOT-safe JSON; each area host owns its listener, readiness gate, and lifecycle.
+Web.Hosting and Database.Hosting use the same terminal, with Web.Server's
+IWebResponseCompletionFeature seam for deferred stop. The seam lived in the Web root until
+#1379 moved the server's per-exchange contracts to Web.Server (owner decision 33). A real
+Program factory compares the Web wrapper with the direct verb as a composition regression.
+The integration owns authentication and AOT-safe JSON; each area host owns its listener,
+readiness gate, and lifecycle. The hosting context owns the retained verifier key internally.
 
-Web.Hosting.Health integrates Hosting.Health contributors with the independent Web.Health model.
-Database.Hosting consumes it privately for admin health checks, retaining its readiness-only accepting gate.
+The integrations are public through Web.Hosting in App.Web and private in each other area
+framework. Cross-area hosting implementation references use the coordinated
+CohesionPrivateProjectReference / CohesionFrameworkPrivateAssembly pair. Web.Health now joins
+the 16 area framework closures that lacked it; Database already carried it. Area ApplicationModel
+packages remain NuGet-only, and Web.Hosting's resolved closure carries neither Web.ApplicationModel
+nor Web.ApplicationModel.Orchestration. Database's health adapter preserves its readiness-only
+accepting gate while Web.Health retains an independent model with no Hosting reference.
 
-See [the package design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md) for the exact protocol and the public response-completion contract.
+See [the hosting design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#resource-control-plane)
+for the exact protocol and the public response-completion contract.
 
-Both runtimes consume the control-plane integration, and the integration depends on the Web root and Web.Server without a reverse runtime reference.
+Database references the Web hosting module, which integrates the shared health and resource contracts.
 
 ```mermaid
 flowchart LR
-    WebHost["Web.Hosting"] --> Terminal["Web.Hosting.Resources"]
-    DbHost["Database.Hosting"] --> Terminal
-    Terminal --> Web["Web"]
-    Terminal --> Server["Web.Server"]
+    DbHost["Database.Hosting"] --> WebHost["Web.Hosting"]
+    WebHost --> Web["Web"]
+    WebHost --> Server["Web.Server"]
+    WebHost --> Health["Web.Health"]
+    WebHost --> Resources["Hosting.Resources"]
+    WebHost --> Contributors["Hosting.Health"]
 ```
 
 ## Diagnostic signal ownership
@@ -36,18 +56,18 @@ exists. Each owner reports its own events rather than forwarding another package
 | Did a listener bind, drain or stop, and did server machinery fail? | `EventSource` named `Assimalign.Cohesion.Web.Hosting` | Web.Hosting | Lifecycle, bind/accept/connection failures, completion-callback failures, refused response heads, capacity waits and drain timeouts, correlated by process-unique `serverId`. Peer-ended connections are Verbose and do not increment `connection-faults`. |
 | Which application fault reached the exception boundary? | `EventSource` named `Assimalign.Cohesion.Web.ErrorHandling` | Web exception boundary | Pipeline and handler failures, expected faults and abandoned responses; client-caused and cancelled exchanges do not become application-fault counts. |
 | Which middleware rejected or degraded an exchange, and why? | The owning Web assembly's `EventSource` | Web feature package | Bounded rejection reasons and exact attribution counters for authentication, authorization, antiforgery, edge policies, timeouts, rate limits, compression, forms and content handling. There are no duplicate request start/stop events or general request counters. |
-| Did health or control-plane work fail? | `Web.Health`, `Web.Hosting.Resources` and `Hosting.Resources` event sources | Web health/HTTP control surface, or shared control-plane producer | Health transitions and failed checks; HTTP authentication/command-input failures; producer-owned contributor failures and command outcomes. |
+| Did health or control-plane work fail? | `Web.Health`, `Web.Hosting` and `Hosting.Resources` event sources | Web health/HTTP control surface, or shared control-plane producer | Health transitions and failed checks; HTTP authentication/command-input failures; producer-owned contributor failures and command outcomes. |
 | Did the underlying connection or TLS handshake fail? | Connections driver event sources; runtime `System.Net.Security` | Connection transport and TLS runtime | Listener, connection and stream lifecycle, driver counters and TLS handshake diagnostics. These sources are outside default Web forwarding. |
 | What should the application's HTTP access log contain? | `ILogger` entries, default category `Assimalign.Cohesion.Web.Diagnostics.HttpLogging` | Web.Diagnostics middleware | Explicitly composed access logging at Information with its own redaction options. The `Web.Diagnostics` EventSource reports failures of logging itself, rather than duplicating access entries. |
 
-The [event-source catalog](../../EVENT_SOURCES.md#cohesion-event-sources) lists all 22 instrumented Web
+The [event-source catalog](../../EVENT_SOURCES.md#cohesion-event-sources) lists all 21 instrumented Web
 assemblies and links their event schemas, counters and payload policies. The
 [deliberately uninstrumented list](../../EVENT_SOURCES.md#web-assemblies-deliberately-left-uninstrumented)
 records where visible status codes, thrown failures or contract-only packages need no extra source.
 The package-level details of request spans and metrics live in
 [Web.Hosting's telemetry design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#server-telemetry-1064),
 and its operator events in
-[Web.Hosting's diagnostics design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#diagnostics-147-1398).
+[Web.Hosting's diagnostics design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#diagnostics).
 
 Request event correlation and the access log read `IWebRequestIdFeature`, published by Web.Hosting
 through the Web.Server contract. Its identifier remains stable when no `ActivityListener` is
@@ -61,6 +81,8 @@ the exact `Assimalign.Cohesion.Http.Connections` name into configured logging si
 register no default listener, and an application-selected forwarder or
 `EnableEventSourceForwarding = false` takes precedence. Forwarding changes neither providers nor
 filter rules, so the HTTP access log's Information level is preserved. Event listeners observe the
-whole process: `serverId` and request identifiers provide attribution when several servers coexist.
+whole process: `serverId`, `resourceName` and request identifiers provide attribution when several
+servers or control planes coexist. Control-plane events share the Web.Hosting provider, so the
+entry-point forwarder observes them through the same Web prefix.
 EventSource counters are inspected separately from forwarded events, and Web feature Meter
 instruments remain the distinct #317 workstream.

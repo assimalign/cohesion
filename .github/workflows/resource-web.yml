@@ -50,8 +50,6 @@ jobs:
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.HostFiltering',
             'Assimalign.Cohesion.Web.Hosting',
-            'Assimalign.Cohesion.Web.Hosting.Health',
-            'Assimalign.Cohesion.Web.Hosting.Resources',
             'Assimalign.Cohesion.Web.HttpsPolicy',
             'Assimalign.Cohesion.Web.OpenApi',
             'Assimalign.Cohesion.Web.ProblemDetails',

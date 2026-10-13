@@ -19,8 +19,8 @@
 
          The framework is what delivers the Web family to applications:
          the hosting/runtime module (Assimalign.Cohesion.Web.Hosting)
-         references only the two feature packages whose contracts it
-         publishes or runs (Web.Routing and Web.Server, owner decision 33),
+         references the feature packages its runtime and integrations need
+         (Web.Routing, Web.Server and Web.Health, owner decisions 33 and 57),
          and the feature libraries never reference the hosting module -
          apps see the whole family because Sdk.Web pulls this framework
          (Web-area dependency rule: resources/Web/README.md).
@@ -55,8 +55,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HostFiltering" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting.Health" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HttpsPolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ProblemDetails" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />

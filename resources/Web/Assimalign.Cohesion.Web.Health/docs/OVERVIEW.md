@@ -11,7 +11,7 @@ and `/livez` pipeline endpoints.
 - **Model:** `IHealthCheck`, `HealthStatus`, `HealthCheckResult`, `HealthReport`,
   `HealthReportEntry`, and `HealthCheckRegistration`.
 - **Composition:** `HealthChecks.CreateBuilder()`, `IHealthChecksBuilder`, inline and typed checks.
-  The optional `Web.Hosting.Health` package adds `AddContributor` for host contributors.
+  Web.Hosting supplies `AddContributor` for host contributors in its `.Hosting.Health` namespace.
 - **Filtering:** `HealthTags` and `HealthCheckPredicates` for aggregate, readiness, and liveness
   views.
 - **HTTP delivery:** `MapHealthChecks`, `MapReadinessCheck`, `MapLivenessCheck`,
@@ -20,16 +20,16 @@ and `/livez` pipeline endpoints.
 ## Dependencies
 
 The package references `Assimalign.Cohesion.Web` for pipeline and HTTP contracts. It references
-no hosting library or dependency-injection container. `Web.Hosting.Health` references this
-package and `Hosting.Health` to supply the optional contributor bridge.
+no hosting library or dependency-injection container. `Web.Hosting` references this package and
+`Hosting.Health` to supply its integrated contributor bridge (owner decision 57, 2026-10-13).
 
 ## Framework delivery
 
 - `App.Web` lists `Assimalign.Cohesion.Web.Health` as a public framework assembly. Web application
   authors see and use its types directly.
-- `App.Database` lists the same assembly as a private framework assembly because the Database
-  runtime uses a private Web implementation closure. Database application authors do not gain a
-  public Web health surface from that inclusion.
+- All 17 other area frameworks list the same assembly privately because they carry Web.Hosting
+  and its implementation closure. Their application authors do not gain a public Web health
+  surface from that inclusion; decision 57 adds the 16 frameworks besides App.Database.
 
 The package can also be referenced directly outside those framework profiles.
 
@@ -85,7 +85,8 @@ description either way ([breaking changes](DESIGN.md#exception-detail)). The exc
 in process, through `IHttpHealthFeature.Report` or a custom `IHealthResponseWriter`
 ([DESIGN](DESIGN.md#exception-detail)).
 
-Hosting contributor integration is supplied by `Assimalign.Cohesion.Web.Hosting.Health`.
+Hosting contributor integration ships in `Assimalign.Cohesion.Web.Hosting`, using the
+`Assimalign.Cohesion.Web.Hosting.Health` namespace; no separate adapter package is needed.
 `Web.Health` owns the health model and endpoints and references no hosting library (O34).
 
 ### Server-side diagnostics

@@ -22,8 +22,8 @@
 
         <!-- IdentityHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.SecurityHeaders" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Server" />

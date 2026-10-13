@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.IO;
 using EndPoint = System.Net.EndPoint;
@@ -23,19 +22,22 @@ internal sealed class WebServerEventSource : EventSource
     private long _connectionFaults;
     private long _connectionCapWaits;
     private long _refusedResponseHeads;
-    private long _nextHeadReport;
-    private long _nextTelemetryReport;
-    private int _suppressedHeads;
-    private int _suppressedTelemetry;
+    private long _rejectedCredentials;
+    private readonly EventThrottle _headThrottle = new();
+    private readonly EventThrottle _telemetryThrottle = new();
+    private readonly EventThrottle _credentialThrottle = new();
+    private readonly EventThrottle _malformedThrottle = new();
     private PollingCounter? _connectionFaultsCounter;
     private PollingCounter? _connectionCapWaitsCounter;
     private PollingCounter? _refusedResponseHeadsCounter;
+    private PollingCounter? _rejectedCredentialsCounter;
 
     private WebServerEventSource() { }
 
     internal long ConnectionFaults => Interlocked.Read(ref _connectionFaults);
     internal long ConnectionCapWaits => Interlocked.Read(ref _connectionCapWaits);
     internal long RefusedResponseHeads => Interlocked.Read(ref _refusedResponseHeads);
+    internal long RejectedCredentials => Interlocked.Read(ref _rejectedCredentials);
 
     [NonEvent]
     public void ServerBound(long serverId, HttpProtocol protocols, IReadOnlyList<Func<EndPoint>> endPointReaders, int maxConcurrentConnections)
@@ -139,7 +141,7 @@ internal sealed class WebServerEventSource : EventSource
     {
         Interlocked.Increment(ref _refusedResponseHeads);
         if (IsEnabled(EventLevel.Error, EventKeywords.None) &&
-            TryReport(ref _nextHeadReport, ref _suppressedHeads, out int suppressed))
+            _headThrottle.TryEmit(out int suppressed))
         {
             ResponseHeadRefused(serverId, GetRequestId(exchange), FormatVersion(exchange.Version),
                 exchange.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
@@ -190,26 +192,43 @@ internal sealed class WebServerEventSource : EventSource
     public void TelemetryListenerFaulted(Exception exception)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None) &&
-            TryReport(ref _nextTelemetryReport, ref _suppressedTelemetry, out int suppressed))
+            _telemetryThrottle.TryEmit(out int suppressed))
         {
             TelemetryListenerFaulted(exception.GetType().FullName ?? exception.GetType().Name, exception.Message, suppressed);
         }
     }
 
     [NonEvent]
-    private static bool TryReport(ref long nextReport, ref int suppressed, out int suppressedCount)
+    internal void CredentialRejected(ResourceContext resource, IHttpContext context,
+        ResourceCredentialStatus status, CredentialRejectionReason reason)
     {
-        long now = Stopwatch.GetTimestamp();
-        long next = Interlocked.Read(ref nextReport);
-        if (now < next || Interlocked.CompareExchange(ref nextReport, now + Stopwatch.Frequency, next) != next)
+        Interlocked.Increment(ref _rejectedCredentials);
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None) && _credentialThrottle.TryEmit(out int suppressed))
         {
-            Interlocked.Increment(ref suppressed);
-            suppressedCount = 0;
-            return false;
+            CredentialRejected(resource.ResourceName ?? string.Empty, GetRequestId(context), status.ToString(),
+                ReasonCode(reason), Route(context.Request.Path.Value),
+                context.ConnectionInfo.RemoteEndPoint?.ToString() ?? string.Empty, suppressed);
         }
+    }
 
-        suppressedCount = Interlocked.Exchange(ref suppressed, 0);
-        return true;
+    [NonEvent]
+    internal void CommandMalformed(ResourceContext resource, IHttpContext context, string phase, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None) && _malformedThrottle.TryEmit(out int suppressed))
+        {
+            CommandMalformed(resource.ResourceName ?? string.Empty, GetRequestId(context),
+                context.Request.Method == HttpMethod.Delete ? "DELETE" : "POST", phase,
+                exception.GetType().FullName ?? exception.GetType().Name, suppressed);
+        }
+    }
+
+    [NonEvent]
+    internal void StopAccepted(ResourceContext resource, IHttpContext context, bool deferred)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            StopAccepted(resource.ResourceName ?? string.Empty, GetRequestId(context), deferred);
+        }
     }
 
     [NonEvent]
@@ -243,6 +262,31 @@ internal sealed class WebServerEventSource : EventSource
         }
         return names.Count == 0 ? "none" : string.Join(", ", names);
     }
+
+    [NonEvent]
+    private static string Route(string path) => path switch
+    {
+        "/cohesion/v1/stop" => "stop",
+        "/cohesion/v1/commands" => "commands",
+        "/cohesion/v1/endpoints" => "endpoints",
+        "/cohesion/v1/healthz" => "healthz",
+        "/cohesion/v1/readyz" => "readyz",
+        "/cohesion/v1/livez" => "livez",
+        _ => "unknown",
+    };
+
+    [NonEvent]
+    private static string ReasonCode(CredentialRejectionReason reason) => reason switch
+    {
+        CredentialRejectionReason.MissingCredential => "missing-credential",
+        CredentialRejectionReason.UnsupportedScheme => "unsupported-scheme",
+        CredentialRejectionReason.InvalidToken => "invalid-token",
+        CredentialRejectionReason.AudienceMismatch => "audience-mismatch",
+        CredentialRejectionReason.CallerMismatch => "caller-mismatch",
+        CredentialRejectionReason.VerifierRejected => "verifier-rejected",
+        CredentialRejectionReason.NonLoopbackPeer => "non-loopback-peer",
+        _ => "verifier-rejected",
+    };
 
     [Event(1, Level = EventLevel.Informational, Message = "Server {0} bound ({1}) at {2}; connection cap {3}")]
     private void ServerBound(long serverId, string protocols, string endPoints, int maxConcurrentConnections)
@@ -304,6 +348,20 @@ internal sealed class WebServerEventSource : EventSource
     private void TelemetryListenerFaulted(string exceptionType, string exceptionMessage, int suppressedCount)
         => WriteEvent(15, exceptionType, exceptionMessage, suppressedCount);
 
+    [Event(16, Level = EventLevel.Warning, Message = "Resource {0} rejected a credential ({2}, {3}) on {4}; suppressed {6}")]
+    private void CredentialRejected(string resourceName, string requestId, string status, string reason,
+        string route, string remoteEndPoint, int suppressedCount)
+        => WriteEvent(16, resourceName, requestId, status, reason, route, remoteEndPoint, suppressedCount);
+
+    [Event(17, Level = EventLevel.Warning, Message = "Resource {0} refused malformed {2} command in {3}: {4}; suppressed {5}")]
+    private void CommandMalformed(string resourceName, string requestId, string httpMethod, string phase,
+        string exceptionType, int suppressedCount)
+        => WriteEvent(17, resourceName, requestId, httpMethod, phase, exceptionType, suppressedCount);
+
+    [Event(18, Level = EventLevel.Informational, Message = "Resource {0} accepted stop; deferred {2}")]
+    private void StopAccepted(string resourceName, string requestId, bool deferred)
+        => WriteEvent(18, resourceName, requestId, deferred);
+
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
         if (command.Command == EventCommand.Enable)
@@ -311,6 +369,8 @@ internal sealed class WebServerEventSource : EventSource
             _connectionFaultsCounter ??= new PollingCounter("connection-faults", this, () => ConnectionFaults) { DisplayName = "Faulted connections" };
             _connectionCapWaitsCounter ??= new PollingCounter("connection-cap-waits", this, () => ConnectionCapWaits) { DisplayName = "Connection cap waits" };
             _refusedResponseHeadsCounter ??= new PollingCounter("refused-response-heads", this, () => RefusedResponseHeads) { DisplayName = "Refused response heads" };
+            _rejectedCredentialsCounter ??= new PollingCounter("rejected-credentials", this,
+                () => RejectedCredentials) { DisplayName = "Rejected Credentials" };
         }
     }
 }

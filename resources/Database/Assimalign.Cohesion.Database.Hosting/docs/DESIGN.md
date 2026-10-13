@@ -64,7 +64,7 @@ Without a gateway identity, the admin listener serves `/cohesion/v1` and every p
 for transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. Other, absent, and non-IP
 remote endpoints receive 403; the status makes the development-only restriction explicit. Forwarded
 headers do not establish locality. The guard precedes Database's own namespaced health mappings,
-which otherwise short-circuit the shared Web.Hosting.Resources control-plane middleware.
+which otherwise short-circuit the shared Web.Hosting control-plane middleware.
 
 Bare `/healthz`, `/readyz`, and `/livez` remain open for orchestrators and load balancers. Loopback
 probes keep the Database health report and its server-accepting readiness gate. Gateway-managed

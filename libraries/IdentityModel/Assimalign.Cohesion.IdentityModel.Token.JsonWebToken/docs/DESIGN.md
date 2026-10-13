@@ -135,7 +135,7 @@ rejects the token instead of throwing.
 
 The stateless `Es256JsonWebTokenValidation` helper in this project's `shared/` folder holds these
 rules in one source location (#1412). The public validator compiles that helper with its existing
-per-call key ownership. Web.Hosting.Resources also compiles it and supplies an
+per-call key ownership. Web.Hosting also compiles it and supplies an
 `IJsonWebTokenSignatureVerifier` over a middleware-owned ECDSA handle while an explicit lifetime
 owner is present. The helper still resolves the issuer, selects the trusted `kid`, enforces ES256,
 and applies the same document and profile rules before accepting a token. Its caller must bind a

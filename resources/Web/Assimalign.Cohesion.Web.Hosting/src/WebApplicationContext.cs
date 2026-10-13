@@ -26,7 +26,7 @@ using Assimalign.Cohesion.Web.Hosting.Internal;
 /// the default server captures the fully composed pipeline). Both snapshots are reused for every
 /// start, stop, and rollback pass.
 /// </remarks>
-public sealed class WebApplicationContext : HostContext, IWebApplicationContext, IWebApplicationLifetime
+public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 {
     private readonly Lock _lifetimeLock = new();
     private readonly List<IDisposable> _lifetimeResources = new();
@@ -90,8 +90,8 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext,
 
     public IEnumerable<IHttpFeature> Features => ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
 
-    /// <inheritdoc />
-    public void RegisterForDisposal(IDisposable resource)
+    // Pipeline composition owns these resources until final application teardown.
+    internal void RegisterForDisposal(IDisposable resource)
     {
         ArgumentNullException.ThrowIfNull(resource);
 

@@ -23,13 +23,13 @@ flight finish within the host's shutdown budget, and cancels only what outlives 
 sees the drain begin through `IWebServerDrainFeature` (a `Web.Server` contract), so a long-lived one, such as a WebSocket,
 can end itself inside the budget. The internal `Assimalign.Cohesion.Web.Hosting` EventSource
 reports lifecycle and failures, with `serverId` identifying each server in the process and no
-request content in its payloads. See [Diagnostics](DESIGN.md#diagnostics-147-1398). Disposing the application
+request content in its payloads. See [Diagnostics](DESIGN.md#diagnostics). Disposing the application
 disposes the service provider and every factory-created service.
 
-Pipeline composition can use `IWebApplicationLifetime` on the application context to register
-disposable resources. Final application disposal releases them after the service provider, in
-reverse registration order; a stop followed by restart keeps them alive. The control-plane
-middleware uses this owner for its retained bootstrap verification handle (#1412).
+The control-plane middleware registers its retained bootstrap verification handle directly with
+WebApplicationContext's internal disposal owner (#1412, decision 57). Final application disposal
+releases registered resources after the service provider, in reverse registration order;
+a stop followed by restart keeps them alive.
 
 Register middleware with `Use` before starting the application or explicitly building its
 pipeline. A later `Use` throws `InvalidOperationException` because the pipeline is already built.
@@ -114,21 +114,21 @@ With no listener the server creates no activity and records nothing. Exporting t
 this module's job; see [Design](DESIGN.md), "Server telemetry", for the attributes, the outcomes and
 what is deliberately not emitted.
 
-## Dependencies and hosting family
+## Dependencies and hosting integrations
 
-Within its area the module references the Web root, its own hosting family, and two feature
-packages (#1379): `Web.Routing`, whose `WebApplicationTerminal` ends the pipeline and whose
-`IWebEndpointFeature.RouteTemplate` names a request's span, and `Web.Server`, whose request id,
-response completion and drain contracts the server installs on every exchange. COHRES002 lets it
-reference any Web library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web` producers,
-and harnesses (owner decision 2026-10-09); each reference ships in every area framework that
-carries this module, so it takes only these. It also references
-Cohesion's hosting, configuration, DI, logging, and transport infrastructure. Its
-`Hosting.Resources` and `Hosting.Health` integrations are runtime concerns; the
-Web root references no hosting library. The reusable `Web.Hosting.Resources` and
-`Web.Hosting.Health` packages do not reference this module; it consumes
-`Web.Hosting.Resources` for the enabled resource's control-plane terminal.
+Within its area the module references the Web root, `Web.Routing`, `Web.Server`, and `Web.Health`.
+Routing supplies the pipeline terminal and route-template telemetry; Server supplies the request
+id, completion, and drain contracts; Health supplies the independent health model used by the
+Hosting.Health adapter. COHRES002 permits Web libraries except Web.Testing, Web.ApplicationModel,
+Web.ApplicationModel.Orchestration, the App.Web producers, and harnesses. The two ApplicationModel
+packages also stay outside its resolved closure. Every reference ships in each area framework
+that carries this module.
 
+The module also references Cohesion hosting, configuration, DI, logging, and transport
+infrastructure. It integrates Hosting.Health and Hosting.Resources itself (owner decision 57,
+2026-10-13); the Web root references no hosting library. Public integration namespaces stay
+`Assimalign.Cohesion.Web.Hosting.Health` and `.Resources`, but package references now use
+`Assimalign.Cohesion.Web.Hosting`. The former two packages are removed.
 All public composition is explicit and AOT-compatible. See [Design](DESIGN.md) for
 listener ownership, cancellation, failure isolation, and control-plane behavior.
 
@@ -153,7 +153,8 @@ application forwarder registration takes precedence. Explicit/options-based buil
 Web hosts register no automatic forwarder.
 
 Listeners observe the entire process. Concurrent entry-point applications can forward the same event;
-use `serverId` payloads for server identity and opt out in secondary hosts that share sinks. Forwarding
+use `serverId` payloads for server identity and `resourceName` for control-plane identity, and opt
+out in secondary hosts that share sinks. Both use the Web.Hosting provider. Forwarding
 ends when the application disposes its logger factory, after shutdown diagnostics. HTTP access logs
 remain Information-level ILogger entries from Web.Diagnostics, independent of this forwarding.
 
@@ -164,3 +165,86 @@ Sdk.Web enables EventSource support for NativeAOT when unset. An explicit
 Compared with 10.0.0-preview.1, entry-point applications now forward these framework events into
 their existing sinks. The built application owns its logger factory and disposes its providers and
 forwarders at final teardown; a factory obtained from its service provider cannot outlive the app.
+
+## Health integration
+
+The adapter in Web.Hosting extends `IHealthChecksBuilder` with `AddContributor`.
+It references `Assimalign.Cohesion.Web.Health` and `Assimalign.Cohesion.Hosting.Health`.
+The Web health model and HTTP endpoints remain in `Web.Health`.
+
+### Usage
+
+```csharp
+using Assimalign.Cohesion.Web.Health;
+using Assimalign.Cohesion.Web.Hosting.Health;
+
+IHealthCheckService health = HealthChecks.CreateBuilder()
+    .AddContributor(contributor)
+    .Build();
+pipeline.MapHealthChecks(health);
+```
+
+The contributor name identifies the check. Omitted tags include readiness and liveness;
+explicit tags replace those defaults. Failure status and timeout use Web health policy.
+The application owns contributor lifetime; the adapter only evaluates it.
+
+`App.Web` exposes the adapter through Web.Hosting. Database.Hosting consumes the module through
+a private project reference paired with Web.Hosting and Web.Health in the App.Database runtime
+pack. See [Health integration](DESIGN.md#health-integration) for dependency and cancellation contracts.
+
+## Resource control plane
+
+Install the resource protocol on a private Web application's pipeline:
+
+```csharp
+using Assimalign.Cohesion.Web.Hosting.Resources;
+
+IWebApplicationPipelineBuilder pipeline = privateApplication;
+pipeline.UseResourceControlPlane(controlPlane, resourceContext,
+    () => resourceApplication.Context.State is HostState.Started);
+```
+
+Install before application middleware. An optional trailing port gates every route; null serves every listener. Hosts composing manually retain `ResourceControlPlaneMiddleware.CreateLifetime(resourceContext)` while serving requests through `InvokeAsync(...)`, then dispose the lease after those requests drain. Stop uses Web.Server's response-completion feature to send its acknowledgement before requesting shutdown. The feature serves health, readiness, liveness, endpoint discovery, stop, and command envelopes. Gateway-managed namespaced routes authenticate against the published application trust key; standalone namespaced routes accept only transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1` and return 403 to other or unknown peers. Forwarded headers do not grant access. Bare `/healthz`, `/readyz`, and `/livez` stay public. Remote standalone management is no longer supported (a behavioral break from 10.0.0-preview.1, #1431). Domain command handlers remain the owning area's responsibility.
+
+Managed middleware reuses one ECDSA verification handle while its lifetime leases are active
+(#1412). `UseResourceControlPlane` transfers its lease directly to WebApplicationContext's
+internal disposal registration and releases it during final application disposal. A stop and
+restart keep it alive. A custom managed pipeline context outside Web.Hosting fails composition
+with a clear `InvalidOperationException`, a behavior change from 10.0.0-preview.1; use the manual
+lifetime API below. A disposed composed pipeline refuses
+further invocation.
+
+This integration lives in Web.Hosting under `src/Resources/`, keeping the
+`Assimalign.Cohesion.Web.Hosting.Resources` namespace. Its dependencies are Web root, Web.Server
+(for `IWebResponseCompletionFeature`, #1379), Hosting.Resources, Hosting.Health, and
+IdentityModel.Token.JsonWebToken. Web roots and features cannot reference the hosting module;
+other areas' hosting modules consume it privately. App.Web exposes it publicly.
+
+See [Resource control plane](DESIGN.md#resource-control-plane) for protocol, authentication, ownership, and parity constraints.
+
+### Manual composition API
+
+`ResourceControlPlaneMiddleware.Validate(ResourceContext resourceContext)` performs the verb's eager managed-identity validation. It rejects a null context, a blank managed resource name, a missing application identity or public trust key, and an invalid P-256 JWK. Standalone contexts need no identity.
+
+`ResourceControlPlaneMiddleware.CreateLifetime(ResourceContext resourceContext)` performs the same
+validation and returns an idempotent `IDisposable` lease. The first lease imports the verification
+handle; the last disposal releases it. Multiple owners of the same resource context share that
+handle, and verification is synchronized with disposal. Keep the lease across the manual host's
+request loop:
+
+```csharp
+using IDisposable lifetime =
+    ResourceControlPlaneMiddleware.CreateLifetime(resourceContext);
+
+// exchanges is the host's request stream; end it only after accepting has stopped.
+await foreach (IHttpContext exchange in exchanges)
+{
+    await ResourceControlPlaneMiddleware.InvokeAsync(
+        controlPlane, resourceContext, isApplicationReady(), controlPlanePort, exchange, next);
+}
+// Every request above has completed before the lifetime scope ends.
+```
+
+`ResourceControlPlaneMiddleware.InvokeAsync(IResourceControlPlane controlPlane, ResourceContext resourceContext, bool isApplicationReady, int? controlPlanePort, IHttpContext context, WebApplicationMiddleware next)` returns a `Task` for one exchange. Required reference arguments cannot be null. A mismatched non-null port forwards every path to `next`; null applies no port gate. Unknown namespaced paths apply the gateway credential check or standalone loopback restriction before returning 404.
+
+Acquire the lifetime during composition, then register `InvokeAsync` ahead of routes the terminal should own. The owning host supplies readiness and listener selection and drains concurrent requests before disposing the lease. Existing callers that only call `Validate` and `InvokeAsync` remain supported: they reuse the parsed key and validation profile but create and dispose a temporary ECDSA handle for each signed token. Stop registers a callback on `IWebResponseCompletionFeature` when present; the callback requests stop with `CancellationToken.None` after transmission. A custom server without the feature uses the request token for the direct-stop fallback.

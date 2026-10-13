@@ -105,15 +105,10 @@ the pipeline is built (#1078). Register middleware before starting the applicati
 building its pipeline. Web.Hosting enforces this boundary; compared with 10.0.0-preview.1, late
 registration now throws instead of accepting middleware that never executes.
 
-`IWebApplicationLifetime` is an optional generic capability on the application context (#1412).
-A composition factory can transfer an `IDisposable` resource through `RegisterForDisposal`
-without referencing the hosting module or extending an existing interface. The owner releases
-registered objects once by reference identity, in reverse registration order, during final
-application teardown after requests have drained. Stops and restarts keep them alive. Registration
-after teardown begins fails, and a disposal failure does not prevent cleanup of the other objects.
-This is an additive composition seam relative to 10.0.0-preview.1; feature packages still own their
-resources and policy, and the root adds no feature contract or hosting-library dependency.
-
+Disposable control-plane resources are owned internally by Web.Hosting's concrete application
+context (owner decision 57, 2026-10-13). The former `IWebApplicationLifetime` seam did not ship
+and is removed: the control plane now lives in the hosting module and needs no Web-root
+disposal contract. Existing root interfaces remain unchanged.
 ## Segments and terminal middleware (#1056)
 
 | Verb | Runs when | Rejoins the main pipeline |

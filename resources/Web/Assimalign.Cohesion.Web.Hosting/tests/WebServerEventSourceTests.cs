@@ -136,6 +136,7 @@ public sealed class WebServerEventSourceTests
         long faults = source.ConnectionFaults;
         long capWaits = source.ConnectionCapWaits;
         long refusedHeads = source.RefusedResponseHeads;
+        long rejectedCredentials = source.RejectedCredentials;
 
         // Act
         try
@@ -176,6 +177,7 @@ public sealed class WebServerEventSourceTests
         source.ConnectionFaults.ShouldBe(faults);
         source.ConnectionCapWaits.ShouldBe(capWaits);
         source.RefusedResponseHeads.ShouldBe(refusedHeads);
+        source.RejectedCredentials.ShouldBe(rejectedCredentials);
         recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
     }
 
@@ -188,6 +190,7 @@ public sealed class WebServerEventSourceTests
         long faults = source.ConnectionFaults;
         long capWaits = source.ConnectionCapWaits;
         long refusedHeads = source.RefusedResponseHeads;
+        long rejectedCredentials = source.RejectedCredentials;
         FakeHttpConnection connection = new(new FakeHttpConnectionContext());
         FakeHttpContext exchange = new();
         bool faultCounted = false;
@@ -205,7 +208,7 @@ public sealed class WebServerEventSourceTests
         }
         using EventSourceRecorder recorder = new(source, EventLevel.Verbose, TimeSpan.FromMilliseconds(100));
         using CancellationTokenSource timeout = new(_timeout);
-        await recorder.WaitForCountersAsync(["connection-faults", "connection-cap-waits", "refused-response-heads"], timeout.Token);
+        await recorder.WaitForCountersAsync(["connection-faults", "connection-cap-waits", "refused-response-heads", "rejected-credentials"], timeout.Token);
 
         // Assert
         source.ConnectionFaults.ShouldBe(faults + 1);
@@ -216,6 +219,7 @@ public sealed class WebServerEventSourceTests
         (await recorder.WaitForCounterAsync("connection-faults", 0, timeout.Token)).Value.ShouldBe((double)(faults + 1));
         (await recorder.WaitForCounterAsync("connection-cap-waits", 0, timeout.Token)).Value.ShouldBe((double)(capWaits + 3));
         (await recorder.WaitForCounterAsync("refused-response-heads", 0, timeout.Token)).Value.ShouldBe((double)(refusedHeads + 3));
+        (await recorder.WaitForCounterAsync("rejected-credentials", 0, timeout.Token)).Value.ShouldBe((double)rejectedCredentials);
         recorder.Events.ShouldBeEmpty();
     }
 

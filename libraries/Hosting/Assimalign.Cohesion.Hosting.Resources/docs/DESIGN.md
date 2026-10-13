@@ -93,7 +93,7 @@ writers serialize a data value they do not recognize through `ToString()`, and a
 its type, message, inner exceptions and stack trace, so through 10.0.0-preview.1 the probes
 published all of it. The control plane is the one place every shipped area's report passes, so the
 check lives here, as it does for a thrown exception. The two area writers that serialize data
-(Web.Hosting.Resources' `ResourceControlPlaneMiddleware` and ConfigurationStore.Hosting's endpoint)
+(Web.Hosting's `ResourceControlPlaneMiddleware` and ConfigurationStore.Hosting's endpoint)
 also write the same text for an `Exception` value, as defense in depth for a custom
 `IResourceControlPlane`, whose report reaches them unfiltered. Descriptions and string data are the
 contributor's own text and are reported as returned.
@@ -150,7 +150,7 @@ mutation: concurrent identical declarations execute their handler once while eve
 receives its own success outcome. An already-absent deletion also succeeds without invoking a
 handler. No event is raised while holding the ledger's snapshot lock.
 
-**Command boundary (#1434).** This source owns command execution; Web.Hosting.Resources owns
+**Command boundary (#1434).** This source owns command execution; Web.Hosting owns
 the HTTP envelope and status mapping. When a handler throws, an internal stateless helper marks
 the original invocation in the exception's existing `Data` dictionary after recording the failure.
 The marker is a BCL `ConditionalWeakTable<ResourceCommand, object>` with weak invocation keys,
@@ -173,7 +173,7 @@ report continues to contain only the fixed failure description introduced by #14
 additive diagnostic change from 10.0.0-preview.1; report and command behavior are unchanged.
 
 **Boundary choice for #1400.** The internal hand-off remains inside Hosting.Resources: the
-aggregation catch invokes this assembly's source directly. Web.Hosting.Resources cannot recover
+aggregation catch invokes this assembly's source directly. Web.Hosting cannot recover
 the exception from the sanitized `ResourceHealthReport`. Routing it to that assembly's source
 would require a new public exception/diagnostics seam or a shipped `InternalsVisibleTo` grant.
 Neither is introduced. This producer-owned event is the smallest local alternative under the
@@ -190,7 +190,7 @@ endpoint is an IP endpoint at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. Ev
 including an absent or non-IP endpoint, receives **403** before any management operation. The
 explicit status explains the restriction. Forwarded headers never establish this trust. The
 transport-neutral control-plane contract needs no HTTP dependency or new public member; enforcement
-belongs to Web.Hosting.Resources' shared middleware and the area endpoints that handle their own
+belongs to Web.Hosting's shared middleware and the area endpoints that handle their own
 routes (ConfigurationStore, SecretStore, IdentityHub, LogSpace's log query, and Database's early
 namespaced health mappings). Scheduler already requires a gateway identity to install its
 control-plane listener.
