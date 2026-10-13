@@ -68,9 +68,11 @@ These are also centrally managed. Don't duplicate per project unless the project
 - Exception: files whose names are fixed by external tooling keep their conventional casing (e.g., `.github/pull_request_template.md`, files under `.claude/**`).
 - API reference needs no exception: **folders** under `docs/Assembly/` mirror CLR namespace/type names, and each type's page is `docs/Assembly/<Namespace>/<Type>/OVERVIEW.md`.
 
-### Direct throws or .NET 10 extension type methods, not `ThrowHelper`
+### Direct throws or exception-type members, not `ThrowHelper`
 - Use direct `throw` statements or framework guard APIs (e.g., `ArgumentNullException.ThrowIfNull`) when the logic is local.
-- If reusable throw behavior is needed, implement as a .NET 10 extension type method in `Extensions/`.
+- Put reusable throw behavior on the exception type as a static member, with its message in
+  `Properties/ErrorMessages.resx`. An assembly owns the throw members of the exception types it owns.
+- Use .NET 10 extension members in `Extensions/` only for exception types the assembly does not own.
 
 ### Exception messages are build-generated resources
 
@@ -160,7 +162,8 @@ public interface IDatabase { }
 
 ### `ThrowHelper` / `ThrowHelpers` types
 - Do not add helper classes whose primary purpose is throwing exceptions.
-- When touching existing usages, migrate toward direct throws or extension type methods.
+- When touching existing usages, migrate toward direct throws or static members on the exception type.
+  Extension members are only for exception types the assembly does not own.
 
 ### Legacy `this` extension syntax in new code
 ```csharp
@@ -501,7 +504,8 @@ Nested host composition is intentional in this repo. Use the hosting abstraction
 1. **Catch specific exceptions, not bare `Exception`.**
 2. **Use custom exceptions for domain errors**, scoped to the owning area.
 3. **Preserve stack trace when rethrowing** — `throw;`, never `throw ex;`.
-4. **Avoid `ThrowHelper` patterns** — direct throws or extension type methods.
+4. **Avoid `ThrowHelper` patterns** — direct throws or static members on the exception type;
+   extension members only for exception types the assembly does not own.
 
 ## Performance
 

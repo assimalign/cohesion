@@ -45,6 +45,27 @@ public class FileSystemException : SystemException
     public virtual FileSystemErrorCode Code { get; } = FileSystemErrorCode.Other;
 
     /// <summary>
+    /// Throws a <see cref="FileSystemException"/> with <see cref="FileSystemErrorCode.PathOutsideRoot"/>
+    /// indicating that <paramref name="path"/> resolves outside the file system's root directory.
+    /// </summary>
+    /// <remarks>
+    /// The message names only the caller's path. It deliberately leaves out the root and the
+    /// resolved host location, which would disclose the host's directory layout to whoever sees
+    /// the message.
+    /// </remarks>
+    /// <param name="path">The path as the caller supplied it.</param>
+    /// <param name="innerException">Optional inner exception.</param>
+    /// <exception cref="FileSystemException">Always.</exception>
+    [DoesNotReturn]
+    public static void ThrowPathOutsideRoot(FileSystemPath path, Exception? innerException = null)
+    {
+        throw new FileSystemException(
+            FileSystemErrorCode.PathOutsideRoot,
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.PathOutsideRoot, path),
+            innerException);
+    }
+
+    /// <summary>
     /// Throws a <see cref="FileSystemException"/> indicating that the directory does not exist.
     /// </summary>
     [DoesNotReturn]
