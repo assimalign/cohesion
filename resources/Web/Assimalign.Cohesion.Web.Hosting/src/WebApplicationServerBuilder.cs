@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Net;
 using System.Threading;
@@ -9,7 +8,6 @@ namespace Assimalign.Cohesion.Web.Hosting;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.DependencyInjection;
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -19,29 +17,6 @@ using Assimalign.Cohesion.Web.Hosting.Internal;
 /// </summary>
 public sealed class WebApplicationServerBuilder
 {
-    /// <summary>
-    /// The number of features the default server's exchanges carry besides the application's own:
-    /// the request-limits feature the first default interceptor attaches while the request is parsed
-    /// (one object carries <c>IHttpMaxRequestBodySizeFeature</c>, <c>IHttpMinRequestBodyDataRateFeature</c>
-    /// and <c>IHttpMinResponseDataRateFeature</c>, #1383 and #1384; see
-    /// <see cref="ApplyDefaultInterceptors"/>), and the request id, response
-    /// starting, completion and drain features the server installs before the pipeline runs. The other default
-    /// interceptors attach a feature only to an upgrade, an extended CONNECT, or an HTTP/1.1 request that
-    /// declares a body (the client-fault feature, #1340). Each exchange's feature collection is sized for
-    /// these plus the stamped application features (#1381).
-    /// </summary>
-    internal const int HostFeatureCount = 5;
-
-    /// <summary>
-    /// The sizes an unsized feature collection's dictionary passes through as it grows: three slots,
-    /// then each time the runtime's smallest hash-table prime at least twice the previous size. A
-    /// collection created at one of these sizes and then outgrown grows to the next one, exactly as an
-    /// unsized collection does, so it never allocates more than an unsized collection holding the same
-    /// features. A size between two of these (11, 23, 29, 47, ...) grows to another size between them,
-    /// and its overflow costs more than never presizing (#1381).
-    /// </summary>
-    private static ReadOnlySpan<int> UnsizedGrowthSizes => [3, 7, 17, 37, 89, 197, 431, 919];
-
     private readonly WebApplicationBuilder _builder;
     private readonly List<Action<IServiceProvider, HttpConnectionListenerOptions>> _configurations = new();
 
@@ -92,7 +67,7 @@ public sealed class WebApplicationServerBuilder
             // The pipeline is resolved first: building it counts the application features it stamps
             // onto every exchange, which the listener needs to size each exchange's features.
             IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
-            int featureCount = HostFeatureCount + _builder.StampedFeatureCount;
+            int featureCount = _builder.StampedFeatureCount;
 
             HttpConnectionListenerOptions options = new();
             ApplyDefaultInterceptors(options);
@@ -103,18 +78,18 @@ public sealed class WebApplicationServerBuilder
                 action.Invoke(serviceProvider, options);
             }
 
-            // Rounded last, so the slots a configuration added for its middleware's features are
-            // rounded with the host's count.
-            options.ExchangeFeatureCapacity = RoundExchangeFeatureCapacity(options.ExchangeFeatureCapacity);
-            IHttpConnectionListener listener = new HttpConnectionListener(options);
-
-            return new WebApplicationServer(new WebApplicationServerOptions
+            WebApplicationServerOptions serverOptions = new()
             {
                 Pipeline = pipeline,
-                Listener = listener,
+                Listener = options,
                 MaxConcurrentConnections = _maxConcurrentConnections ?? _configuredMaxConcurrentConnections,
-                TelemetryQueryValues = _telemetryQueryValues?.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
-            });
+            };
+            if (_telemetryQueryValues is not null)
+            {
+                serverOptions.TelemetryQueryValues.UnionWith(_telemetryQueryValues);
+            }
+
+            return new WebApplicationServer(serverOptions);
         });
     }
 
@@ -188,7 +163,7 @@ public sealed class WebApplicationServerBuilder
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="server"/> is <see langword="null"/>.</exception>
     public WebApplicationServerBuilder UseServer<TServer>(TServer server)
-        where TServer : IWebApplicationServer, IHostService
+        where TServer : IWebApplicationServer
     {
         ArgumentNullException.ThrowIfNull(server);
 
@@ -208,7 +183,7 @@ public sealed class WebApplicationServerBuilder
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
     public WebApplicationServerBuilder UseServer<TServer>(Func<IServiceProvider, TServer> factory)
-        where TServer : IWebApplicationServer, IHostService
+        where TServer : IWebApplicationServer
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -228,10 +203,10 @@ public sealed class WebApplicationServerBuilder
     /// Configures the default web server's HTTP connection listener.
     /// </summary>
     /// <remarks>
-    /// The server's default interceptors and its
+    /// The hosting module's HTTP default interceptors and its
     /// <see cref="HttpConnectionListenerOptions.ExchangeFeatureCapacity"/> are set before
-    /// <paramref name="configure"/> runs. The capacity counts the features the server installs on every
-    /// exchange and the application features the pipeline stamps onto it. A middleware that installs
+    /// <paramref name="configure"/> runs. The capacity counts the application features the pipeline stamps onto every exchange.
+    /// The server adds its own feature allowance after configuration. A middleware that installs
     /// its own feature on every exchange, such as routing on a matched request or response compression,
     /// is not counted; add one slot for each (<c>options.ExchangeFeatureCapacity += 1</c>). After every
     /// configuration has run, the server rounds the capacity up to a size from which an exchange that
@@ -293,31 +268,8 @@ public sealed class WebApplicationServerBuilder
     }
 
     /// <summary>
-    /// Installs the web host's default interceptors. Runs before any user configuration so the
-    /// defaults occupy the front of the interceptor order: the request-limits interceptor is registered
-    /// first, guaranteeing every request carries the typed <c>IHttpMaxRequestBodySizeFeature</c>,
-    /// <c>IHttpMinRequestBodyDataRateFeature</c> and <c>IHttpMinResponseDataRateFeature</c> (one object,
-    /// #1383 and #1384) and that user-registered
-    /// interceptors' <c>AfterRequestHead</c> hooks can observe them (all three protocol versions run the
-    /// request-parse seam). The HTTP/1.1 protocol-upgrade interceptor follows, so
-    /// <c>context.Upgrade</c>, and with it a WebSocket handshake, is available on every HTTP/1.1
-    /// listener. The extended CONNECT interceptor follows, so <c>context.ExtendedConnect</c>, and
-    /// with it a WebSocket over HTTP/2 or HTTP/3, is available on every HTTP/2 and HTTP/3 listener. The
-    /// client-fault interceptor follows: it publishes the transport's client-fault report as
-    /// <see cref="IWebClientFaultFeature"/> on a request that can have a body, on any version, so the HTTP
-    /// logging middleware, the exception boundary and request decompression classify a malformed or
-    /// over-limit body as the client's fault rather than the application's (#1340, #1378). A request that no
-    /// application accepts is served exactly as before, and an ordinary exchange keeps the transport's
-    /// fast path under those four; a request that can have a body takes the response phase, for its
-    /// exchange control. The QUIC driver's input-completion facet exposes an end already received, so
-    /// an HTTP/3 head followed by FIN skips the client-fault gate unless a positive declared content
-    /// length still needs validation (#1427). User configurations may still inspect or clear
-    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out; clearing them removes
-    /// WebSockets on every protocol, because the HTTP/2 and HTTP/3 transports still advertise extended
-    /// CONNECT but no feature then surfaces it, and a malformed body is then classified as an
-    /// application fault again. The fifth interceptor publishes response-starting callbacks on every
-    /// exchange and uses the transport's shared buffered/streamed head hook (#1156). It requires
-    /// the response phase even for a plain GET; clearing it removes the starting feature.
+    /// Installs HTTP policy defaults before application configuration. The server prepends its
+    /// own client-fault and response-starting interceptors when it constructs the listener.
     /// </summary>
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
@@ -325,38 +277,5 @@ public sealed class WebApplicationServerBuilder
         options.Interceptors.Add(HttpRequestLimits.CreateInterceptor());
         options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
         options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
-        options.Interceptors.Add(new WebClientFaultInterceptor());
-        options.Interceptors.Add(new WebResponseStartingInterceptor());
-    }
-
-    /// <summary>
-    /// Rounds the number of features an exchange is expected to carry up to the smallest of
-    /// <see cref="UnsizedGrowthSizes"/> that holds it. The count leaves out the features middleware
-    /// install as an exchange passes through, such as routing's route match on every matched request,
-    /// so an exchange can carry more than it. Sized on that chain, the overflow grows the collection as
-    /// an unsized one grows and never costs more than leaving it unsized. The price is unused slots when
-    /// the count falls between two sizes (#1381).
-    /// </summary>
-    /// <param name="featureCount">The features an ordinary exchange is expected to carry.</param>
-    /// <returns>
-    /// The capacity to size each exchange's feature collection for. <c>0</c>, which leaves the
-    /// collection unsized, stays <c>0</c>, and a count above the largest size is returned unchanged.
-    /// </returns>
-    internal static int RoundExchangeFeatureCapacity(int featureCount)
-    {
-        if (featureCount == 0)
-        {
-            return 0;
-        }
-
-        foreach (int size in UnsizedGrowthSizes)
-        {
-            if (featureCount <= size)
-            {
-                return size;
-            }
-        }
-
-        return featureCount;
     }
 }

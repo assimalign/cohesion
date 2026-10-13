@@ -99,7 +99,8 @@ explains when to use an event, a request span, a metric, or the HTTP access log.
 | `Assimalign.Cohesion.Web.ForwardedHeaders` | Forwarding stop reason, family and applied depth (Verbose); transport peer IP only for an untrusted peer at depth zero | `untrusted-forwarding`, `malformed-forwarding` | [ForwardedHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Health` | Health worsened (Warning), improved (Informational), thrown or timed-out check (Verbose); includes adapted Hosting.Health contributors | `failed-checks` | [Health DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Health/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.HostFiltering` | Rejected effective host with bounded host component, reason and request id (Verbose) | `rejected-requests` | [HostFiltering DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.HostFiltering/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Hosting` | Server lifecycle and failures, peer-ended connections (Verbose), refused response heads and telemetry listener failures (throttled), completion callback and isolation failures; process-unique serverId. Shared HTTP control-plane credential/loopback refusals and malformed commands (throttled), stop accepted, identified by resourceName; non-Web processes need a tool or their own forwarder | `connection-faults`, `connection-cap-waits`, `refused-response-heads`, `rejected-credentials` | [Hosting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Hosting` | Control plane disabled; shared HTTP control-plane credential/loopback refusals and malformed commands (throttled), stop accepted, identified by resourceName; non-Web processes need a tool or their own forwarder | `rejected-credentials` | [Hosting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Server` | Server lifecycle and failures, peer-ended connections (Verbose), refused response heads and telemetry listener failures (throttled), completion callback and isolation failures; process-unique serverId | `connection-faults`, `connection-cap-waits`, `refused-response-heads` | [Server DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Server/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.RateLimiting` | Rejected global or endpoint policy (Verbose); rejection after response commit (Warning, throttled); partition keys are never written | `rejected-requests` | [RateLimiting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.RateLimiting/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.RequestTimeouts` | Timeout enforced (Warning, throttled) or ignored by downstream work (Verbose); armed interval and request correlation | `timed-out-requests`, `ignored-timeouts` | [RequestTimeouts DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.SecurityHeaders` | Security policy staging skipped by read-only headers (Warning, throttled); excludes disabled endpoints and protocol takeovers | `unprotected-responses` | [SecurityHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/DESIGN.md#diagnostics) |
@@ -114,12 +115,12 @@ listener that closes the connection).
 
 HTTP transport rejections and protocol errors belong to `Assimalign.Cohesion.Http.Connections`
 (#1300), including requests rejected before Web dispatch and therefore absent from a Web request
-span. Its Meter and EventSource complement Web.Hosting's request signals; connection lifecycle
+span. Its Meter and EventSource complement Web.Server's request signals; connection lifecycle
 and connection counts remain with the Connections drivers.
 
 ### Web assemblies deliberately left uninstrumented
 
-These 16 Web assemblies deliberately have no event source, alongside the framework producer
+These 15 Web assemblies deliberately have no event source, alongside the framework producer
 shells. Each row records the reason from
 [Web event-source scope §6](programs/WEB_EVENT_SOURCES_SCOPE.md#6-no-source-and-why).
 `Web.Authentication.Certificate` is instrumented and appears in the catalog above.
@@ -127,7 +128,6 @@ shells. Each row records the reason from
 | Assembly or framework project | Why it has no source |
 | --- | --- |
 | `Assimalign.Cohesion.Web` | Contracts and pure pipeline helpers have no runtime state, loop or swallowed failure; the root must not claim every Web package's signals. |
-| `Assimalign.Cohesion.Web.Server` | Contracts only; Http.Connections reports transport client faults through core Http's generic `IHttpExchangeControl` seam, and Web.Hosting adapts those reports into the Web.Server features it implements. |
 | `Assimalign.Cohesion.Web.Testing` | A shipped test harness, like Connections.InMemory, rather than a runtime component; it receives no access to internal sources. |
 | `Assimalign.Cohesion.Web.ApplicationModel` | Invalid declarative plans throw; runtime control-plane outcomes belong to Hosting.Resources. |
 | `Assimalign.Cohesion.Web.Routing` | Failures throw at startup or reach the exception boundary; 404/405 are statuses and the matched template is already the span's `http.route`. |
@@ -154,7 +154,7 @@ sources only.
 
 | Assembly (same-named `ActivitySource` and/or `Meter`) | Traces | Metrics | Reference |
 | --- | --- | --- | --- |
-| `Assimalign.Cohesion.Web.Hosting` | One `Server` span per HTTP request, parented to the caller's `traceparent` | `http.server.request.duration`, `http.server.active_requests` | [Request telemetry](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#server-telemetry-1064); [same-named EventSource for server diagnostics](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Server` | One `Server` span per HTTP request, parented to the caller's `traceparent` | `http.server.request.duration`, `http.server.active_requests` | [Request telemetry](../resources/Web/Assimalign.Cohesion.Web.Server/docs/DESIGN.md#server-telemetry-1064); [same-named EventSource for server diagnostics](../resources/Web/Assimalign.Cohesion.Web.Server/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Http.Connections` | None | `cohesion.http.server.rejected_requests`, `cohesion.http.server.protocol_errors`, `cohesion.http.server.response_rate_aborts`, `cohesion.http.server.response_aborts` | [Http.Connections DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#meter-instruments) |
 
 Web event sources report operator events and exact attribution counters, rather than duplicating

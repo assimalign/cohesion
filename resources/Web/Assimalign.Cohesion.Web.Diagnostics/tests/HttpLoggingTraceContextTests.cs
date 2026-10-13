@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Web.Diagnostics.Tests;
 [Collection(nameof(LoggingTelemetryCollection))]
 public class HttpLoggingTraceContextTests
 {
-    private const string serverSource = "Assimalign.Cohesion.Web.Hosting";
+    private const string serverSource = "Assimalign.Cohesion.Web.Server";
     private const string callerTrace = "0af7651916cd43dd8448eb211c80319c";
     private const string callerSpan = "b7ad6b7169203331";
     private const string traceParent = "00-" + callerTrace + "-" + callerSpan + "-01";

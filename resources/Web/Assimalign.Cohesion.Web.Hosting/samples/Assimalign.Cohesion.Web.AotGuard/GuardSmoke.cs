@@ -57,7 +57,7 @@ internal static class GuardSmoke
 
             using ActivityListener activities = new()
             {
-                ShouldListenTo = source => source.Name == "Assimalign.Cohesion.Web.Hosting",
+                ShouldListenTo = source => source.Name == "Assimalign.Cohesion.Web.Server",
                 Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
                 ActivityStopped = activity =>
                 {
@@ -73,7 +73,7 @@ internal static class GuardSmoke
             {
                 InstrumentPublished = static (instrument, listener) =>
                 {
-                    if (instrument.Meter.Name == "Assimalign.Cohesion.Web.Hosting" && instrument.Name == "http.server.request.duration")
+                    if (instrument.Meter.Name == "Assimalign.Cohesion.Web.Server" && instrument.Name == "http.server.request.duration")
                     {
                         listener.EnableMeasurementEvents(instrument);
                     }

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
+        <Compile Include="..\..\Assimalign.Cohesion.Web.Server\tests\TestObjects\ServerTestDoubles.cs" Link="TestObjects\ServerTestDoubles.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
   <PropertyGroup>

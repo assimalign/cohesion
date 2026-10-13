@@ -1,0 +1,1001 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Runtime.ExceptionServices;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Web.Internal;
+
+namespace Assimalign.Cohesion.Web;
+
+/// <summary>
+/// The default <see cref="IWebApplicationServer"/>: a dedicated accept loop that dispatches every
+/// accepted connection to its own tracked <see cref="Task"/>, and every stream of a multiplexed
+/// (HTTP/2 or HTTP/3) connection to its own tracked <see cref="Task"/>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// One <see cref="IHttpConnectionListener"/> feeds one accept loop. The loop never serves a
+/// connection inline — it hands each accepted connection to <see cref="ServeConnectionAsync"/> and
+/// immediately loops back to accept the next. That decoupling is the whole point of the rewrite: a
+/// single idle HTTP/1.1 keep-alive client parked in its receive loop can no longer starve every
+/// other connection, and a fault serving one connection can no longer stop the accept loop or crash
+/// the process.
+/// </para>
+/// <para>
+/// Within a connection, dispatch follows the protocol. An HTTP/1.1 connection carries one exchange
+/// at a time and its transport reads the next request only when the receive loop asks for it, so the
+/// loop serves each exchange inline and asks for the next only after the response is sent. HTTP/2
+/// and HTTP/3 multiplex streams, so each exchange runs on its own task while the loop keeps
+/// receiving; the transport's stream limits bound how many run at once.
+/// </para>
+/// <para>
+/// Layering: wire-level failure isolation (truncated frames, peer reset, per-stream RST/GOAWAY)
+/// already lives in <c>Assimalign.Cohesion.Http.Connections</c> — the receive enumerable simply
+/// stops yielding on a wire error. This server owns only the concerns above that layer:
+/// application-exception isolation per exchange, per-connection and per-stream dispatch,
+/// connection/context/exchange disposal, in-flight tracking for the <see cref="StopAsync"/> drain,
+/// and the optional concurrency cap. It does not re-implement any wire-protocol behaviour: it
+/// finalizes every exchange through the connection context, which owns the wire encoding of a
+/// response, a replacement <c>500</c>, and a reset alike.
+/// </para>
+/// </remarks>
+public sealed class WebApplicationServer : IWebApplicationServer
+{
+    // Request id/activity, response starting/client fault, completion, drain, and the reserved slot
+    // for the hosted path's request-limits feature. Conditional features may grow the collection.
+    internal const int HostFeatureCount = 5;
+
+    // The dictionary's ordinary growth chain. Sizing on the same chain keeps an overflow from
+    // allocating more slots than an initially unsized collection would (#1381).
+    private static ReadOnlySpan<int> UnsizedGrowthSizes => [3, 7, 17, 37, 89, 197, 431, 919];
+
+    // Once a stop's budget has run out and the in-flight exchanges were cancelled, how long the stop
+    // still waits for them to unwind before it releases the listener and completes.
+    private static readonly TimeSpan _abortGracePeriod = TimeSpan.FromSeconds(1);
+
+    private readonly IWebApplicationPipeline _pipeline;
+    private readonly IHttpConnectionListener _listener;
+
+    // The stop signals: Draining stops accepting and begins every connection's graceful close;
+    // Aborted cancels what is still in flight once the stop's budget runs out.
+    private readonly WebApplicationServerDrain _drain = new();
+
+    // Publishes Draining to every exchange (IWebServerDrainFeature), so a long-lived exchange such
+    // as a WebSocket can end itself cleanly within the budget. One shared instance.
+    private readonly WebServerDrainFeature _drainFeature;
+
+    // Event listeners observe the whole process, so every server needs its own identity.
+    private static long _nextServerId;
+
+    // The query parameters whose values a request span's url.query shows; null redacts every value.
+    private readonly FrozenSet<string>? _telemetryQueryValues;
+
+    // The exchanges being served on every connection, reported when a stop's budget runs out.
+    private int _exchangesInFlight;
+
+    // In-flight per-connection tasks, keyed by a monotonic id so a completing connection can remove
+    // exactly its own entry. ConcurrentDictionary because the accept loop adds while the connection
+    // tasks (running on arbitrary pool threads) remove themselves.
+    private readonly ConcurrentDictionary<long, Task> _connections = new();
+
+    // Null == unlimited. Otherwise a fair gate around accept: a slot is acquired before accepting
+    // and released when the connection it was acquired for finishes, bounding concurrent service.
+    private readonly SemaphoreSlim? _connectionSlots;
+    private readonly Lock _lifecycleLock = new();
+
+    private long _connectionKey;
+    private Task? _startTask;
+    private Task? _stopTask;
+    private Task? _acceptLoop;
+    private int _stopped;
+
+    /// <summary>
+    /// Initializes a server with its pipeline, transport listeners, exchange features and telemetry.
+    /// </summary>
+    /// <param name="options">The construction options, snapshotted before the server starts.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> or a telemetry query name is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when the pipeline or listener options are missing, or a telemetry query name is empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the connection cap is not positive or the exchange feature count overflows.</exception>
+    public WebApplicationServer(WebApplicationServerOptions options)
+        : this(options, CreateListener(options))
+    {
+    }
+
+    // A fake listener belongs only to this assembly's tests. Production callers always take the
+    // constructor above, which installs the same server interceptors and capacity for every caller.
+    internal WebApplicationServer(WebApplicationServerOptions options, IHttpConnectionListener listener)
+    {
+        ValidateOptions(options);
+        ArgumentNullException.ThrowIfNull(listener);
+
+        _pipeline = options.Pipeline!;
+        _listener = listener;
+        ServerId = Interlocked.Increment(ref _nextServerId);
+        _telemetryQueryValues = options.TelemetryQueryValues.Count == 0
+            ? null
+            : options.TelemetryQueryValues.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        _drainFeature = new WebServerDrainFeature(_drain.Draining);
+
+        if (options.MaxConcurrentConnections is int limit)
+        {
+            _connectionSlots = new SemaphoreSlim(limit, limit);
+        }
+
+        MaxConcurrentConnections = options.MaxConcurrentConnections;
+    }
+
+    /// <summary>
+    /// Gets the cap on concurrently served connections, or <see langword="null"/> when the server is
+    /// unlimited.
+    /// </summary>
+    internal int? MaxConcurrentConnections { get; }
+
+    internal long ServerId { get; }
+
+    private static void ValidateOptions(WebApplicationServerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.Pipeline is null)
+        {
+            throw new ArgumentException("A pipeline must be configured on the server options.", nameof(options));
+        }
+
+        if (options.Listener is null)
+        {
+            throw new ArgumentException("Listener options must be configured on the server options.", nameof(options));
+        }
+
+        if (options.MaxConcurrentConnections is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.MaxConcurrentConnections,
+                "The maximum concurrent connection count, when set, must be greater than zero.");
+        }
+
+        if (options.Listener.ExchangeFeatureCapacity > int.MaxValue - HostFeatureCount)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.Listener.ExchangeFeatureCapacity,
+                "The exchange feature count must leave room for the server's features.");
+        }
+
+        foreach (string name in options.TelemetryQueryValues)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(name, nameof(options));
+        }
+    }
+
+    private static IHttpConnectionListener CreateListener(WebApplicationServerOptions options)
+    {
+        ValidateOptions(options);
+
+        HttpConnectionListenerOptions listenerOptions = options.Listener;
+        int configuredFeatureCapacity = listenerOptions.ExchangeFeatureCapacity;
+        WebClientFaultInterceptor clientFault = new();
+        WebResponseStartingInterceptor responseStarting = new();
+
+        listenerOptions.ExchangeFeatureCapacity = RoundExchangeFeatureCapacity(configuredFeatureCapacity + HostFeatureCount);
+        listenerOptions.Interceptors.Insert(0, clientFault);
+        listenerOptions.Interceptors.Insert(1, responseStarting);
+
+        try
+        {
+            // The transport snapshots both values here. Keeping our interceptors first guarantees
+            // application hooks observe their features, independent of the hosting module. The
+            // host's limits, upgrade and extended-CONNECT hooks do not consume these features.
+            return new HttpConnectionListener(listenerOptions);
+        }
+        finally
+        {
+            // Leave the caller's options reusable: another server must add and round once too,
+            // rather than accumulating our capacity and interceptors from an earlier construction.
+            listenerOptions.Interceptors.Remove(clientFault);
+            listenerOptions.Interceptors.Remove(responseStarting);
+            listenerOptions.ExchangeFeatureCapacity = configuredFeatureCapacity;
+        }
+    }
+
+    /// <summary>
+    /// Rounds the feature count to the dictionary's ordinary growth chain, so overflow never
+    /// allocates more slots than an unsized collection carrying the same features (#1381).
+    /// </summary>
+    internal static int RoundExchangeFeatureCapacity(int featureCount)
+    {
+        if (featureCount == 0)
+        {
+            return 0;
+        }
+
+        foreach (int size in UnsizedGrowthSizes)
+        {
+            if (featureCount <= size)
+            {
+                return size;
+            }
+        }
+
+        return featureCount;
+    }
+
+    /// <summary>
+    /// Binds the configured listener and then starts the accept loop.
+    /// </summary>
+    /// <remarks>
+    /// The loop runs as a stored <see cref="Task"/> — never an
+    /// <c>async void</c> thread-pool work item — so its exceptions are observable rather than
+    /// escalated to a process-terminating unhandled exception. Concurrent and repeated calls await
+    /// the same bind operation. A listener bind failure is propagated to the caller.
+    /// </remarks>
+    /// <param name="cancellationToken">The cancellation token for listener binding.</param>
+    /// <returns>A task that completes only after the listener is bound and the loop is scheduled.</returns>
+    public Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_lifecycleLock)
+        {
+            // A stop already ran (or is running): the shutdown source is cancelled/disposed, so a
+            // stray start is a no-op. In-process restart builds a fresh host and listener instance.
+            if (Volatile.Read(ref _stopped) == 1)
+            {
+                return Task.CompletedTask;
+            }
+
+            return _startTask ??= StartCoreAsync(cancellationToken);
+        }
+    }
+
+    private async Task StartCoreAsync(CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource bindCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _drain.Draining);
+
+        try
+        {
+            await _listener.BindAsync(bindCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (_drain.Draining.IsCancellationRequested)
+        {
+            // StopAsync won a race with startup. It awaits this task and owns terminal listener
+            // release, so cancellation of the pending bind is a clean stop rather than a startup
+            // failure.
+            return;
+        }
+        catch (Exception exception)
+        {
+            WebServerEventSource.Log.BindFailed(ServerId, _listener.Protocols, exception);
+            throw;
+        }
+
+        lock (_lifecycleLock)
+        {
+            // Stop may have won a race with an asynchronous bind. In that case StopAsync owns
+            // listener release and this start completes without touching its disposed token source.
+            if (Volatile.Read(ref _stopped) == 1)
+            {
+                return;
+            }
+
+            WebServerEventSource.Log.ServerBound(ServerId, _listener, MaxConcurrentConnections ?? 0);
+            CancellationToken drainingToken = _drain.Draining;
+            _acceptLoop = Task.Run(() => AcceptLoopAsync(drainingToken));
+        }
+    }
+
+    /// <summary>
+    /// Drains the server lame-duck style and then disposes the listener: stops accepting, lets the
+    /// exchanges in flight finish within the caller's budget, and cancels whatever outlives it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The drain begins at once (<see cref="WebApplicationServerDrain.Begin"/>): the accept loop stops,
+    /// and every live connection begins its graceful close — it takes no new exchange and tells its
+    /// peer (HTTP/1.1 <c>Connection: close</c>, an HTTP/2 or HTTP/3 <c>GOAWAY</c>), and an idle
+    /// keep-alive connection closes at once. Nothing is cancelled: the exchanges already running finish
+    /// and their responses are delivered. A connection task completes only after every exchange it
+    /// dispatched has, and it swallows its own cancellation and faults, so the drain covers every
+    /// in-flight exchange on every connection without surfacing an unobserved exception.
+    /// </para>
+    /// <para>
+    /// When <paramref name="cancellationToken"/> fires first, the drain is aborted: every exchange
+    /// still running is cancelled (<see cref="IHttpContext.RequestCancelled"/>), every connection still
+    /// open is aborted, and the stop waits up to <see cref="_abortGracePeriod"/> for them to unwind
+    /// before it releases the listener. The stop still completes normally then — the server is stopped;
+    /// only the graceful part was cut short, which the caller knows from its own token. Repeated calls
+    /// share the first call's task, and a stop before start is safe.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">The drain budget: when it fires, what is still in flight is cancelled.</param>
+    /// <returns>A task that completes once the in-flight connections and exchanges have drained, or the budget ran out, and the listener is released.</returns>
+    public Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_lifecycleLock)
+        {
+            return _stopTask ??= StopCoreAsync(cancellationToken);
+        }
+    }
+
+    private async Task StopCoreAsync(CancellationToken cancellationToken)
+    {
+        Volatile.Write(ref _stopped, 1);
+        Exception? shutdownSignalFailure = null;
+        long drainStarted = Stopwatch.GetTimestamp();
+
+        try
+        {
+            try
+            {
+                _drain.Begin();
+            }
+            catch (Exception exception)
+            {
+                // Cancellation callbacks are user-extensible. Record their failure, but continue
+                // through bind/accept unwinding, the drain, and listener release before surfacing it.
+                shutdownSignalFailure = exception;
+            }
+
+            WebServerEventSource.Log.Draining(ServerId, _connections.Count, Volatile.Read(ref _exchangesInFlight));
+
+            try
+            {
+                await DrainAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The budget ran out with work still in flight. The stop still completes normally once
+                // the listener is released: its job is done, only the graceful part was cut short, and
+                // the caller knows that from its own token. Throwing would replay the cancellation to
+                // every later StopAsync caller, which shares this task.
+                WebServerEventSource.Log.DrainTimedOut(
+                    ServerId,
+                    _connections.Count,
+                    Volatile.Read(ref _exchangesInFlight),
+                    Stopwatch.GetElapsedTime(drainStarted));
+                await AbortDrainAsync().ConfigureAwait(false);
+            }
+
+            if (shutdownSignalFailure is not null)
+            {
+                ExceptionDispatchInfo.Capture(shutdownSignalFailure).Throw();
+            }
+        }
+        finally
+        {
+            // Releasing the listener is not optional when a drain budget expires: StopAsync does
+            // not complete until the endpoint is free for a replacement host instance.
+            try
+            {
+                await _listener.DisposeAsync().ConfigureAwait(false);
+                WebServerEventSource.Log.ServerStopped(ServerId, Stopwatch.GetElapsedTime(drainStarted), _drain.Aborted.IsCancellationRequested);
+            }
+            finally
+            {
+                _drain.Dispose();
+                _connectionSlots?.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Waits, within the budget, for startup, the accept loop, and every in-flight connection — and
+    /// so every exchange — to finish.
+    /// </summary>
+    private async Task DrainAsync(CancellationToken cancellationToken)
+    {
+        if (_startTask is not null)
+        {
+            try
+            {
+                await _startTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Startup itself was cancelled. Stop still owns terminal listener cleanup.
+            }
+            // Deviates from the specific-exception rule: a listener can fail with any exception.
+            // Only a faulted startup is swallowed; a cancellation of this wait remains the budget.
+            catch (Exception) when (_startTask.IsFaulted)
+            {
+                // The bind failure was already delivered to the startup caller. Stop is the
+                // rollback path and must release resources without reporting it a second time.
+            }
+        }
+
+        // Wait for the accept loop to observe the drain first: once it has stopped, no new
+        // connection task can be added, so the in-flight snapshot below is complete.
+        if (_acceptLoop is not null)
+        {
+            await _acceptLoop.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        Task[] inFlight = _connections.Values.ToArray();
+        if (inFlight.Length > 0)
+        {
+            // Every connection task is self-contained (it never rethrows) and completes only
+            // after its own exchanges have, so WhenAll drains every in-flight exchange without
+            // observing an exception.
+            await Task.WhenAll(inFlight).WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Ends a drain whose budget ran out: cancels every exchange still running, aborts every
+    /// connection still open, and waits briefly for them to unwind.
+    /// </summary>
+    private async Task AbortDrainAsync()
+    {
+        try
+        {
+            _drain.Abort();
+        }
+        // Deviates from the repo "catch specific exceptions" rule per design decision: middleware
+        // register callbacks on the token this cancels, so the failure is arbitrary user code. Every
+        // callback still ran, and an exchange whose callback threw unwinds like the others.
+        catch (Exception)
+        {
+        }
+
+        // Unwinding is cooperative and bounded: an exchange that honors RequestCancelled normally
+        // finishes within the grace period, and one that ignores it keeps running after the stop
+        // completes.
+        Task[] unwinding = _acceptLoop is null
+            ? _connections.Values.ToArray()
+            : [_acceptLoop, .. _connections.Values];
+
+        try
+        {
+            await Task.WhenAll(unwinding).WaitAsync(_abortGracePeriod).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            WebServerEventSource.Log.AbortGraceExpired(ServerId, Volatile.Read(ref _exchangesInFlight), _abortGracePeriod);
+        }
+    }
+
+    private async Task AcceptLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                // Gate around accept: reserve a slot before accepting so the listener's backlog
+                // channel applies backpressure when the cap is reached. The slot is handed to the
+                // connection task, which releases it when the connection finishes.
+                if (_connectionSlots is not null && !_connectionSlots.Wait(0))
+                {
+                    WebServerEventSource.Log.ConnectionCapWait(ServerId, MaxConcurrentConnections!.Value);
+                    await _connectionSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                IHttpConnection connection;
+                try
+                {
+                    connection = await _listener.AcceptAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // The slot was reserved for a connection we never accepted; return it so a
+                    // transient accept failure does not permanently shrink the cap.
+                    ReleaseConnectionSlot();
+                    throw;
+                }
+
+                // A connection outlives the drain's start (it is closed gracefully, not cancelled), so it
+                // is served under the abort token, not the accept loop's.
+                long key = Interlocked.Increment(ref _connectionKey);
+                Task serve = ServeConnectionAsync(connection, key, _drain.Aborted);
+
+                // Register before checking completion: if the task already finished (its finally
+                // removed nothing because the key was absent), the follow-up removal below keeps
+                // the map from leaking a completed entry.
+                _connections[key] = serve;
+                if (serve.IsCompleted)
+                {
+                    _connections.TryRemove(key, out _);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The drain began: the server accepts nothing new. Any other cancellation is the listener's
+            // failure (it reports a transport fault with the transport's own exception), so it falls
+            // through to the fault log below instead of ending the accepts unnoticed (#1310).
+        }
+        catch (ObjectDisposedException)
+        {
+            // The listener was disposed concurrently with shutdown.
+        }
+        catch (Exception exception)
+        {
+            // A fatal accept-loop failure (e.g. the transport listener itself faulted) ends the
+            // loop; already-accepted connections still drain through StopAsync. Swallowed so the
+            // stored task completes rather than escalating as an unobserved exception — and logged,
+            // because the server keeps running but accepts nothing more.
+            WebServerEventSource.Log.AcceptLoopFaulted(ServerId, exception);
+        }
+    }
+
+    private async Task ServeConnectionAsync(IHttpConnection connection, long key, CancellationToken cancellationToken)
+    {
+        WebApplicationServerDrain.Registration drainRegistration = default;
+        bool faultCounted = false;
+        try
+        {
+            await using (connection.ConfigureAwait(false))
+            {
+                IHttpConnectionContext context = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+                // Lame-duck drain: the context begins its graceful close when the stop begins, and the
+                // connection is aborted if the stop's budget runs out first. The abort registration
+                // outlives connection disposal, which may still be awaiting QUIC stream delivery.
+                drainRegistration = _drain.Register(connection, context);
+
+                // The connection's concurrently served streams. Created by the first multiplexed
+                // exchange, so an HTTP/1.1 connection never allocates one.
+                MultiplexedExchangeTracker? streams = null;
+
+                // The version of the exchanges this connection carries, for its fault diagnostics.
+                HttpVersion version = HttpVersion.Unknown;
+
+                try
+                {
+                    await foreach (IHttpContext exchange in context.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        version = exchange.Version;
+
+                        if (IsMultiplexed(exchange))
+                        {
+                            // One task per stream, started the moment the transport yields it; the
+                            // loop goes straight back for the next. The server queues nothing of its
+                            // own, so concurrency is bounded by what the transport admits: HTTP/2
+                            // SETTINGS_MAX_CONCURRENT_STREAMS, HTTP/3 QUIC stream credit.
+                            (streams ??= new MultiplexedExchangeTracker()).Start(
+                                () => ServeExchangeAsync(context, exchange, multiplexed: true, cancellationToken));
+
+                            continue;
+                        }
+
+                        // HTTP/1.1: the transport reads (and realigns on) the next request only when
+                        // the loop asks for it, so the exchange is served inline and the next one is
+                        // not requested until this one's response is sent and the exchange disposed.
+                        if (!await ServeExchangeAsync(context, exchange, multiplexed: false, cancellationToken).ConfigureAwait(false))
+                        {
+                            // The exchange was reset; a sequential connection ends with it.
+                            break;
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // The stop's budget ran out and the drain was aborted, including a sequential
+                    // exchange's send cut off by it — not a fault.
+                }
+                catch (Exception exception)
+                {
+                    // Connection-level isolation boundary. Application faults never reach it: each
+                    // exchange isolates its own (ServeExchangeAsync). What remains is a receive-side
+                    // failure the transport surfaced, or a sequential connection whose response could
+                    // not be put on the wire; either way this connection cannot carry another request.
+                    // Aborting signals the peer; the enclosing await using still disposes it. Catching
+                    // Exception is the deliberate process-crash guard, mirroring the accept-loop
+                    // isolation boundary in HttpConnectionListener.
+                    WebServerEventSource.Log.ConnectionEnded(ServerId, connection, context, version, exception, _drain.Aborted.IsCancellationRequested, ref faultCounted);
+                    connection.Abort(exception);
+                }
+                finally
+                {
+                    // StopAsync and the connection slot both wait on this task, so it must not
+                    // complete, and the context must not be torn down under a running stream, while
+                    // any exchange dispatched from this connection is still in flight.
+                    if (streams is not null)
+                    {
+                        await streams.WhenDrainedAsync().ConfigureAwait(false);
+                    }
+
+                    // A context may no longer accept a graceful-close signal after disposal, even
+                    // while its underlying connection still needs the stop budget's abort signal.
+                    drainRegistration.UnregisterGracefulClose();
+                    await DisposeContextAsync(context).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // OpenAsync was cancelled during shutdown, or connection disposal observed cancellation.
+        }
+        catch (Exception exception)
+        {
+            // Teardown faults (OpenAsync or connection disposal) must not escape as an unobserved
+            // task exception; the connection is being discarded regardless.
+            WebServerEventSource.Log.ConnectionEnded(ServerId, connection, context: null, HttpVersion.Unknown, exception, _drain.Aborted.IsCancellationRequested, ref faultCounted);
+        }
+        finally
+        {
+            drainRegistration.Dispose();
+            _connections.TryRemove(key, out _);
+            ReleaseConnectionSlot();
+        }
+    }
+
+    /// <summary>
+    /// Serves one exchange to completion: the middleware pipeline, then exactly one finalization
+    /// through the connection context — the application's response, a <c>500</c> that replaces it,
+    /// or a reset — then the response-completion callbacks and the exchange's disposal.
+    /// </summary>
+    /// <remarks>
+    /// This is the application-exception isolation boundary. Whatever the pipeline, its completion
+    /// callbacks, or the exchange's own disposal throw costs this exchange and nothing else. A response
+    /// the transport refuses to send because a field cannot be carried (#1183) counts as a pipeline
+    /// fault: nothing of it was written, so a <c>500</c> replaces it. The one
+    /// failure that escapes is a sequential (HTTP/1.1) connection's failed send: its response
+    /// framing on the wire is then unknown, so the caller must stop reading from the connection. A
+    /// multiplexed exchange never throws; a failed send resets its own stream.
+    /// </remarks>
+    /// <param name="context">The connection context the exchange was received from.</param>
+    /// <param name="exchange">The exchange to serve.</param>
+    /// <param name="multiplexed">Whether the exchange is one stream of a multiplexed connection.</param>
+    /// <param name="cancellationToken">The server's abort token, cancelled only when a stop's budget runs out.</param>
+    /// <returns>
+    /// <see langword="true"/> when a response was sent, so a sequential connection may carry the next
+    /// request; <see langword="false"/> when the exchange was reset.
+    /// </returns>
+    private async Task<bool> ServeExchangeAsync(
+        IHttpConnectionContext context,
+        IHttpContext exchange,
+        bool multiplexed,
+        CancellationToken cancellationToken)
+    {
+        WebExchangeTelemetry telemetry = WebExchangeTelemetry.Start(exchange, _telemetryQueryValues);
+        Interlocked.Increment(ref _exchangesInFlight);
+
+        try
+        {
+            ResponseCompletionFeature responseCompletion = new();
+            ExchangeOutcome outcome = await ExecutePipelineAsync(exchange, responseCompletion, cancellationToken).ConfigureAwait(false);
+
+            bool responded;
+
+            try
+            {
+                try
+                {
+                    (responded, outcome) = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
+                }
+                catch (HttpException exception) when (outcome == ExchangeOutcome.Completed && IsRefusedResponseHead(exception, exchange))
+                {
+                    // The transport refused a field of the application's response before writing any of
+                    // it (#1183): a name that is not a token, or a value with CR, LF, NUL, or another
+                    // control character. That is an application fault like any other, so the exchange is
+                    // finalized as one: a 500 in place of the refused response.
+                    WebServerEventSource.Log.ResponseHeadRefused(ServerId, exchange, exception);
+                    outcome = ExchangeOutcome.Faulted;
+                    (responded, outcome) = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            // A client-abandoned buffered send has the same outcome as a streamed write in the
+            // pipeline. The transport report also survives a response adapter wrapping its failure.
+            catch (Exception) when (exchange.Features.Get<IWebResponseClientFaultFeature>() is { ResponseAbortedByClient: true })
+            {
+                outcome = ExchangeOutcome.Cancelled;
+                await TryResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+                responded = false;
+            }
+            // Deviates from the specific-exception rule: arbitrary starting callbacks are application
+            // work even when a buffered send drives them.
+            // Their cancellation forbids a replacement head and completion callbacks alike.
+            catch (Exception) when (exchange.Features.Get<ResponseStartingFeature>() is { HasFailed: true })
+            {
+                outcome = ExchangeOutcome.Faulted;
+                await TryResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+                responded = false;
+            }
+            // Deviates from the repo "catch specific exceptions" rule per design decision: on a
+            // multiplexed connection a failed send belongs to this stream alone (a response body
+            // that throws, a lifecycle hook that throws, a write cut off by an aborted drain). Resetting the
+            // stream releases its concurrency slot and drain accounting while its siblings carry on.
+            catch (Exception) when (multiplexed)
+            {
+                await TryResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+
+                return false;
+            }
+
+            telemetry.SetOutcome(responded, canceled: outcome == ExchangeOutcome.Cancelled);
+
+            // Completion callbacks are "after this response is on the wire" work, so they run only
+            // for the application's own response — never after a replacement 500 or a reset.
+            if (outcome == ExchangeOutcome.Completed)
+            {
+                await RunCompletionCallbacksAsync(exchange, responseCompletion).ConfigureAwait(false);
+            }
+
+            return responded;
+        }
+        finally
+        {
+            telemetry.Stop();
+            await DisposeExchangeAsync(exchange).ConfigureAwait(false);
+            Interlocked.Decrement(ref _exchangesInFlight);
+        }
+    }
+
+    private async Task<ExchangeOutcome> ExecutePipelineAsync(
+        IHttpContext exchange,
+        ResponseCompletionFeature responseCompletion,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            exchange.Features.Set(responseCompletion);
+            exchange.Features.Set(_drainFeature);
+            exchange.Features.Get<ResponseStartingFeature>()?.Bind(exchange);
+
+            await _pipeline.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
+
+            // Middleware can abort a started response and return normally (the exception
+            // boundary does). The generic exchange signal still makes that a cancellation.
+            return cancellationToken.IsCancellationRequested || exchange.RequestCancelled.IsCancellationRequested
+                ? ExchangeOutcome.Cancelled
+                : ExchangeOutcome.Completed;
+        }
+        // An application may wrap the transport exception without installing ErrorHandling.
+        // The response outcome remains a cancellation, whatever exception reached this boundary.
+        catch (Exception) when (exchange.Features.Get<IWebResponseClientFaultFeature>() is { ResponseAbortedByClient: true })
+        {
+            return ExchangeOutcome.Cancelled;
+        }
+        catch (OperationCanceledException) when (
+            cancellationToken.IsCancellationRequested || exchange.RequestCancelled.IsCancellationRequested)
+        {
+            // The stop's budget ran out, or the exchange itself was cancelled (a peer reset, a closed
+            // connection, IHttpContext.Cancel): an abandoned exchange, not a fault.
+            return ExchangeOutcome.Cancelled;
+        }
+        // Deviates from the repo "catch specific exceptions" rule per design decision: this is the
+        // application-exception isolation boundary around arbitrary middleware (docs/DESIGN.md,
+        // "Error model"). An operation cancelled for any other reason — an application timeout, say
+        // — is a fault like any other.
+        catch (Exception)
+        {
+            return ExchangeOutcome.Faulted;
+        }
+    }
+
+    /// <summary>
+    /// Ends the exchange on the wire exactly once: the application's response when the pipeline
+    /// completed; a <c>500</c> in place of the staged response when the pipeline faulted before the
+    /// response started; otherwise — a cancelled exchange, or a fault after the response started,
+    /// when a replacement could only complete a truncated response as if it were whole — a reset.
+    /// </summary>
+    /// <returns>Whether a response was sent, and the outcome after any cancellation during the send.</returns>
+    private static async Task<(bool Responded, ExchangeOutcome Outcome)> FinalizeAsync(
+        IHttpConnectionContext context,
+        IHttpContext exchange,
+        ExchangeOutcome outcome,
+        CancellationToken cancellationToken)
+    {
+        if (exchange.Features.Get<ResponseStartingFeature>() is { HasFailed: true })
+        {
+            await ResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+            return (false, outcome);
+        }
+
+        if (outcome == ExchangeOutcome.Completed
+            || (outcome == ExchangeOutcome.Faulted && !exchange.HasResponseStarted && TryPrepareServerErrorResponse(exchange)))
+        {
+            exchange.Features.Get<ResponseStartingFeature>()?.RestoreHeaders();
+            await context.SendAsync(exchange, cancellationToken).ConfigureAwait(false);
+
+            // Buffered starting callbacks run inside SendAsync and may cancel without throwing.
+            // The transport then resets normally, so that return is not proof a response was sent.
+            return cancellationToken.IsCancellationRequested || exchange.RequestCancelled.IsCancellationRequested
+                ? (false, ExchangeOutcome.Cancelled)
+                : (true, outcome);
+        }
+
+        await ResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+
+        return (false, outcome);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="exception"/>, thrown by <see cref="IHttpConnectionContext.SendAsync"/>,
+    /// is the transport refusing a response field before it wrote any of the head (#1183). The
+    /// response has then not started, so it can still be replaced.
+    /// </summary>
+    private static bool IsRefusedResponseHead(HttpException exception, IHttpContext exchange)
+    {
+        return exception.Code == HttpErrorCode.InvalidResponseField && !exchange.HasResponseStarted;
+    }
+
+    /// <summary>
+    /// Replaces whatever response a faulted application staged with a bodyless
+    /// <c>500 Internal Server Error</c>. Returns <see langword="false"/> when the response itself
+    /// cannot be reshaped; the caller then resets the exchange instead.
+    /// </summary>
+    /// <remarks>
+    /// The staged headers and trailers are both dropped: they belong to the response the
+    /// application failed to finish, and a field among them may be the one the transport refused.
+    /// FinalizeAsync subsequently restores starting-callback edits and preserved policy headers.
+    /// </remarks>
+    private static bool TryPrepareServerErrorResponse(IHttpContext exchange)
+    {
+        Stream staged;
+
+        try
+        {
+            IHttpResponse response = exchange.Response;
+
+            response.Headers.Clear();
+
+            if (response.Trailers.IsSupported)
+            {
+                response.Trailers.Clear();
+            }
+
+            // Swap in a fresh body rather than truncating the staged one: a seekable body the
+            // application supplied may be a file it owns, and truncating it would destroy data.
+            staged = response.Body;
+            response.Body = new MemoryStream();
+            response.StatusCode = HttpStatusCode.InternalServerError;
+        }
+        // Deviates from the repo "catch specific exceptions" rule per design decision: the faulted
+        // application may have left its response in any state; failing to reshape it degrades to a
+        // reset of this exchange, never to a fault that escapes the exchange.
+        catch (Exception)
+        {
+            return false;
+        }
+
+        // The exchange disposes whatever body it ends with, so the one it no longer holds is
+        // released here.
+        try
+        {
+            staged.Dispose();
+        }
+        // Deviates from the repo "catch specific exceptions" rule per design decision: the staged
+        // body is application-supplied; its disposal failure must not cost the replacement response.
+        catch (Exception)
+        {
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Resets the exchange: requests its cancellation, then lets the connection context put the
+    /// version's reset on the wire (an HTTP/2 <c>RST_STREAM</c>, an HTTP/3 stream abort, or no
+    /// response and a connection that ends after the exchange on HTTP/1.1).
+    /// </summary>
+    private static async Task ResetAsync(IHttpConnectionContext context, IHttpContext exchange, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await exchange.CancelAsync().ConfigureAwait(false);
+        }
+        // Deviates from the repo "catch specific exceptions" rule per design decision: cancellation
+        // callbacks on RequestCancelled are application code. Their failure must not stop the reset,
+        // which the exchange recorded before running them.
+        catch (Exception)
+        {
+        }
+
+        await context.SendAsync(exchange, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task TryResetAsync(IHttpConnectionContext context, IHttpContext exchange, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+        }
+        // Deviates from the repo "catch specific exceptions" rule per design decision: nothing more
+        // can be done for this stream. Connection teardown releases it, and its siblings must not
+        // pay for it.
+        catch (Exception)
+        {
+        }
+    }
+
+    private async Task RunCompletionCallbacksAsync(IHttpContext exchange, ResponseCompletionFeature responseCompletion)
+    {
+        try
+        {
+            await responseCompletion.CompleteAsync().ConfigureAwait(false);
+        }
+        catch (AggregateException failures)
+        {
+            // CompleteAsync has attempted every callback. Keep one report per callback, even
+            // when that callback itself threw an aggregate, without changing the sent response.
+            foreach (Exception failure in failures.InnerExceptions)
+            {
+                WebServerEventSource.Log.CompletionCallbackFailed(ServerId, exchange, failure);
+            }
+        }
+    }
+
+    private static async ValueTask DisposeExchangeAsync(IHttpContext exchange)
+    {
+        try
+        {
+            await exchange.DisposeAsync().ConfigureAwait(false);
+        }
+        // Deviates from the repo "catch specific exceptions" rule per design decision: the exchange's
+        // features and bodies may be application-supplied, and its response has already been
+        // finalized; a disposal fault is contained to the exchange.
+        catch (Exception)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Whether the exchange is one stream of a multiplexed connection (HTTP/2 or HTTP/3), whose
+    /// siblings the transport can receive and serve while it runs.
+    /// </summary>
+    private static bool IsMultiplexed(IHttpContext exchange)
+    {
+        return exchange.Version is HttpVersion.Http20 or HttpVersion.Http30;
+    }
+
+    private void ReleaseConnectionSlot()
+    {
+        try
+        {
+            _connectionSlots?.Release();
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref _stopped) == 1)
+        {
+            // A caller's drain budget expired and terminal cleanup disposed the gate before an
+            // application task that ignored cancellation returned. The server is already stopped;
+            // releasing that retired slot has no observable purpose.
+        }
+    }
+
+    private static async ValueTask DisposeContextAsync(IHttpConnectionContext context)
+    {
+        // IHttpConnectionContext is not IAsyncDisposable: a context is a projection over the
+        // connection, and the connection releases the transport on its own disposal. The server
+        // still disposes any context that DOES hold resources, so a stateful context is torn down
+        // deterministically when its per-connection loop ends. The HTTP/2 context is one — its
+        // disposal is the RFC 9113 §6.8 graceful close (GOAWAY, then the pump stops and the output
+        // completes) — which is why ServeConnectionAsync drains the connection's streams first.
+        // AOT-safe — a type test, no reflection.
+        switch (context)
+        {
+            case IAsyncDisposable asyncDisposable:
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                break;
+            case IDisposable disposable:
+                disposable.Dispose();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// How an exchange's pipeline ended, which decides how the exchange is finalized.
+    /// </summary>
+    private enum ExchangeOutcome
+    {
+        /// <summary>The pipeline returned; the application's response is sent as staged.</summary>
+        Completed,
+
+        /// <summary>The pipeline threw; the exchange is answered with a 500 or, once its response started, reset.</summary>
+        Faulted,
+
+        /// <summary>The exchange was abandoned (server shutdown or exchange cancellation); it is reset.</summary>
+        Cancelled,
+    }
+}

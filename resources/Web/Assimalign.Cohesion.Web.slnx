@@ -358,6 +358,9 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Server/src/">
 		<Project Path="Assimalign.Cohesion.Web.Server/src/Assimalign.Cohesion.Web.Server.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Server/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Server/tests/Assimalign.Cohesion.Web.Server.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/docs/">
 		<File Path="Assimalign.Cohesion.Web.Sessions/docs/DESIGN.md" />

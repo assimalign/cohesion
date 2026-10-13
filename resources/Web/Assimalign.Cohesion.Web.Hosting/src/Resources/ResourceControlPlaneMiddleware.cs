@@ -106,7 +106,7 @@ public static class ResourceControlPlaneMiddleware
             !IsLoopbackPeer(context))
         {
             context.Response.StatusCode = HttpStatusCode.Forbidden;
-            WebServerEventSource.Log.CredentialRejected(resourceContext, context,
+            WebHostingEventSource.Log.CredentialRejected(resourceContext, context,
                 ResourceCredentialStatus.Forbidden, CredentialRejectionReason.NonLoopbackPeer);
             return;
         }
@@ -123,7 +123,7 @@ public static class ResourceControlPlaneMiddleware
                 {
                     context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
                 }
-                WebServerEventSource.Log.CredentialRejected(resourceContext, context, status, authorization.Reason);
+                WebHostingEventSource.Log.CredentialRejected(resourceContext, context, status, authorization.Reason);
                 return;
             }
         }
@@ -216,7 +216,7 @@ public static class ResourceControlPlaneMiddleware
                 await controlPlane.RequestStopAsync(context.RequestCancelled).ConfigureAwait(false);
             }
             context.Response.StatusCode = HttpStatusCode.Accepted;
-            WebServerEventSource.Log.StopAccepted(resourceContext, context, responseCompletion is not null);
+            WebHostingEventSource.Log.StopAccepted(resourceContext, context, responseCompletion is not null);
             return;
         }
 
@@ -429,7 +429,7 @@ public static class ResourceControlPlaneMiddleware
             context.Response.StatusCode = HttpStatusCode.BadRequest;
             if (!Assimalign.Cohesion.Hosting.Resources.Internal.CommandFailureDiagnostics.TryConsume(exception, command))
             {
-                WebServerEventSource.Log.CommandMalformed(resource, context, phase, exception);
+                WebHostingEventSource.Log.CommandMalformed(resource, context, phase, exception);
             }
             return;
         }

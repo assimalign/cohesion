@@ -390,7 +390,7 @@ or `416`. Cancellation surfaces as `OperationCanceledException` from the copy.
 ## Diagnostics
 
 The internal `StaticFilesEventSource` is named `Assimalign.Cohesion.Web.StaticFiles`. It adds no public
-diagnostics API, logging dependency, or metrics instruments. The contracts-only `Web.Server` reference
+diagnostics API, logging dependency, or metrics instruments. The `Web.Server` reference
 supplies `IWebRequestIdFeature` for rejected-request correlation; no ambient activity is read.
 
 | Id | Event | Level | Payload |

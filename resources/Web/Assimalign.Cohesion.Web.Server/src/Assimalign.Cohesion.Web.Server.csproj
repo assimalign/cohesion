@@ -4,10 +4,13 @@
 		     the Web root under owner decision 33 (#1379) and keep the namespace they shipped in, as
 		     Web.Api, Web.Forms and Web.ProblemDetails do, so every reader keeps compiling. -->
 		<RootNamespace>Assimalign.Cohesion.Web</RootNamespace>
-		<Description>The per-exchange contracts the Cohesion Web server publishes: the request id (IWebRequestIdFeature, the W3C trace id that names the request in the server span, logs and responses), the exchange-owned server activity (IWebRequestActivityFeature), post-response completion callbacks (IWebResponseCompletionFeature), the server's lame-duck drain signal (IWebServerDrainFeature), and the client-fault report (IWebClientFaultFeature, the 4xx the transport answers a request body that broke its framing or a limit with). Contracts only: Assimalign.Cohesion.Web.Hosting installs them, and a custom IWebApplicationServer may omit them.</Description>
+		<Description>The Cohesion Web server engine and the per-exchange request identity, activity, response lifecycle, drain and client-fault contracts it publishes. Construct WebApplicationServer directly from a pipeline and listener options, or compose it through Assimalign.Cohesion.Web.Hosting.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 	</ItemGroup>
 </Project>

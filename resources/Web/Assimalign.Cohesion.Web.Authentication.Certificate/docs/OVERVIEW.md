@@ -8,8 +8,9 @@ serial number. Applications can map it to an account or reject it through an asy
 
 This package supplies an `IAuthenticationHandler` and the C# 14 `AddCertificate` extensions on
 `AuthenticationBuilder`. It depends on `Web.Authentication` for scheme dispatch, `Http.Tls` for
-the connection certificate, and contracts-only `Web.Server` for diagnostic request ids. It has no
-hosting or dependency-injection reference. `App.Web` delivers
+the connection certificate, and `Web.Server` for diagnostic request ids. Web.Server also brings
+the server engine and Http.Connections into the package closure; it requires no connection driver.
+This package has no hosting or dependency-injection reference. `App.Web` delivers
 it to `Sdk.Web` applications; standalone consumers reference the package directly.
 
 The listener owns certificate requests, chain validation and trust. Configure its

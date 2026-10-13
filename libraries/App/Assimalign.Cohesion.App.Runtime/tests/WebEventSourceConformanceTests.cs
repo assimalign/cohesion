@@ -36,6 +36,7 @@ public sealed class WebEventSourceConformanceTests
         members.ShouldContain("Assimalign.Cohesion.Web.Authentication.Certificate");
         members.ShouldContain("Assimalign.Cohesion.Http.Connections");
         members.ShouldContain("Assimalign.Cohesion.Web.Hosting");
+        members.ShouldContain("Assimalign.Cohesion.Web.Server");
         members.ShouldNotContain("Assimalign.Cohesion.Web.Hosting.Health");
         members.ShouldNotContain("Assimalign.Cohesion.Web.Hosting.Resources");
         documentedSources.Distinct(StringComparer.Ordinal).Count().ShouldBe(documentedSources.Length,
@@ -80,13 +81,23 @@ public sealed class WebEventSourceConformanceTests
                 manifest.ShouldNotBeNullOrEmpty($"{source.FullName} must have a valid strict manifest.");
                 if (assemblyName == "Assimalign.Cohesion.Web.Hosting")
                 {
+                    source.Name.ShouldBe("WebHostingEventSource");
+                    XDocument.Parse(manifest).Descendants()
+                        .Where(element => element.Name.LocalName == "event" &&
+                            (string?)element.Attribute("symbol") is "ControlPlaneDisabled" or "CredentialRejected" or "CommandMalformed" or "StopAccepted")
+                        .Select(element => (element.Attribute("symbol")!.Value, (int)element.Attribute("value")!))
+                        .OrderBy(item => item.Item2).ToArray()
+                        .ShouldBe(new[] { ("ControlPlaneDisabled", 1), ("CredentialRejected", 2), ("CommandMalformed", 3), ("StopAccepted", 4) });
+                }
+
+                if (assemblyName == "Assimalign.Cohesion.Web.Server")
+                {
                     source.Name.ShouldBe("WebServerEventSource");
                     XDocument.Parse(manifest).Descendants()
                         .Where(element => element.Name.LocalName == "event" &&
-                            (string?)element.Attribute("symbol") is "CredentialRejected" or "CommandMalformed" or "StopAccepted")
-                        .Select(element => (element.Attribute("symbol")!.Value, (int)element.Attribute("value")!))
-                        .OrderBy(item => item.Item2).ToArray()
-                        .ShouldBe(new[] { ("CredentialRejected", 16), ("CommandMalformed", 17), ("StopAccepted", 18) });
+                            (int)element.Attribute("value")! > 0)
+                        .Select(element => (int)element.Attribute("value")!)
+                        .OrderBy(id => id).ToArray().ShouldBe(Enumerable.Range(1, 14).ToArray());
                 }
 
                 if (IsWebAssembly(assemblyName))

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Web.Server.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Quic" />
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="Shouldly" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" GeneratePathProperty="true" />
+    <Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+  </ItemGroup>
+  <Target Name="EnsureVSTestSupportFiles" AfterTargets="Build">
+    <Copy SourceFiles="$(Pkgxunit_runner_visualstudio)\build\net8.0\xunit.runner.visualstudio.testadapter.dll"
+          DestinationFiles="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(OutputPath)xunit.runner.visualstudio.testadapter.dll'))"
+          SkipUnchangedFiles="true"
+          Condition="'$(Pkgxunit_runner_visualstudio)' != '' and Exists('$(Pkgxunit_runner_visualstudio)\build\net8.0\xunit.runner.visualstudio.testadapter.dll')" />
+  </Target>
+</Project>

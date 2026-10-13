@@ -238,5 +238,5 @@ every modified orphan. No session id, cookie, key, or value is written. The requ
 Http.Sessions owns load/commit failures (see above), with no duplicate report here.
 
 Since 10.0.0-preview.1, diagnostics become observable but cookie and persistence behavior are
-unchanged. The new contracts-only Web.Server dependency provides request correlation and adds
+unchanged. The Web.Server dependency provides request correlation and adds
 no hosting dependency or framework member.

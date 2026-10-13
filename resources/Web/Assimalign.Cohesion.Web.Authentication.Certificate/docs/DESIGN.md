@@ -7,9 +7,10 @@ authorization. Owner decision 31 places the scheme in its own package, alongside
 `IAuthenticationHandler` remains the public contract; `CertificateAuthenticationHandler` is internal
 and `CertificateAuthentication.CreateHandler` provides the container-free factory.
 
-The package references the scheme model, TLS feature and contracts-only Web.Server request id;
-neither the transport nor Web.Hosting
-references this package. The following arrows mean project references:
+The package references the scheme model, TLS feature and Web.Server for its request-id contract.
+Web.Server also carries the server engine and Http.Connections in the package closure, with no
+connection-driver or Hosting dependency. Neither the transport nor Web.Hosting references this
+package. The following arrows mean project references:
 
 ```mermaid
 flowchart LR
@@ -148,7 +149,7 @@ new request and resets the guard.
 The request id comes from `IWebRequestIdFeature`, read and formatted only when Verbose is enabled;
 it is empty when a custom server supplies no feature. No certificate contents, subject, issuer,
 thumbprint, serial, principal, claim or callback failure text is emitted. This implementation omits
-the optional bounded thumbprint entirely. The contracts-only Web.Server reference adds no hosting
+the optional bounded thumbprint entirely. The Web.Server reference adds no hosting
 dependency or framework member.
 
 **Scope deviation: TLS rejection reasons are not observable here.** The requested `UntrustedChain`,

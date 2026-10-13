@@ -823,7 +823,7 @@ compile without them, moved here:
 
 | Type | Kind | Reads or publishes |
 |---|---|---|
-| `IWebEndpointFeature` | contract, `Abstractions/` | published by `UseRouting`; run by the terminal; read by Web.Hosting's telemetry |
+| `IWebEndpointFeature` | contract, `Abstractions/` | published by `UseRouting`; run by the terminal; read by Web.Server's telemetry |
 | `WebApplicationTerminal` | static class | runs `IWebEndpointFeature`, else a bodyless 404 |
 | `IWebPathBaseFeature` | contract, `Abstractions/` | published by `Map(path)` and by Web.Rewrite inside a branch |
 | `WebApplicationBranchingExtensions` | `Map(path)`, `MapWhen`, `GetPathBase()`, `GetEffectivePath()` | end in the terminal; read and publish the path base |
@@ -1116,6 +1116,13 @@ and a child, such as a repeated parameter name, reports through the same message
   `RouteValueDictionary` and the installed `IRouteMatchFeature`.
 - Metadata construction throws `ArgumentException` on a `null` item so a malformed metadata list fails
   at the producer, not at a later consumer.
+
+## Server dependency boundary
+
+Web.Server references Web.Routing to read `IWebEndpointFeature.RouteTemplate` for the server
+span's `http.route` and bounded diagnostic route payloads. **Web.Routing must never reference
+Web.Server:** the reverse reference would form a cycle. Routing continues to publish endpoint
+and path-base features independently of the server engine and its exchange features.
 
 ## Family relationships / fan-out
 

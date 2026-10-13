@@ -41,7 +41,7 @@ public sealed class ResourceCommandDiagnosticsTests
         handler.Failure = new ArgumentException("handler-secret payload-secret key-secret caller-secret");
         await Task.Delay(TimeSpan.FromMilliseconds(1100), CancellationToken.None);
         using var producerRecorder = new EventSourceRecorder(producer, EventLevel.Verbose);
-        using var webRecorder = new EventSourceRecorder(WebServerEventSource.Log, EventLevel.Verbose);
+        using var webRecorder = new EventSourceRecorder(WebHostingEventSource.Log, EventLevel.Verbose);
         await using var exchange = new ControlPlaneExchange("/cohesion/v1/commands", new HttpMethod(method));
         var requestId = new ControlPlaneRequestIdFeature();
         exchange.Features.Set<IWebRequestIdFeature>(requestId);
@@ -58,7 +58,7 @@ public sealed class ResourceCommandDiagnosticsTests
         Payload(failure, "operation").ShouldBe(operation);
         Payload(failure, "exceptionType").ShouldBe("System.ArgumentException");
         string.Join("|", failure.Payload!).ShouldNotContain("secret", Case.Sensitive);
-        webRecorder.Events.ShouldNotContain(item => item.EventId == 17 &&
+        webRecorder.Events.ShouldNotContain(item => item.EventId == 3 &&
             Equals(Payload(item, "requestId"), requestId.ExpectedId));
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         producerRecorder.Events.ShouldNotContain(item => item.EventId == 0);
@@ -88,7 +88,7 @@ public sealed class ResourceCommandDiagnosticsTests
         }
         await Task.Delay(TimeSpan.FromMilliseconds(1100), CancellationToken.None);
         using var producerRecorder = new EventSourceRecorder(producer, EventLevel.Verbose);
-        using var webRecorder = new EventSourceRecorder(WebServerEventSource.Log, EventLevel.Verbose);
+        using var webRecorder = new EventSourceRecorder(WebHostingEventSource.Log, EventLevel.Verbose);
         await using var exchange = new ControlPlaneExchange("/cohesion/v1/commands", HttpMethod.Post);
         var requestId = new ControlPlaneRequestIdFeature();
         exchange.Features.Set<IWebRequestIdFeature>(requestId);
@@ -126,7 +126,7 @@ public sealed class ResourceCommandDiagnosticsTests
         originalFailure.ShouldBeSameAs(exception);
         await Task.Delay(TimeSpan.FromMilliseconds(1100), CancellationToken.None);
         using var producerRecorder = new EventSourceRecorder(producer, EventLevel.Verbose);
-        using var webRecorder = new EventSourceRecorder(WebServerEventSource.Log, EventLevel.Verbose);
+        using var webRecorder = new EventSourceRecorder(WebHostingEventSource.Log, EventLevel.Verbose);
         await using var exchange = new ControlPlaneExchange("/cohesion/v1/commands", HttpMethod.Post);
         var requestId = new ControlPlaneRequestIdFeature();
         exchange.Features.Set<IWebRequestIdFeature>(requestId);
@@ -136,7 +136,7 @@ public sealed class ResourceCommandDiagnosticsTests
         await InvokeAsync(new ReusedExceptionControlPlane(exception), exchange);
 
         // Assert
-        EventWrittenEventArgs malformed = webRecorder.Events.Where(item => item.EventId == 17 &&
+        EventWrittenEventArgs malformed = webRecorder.Events.Where(item => item.EventId == 3 &&
             Equals(Payload(item, "requestId"), requestId.ExpectedId)).ShouldHaveSingleItem();
         Payload(malformed, "phase").ShouldBe("Handler");
         Payload(malformed, "exceptionType").ShouldBe("System.ArgumentException");

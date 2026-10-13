@@ -48,9 +48,9 @@ Why the rule exists:
   delivers the family to applications, so an app using `Sdk.Web` sees every Web assembly without
   any project wiring, and builder verbs ship with their feature (see *Feature registration*
   below). Each reference `Web.Hosting` takes ships its closure in every framework that carries
-  `Web.Hosting`: `App.Web` and, privately, all 17 other area frameworks. It takes two (owner
-  decision 33, #1379): `Web.Routing`, for the pipeline terminal and the endpoint's route template
-  its telemetry reports, and `Web.Server`, for the per-exchange features the server installs.
+  `Web.Hosting`: `App.Web` and, privately, all 17 other area frameworks. It takes three:
+  `Web.Routing` for the pipeline terminal, `Web.Server` for the public engine and its per-exchange
+  features, and `Web.Health` for the integrated health adapter (decisions 33 and 57).
 - **The root holds no feature contracts** (owner decision 33, #1379). An `IHttpFeature` contract
   lives with the package that publishes it: the endpoint and the path base in `Web.Routing`, the
   request id, response completion and drain signal in `Web.Server`. The root keeps the base
@@ -175,6 +175,7 @@ flowchart LR
     Host --> Health["Web.Health"]
     Routing --> Root
     Server --> Root
+    Server --> Routing
     Host --> HR["Hosting.Resources"]
     Host --> HH["Hosting.Health"]
     Host --> JWT["IdentityModel.Token.JsonWebToken"]
@@ -182,13 +183,17 @@ flowchart LR
     Feature["Web feature libraries"] --> Root
 ```
 
+Web.Hosting references Web.Server for its public server engine. Web.Server references Web.Routing
+for the `http.route` template; Web.Routing must never reference Web.Server, which would form a cycle.
+The engine has no Hosting or connection-driver dependency and can be constructed directly.
+
 ## Project map
 
 | Project | Role |
 | --- | --- |
 | `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) and the composition verbs `Use`, `UseWhen` and `Run` every library builds against; no `IHttpFeature` contract (#1379) |
-| `Assimalign.Cohesion.Web.Server` | Contracts only: the per-exchange features the server publishes, `IWebRequestIdFeature` (the request's W3C trace id), `IWebRequestActivityFeature` (the server span), `IWebResponseStartingFeature` (callbacks before final-head commit), `IWebResponseCompletionFeature` (callbacks after the response reaches the transport), `IWebServerDrainFeature` (the lame-duck drain signal) and `IWebClientFaultFeature` (the `4xx` the transport answers a request body that broke its framing or a limit with, which `Web.Diagnostics`, `Web.ErrorHandling` and `Web.Compression` read so a client fault is not handled as an application defect, #1340). `Web.Hosting` installs all six; namespace `Assimalign.Cohesion.Web`, moved from the root (#1379) |
-| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, concrete-builder `AddService`, builder-time DI/config/logging composition; the server's request spans and HTTP metrics (`ActivitySource` and `Meter` `Assimalign.Cohesion.Web.Hosting`) and the request id (#1064). Integrates `Hosting.Health` contributors with `Web.Health` and serves the shared resource control plane with ES256 verification and deferred stop. References `Web.Routing`, `Web.Server`, and `Web.Health` (decision 57) |
+| `Assimalign.Cohesion.Web.Server` | Public `WebApplicationServer` engine and `WebApplicationServerOptions`, plus the seven per-exchange feature contracts it installs. Owns dispatch, drain, response callbacks, client-fault reports, request identity, spans, metrics and operator diagnostics under `Assimalign.Cohesion.Web.Server`. References Web.Routing for `http.route`; requires no hosting module or connection driver. |
+| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, non-owning `WebApplicationServerHostService`, concrete-builder `AddService`, builder-time DI/config/logging composition, HTTP policy defaults and TCP/QUIC helpers. Constructs the Web.Server engine. Integrates Hosting.Health with Web.Health and serves the shared resource control plane with ES256 verification and deferred stop. Its `WebHostingEventSource` owns control-plane diagnostics. References Web.Routing, Web.Server and Web.Health (decision 57). |
 | `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation; `UseRouting` selects the endpoint and the pipeline terminal runs it (#1054), so policy middleware registered after `UseRouting` reads the matched endpoint. Owns the endpoint contract (`IWebEndpointFeature`), the standard terminal (`WebApplicationTerminal`) and the branches that end in it (`Map(path)`, `MapWhen`, `IWebPathBaseFeature`), moved from the root (#1379) |
 | `Assimalign.Cohesion.Web.Api` | Endpoint mapping over the router: plain `Map`/`MapGet` terminal middleware plus source-generated typed-delegate binding (`(int id, IHttpContext) => ...` — route/query/header/body/form + uploaded files + injections, 400/413/415 outcomes), returned values written with content negotiation (`string` as `text/plain`, `null` as 204), `COHWEB` compile errors for handlers it cannot bind, and neutral endpoint-description metadata (`EndpointParameterMetadata`, `EndpointResponseMetadata`, plus the `WithTags`/`WithSummary`/`WithDescription`/`ExcludeFromDescription` verbs) for documentation adapters; the interceptor generator lives in `analyzers/Assimalign.Cohesion.SourceGeneration.Web` |
 | `Assimalign.Cohesion.Web.Serialization` | The content-serialization registry: media-type-keyed request-reader/response-writer halves, `AddJsonSerialization` over a source-generated resolver (AOT), and the `ReadContentAsync`/`WriteContentAsync` call sites |

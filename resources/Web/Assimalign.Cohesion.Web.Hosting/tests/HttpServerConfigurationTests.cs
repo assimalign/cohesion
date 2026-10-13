@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
+using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -10,6 +12,7 @@ using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 
@@ -19,6 +22,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
+[Collection(nameof(TelemetryCollection))]
 public class HttpServerConfigurationTests
 {
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Applies automatic Date configuration on both binding paths")]
@@ -771,16 +775,29 @@ public class HttpServerConfigurationTests
         IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
         {
             ["Http:Limits:MaxConcurrentConnections"] = "40",
+            ["Http:Endpoints:Primary:Protocol"] = "Http1",
+            ["Http:Endpoints:Primary:Host"] = "127.0.0.1",
+            ["Http:Endpoints:Primary:Port"] = "0",
         });
+        using EventSourceRecorder recorded = new(await ServerDiagnosticsSource.GetAsync(), EventLevel.Informational);
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.Server.UseConfiguration(configuration);
         await using WebApplication application = builder.Build();
 
-        // Act
-        IWebApplicationServer server = application.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
+        try
+        {
+            // Act
+            await ((IWebApplication)application).StartAsync(timeout.Token);
 
-        // Assert
-        server.ShouldBeOfType<WebApplicationServer>().MaxConcurrentConnections.ShouldBe(40);
+            // Assert
+            EventWrittenEventArgs bound = recorded.Events.Where(entry => entry.EventName == "ServerBound").ShouldHaveSingleItem();
+            bound.Payload![bound.PayloadNames!.IndexOf("maxConcurrentConnections")].ShouldBe(40);
+        }
+        finally
+        {
+            await ((IWebApplication)application).StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseConfiguration: An explicit LimitConcurrentConnections takes precedence over the configured cap")]
@@ -790,16 +807,29 @@ public class HttpServerConfigurationTests
         IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
         {
             ["Http:Limits:MaxConcurrentConnections"] = "40",
+            ["Http:Endpoints:Primary:Protocol"] = "Http1",
+            ["Http:Endpoints:Primary:Host"] = "127.0.0.1",
+            ["Http:Endpoints:Primary:Port"] = "0",
         });
+        using EventSourceRecorder recorded = new(await ServerDiagnosticsSource.GetAsync(), EventLevel.Informational);
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.Server.LimitConcurrentConnections(3).UseConfiguration(configuration);
         await using WebApplication application = builder.Build();
 
-        // Act
-        IWebApplicationServer server = application.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
+        try
+        {
+            // Act
+            await ((IWebApplication)application).StartAsync(timeout.Token);
 
-        // Assert
-        server.ShouldBeOfType<WebApplicationServer>().MaxConcurrentConnections.ShouldBe(3);
+            // Assert
+            EventWrittenEventArgs bound = recorded.Events.Where(entry => entry.EventName == "ServerBound").ShouldHaveSingleItem();
+            bound.Payload![bound.PayloadNames!.IndexOf("maxConcurrentConnections")].ShouldBe(3);
+        }
+        finally
+        {
+            await ((IWebApplication)application).StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: An invalid handshake timeout should name the endpoint and key")]

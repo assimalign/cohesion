@@ -69,7 +69,7 @@ public class Http3InputCompletionAllocationTests
         await using InMemoryMultiplexedConnectionListener transport = new();
         HttpConnectionListenerOptions options = new() { AddDateHeader = false };
         options.UseHttp3(new CompletedStreamInputListener(transport, publishCompletion: true));
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+        await WebServerTestInterceptors.InstallAsync(options);
         await using HttpConnectionListener listener = new(options);
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
         await client.OpenControlStreamAsync(cancellationToken);
@@ -97,7 +97,7 @@ public class Http3InputCompletionAllocationTests
         await using InMemoryMultiplexedConnectionListener transport = new();
         HttpConnectionListenerOptions options = new() { AddDateHeader = false };
         options.UseHttp3(new CompletedStreamInputListener(transport, publishCompletion));
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+        await WebServerTestInterceptors.InstallAsync(options);
         await using HttpConnectionListener listener = new(options);
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
         await client.OpenControlStreamAsync(cancellationToken);

@@ -400,7 +400,7 @@ An internal policy evaluation returns the first failing requirement's index, pre
 order and the synchronous fast path. Public `EvaluateAsync` keeps its `ValueTask<bool>` contract and
 behavior. The requirement's type name, joined policy scheme names, endpoint template, and request id
 are read only inside the Verbose `IsEnabled` guard. An empty `schemes` field means that the policy
-uses the authentication defaults. The request id comes from `IWebRequestIdFeature` in the contracts-only
+uses the authentication defaults. The request id comes from `IWebRequestIdFeature` in the
 Web.Server dependency; an absent feature produces an empty string. No ambient activity is consulted.
 The source never writes users, claims, role names, route values, request paths or queries.
 

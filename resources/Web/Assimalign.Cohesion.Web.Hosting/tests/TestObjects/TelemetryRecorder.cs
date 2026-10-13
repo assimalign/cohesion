@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 internal sealed record RecordedMeasurement(string Instrument, double Value, IReadOnlyDictionary<string, object?> Tags);
 
 /// <summary>
-/// Subscribes to the server's <c>Assimalign.Cohesion.Web.Hosting</c> activity source and meter, and
+/// Subscribes to the server's <c>Assimalign.Cohesion.Web.Server</c> activity source and meter, and
 /// records every stopped activity and every measurement until it is disposed.
 /// </summary>
 /// <remarks>
@@ -26,7 +26,7 @@ internal sealed record RecordedMeasurement(string Instrument, double Value, IRea
 /// </remarks>
 internal sealed class TelemetryRecorder : IDisposable
 {
-    public const string SourceName = "Assimalign.Cohesion.Web.Hosting";
+    public const string SourceName = "Assimalign.Cohesion.Web.Server";
 
     private readonly ActivityListener? _activityListener;
     private readonly MeterListener? _meterListener;

@@ -110,8 +110,8 @@ redesign, and is deliberately not built until a consumer needs it.
   is via installing a different `IHttpFormFeature`, not service location.
 - **References.** The Web root and `Http.Forms`, plus `Web.ProblemDetails` for
   the rejection payload (feature to feature, which the Web dependency rule
-  allows), `Http.Streaming` for the committed-head check, and the contracts-only
-  `Web.Server` for request correlation. All five are
+  allows), `Http.Streaming` for the committed-head check, and
+  `Web.Server` for the request-id contract used by request correlation. All five are
   already App.Web members, and none is a `Hosting*` library.
 
 ## Diagnostics

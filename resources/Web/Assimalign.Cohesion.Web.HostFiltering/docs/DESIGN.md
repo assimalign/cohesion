@@ -165,7 +165,7 @@ authority cannot be structurally split, such as `denied.example:` or `[::1`.
 raw header value or
 route template is written. The request id is read from `IWebRequestIdFeature`
 inside `IsEnabled`, with an empty string when a custom server omits the feature.
-`Activity.Current` is never used. The contracts-only `Web.Server` reference supplies
+`Activity.Current` is never used. The `Web.Server` reference supplies
 that feature and is already part of App.Web's closure.
 
 The `rejected-requests` total is a lazily created `PollingCounter`, backed by an

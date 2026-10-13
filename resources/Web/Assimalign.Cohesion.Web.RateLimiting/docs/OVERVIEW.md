@@ -26,7 +26,7 @@ partitioning and queueing, are available through the policy model.
 
 - `Assimalign.Cohesion.Web` — the pipeline builder and middleware abstractions the verb and middleware build on.
 - `Assimalign.Cohesion.Web.Routing` — the published route match and endpoint-metadata bag the per-endpoint gate reads, and the acknowledgement routing checks before it dispatches.
-- `Assimalign.Cohesion.Web.Server` — the contracts-only request-id feature used to correlate rejection diagnostics.
+- `Assimalign.Cohesion.Web.Server` — the request-id feature contract used to correlate rejection diagnostics.
 - `Assimalign.Cohesion.Http` — the HTTP context, status codes, and header keys.
 - `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveRemoteIp` read the client-address partition key composes with.
 - `Assimalign.Cohesion.Http.Streaming` — the response-streaming feature the rejection writer checks before answering.

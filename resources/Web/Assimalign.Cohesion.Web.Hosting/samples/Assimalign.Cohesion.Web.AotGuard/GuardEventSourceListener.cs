@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Web.AotGuard;
 /// </summary>
 internal sealed class GuardEventSourceListener : EventListener
 {
-    private const string sourceName = "Assimalign.Cohesion.Web.Hosting";
+    private const string sourceName = "Assimalign.Cohesion.Web.Server";
     private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
 
     /// <summary>

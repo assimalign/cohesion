@@ -158,7 +158,7 @@ internal sealed class TcpConnectionEventSource : EventSource
     exception is `ResponseHeadRefused`, which header-injection probes drive.
 14. **Web request events.** Per-request events are Verbose and never report success. They carry
     `requestId`, read inside `IsEnabled` as `IWebRequestIdFeature.RequestId.ToHexString()`. Never read
-    `Activity.Current`: with no ActivitySource listener, Web.Hosting does not enter `StartActivity`
+    `Activity.Current`: with no ActivitySource listener, Web.Server does not enter `StartActivity`
     to clear it, so it can be an unrelated ambient activity shared by every request. The request
     feature supplies the server span's trace id when traced, otherwise the `traceparent` id or a
     stable random id, so events and the HTTP access log can join.

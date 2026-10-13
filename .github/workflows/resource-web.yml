@@ -60,6 +60,7 @@ jobs:
             'Assimalign.Cohesion.Web.Routing',
             'Assimalign.Cohesion.Web.SecurityHeaders',
             'Assimalign.Cohesion.Web.Serialization',
+            # The shared action runs Web.Server/tests/Assimalign.Cohesion.Web.Server.Tests.csproj.
             'Assimalign.Cohesion.Web.Server',
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.StaticFiles',

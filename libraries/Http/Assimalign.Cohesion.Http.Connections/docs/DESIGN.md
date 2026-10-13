@@ -1755,7 +1755,7 @@ and verify real protocol decisions under both listeners by delta and connection/
 
 | What an operator wants | Owner |
 | --- | --- |
-| Per-request spans, latency, route and pipeline outcome | Web.Hosting's `ActivitySource` and `Meter`; application responses are not counted here. |
+| Per-request spans, latency, route and pipeline outcome | Web.Server's `ActivitySource` and `Meter`; application responses are not counted here. |
 | Driver connection lifetimes and counts | Each Connections driver's EventSource. |
 | TLS handshakes | Runtime `System.Net.Security`, plus the listener/QUIC driver's failures. |
 | Transport rejections, client-fault outcomes and protocol codes | This source and Meter; Web sources never report them. |

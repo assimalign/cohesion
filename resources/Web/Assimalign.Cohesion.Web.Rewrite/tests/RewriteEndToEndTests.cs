@@ -68,7 +68,7 @@ public class RewriteEndToEndTests
         TaskCompletionSource<Activity> stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
         using ActivityListener listener = new()
         {
-            ShouldListenTo = source => source.Name == "Assimalign.Cohesion.Web.Hosting",
+            ShouldListenTo = source => source.Name == "Assimalign.Cohesion.Web.Server",
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = activity =>
             {

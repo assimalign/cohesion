@@ -21,7 +21,7 @@ every server drains. The default server drains lame-duck style: it accepts nothi
 every peer the connection is closing (`Connection: close` or `GOAWAY`), lets the requests in
 flight finish within the host's shutdown budget, and cancels only what outlives it. Each exchange
 sees the drain begin through `IWebServerDrainFeature` (a `Web.Server` contract), so a long-lived one, such as a WebSocket,
-can end itself inside the budget. The internal `Assimalign.Cohesion.Web.Hosting` EventSource
+can end itself inside the budget. The internal `Assimalign.Cohesion.Web.Server` EventSource
 reports lifecycle and failures, with `serverId` identifying each server in the process and no
 request content in its payloads. See [Diagnostics](DESIGN.md#diagnostics). Disposing the application
 disposes the service provider and every factory-created service.
@@ -95,10 +95,10 @@ now affect HTTP/3 where 10.0.0-preview.1 ignored them; the default stays 10 seco
 
 The default server traces and measures every request (#1064). Subscribe by name:
 
-- **Traces:** the `ActivitySource` `Assimalign.Cohesion.Web.Hosting` emits one `Server` span per
+- **Traces:** the `ActivitySource` `Assimalign.Cohesion.Web.Server` emits one `Server` span per
   request, parented to the caller's W3C `traceparent`, named `GET /orders/{id}` once routing has
   selected the endpoint, and tagged per the OpenTelemetry HTTP server conventions.
-- **Metrics:** the `Meter` `Assimalign.Cohesion.Web.Hosting` emits `http.server.request.duration`
+- **Metrics:** the `Meter` `Assimalign.Cohesion.Web.Server` emits `http.server.request.duration`
   (seconds) and `http.server.active_requests`.
 - **Request id:** `context.Features.Get<IWebRequestIdFeature>()?.RequestId` is the request's trace id,
   with or without a listener.
@@ -111,14 +111,14 @@ builder.Server.AllowQueryValuesInTelemetry("page", "sort");
 ```
 
 With no listener the server creates no activity and records nothing. Exporting these signals is not
-this module's job; see [Design](DESIGN.md), "Server telemetry", for the attributes, the outcomes and
+this module's job; see [server telemetry](../../Assimalign.Cohesion.Web.Server/docs/DESIGN.md#server-telemetry-1064) for the attributes, the outcomes and
 what is deliberately not emitted.
 
 ## Dependencies and hosting integrations
 
 Within its area the module references the Web root, `Web.Routing`, `Web.Server`, and `Web.Health`.
-Routing supplies the pipeline terminal and route-template telemetry; Server supplies the request
-id, completion, and drain contracts; Health supplies the independent health model used by the
+Routing supplies the pipeline terminal; Server supplies the engine, telemetry and exchange features,
+including request id, completion and drain; Health supplies the independent health model used by the
 Hosting.Health adapter. COHRES002 permits Web libraries except Web.Testing, Web.ApplicationModel,
 Web.ApplicationModel.Orchestration, the App.Web producers, and harnesses. The two ApplicationModel
 packages also stay outside its resolved closure. Every reference ships in each area framework

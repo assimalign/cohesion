@@ -12,23 +12,26 @@ using Xunit;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Diagnostics;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
+using Assimalign.Cohesion.Web.Server.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 [Collection(nameof(TelemetryCollection))]
 public sealed class WebDefaultEventSourceForwardingTests
 {
-    private const string serverSource = "Assimalign.Cohesion.Web.Hosting";
+    private const string serverSource = "Assimalign.Cohesion.Web.Server";
+    private const string hostingSource = "Assimalign.Cohesion.Web.Hosting";
     private const string tcpSource = "Assimalign.Cohesion.Connections.Tcp";
     private const string dependencyInjectionSource = "Assimalign.Cohesion.DependencyInjection";
     private const string accessLogCategory = "Assimalign.Cohesion.Web.Diagnostics.HttpLogging";
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Default forwarding: Entry points forward Web events without TCP or dependency-injection events")]
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Default forwarding: Entry points forward both Web.Server and Web.Hosting without TCP or dependency-injection events")]
     public async Task Build_WithAnEntryPoint_ShouldForwardWebWithoutTransportOrContainerEvents()
     {
         // Arrange — initialize the real TCP provider so a separate listener can prove it raises events.
@@ -52,6 +55,7 @@ public sealed class WebDefaultEventSourceForwardingTests
         try
         {
             await ((IWebApplication)application).StartAsync(CancellationToken.None);
+            WebHostingEventSource.Log.StopAccepted(new ResourceContext(resourceName: "forwarding-test"), new FakeHttpContext(), deferred: false);
             await ((IWebApplication)application).StopAsync(CancellationToken.None);
 
             // Assert — each excluded provider actually emitted while forwarding was active.
@@ -60,9 +64,12 @@ public sealed class WebDefaultEventSourceForwardingTests
                 Equals(entry.Payload![0], containerId));
             tcpEvents.Events.ShouldContain(entry => entry.EventName == "ListenerBound" &&
                 Equals(entry.Payload![2], listener.EndPoint.ToString()));
-            long serverId = application.Context.Servers.Single().ShouldBeOfType<WebApplicationServer>().ServerId;
+            long serverId = (long)recorded.Entries.Single(entry => entry.Category == serverSource &&
+                Equals(entry.Attributes["EventName"], "ServerBound")).Attributes["serverId"]!;
             ServerEntries(recorded, serverId, "ServerBound").ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Information);
             ServerEntries(recorded, serverId, "ServerStopped").ShouldHaveSingleItem();
+            recorded.Entries.Where(entry => entry.Category == hostingSource &&
+                Equals(entry.Attributes["EventName"], "StopAccepted")).ShouldHaveSingleItem();
             recorded.Entries.ShouldNotContain(entry => entry.Category.StartsWith("Assimalign.Cohesion.Connections.", StringComparison.Ordinal));
             recorded.Entries.ShouldNotContain(entry => entry.Category == dependencyInjectionSource);
             factory.Forwarders.ShouldHaveSingleItem().Name.ShouldBe("EventSource");
@@ -205,6 +212,7 @@ public sealed class WebDefaultEventSourceForwardingTests
     public async Task DisposeAsync_WithDefaultForwarding_ShouldDisposeTheFactoryAndStopDelivery()
     {
         // Arrange
+        using EventSourceRecorder serverEvents = new(await ServerDiagnosticsSource.GetAsync(), EventLevel.Informational);
         RecordingLoggerProvider recorded = new();
         WebApplicationBuilder builder = WebApplication.CreateBuilder(Array.Empty<string>());
         builder.Logging.AddProvider(recorded);
@@ -213,12 +221,12 @@ public sealed class WebDefaultEventSourceForwardingTests
         WebApplicationServer first = new(new WebApplicationServerOptions
         {
             Pipeline = new FakePipeline(),
-            Listener = new FakeHttpConnectionListener(),
+            Listener = new HttpConnectionListenerOptions().UseHttp1(CreateListener()),
         });
         WebApplicationServer later = new(new WebApplicationServerOptions
         {
             Pipeline = new FakePipeline(),
-            Listener = new FakeHttpConnectionListener(),
+            Listener = new HttpConnectionListenerOptions().UseHttp1(CreateListener()),
         });
 
         // Act
@@ -231,8 +239,13 @@ public sealed class WebDefaultEventSourceForwardingTests
             await later.StopAsync(CancellationToken.None);
 
             // Assert
-            ServerEntries(recorded, first.ServerId, "ServerBound").ShouldHaveSingleItem();
-            ServerEntries(recorded, later.ServerId, "ServerBound").ShouldBeEmpty();
+            EventWrittenEventArgs[] bound = serverEvents.Events.Where(entry => entry.EventId == 1).ToArray();
+            bound.Length.ShouldBe(2);
+            long firstId = (long)bound[0].Payload![0]!;
+            long laterId = (long)bound[1].Payload![0]!;
+            firstId.ShouldNotBe(laterId);
+            ServerEntries(recorded, firstId, "ServerBound").ShouldHaveSingleItem();
+            ServerEntries(recorded, laterId, "ServerBound").ShouldBeEmpty();
             Should.Throw<ObjectDisposedException>(() => factory.Create("after-disposal"));
         }
         finally

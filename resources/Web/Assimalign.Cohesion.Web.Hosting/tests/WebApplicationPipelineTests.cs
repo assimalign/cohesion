@@ -8,6 +8,7 @@ using Xunit;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
+using Assimalign.Cohesion.Web.Server.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
 

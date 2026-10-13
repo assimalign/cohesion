@@ -12,11 +12,9 @@
 	     in all 18 area frameworks. See resources/Web/README.md. -->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
-		<!-- Owner decision 33 (#1379): the pipeline ends in Web.Routing's WebApplicationTerminal, and
-		     the server's telemetry names a request by IWebEndpointFeature.RouteTemplate (http.route). -->
+		<!-- Owner decision 33 (#1379): the pipeline ends in Web.Routing's WebApplicationTerminal. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
-		<!-- Owner decision 33 (#1379): the server installs Web.Server's request id, response
-		     completion and drain features on every exchange. -->
+		<!-- Owner decision 57 (b) (#1458): the public engine and its exchange features live in Web.Server. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />

@@ -42,17 +42,20 @@ runtime could see. Decision 32 relaxed COHRES002, and the five moved to their pu
 |---|---|---|---|
 | `IWebEndpointFeature` | `UseRouting` | `Web.Routing` | routing selects the endpoint; the standard terminal that runs it (`WebApplicationTerminal`) moved with it |
 | `IWebPathBaseFeature` | `Map(path)` | `Web.Routing` | the non-rejoining branches end in that terminal, so they and their path-base view moved too |
-| `IWebRequestIdFeature` | `Web.Hosting`'s telemetry | `Web.Server` | the server publishes it; COHRES001 rules out `Web.Hosting` itself as the home, because its readers are feature libraries |
-| `IWebResponseCompletionFeature` | `Web.Hosting` | `Web.Server` | as above |
-| `IWebServerDrainFeature` | `Web.Hosting` | `Web.Server` | as above |
+| `IWebRequestIdFeature` | `Web.Server`'s telemetry | `Web.Server` | the server publishes it; COHRES001 rules out `Web.Hosting` itself as the home, because its readers are feature libraries |
+| `IWebResponseCompletionFeature` | `Web.Server` | `Web.Server` | as above |
+| `IWebServerDrainFeature` | `Web.Server` | `Web.Server` | as above |
 
-The root's position after the move, with every arrow meaning "references":
+The engine now also lives in Web.Server, which references Web.Routing for the telemetry route
+template (decision 57). The reverse reference would create a cycle. The root's position after the
+move, with every arrow meaning "references":
 
 ```mermaid
 flowchart LR
     Root["Assimalign.Cohesion.Web — area root"] --> Http["Assimalign.Cohesion.Http"]
     Routing["Web.Routing — endpoint, path base, Map, terminal"] --> Root
-    Server["Web.Server — request id, completion, drain"] --> Root
+    Server["Web.Server — engine and exchange features"] --> Root
+    Server --> Routing
     Hosting["Web.Hosting — runtime module"] --> Root
     Hosting --> Routing
     Hosting --> Server
@@ -164,10 +167,12 @@ signal — are `Web.Server`'s contracts since #1379; their design is in
 [Web.Server's DESIGN](../../Assimalign.Cohesion.Web.Server/docs/DESIGN.md). A custom server may
 omit any of them, so their readers handle an absent feature.
 
-`IWebApplicationBuilder.AddServer` accepts that contracts-only server directly or through
-a factory over the final `IWebApplicationContext`. The Hosting implementation supplies its
-own lifecycle adapter, so a server is not required to reference or implement Hosting's
-`IHostService`. Multiple servers start in registration order and stop in reverse order;
+`IWebApplicationBuilder.AddServer` accepts any `IWebApplicationServer`, including the public
+`WebApplicationServer` engine, directly or through a factory over the final `IWebApplicationContext`.
+Web.Hosting wraps every server that is not an `IHostService` in the public, non-owning
+`WebApplicationServerHostService`. The wrapper forwards start and stop and owns its own service id;
+it does not dispose the server. A server need not reference or implement Hosting's `IHostService`.
+Multiple servers start in registration order and stop in reverse order;
 `IWebApplicationContext.Servers` exposes the original server objects rather than their
 runtime adapters.
 

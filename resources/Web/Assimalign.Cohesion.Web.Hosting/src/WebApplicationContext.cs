@@ -126,7 +126,7 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
             .Where(static server => server is not InactiveWebApplicationServer)
             .ToArray());
         _serverServices = new Lazy<IHostService[]>(() => _servers.Value
-            .Select(static server => server as IHostService ?? new WebApplicationServerLifecycleAdapter(server))
+            .Select(static server => server as IHostService ?? new WebApplicationServerHostService(server))
             .ToArray());
     }
 

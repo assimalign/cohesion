@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web;
 /// </para>
 /// <list type="bullet">
 /// <item>When the server traces the request (a listener subscribes to its <see cref="ActivitySource"/>,
-/// <c>Assimalign.Cohesion.Web.Hosting</c>), the id is the trace id of the request's server span. That is
+/// <c>Assimalign.Cohesion.Web.Server</c>), the id is the trace id of the request's server span. That is
 /// the caller's trace id when the request carried a valid W3C <c>traceparent</c> header, and a new trace
 /// id otherwise.</item>
 /// <item>Without a span the same rule applies: the trace id of a valid <c>traceparent</c>, or else a

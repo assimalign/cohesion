@@ -133,7 +133,7 @@ public class WebApplicationServerDefaultsTests
         await using InMemoryMultiplexedConnectionListener transport = new();
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(transport);
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+        await WebServerTestInterceptors.InstallAsync(options);
         InlineRequestProbe probe = new();
         options.Interceptors.Add(probe);
         await using HttpConnectionListener listener = new(options);
@@ -175,7 +175,7 @@ public class WebApplicationServerDefaultsTests
 
         WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
 
-        options.Interceptors.Count.ShouldBe(5);
+        options.Interceptors.Count.ShouldBe(3);
 
         // Prove slot 0 is the RequestLimits interceptor by behavior: its head hook attaches the
         // typed feature as a write-through view over the context knob.
@@ -294,77 +294,6 @@ public class WebApplicationServerDefaultsTests
         extendedConnect!.Protocol.ShouldBe("websocket");
         tunnel.ShouldBeSameAs(System.IO.Stream.Null);
         control.AcceptCount.ShouldBe(1);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the client-fault interceptor last, publishing the control's report on a request that can have a body")]
-    public void ApplyDefaultInterceptors_ShouldInstallClientFaultFourth()
-    {
-        // Arrange — #1340: the transport reports a client fault on the exchange control, which exists only
-        // in the response phase, so the interceptor takes part in it for a request that can fault.
-        HttpConnectionListenerOptions options = new();
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
-
-        HttpHeaderCollection requestHeaders = new();
-        requestHeaders[HttpHeaderKey.TransferEncoding] = "chunked";
-        HttpFeatureCollection features = new();
-        HttpExchangeInterceptorRequestContext request = CreateRequestContext(HttpVersion.Http11, requestHeaders, features);
-        ClientFaultControl control = new() { ClientFaultStatusCode = HttpStatusCode.BadRequest };
-
-        // Act — prove slot 3 is the client-fault interceptor by behavior.
-        options.Interceptors[3].AfterRequestHead(request);
-        request.ResponseInterceptors.ShouldHaveSingleItem().ShouldBeSameAs(options.Interceptors[3]);
-        options.Interceptors[3].BeforeResponse(new HttpExchangeInterceptorResponseContext
-        {
-            Version = HttpVersion.Http11,
-            Headers = new HttpHeaderCollection(),
-            Features = features,
-            ConnectionInfo = HttpConnectionInfo.Empty,
-            ResponseBody = System.IO.Stream.Null,
-            Control = control,
-        });
-
-        // Assert — the feature reads the control, so a status latched later is reported too.
-        IWebClientFaultFeature feature = features.Get<IWebClientFaultFeature>().ShouldNotBeNull();
-        feature.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
-        control.ClientFaultStatusCode = HttpStatusCode.RequestEntityTooLarge;
-        feature.StatusCode.ShouldBe(HttpStatusCode.RequestEntityTooLarge);
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: The client-fault interceptor should leave a request that cannot have a body on the fast path")]
-    [InlineData("1.1")]
-    [InlineData("2")]
-    [InlineData("3")]
-    public void ClientFaultInterceptor_OnRequestThatCannotHaveABody_ShouldNotTakeTheResponsePhase(string version)
-    {
-        // Arrange — the transport found that nothing follows the head: no body can fault while it is read.
-        HttpConnectionListenerOptions options = new();
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
-        HttpExchangeInterceptorRequestContext request = CreateRequestContext(ToVersion(version), new HttpHeaderCollection(), new HttpFeatureCollection(), canHaveBody: false);
-
-        // Act
-        options.Interceptors[3].AfterRequestHead(request);
-
-        // Assert
-        request.ResponseInterceptors.ShouldBeEmpty();
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: The client-fault interceptor should take the response phase for a request that can have a body on every version")]
-    [InlineData("1.1")]
-    [InlineData("2")]
-    [InlineData("3")]
-    public void ClientFaultInterceptor_OnRequestThatCanHaveABody_ShouldTakeTheResponsePhase(string version)
-    {
-        // Arrange — #1378: an HTTP/2 or HTTP/3 request need not declare its body, so the head carries no
-        // Content-Length or Transfer-Encoding here; the transport's signal alone decides.
-        HttpConnectionListenerOptions options = new();
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
-        HttpExchangeInterceptorRequestContext request = CreateRequestContext(ToVersion(version), new HttpHeaderCollection(), new HttpFeatureCollection(), canHaveBody: true);
-
-        // Act
-        options.Interceptors[3].AfterRequestHead(request);
-
-        // Assert
-        request.ResponseInterceptors.ShouldHaveSingleItem().ShouldBeSameAs(options.Interceptors[3]);
     }
 
     private static HttpVersion ToVersion(string version) => version switch
