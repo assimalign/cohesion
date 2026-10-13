@@ -77,7 +77,7 @@ public sealed class JwtBearerEventSourceTests
             _ => throw new InvalidOperationException(),
         };
         context.SetAuthorization("Bearer " + token);
-        IAuthenticationHandler handler = JwtBearerAuthentication.CreateHandler(Options());
+        IAuthenticationHandler handler = JwtBearerHandler.Create(Options());
         await handler.InitializeAsync(new AuthenticationScheme(scheme, null, () => handler), context);
         long before = JwtBearerEventSource.Log.RejectedTokens;
 
@@ -123,7 +123,7 @@ public sealed class JwtBearerEventSourceTests
         string algorithm = new('a', 80);
         string keyId = new('k', 300);
         context.SetAuthorization("Bearer " + Compact("{\"alg\":\"" + algorithm + "\",\"kid\":\"" + keyId + "\"}", "{}", "AA"));
-        IAuthenticationHandler handler = JwtBearerAuthentication.CreateHandler(Options());
+        IAuthenticationHandler handler = JwtBearerHandler.Create(Options());
         const string scheme = "truncation";
         await handler.InitializeAsync(new AuthenticationScheme(scheme, null, () => handler), context);
 
@@ -143,8 +143,8 @@ public sealed class JwtBearerEventSourceTests
         // Arrange
         AuthenticationBuilder builder = new();
         builder.Options.DefaultScheme = "first";
-        builder.AddScheme(new AuthenticationScheme("first", null, () => JwtBearerAuthentication.CreateHandler(Options())));
-        builder.AddScheme(new AuthenticationScheme("second", null, () => JwtBearerAuthentication.CreateHandler(Options())));
+        builder.AddScheme(new AuthenticationScheme("first", null, () => JwtBearerHandler.Create(Options())));
+        builder.AddScheme(new AuthenticationScheme("second", null, () => JwtBearerHandler.Create(Options())));
         IAuthenticationService service = builder.Build();
         long before = JwtBearerEventSource.Log.RejectedTokens;
 
@@ -175,7 +175,7 @@ public sealed class JwtBearerEventSourceTests
         {
             context.SetAuthorization("Bearer " + TestJwt.Hmac(_key, TestJwt.Payload(_now, "issuer-secret", "audience-secret"), keyId: "current"));
         }
-        IAuthenticationHandler handler = JwtBearerAuthentication.CreateHandler(Options());
+        IAuthenticationHandler handler = JwtBearerHandler.Create(Options());
         await handler.InitializeAsync(new AuthenticationScheme("accepted", null, () => handler), context);
         long before = JwtBearerEventSource.Log.RejectedTokens;
 
@@ -200,7 +200,7 @@ public sealed class JwtBearerEventSourceTests
         TestRequestIdFeature requestId = new();
         context.Features.Set<IWebRequestIdFeature>(requestId);
         context.SetAuthorization("Bearer malformed");
-        IAuthenticationHandler handler = JwtBearerAuthentication.CreateHandler(Options());
+        IAuthenticationHandler handler = JwtBearerHandler.Create(Options());
         await handler.InitializeAsync(new AuthenticationScheme("disabled", null, () => handler), context);
         long before = JwtBearerEventSource.Log.RejectedTokens;
 
@@ -224,7 +224,7 @@ public sealed class JwtBearerEventSourceTests
         factory.Builder.Services.AddAuthentication(authentication =>
         {
             authentication.Options.DefaultScheme = "reauthentication";
-            authentication.AddScheme(new AuthenticationScheme("reauthentication", null, () => JwtBearerAuthentication.CreateHandler(Options())));
+            authentication.AddScheme(new AuthenticationScheme("reauthentication", null, () => JwtBearerHandler.Create(Options())));
         });
         factory.Builder.Services.AddAuthorization();
         IRouterBuilder routes = factory.Application.UseRouting();
@@ -267,7 +267,7 @@ public sealed class JwtBearerEventSourceTests
     private static JwtBearerOptions Options()
     {
         JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
-        options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(_key, "current"));
+        options.SigningKeys.Add(HmacJwtSignatureVerifier.Create(_key, "current"));
         options.ValidIssuers.Add("issuer-secret");
         options.ValidAudiences.Add("audience-secret");
         return options;

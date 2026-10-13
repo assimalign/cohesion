@@ -7,10 +7,12 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Security.DataProtection;
+using Assimalign.Cohesion.Web.Authentication.Cookie.Internal;
 using Assimalign.Cohesion.Web.Routing;
 
-namespace Assimalign.Cohesion.Web.Authentication.Cookie.Internal;
+namespace Assimalign.Cohesion.Web.Authentication.Cookie;
 
+// Deviates from the internal-implementation rule per owner decision 59 (#1465): the implementation is public.
 /// <summary>
 /// The cookie authentication handler: issues and validates a data-protected ticket cookie,
 /// applies sliding-expiration renewal, and drives login/logout/access-denied behavior — redirects
@@ -24,7 +26,7 @@ namespace Assimalign.Cohesion.Web.Authentication.Cookie.Internal;
 /// return URL), which the user agent resolves against the URL it actually requested, so they need no
 /// host or scheme and stay correct behind a proxy.
 /// </remarks>
-internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
+public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
 {
     private readonly CookieAuthenticationOptions _options;
     private readonly IDataProtector _protector;
@@ -33,7 +35,7 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     private IHttpContext _context = null!;
     private AuthenticateResult? _cachedResult;
 
-    public CookieAuthenticationHandler(CookieAuthenticationOptions options)
+    private CookieAuthenticationHandler(CookieAuthenticationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
@@ -43,7 +45,21 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
                 "from the application data-protection key ring.");
     }
 
+    /// <summary>
+    /// Creates a cookie authentication handler over the supplied options.
+    /// </summary>
+    /// <param name="options">The configured cookie options. <see cref="CookieAuthenticationOptions.TicketProtector"/> must be set.</param>
+    /// <returns>A cookie authentication handler.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><see cref="CookieAuthenticationOptions.TicketProtector"/> is not set.</exception>
+    public static CookieAuthenticationHandler Create(CookieAuthenticationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return new CookieAuthenticationHandler(options);
+    }
+
     /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="scheme"/> or <paramref name="context"/> is <see langword="null"/>.</exception>
     public Task InitializeAsync(AuthenticationScheme scheme, IHttpContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scheme);
@@ -117,6 +133,7 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     }
 
     /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="user"/> is <see langword="null"/>.</exception>
     public Task SignInAsync(ClaimsPrincipal user, AuthenticationProperties? properties, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(user);

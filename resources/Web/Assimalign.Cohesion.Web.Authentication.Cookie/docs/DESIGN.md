@@ -184,13 +184,18 @@ URL it actually requested. Nothing in the handler reads `Request.Host`,
 by construction; an absolute return URL would have to be built from the
 effective scheme and host.
 
-## Interface-first posture
+## Public implementation and preview.1 compatibility (#1465)
 
-`CookieAuthenticationHandler` is `internal`; the public surface is
-`IAuthenticationHandler`/`IAuthenticationSignInHandler` from the base
-package plus the `CookieAuthentication.CreateHandler` factory the
-composition root calls. `CookieAuthenticationOptions` and
-`CookieAuthenticationDefaults` are the only other public types.
+Owner decision 59 makes `CookieAuthenticationHandler` public and sealed, with a private
+constructor and `Create(options)` returning the concrete handler.
+`IAuthenticationHandler`/`IAuthenticationSignInHandler` remain the extension contracts.
+Creation keeps the same options and validation.
+
+10.0.0-preview.1 shipped `CookieAuthentication.CreateHandler(options)`. The static
+`CookieAuthentication` class is removed: migrate to
+`CookieAuthenticationHandler.Create(options)` and rebuild. This is source- and
+binary-breaking, accepted during previews on decision 15's terms. Authentication,
+ticket protection and redirect behavior are unchanged by the conversion.
 
 ## AOT posture
 

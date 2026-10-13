@@ -244,9 +244,10 @@ the earlier key ring. The builder cannot tell a scheme's read from any
 other, so a caller that reads `DataProtectionProvider` (to share the key
 ring with antiforgery, say) fixes it too, and the error says either may
 have read it. `AuthenticationService.Create` and the public
-handler factories (`CookieAuthentication.CreateHandler`,
-`JwtBearerAuthentication.CreateHandler`, `CertificateAuthentication.CreateHandler`) remain the seams the verbs use
-while the concrete handler and service implementations stay `internal`.
+handler factories (`CookieAuthenticationHandler.Create`,
+`JwtBearerHandler.Create`, `CertificateAuthenticationHandler.Create`) remain the seams the verbs use
+on the public sealed handler and service implementations. Each `Create` returns its concrete
+type; construction is private and the existing interfaces remain the extension contracts.
 
 ## Family map
 
@@ -315,3 +316,15 @@ serialization or runtime-policy surface is consumed by this package.
 - **A claim-transformation pipeline.** Middleware that needs to
   reshape claims should mutate the principal it installs; the feature
   itself stays a passive holder.
+
+## Public implementation and preview.1 compatibility (#1465)
+
+Owner decision 59 moves the static entry point onto the public sealed
+`AuthenticationService` implementation, with a private constructor.
+`AuthenticationService.Create(options)` keeps its parameters, live-options behavior and
+validation, and now returns `AuthenticationService` instead of `IAuthenticationService`.
+
+The static entry point shipped in 10.0.0-preview.1. Existing calls keep the same spelling and
+remain source-compatible; assigning the returned value to `IAuthenticationService` still works.
+The concrete return type changes the CLR method signature, so this is binary-breaking and
+consumers must rebuild. The break is accepted during previews on decision 15's terms.

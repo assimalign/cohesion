@@ -14,6 +14,22 @@ namespace Assimalign.Cohesion.Web.Authentication.Certificate.Tests;
 
 public class CertificateAuthenticationHandlerTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Certificate] - Create: returns the public concrete handler implementing its contract")]
+    public async Task Create_WithOptions_ReturnsConcreteHandler()
+    {
+        // Arrange
+        TestHttpContext context = TestHttpContext.Create();
+
+        // Act
+        CertificateAuthenticationHandler handler = CertificateAuthenticationHandler.Create(new CertificateAuthenticationOptions());
+        IAuthenticationHandler contract = handler;
+        await contract.InitializeAsync(new AuthenticationScheme("Certificate", null, () => handler), context, CancellationToken.None);
+        AuthenticateResult result = await contract.AuthenticateAsync(CancellationToken.None);
+
+        // Assert
+        result.None.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.Authentication.Certificate] - Authenticate: No client certificate should yield no result")]
     [InlineData(false)]
     [InlineData(true)]
@@ -319,7 +335,7 @@ public class CertificateAuthenticationHandlerTests
 
     private static async Task<IAuthenticationHandler> InitializeAsync(CertificateAuthenticationOptions options, TestHttpContext context)
     {
-        IAuthenticationHandler handler = CertificateAuthentication.CreateHandler(options);
+        IAuthenticationHandler handler = CertificateAuthenticationHandler.Create(options);
         await handler.InitializeAsync(new AuthenticationScheme(CertificateAuthenticationDefaults.AuthenticationScheme, null, () => handler), context, CancellationToken.None);
         return handler;
     }

@@ -5,10 +5,13 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Authentication.Certificate.Internal;
 
-namespace Assimalign.Cohesion.Web.Authentication.Certificate.Internal;
+namespace Assimalign.Cohesion.Web.Authentication.Certificate;
 
-internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
+// Deviates from the internal-implementation rule per owner decision 59 (#1465): the implementation is public.
+/// <summary>Authenticates requests with a TLS client certificate and optional application validation.</summary>
+public sealed class CertificateAuthenticationHandler : IAuthenticationHandler
 {
     private readonly Func<CertificateValidatedContext, CancellationToken, ValueTask>? _onCertificateValidated;
     private AuthenticationScheme _scheme = null!;
@@ -16,11 +19,24 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
     private Task<AuthenticateResult>? _authentication;
     private int _rejectionReported;
 
-    public CertificateAuthenticationHandler(Func<CertificateValidatedContext, CancellationToken, ValueTask>? onCertificateValidated)
+    private CertificateAuthenticationHandler(Func<CertificateValidatedContext, CancellationToken, ValueTask>? onCertificateValidated)
     {
         _onCertificateValidated = onCertificateValidated;
     }
 
+    /// <summary>Creates a handler with a snapshot of the supplied options.</summary>
+    /// <param name="options">Application mapping and validation options.</param>
+    /// <returns>A fresh per-request authentication handler.</returns>
+    /// <exception cref="ArgumentNullException">The options are null.</exception>
+    public static CertificateAuthenticationHandler Create(CertificateAuthenticationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return new CertificateAuthenticationHandler(options.OnCertificateValidated);
+    }
+
+    /// <inheritdoc />
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is canceled.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="scheme"/> or <paramref name="context"/> is <see langword="null"/>.</exception>
     public Task InitializeAsync(AuthenticationScheme scheme, IHttpContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scheme);
@@ -33,6 +49,8 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is canceled.</exception>
     public Task<AuthenticateResult> AuthenticateAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -83,6 +101,8 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
             validation.Principal, new AuthenticationProperties(), _scheme.Name));
     }
 
+    /// <inheritdoc />
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is canceled.</exception>
     public Task ChallengeAsync(AuthenticationProperties? properties, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -99,6 +119,8 @@ internal sealed class CertificateAuthenticationHandler : IAuthenticationHandler
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is canceled.</exception>
     public Task ForbidAsync(AuthenticationProperties? properties, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

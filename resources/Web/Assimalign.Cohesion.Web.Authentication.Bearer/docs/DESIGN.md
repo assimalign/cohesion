@@ -36,9 +36,10 @@ a Web dependency. Bearer keeps the orchestration and its public compatibility se
 - **ECDSA** (`ES256/384/512`) &mdash; a thin adapter over
   `JsonWebTokenSignatureVerifier.CreateEcdsa`, including named-curve and P1363-length binding.
 
-`JwtSignatureVerifier.CreateHmac/CreateRsa/CreateEcdsa` remain the public Bearer factories; the
-adapter and all concrete verifiers stay internal. This preserves configured applications while
-making the asymmetric primitive available below Web.
+`HmacJwtSignatureVerifier.Create`, `RsaJwtSignatureVerifier.Create` and
+`EcdsaJwtSignatureVerifier.Create` return their public sealed implementations. The RSA and
+ECDSA adapters are separate types; each delegates to the corresponding IdentityModel verifier
+and borrows the caller's key. Their constructors are private.
 
 **Algorithm-confusion defense is structural.** Because a verifier is bound
 to concrete key material, its accepted algorithms are bounded by its key
@@ -76,7 +77,7 @@ empty `ValidIssuers` or `ValidAudiences` is a configuration error:
 
 - `AddJwtBearer` validates the options when the scheme is registered, so the
   application fails at startup where the misconfiguration is written.
-- `JwtBearerAuthentication.CreateHandler` runs the same check, for composition
+- `JwtBearerHandler.Create` runs the same check, for composition
   roots that build handlers themselves.
 - The handler treats an empty list with validation on as matching nothing,
   which covers options mutated after registration.
@@ -167,3 +168,22 @@ key id are untrusted text, truncated only when the event is enabled.
 
 This adds diagnostics without changing public APIs or authentication decisions relative
 to 10.0.0-preview.1. The separate #1450 challenge behavior change is described above.
+
+## Public implementations and preview.1 compatibility (#1465)
+
+Owner decision 59 promotes `JwtBearerHandler` and the three signature verifiers to public sealed
+types with private constructors. Each creation method returns its own type and preserves its
+parameters and validation; the handler and verifier interfaces remain the extension contracts.
+
+10.0.0-preview.1 shipped the static `JwtBearerAuthentication` and `JwtSignatureVerifier`
+classes. Their removal and replacement are source- and binary-breaking, accepted during
+previews on decision 15's terms. Migrate and rebuild:
+
+| Preview.1 call | Replacement |
+| --- | --- |
+| `JwtBearerAuthentication.CreateHandler(options)` | `JwtBearerHandler.Create(options)` |
+| `JwtSignatureVerifier.CreateHmac(key, keyId)` | `HmacJwtSignatureVerifier.Create(key, keyId)` |
+| `JwtSignatureVerifier.CreateRsa(publicKey, keyId)` | `RsaJwtSignatureVerifier.Create(publicKey, keyId)` |
+| `JwtSignatureVerifier.CreateEcdsa(publicKey, keyId)` | `EcdsaJwtSignatureVerifier.Create(publicKey, keyId)` |
+
+Authentication and cryptographic verification behavior are unchanged by this conversion.

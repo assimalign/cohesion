@@ -8,16 +8,18 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.IdentityModel.Token;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+using Assimalign.Cohesion.Web.Authentication.Bearer.Internal;
 
-namespace Assimalign.Cohesion.Web.Authentication.Bearer.Internal;
+namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 
+// Deviates from the internal-implementation rule per owner decision 59 (#1465): the implementation is public.
 /// <summary>
 /// The JWT bearer authentication handler: parses the <c>Authorization: Bearer</c> credential,
 /// verifies the token signature through the configured keys, validates the document rules through
 /// the IdentityModel JSON Web Token contracts, maps the token onto a principal, and emits RFC 6750
 /// <c>WWW-Authenticate</c> challenges.
 /// </summary>
-internal sealed class JwtBearerHandler : IAuthenticationHandler
+public sealed class JwtBearerHandler : IAuthenticationHandler
 {
     private readonly JwtBearerOptions _options;
 
@@ -25,13 +27,66 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
     private IHttpContext _context = null!;
     private AuthenticateResult? _cachedResult;
 
-    public JwtBearerHandler(JwtBearerOptions options)
+    private JwtBearerHandler(JwtBearerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
     }
 
+    /// <summary>
+    /// Creates a JWT bearer authentication handler over the supplied options.
+    /// </summary>
+    /// <param name="options">The configured bearer options.</param>
+    /// <returns>A JWT bearer authentication handler.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="JwtBearerOptions.RequireSignedTokens"/> is <see langword="true"/> but no signing keys
+    /// are configured; or <see cref="JwtBearerOptions.ValidateIssuer"/> is <see langword="true"/> but
+    /// <see cref="JwtBearerOptions.ValidIssuers"/> is empty; or
+    /// <see cref="JwtBearerOptions.ValidateAudience"/> is <see langword="true"/> but
+    /// <see cref="JwtBearerOptions.ValidAudiences"/> is empty.
+    /// </exception>
+    public static JwtBearerHandler Create(JwtBearerOptions options)
+    {
+        Validate(options);
+        return new JwtBearerHandler(options);
+    }
+
+    /// <summary>
+    /// Validates bearer options against the fail-closed defaults: a signed-token scheme needs a
+    /// signing key, and issuer and audience validation need at least one accepted value each
+    /// unless the application opted out explicitly.
+    /// </summary>
+    /// <param name="options">The configured bearer options.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A required value is missing; the message names the property and the opt-out.</exception>
+    internal static void Validate(JwtBearerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.RequireSignedTokens && options.SigningKeys.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "JwtBearerOptions requires at least one signing key when RequireSignedTokens is true.");
+        }
+
+        if (options.ValidateIssuer && options.ValidIssuers.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "JwtBearerOptions requires at least one entry in ValidIssuers while ValidateIssuer is true. " +
+                "Add the issuer (the token's 'iss') the scheme accepts, or set ValidateIssuer = false to accept any issuer a signing key verifies.");
+        }
+
+        if (options.ValidateAudience && options.ValidAudiences.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "JwtBearerOptions requires at least one entry in ValidAudiences while ValidateAudience is true. " +
+                "Add the audience (the token's 'aud') this service answers to, or set ValidateAudience = false to accept tokens minted for any audience.");
+        }
+    }
+
     /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="scheme"/> or <paramref name="context"/> is <see langword="null"/>.</exception>
     public Task InitializeAsync(AuthenticationScheme scheme, IHttpContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scheme);
@@ -197,7 +252,7 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
     }
 
     // Fail closed: validation is on unless the application turned it off, and an empty accepted
-    // list with validation on matches nothing (JwtBearerAuthentication.Validate rejects that
+    // list with validation on matches nothing (JwtBearerHandler.Validate rejects that
     // configuration up front, so this is the defense for options mutated after registration).
     private bool IssuerIsValid(JsonWebToken jwt)
     {

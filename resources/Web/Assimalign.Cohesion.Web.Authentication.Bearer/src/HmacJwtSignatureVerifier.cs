@@ -3,18 +3,19 @@ using System.Security.Cryptography;
 
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.Web.Authentication.Bearer.Internal;
+namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 
+// Deviates from the internal-implementation rule per owner decision 59 (#1465): the implementation is public.
 /// <summary>
 /// Verifies HMAC-signed tokens (<c>HS256</c>/<c>HS384</c>/<c>HS512</c>) with a shared secret.
 /// The computed MAC is compared in fixed time to defeat timing side channels.
 /// </summary>
-internal sealed class HmacJwtSignatureVerifier : IJwtSignatureVerifier
+public sealed class HmacJwtSignatureVerifier : IJwtSignatureVerifier
 {
     private readonly byte[] _key;
     private readonly string? _keyId;
 
-    public HmacJwtSignatureVerifier(byte[] key, string? keyId)
+    private HmacJwtSignatureVerifier(byte[] key, string? keyId)
     {
         ArgumentNullException.ThrowIfNull(key);
         if (key.Length == 0)
@@ -25,6 +26,17 @@ internal sealed class HmacJwtSignatureVerifier : IJwtSignatureVerifier
         _key = (byte[])key.Clone();
         _keyId = keyId;
     }
+
+    /// <summary>
+    /// Creates a verifier for HMAC-signed tokens (<c>HS256</c>/<c>HS384</c>/<c>HS512</c>).
+    /// </summary>
+    /// <param name="key">The shared secret. Copied defensively.</param>
+    /// <param name="keyId">The <c>kid</c> this key answers to, or <see langword="null"/> to match any token that omits or ignores <c>kid</c>.</param>
+    /// <returns>An HMAC verifier.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="key"/> is empty.</exception>
+    public static HmacJwtSignatureVerifier Create(byte[] key, string? keyId = null)
+        => new HmacJwtSignatureVerifier(key, keyId);
 
     /// <inheritdoc />
     public bool CanVerify(string algorithm, string? keyId)

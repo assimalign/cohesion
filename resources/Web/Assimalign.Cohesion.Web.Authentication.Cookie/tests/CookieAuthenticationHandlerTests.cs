@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
@@ -43,13 +44,29 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Create: returns the public concrete handler implementing its contract")]
+    public async Task Create_WithOptions_ReturnsConcreteHandler()
+    {
+        // Arrange
+        TestHttpContext context = TestHttpContext.Create();
+
+        // Act
+        CookieAuthenticationHandler handler = CookieAuthenticationHandler.Create(CreateOptions());
+        IAuthenticationSignInHandler contract = handler;
+        await contract.InitializeAsync(new AuthenticationScheme("Cookies", null, () => handler), context, CancellationToken.None);
+        AuthenticateResult result = await contract.AuthenticateAsync(CancellationToken.None);
+
+        // Assert
+        result.None.ShouldBeTrue();
+    }
+
     private CookieAuthenticationOptions CreateOptions()
         => new() { TicketProtector = _protector, TimeProvider = _time };
 
     private static async Task<IAuthenticationSignInHandler> InitializeAsync(
         CookieAuthenticationOptions options, TestHttpContext context)
     {
-        IAuthenticationSignInHandler handler = CookieAuthentication.CreateHandler(options);
+        IAuthenticationSignInHandler handler = CookieAuthenticationHandler.Create(options);
         AuthenticationScheme scheme = new(CookieAuthenticationDefaults.AuthenticationScheme, null, () => handler);
         await handler.InitializeAsync(scheme, context);
         return handler;

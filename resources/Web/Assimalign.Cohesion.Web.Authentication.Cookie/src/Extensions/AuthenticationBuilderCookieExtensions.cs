@@ -57,7 +57,7 @@ public static class AuthenticationBuilderCookieExtensions
             return builder.AddScheme(new AuthenticationScheme(
                 scheme,
                 options.DisplayName,
-                () => CookieAuthentication.CreateHandler(options)));
+                () => CookieAuthenticationHandler.Create(options)));
         }
     }
 }

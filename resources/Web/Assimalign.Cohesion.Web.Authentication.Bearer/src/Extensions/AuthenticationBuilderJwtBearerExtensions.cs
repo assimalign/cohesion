@@ -53,12 +53,12 @@ public static class AuthenticationBuilderJwtBearerExtensions
 
             // Fail at registration, where the misconfiguration is written, not on the first
             // authenticated request.
-            JwtBearerAuthentication.Validate(options);
+            JwtBearerHandler.Validate(options);
 
             return builder.AddScheme(new AuthenticationScheme(
                 scheme,
                 options.DisplayName,
-                () => JwtBearerAuthentication.CreateHandler(options)));
+                () => JwtBearerHandler.Create(options)));
         }
     }
 }

@@ -285,7 +285,7 @@ public class CertificateAuthenticationEventSourceTests
 
     private static async Task<IAuthenticationHandler> InitializeAsync(CertificateAuthenticationOptions options, TestHttpContext context, string scheme = "certificate")
     {
-        IAuthenticationHandler handler = CertificateAuthentication.CreateHandler(options);
+        IAuthenticationHandler handler = CertificateAuthenticationHandler.Create(options);
         await handler.InitializeAsync(new AuthenticationScheme(scheme, null, () => handler), context, CancellationToken.None);
         return handler;
     }

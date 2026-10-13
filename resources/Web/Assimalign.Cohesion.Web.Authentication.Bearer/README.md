@@ -13,11 +13,12 @@ re-validates the caller-supplied token on every request.
   least one issuer and one audience fails unless `ValidateIssuer` or
   `ValidateAudience` is set to `false` explicitly.
 - `JwtBearerDefaults` &mdash; the default scheme name (`"Bearer"`).
-- `IJwtSignatureVerifier` + `JwtSignatureVerifier.CreateHmac/CreateRsa/CreateEcdsa`
+- `IJwtSignatureVerifier` + the public sealed `HmacJwtSignatureVerifier`,
+  `RsaJwtSignatureVerifier` and `EcdsaJwtSignatureVerifier`, each with `Create`
   &mdash; the compatibility seam: HMAC remains Web-local, while the RSA/ECDSA factories
   adapt the reusable IdentityModel JWT verifiers.
-- `JwtBearerAuthentication.CreateHandler(options)` &mdash; the factory the
-  composition root calls; the concrete handler stays internal.
+- `JwtBearerHandler.Create(options)` &mdash; the factory the
+  composition root calls; it returns the public sealed handler with private construction.
 
 ## How it fits
 
@@ -39,7 +40,7 @@ builder.Services.AddAuthentication(auth =>
     {
         o.ValidIssuers.Add("https://issuer.example");
         o.ValidAudiences.Add("api://default");
-        o.SigningKeys.Add(JwtSignatureVerifier.CreateRsa(publicKey));
+        o.SigningKeys.Add(RsaJwtSignatureVerifier.Create(publicKey));
     });
 });
 

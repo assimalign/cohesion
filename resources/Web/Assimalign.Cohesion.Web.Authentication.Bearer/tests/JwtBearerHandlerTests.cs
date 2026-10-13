@@ -1,6 +1,7 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
@@ -14,6 +15,48 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer.Tests;
 
 public class JwtBearerHandlerTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Create: returns the public concrete handler implementing its contract")]
+    public async Task Create_WithOptions_ReturnsConcreteHandler()
+    {
+        // Arrange
+        JwtBearerOptions options = HmacOptions();
+        TestHttpContext context = TestHttpContext.Create();
+
+        // Act
+        JwtBearerHandler handler = JwtBearerHandler.Create(options);
+        IAuthenticationHandler contract = handler;
+        await contract.InitializeAsync(new AuthenticationScheme("Bearer", null, () => handler), context, CancellationToken.None);
+        AuthenticateResult result = await contract.AuthenticateAsync(CancellationToken.None);
+
+        // Assert
+        result.None.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Create: concrete signature verifiers retain their algorithm and key selection")]
+    public void Create_WithKeys_ReturnsConcreteSignatureVerifiers()
+    {
+        // Arrange
+        using RSA rsa = RSA.Create(2048);
+        using ECDsa ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        byte[] input = Encoding.ASCII.GetBytes("header.payload");
+
+        // Act
+        HmacJwtSignatureVerifier hmacVerifier = HmacJwtSignatureVerifier.Create(_secretKey, "hmac");
+        RsaJwtSignatureVerifier rsaVerifier = RsaJwtSignatureVerifier.Create(rsa, "rsa");
+        EcdsaJwtSignatureVerifier ecdsaVerifier = EcdsaJwtSignatureVerifier.Create(ecdsa, "ec");
+        IJwtSignatureVerifier[] contracts = [hmacVerifier, rsaVerifier, ecdsaVerifier];
+
+        // Assert
+        contracts[0].CanVerify("HS256", "hmac").ShouldBeTrue();
+        contracts[0].Verify("HS256", input, HMACSHA256.HashData(_secretKey, input)).ShouldBeTrue();
+        contracts[1].CanVerify("RS256", "rsa").ShouldBeTrue();
+        contracts[1].CanVerify("HS256", "rsa").ShouldBeFalse();
+        contracts[1].Verify("RS256", input, rsa.SignData(input, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)).ShouldBeTrue();
+        contracts[2].CanVerify("ES256", "ec").ShouldBeTrue();
+        contracts[2].CanVerify("ES256", "wrong-key").ShouldBeFalse();
+        contracts[2].Verify("ES256", input, ecdsa.SignData(input, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)).ShouldBeTrue();
+    }
+
     private static readonly DateTimeOffset _now = new(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
     private static readonly byte[] _secretKey = Encoding.UTF8.GetBytes("this-is-a-256-bit-hmac-test-key-value!!");
 
@@ -22,7 +65,7 @@ public class JwtBearerHandlerTests
 
     private static async Task<IAuthenticationHandler> InitializeAsync(JwtBearerOptions options, TestHttpContext context)
     {
-        IAuthenticationHandler handler = JwtBearerAuthentication.CreateHandler(options);
+        IAuthenticationHandler handler = JwtBearerHandler.Create(options);
         AuthenticationScheme scheme = new(JwtBearerDefaults.AuthenticationScheme, null, () => handler);
         await handler.InitializeAsync(scheme, context);
         return handler;
@@ -31,7 +74,7 @@ public class JwtBearerHandlerTests
     private static JwtBearerOptions HmacOptions()
     {
         JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
-        options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(_secretKey));
+        options.SigningKeys.Add(HmacJwtSignatureVerifier.Create(_secretKey));
         options.ValidIssuers.Add(Issuer);
         options.ValidAudiences.Add(Audience);
         return options;
@@ -194,7 +237,7 @@ public class JwtBearerHandlerTests
         // Arrange — the algorithm-confusion guard: no configured verifier accepts HS256.
         using RSA rsa = RSA.Create(2048);
         JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
-        options.SigningKeys.Add(JwtSignatureVerifier.CreateRsa(rsa));
+        options.SigningKeys.Add(RsaJwtSignatureVerifier.Create(rsa));
         options.ValidIssuers.Add(Issuer);
         options.ValidAudiences.Add(Audience);
 
@@ -216,7 +259,7 @@ public class JwtBearerHandlerTests
         // Arrange
         using RSA rsa = RSA.Create(2048);
         JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
-        options.SigningKeys.Add(JwtSignatureVerifier.CreateRsa(rsa));
+        options.SigningKeys.Add(RsaJwtSignatureVerifier.Create(rsa));
         options.ValidIssuers.Add(Issuer);
         options.ValidAudiences.Add(Audience);
 
@@ -239,7 +282,7 @@ public class JwtBearerHandlerTests
         // Arrange
         using ECDsa ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
-        options.SigningKeys.Add(JwtSignatureVerifier.CreateEcdsa(ecdsa));
+        options.SigningKeys.Add(EcdsaJwtSignatureVerifier.Create(ecdsa));
         options.ValidIssuers.Add(Issuer);
         options.ValidAudiences.Add(Audience);
 
@@ -355,7 +398,7 @@ public class JwtBearerHandlerTests
         JwtBearerOptions options = new();
 
         // Act + Assert
-        Should.Throw<InvalidOperationException>(() => JwtBearerAuthentication.CreateHandler(options));
+        Should.Throw<InvalidOperationException>(() => JwtBearerHandler.Create(options));
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - CreateHandler fails closed when no issuer is configured")]
@@ -366,7 +409,7 @@ public class JwtBearerHandlerTests
         options.ValidIssuers.Clear();
 
         // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => JwtBearerAuthentication.CreateHandler(options));
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => JwtBearerHandler.Create(options));
 
         // Assert
         exception.Message.ShouldContain(nameof(JwtBearerOptions.ValidIssuers), Case.Sensitive);
@@ -381,7 +424,7 @@ public class JwtBearerHandlerTests
         options.ValidAudiences.Clear();
 
         // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => JwtBearerAuthentication.CreateHandler(options));
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => JwtBearerHandler.Create(options));
 
         // Assert
         exception.Message.ShouldContain(nameof(JwtBearerOptions.ValidAudiences), Case.Sensitive);

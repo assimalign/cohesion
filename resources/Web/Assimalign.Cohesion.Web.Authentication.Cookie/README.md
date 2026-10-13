@@ -12,8 +12,8 @@ login / logout / access-denied flow.
   and the `IDataProtector` that seals the ticket.
 - `CookieAuthenticationDefaults` &mdash; the default scheme name
   (`"Cookies"`) and paths.
-- `CookieAuthentication.CreateHandler(options)` &mdash; the factory the
-  composition root calls; the concrete handler stays internal.
+- `CookieAuthenticationHandler.Create(options)` &mdash; the factory the
+  composition root calls; it returns the public sealed handler with private construction.
 
 ## How it fits
 

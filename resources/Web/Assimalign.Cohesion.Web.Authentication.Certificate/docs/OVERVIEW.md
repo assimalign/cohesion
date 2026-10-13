@@ -18,6 +18,9 @@ The listener owns certificate requests, chain validation and trust. Configure it
 endpoint. Their default validator uses platform trust; a supplied validator defines application
 trust. Registering the authentication scheme alone does not request a certificate.
 
+For direct composition, `CertificateAuthenticationHandler.Create(options)` returns the public
+sealed handler and snapshots the validation callback. The constructor is private.
+
 ## Usage
 
 Inside a Web application's composition root, after configuring its HTTPS endpoint:

@@ -67,7 +67,7 @@ public sealed class AuthenticationCompositionTests : IDisposable
                 .AddCookie()
                 .AddJwtBearer(options =>
                 {
-                    options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!")));
+                    options.SigningKeys.Add(HmacJwtSignatureVerifier.Create(Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!")));
                     options.ValidIssuers.Add("https://issuer.example");
                     options.ValidAudiences.Add("api://default");
                 });
@@ -157,10 +157,10 @@ public sealed class AuthenticationCompositionTests : IDisposable
         byte[] key = Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!");
 
         // Act + Assert — the misconfiguration surfaces where it is written, not on a request.
-        Should.Throw<InvalidOperationException>(() => auth.AddJwtBearer(options => options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(key))));
+        Should.Throw<InvalidOperationException>(() => auth.AddJwtBearer(options => options.SigningKeys.Add(HmacJwtSignatureVerifier.Create(key))));
         Should.Throw<InvalidOperationException>(() => auth.AddJwtBearer("audience-only", options =>
         {
-            options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(key));
+            options.SigningKeys.Add(HmacJwtSignatureVerifier.Create(key));
             options.ValidIssuers.Add("https://issuer.example");
         }));
         auth.Options.GetScheme(JwtBearerDefaults.AuthenticationScheme).ShouldBeNull();

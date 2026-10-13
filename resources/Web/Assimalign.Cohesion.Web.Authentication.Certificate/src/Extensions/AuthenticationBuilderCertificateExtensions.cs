@@ -38,7 +38,7 @@ public static partial class AuthenticationBuilderCertificateExtensions
             return builder.AddScheme(new AuthenticationScheme(
                 scheme,
                 snapshot.DisplayName,
-                () => CertificateAuthentication.CreateHandler(snapshot)));
+                () => CertificateAuthenticationHandler.Create(snapshot)));
         }
     }
 }

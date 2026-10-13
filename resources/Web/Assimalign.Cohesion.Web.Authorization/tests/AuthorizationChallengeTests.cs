@@ -240,7 +240,7 @@ public sealed class AuthorizationChallengeTests : IDisposable
             authentication.AddScheme(TestEndpoints.Scheme(TestEndpoints.Secondary));
             authentication.AddJwtBearer(options =>
             {
-                options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(_signingKey));
+                options.SigningKeys.Add(HmacJwtSignatureVerifier.Create(_signingKey));
                 options.ValidIssuers.Add(TestJwt.Issuer);
                 options.ValidAudiences.Add(TestJwt.Audience);
             });
@@ -274,7 +274,7 @@ public sealed class AuthorizationChallengeTests : IDisposable
                 .AddCookie()
                 .AddJwtBearer(options =>
                 {
-                    options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(_signingKey));
+                    options.SigningKeys.Add(HmacJwtSignatureVerifier.Create(_signingKey));
                     options.ValidIssuers.Add(TestJwt.Issuer);
                     options.ValidAudiences.Add(TestJwt.Audience);
                 });

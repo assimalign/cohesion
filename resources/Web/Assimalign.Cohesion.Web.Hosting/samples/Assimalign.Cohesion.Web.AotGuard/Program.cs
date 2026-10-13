@@ -64,7 +64,7 @@ builder.Services
             .AddCookie()
             .AddJwtBearer(options =>
             {
-                options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(signingKey));
+                options.SigningKeys.Add(HmacJwtSignatureVerifier.Create(signingKey));
                 options.ValidIssuers.Add(GuardSmoke.Issuer);
                 options.ValidAudiences.Add(GuardSmoke.Audience);
             });

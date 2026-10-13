@@ -60,7 +60,7 @@ public sealed class CookieAuthenticationEventSourceTests
         string value = reason == "NotBase64Url" ? "!cookie-secret!" : reason == "Expired" ? Ticket(_now.AddMinutes(-1)) : "AA";
         context.Request.Cookies.Add(new HttpCookie(cookieName, value));
         DataProtectionException? failure = reason == "UnprotectFailed" ? new DataProtectionException("The protected payload is malformed.") : null;
-        IAuthenticationSignInHandler handler = CookieAuthentication.CreateHandler(Options(new DiagnosticDataProtector(failure)));
+        IAuthenticationSignInHandler handler = CookieAuthenticationHandler.Create(Options(new DiagnosticDataProtector(failure)));
         string scheme = "reason-" + reason;
         await handler.InitializeAsync(new AuthenticationScheme(scheme, null, () => handler), context);
         long before = CookieAuthenticationEventSource.Log.RejectedTickets;
@@ -110,7 +110,7 @@ public sealed class CookieAuthenticationEventSourceTests
         using EventSourceRecorder recorder = new(CookieAuthenticationEventSource.Log, EventLevel.Verbose);
         TestHttpContext context = TestHttpContext.Create();
         context.Request.Cookies.Add(new HttpCookie(cookieName, "AA"));
-        IAuthenticationSignInHandler handler = CookieAuthentication.CreateHandler(Options(new DiagnosticDataProtector(failure)));
+        IAuthenticationSignInHandler handler = CookieAuthenticationHandler.Create(Options(new DiagnosticDataProtector(failure)));
         await handler.InitializeAsync(new AuthenticationScheme(kind, null, () => handler), context);
 
         // Act
@@ -132,8 +132,8 @@ public sealed class CookieAuthenticationEventSourceTests
         // Arrange
         AuthenticationBuilder builder = new();
         builder.Options.DefaultScheme = "first";
-        builder.AddScheme(new AuthenticationScheme("first", null, () => CookieAuthentication.CreateHandler(Options(new DiagnosticDataProtector()))));
-        builder.AddScheme(new AuthenticationScheme("second", null, () => CookieAuthentication.CreateHandler(Options(new DiagnosticDataProtector()))));
+        builder.AddScheme(new AuthenticationScheme("first", null, () => CookieAuthenticationHandler.Create(Options(new DiagnosticDataProtector()))));
+        builder.AddScheme(new AuthenticationScheme("second", null, () => CookieAuthenticationHandler.Create(Options(new DiagnosticDataProtector()))));
         IAuthenticationService service = builder.Build();
         long before = CookieAuthenticationEventSource.Log.RejectedTickets;
 
@@ -164,7 +164,7 @@ public sealed class CookieAuthenticationEventSourceTests
         {
             context.Request.Cookies.Add(new HttpCookie(cookieName, Ticket(_now.AddHours(1))));
         }
-        IAuthenticationSignInHandler handler = CookieAuthentication.CreateHandler(Options(new DiagnosticDataProtector()));
+        IAuthenticationSignInHandler handler = CookieAuthenticationHandler.Create(Options(new DiagnosticDataProtector()));
         await handler.InitializeAsync(new AuthenticationScheme("accepted", null, () => handler), context);
         long before = CookieAuthenticationEventSource.Log.RejectedTickets;
 
@@ -189,7 +189,7 @@ public sealed class CookieAuthenticationEventSourceTests
         TestRequestIdFeature requestId = new();
         context.Features.Set<IWebRequestIdFeature>(requestId);
         context.Request.Cookies.Add(new HttpCookie(cookieName, "!cookie-secret!"));
-        IAuthenticationSignInHandler handler = CookieAuthentication.CreateHandler(Options(new DiagnosticDataProtector()));
+        IAuthenticationSignInHandler handler = CookieAuthenticationHandler.Create(Options(new DiagnosticDataProtector()));
         await handler.InitializeAsync(new AuthenticationScheme("disabled", null, () => handler), context);
         long before = CookieAuthenticationEventSource.Log.RejectedTickets;
 
@@ -213,7 +213,7 @@ public sealed class CookieAuthenticationEventSourceTests
         factory.Builder.Services.AddAuthentication(authentication =>
         {
             authentication.Options.DefaultScheme = "reauthentication";
-            authentication.AddScheme(new AuthenticationScheme("reauthentication", null, () => CookieAuthentication.CreateHandler(Options(new DiagnosticDataProtector()))));
+            authentication.AddScheme(new AuthenticationScheme("reauthentication", null, () => CookieAuthenticationHandler.Create(Options(new DiagnosticDataProtector()))));
         });
         factory.Builder.Services.AddAuthorization();
         IRouterBuilder routes = factory.Application.UseRouting();
