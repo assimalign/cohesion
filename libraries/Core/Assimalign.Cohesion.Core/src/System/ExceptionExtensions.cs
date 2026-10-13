@@ -1,11 +1,13 @@
 ﻿using System;
+using System.Globalization;
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
+using Assimalign.Cohesion;
+
 namespace System;
 
-using Assimalign.Cohesion.Properties;
 
 public static class ArgumentExceptionExtensions
 {
@@ -37,7 +39,7 @@ public static class ArgumentExceptionExtensions
             if (!Enum.IsDefined(argument))
             {
                 throw new ArgumentException(
-                    string.Format(ErrorMessages.ArgumentExceptionOnEnumNotDefined, typeof(TEnum).FullName));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArgumentExceptionOnEnumNotDefined, typeof(TEnum).FullName));
             }
 
             return argument;
@@ -58,7 +60,7 @@ public static class ArgumentExceptionExtensions
             if (argument is not T type)
             {
                 throw new ArgumentException(
-                    string.Format(ErrorMessages.ArgumentExceptionOnNotOfType, paramName, typeof(T).FullName));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArgumentExceptionOnNotOfType, paramName, typeof(T).FullName));
             }
 
             return type;
@@ -95,7 +97,7 @@ public static class ArgumentNullExceptionExtensions
             if (argument.IsEmpty)
             {
                 throw new ArgumentException(
-                    string.Format(ErrorMessages.ArgumentExceptionOnEmptySpan, paramName));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArgumentExceptionOnEmptySpan, paramName));
             }
         }
 

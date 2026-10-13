@@ -92,6 +92,12 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet build build/Tasks -c Release
+      - name: Check build-generated resources with the CLI
+        run: dotnet run --project build/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj -c Release -p:ContinuousIntegrationBuild=true
+      - name: Check build-generated resources with NativeAOT
+        run: |
+          dotnet publish build/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj -c Release -r linux-x64 -p:PublishAot=true -o "${{ runner.temp }}/resource-generation-check"
+          "${{ runner.temp }}/resource-generation-check/Assimalign.Cohesion.ResourceGenerationCheck"
       - run: dotnet build libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release
 
   # NativeAOT guard (#1052): a representative Web application — routing (groups, branching, the

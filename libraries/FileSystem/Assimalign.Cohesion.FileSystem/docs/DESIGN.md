@@ -223,3 +223,12 @@ mount-relative paths; it also catches `FileSystemException`, so a refusal is a 4
    `README.md` + `docs/{OVERVIEW,DESIGN}.md`. Update
    `Assimalign.Cohesion.FileSystem/docs/COMPATIBILITY.md` with the
    new row.
+
+## Build-generated resources (#1467)
+
+Exception messages are held in `src/Properties/ErrorMessages.resx`. The internal `ErrorMessages` accessor is generated in the project
+root namespace by MSBuild's GenerateResource task through
+`build/Targets/Build.ErrorMessages.targets`. The generated source stays under
+`obj/`; no checked-in designer or Visual Studio custom tool is required. Ordinary
+`dotnet build`, CI and NativeAOT publication use the same embedded resources.
+Existing message text is preserved.

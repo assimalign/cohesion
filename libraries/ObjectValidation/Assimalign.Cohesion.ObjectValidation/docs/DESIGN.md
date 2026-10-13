@@ -254,3 +254,12 @@ IValidator validator = Validator.Create(builder =>
 var person = new Person();
 ValidationResult result = validator.Validate(person);
 ```
+
+## Build-generated resources (#1467)
+
+Non-exception strings remain in `src/Properties/Resources.resx` (the validation-result messages). Their internal `Resources` accessor is generated in the project
+root namespace by MSBuild's GenerateResource task through
+`build/Targets/Build.ErrorMessages.targets`. The generated source stays under
+`obj/`; no checked-in designer or Visual Studio custom tool is required. Ordinary
+`dotnet build`, CI and NativeAOT publication use the same embedded resources.
+Existing message text is preserved.

@@ -5,7 +5,6 @@ using System.Text.RegularExpressions;
 
 namespace Assimalign.Cohesion.ObjectValidation;
 
-using Assimalign.Cohesion.ObjectValidation.Properties;
 using Assimalign.Cohesion.ObjectValidation.Internal;
 
 

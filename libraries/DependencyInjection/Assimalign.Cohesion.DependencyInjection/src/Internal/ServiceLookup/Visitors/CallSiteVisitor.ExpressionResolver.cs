@@ -10,7 +10,6 @@ using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor<object?, Expression>
 {
@@ -273,7 +272,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
     {
         if (scope != _scopeParameter)
         {
-            throw new NotSupportedException(Resources.GetCaptureDisposableNotSupported);
+            throw new NotSupportedException(ErrorMessages.GetCaptureDisposableNotSupported);
         }
         return _captureDisposable;
     }

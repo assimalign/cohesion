@@ -2,7 +2,6 @@
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class ConstantCallSite : CallSiteService
 {
@@ -23,7 +22,7 @@ internal sealed class ConstantCallSite : CallSiteService
         
         if (defaultValue != null && !serviceType.IsInstanceOfType(defaultValue))
         {
-            throw new ArgumentException(Resources.GetConstantCantBeConvertedToServiceType(defaultValue.GetType(), serviceType));
+            throw new ArgumentException(ErrorMessageFormatter.GetConstantCantBeConvertedToServiceType(defaultValue.GetType(), serviceType));
         }
 
         Value = defaultValue;

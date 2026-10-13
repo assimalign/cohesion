@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Diagnostics.CodeAnalysis;
@@ -6,7 +7,6 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
-using Assimalign.Cohesion.ObjectMapping.Properties;
 
 /*
  * Maps a complex (reference) member by delegating to the profiles registered for the member's
@@ -48,7 +48,7 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
         // Ensure that the member is of type TTarget (Target Members cannot be nested.)
         if (memberExpression.Member.DeclaringType != typeof(TTarget))
         {
-            throw new ArgumentException(string.Format(Resources.MapperExceptionInvalidChaining, target, typeof(TTarget).Name));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MapperExceptionInvalidChaining, target, typeof(TTarget).Name));
         }
 
         _sourceGetter = source.Compile();

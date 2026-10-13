@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
@@ -42,20 +41,20 @@ internal sealed class CallSiteFactory : IServiceLookup
                 if (implementationType == null || !implementationType.IsGenericTypeDefinition)
                 {
                     throw new ArgumentException(
-                        Resources.GetOpenGenericServiceRequiresOpenGenericImplementationExceptionMessage(serviceType),
+                        ErrorMessageFormatter.GetOpenGenericServiceRequiresOpenGenericImplementationExceptionMessage(serviceType),
                         "descriptors");
                 }
                 if (implementationType.IsAbstract || implementationType.IsInterface)
                 {
                     throw new ArgumentException(
-                        Resources.GetTypeCannotBeActivatedExceptionMessage(implementationType, serviceType));
+                        ErrorMessageFormatter.GetTypeCannotBeActivatedExceptionMessage(implementationType, serviceType));
                 }
                 Type[] serviceTypeGenericArguments = serviceType.GetGenericArguments();
                 Type[] implementationTypeGenericArguments = implementationType.GetGenericArguments();
                 if (serviceTypeGenericArguments.Length != implementationTypeGenericArguments.Length)
                 {
                     throw new ArgumentException(
-                        Resources.GetArityOfOpenGenericServiceNotEqualArityOfOpenGenericImplementationExceptionMessage(serviceType, implementationType), "descriptors");
+                        ErrorMessageFormatter.GetArityOfOpenGenericServiceNotEqualArityOfOpenGenericImplementationExceptionMessage(serviceType, implementationType), "descriptors");
                 }
                 if (ServiceProvider.VerifyOpenGenericServiceTrimmability)
                 {
@@ -72,7 +71,7 @@ internal sealed class CallSiteFactory : IServiceLookup
                     implementationType.IsInterface)
                 {
                     throw new ArgumentException(
-                         Resources.GetTypeCannotBeActivatedExceptionMessage(implementationType, serviceType));
+                         ErrorMessageFormatter.GetTypeCannotBeActivatedExceptionMessage(implementationType, serviceType));
                 }
             }
 
@@ -111,7 +110,7 @@ internal sealed class CallSiteFactory : IServiceLookup
             if (!AreCompatible(serviceDynamicallyAccessedMembers, implementationDynamicallyAccessedMembers))
             {
                 throw new ArgumentException(
-                    Resources.GetTrimmingAnnotationsDoNotMatchExceptionMessage(implementationType, serviceType));
+                    ErrorMessageFormatter.GetTrimmingAnnotationsDoNotMatchExceptionMessage(implementationType, serviceType));
             }
 
             bool serviceHasNewConstraint = serviceGenericType.GenericParameterAttributes.HasFlag(GenericParameterAttributes.DefaultConstructorConstraint);
@@ -119,7 +118,7 @@ internal sealed class CallSiteFactory : IServiceLookup
             if (implementationHasNewConstraint && !serviceHasNewConstraint)
             {
                 throw new ArgumentException(
-                    Resources.GetTrimmingAnnotationsDoNotMatch_NewConstraintExceptionMessage(implementationType, serviceType));
+                    ErrorMessageFormatter.GetTrimmingAnnotationsDoNotMatch_NewConstraintExceptionMessage(implementationType, serviceType));
             }
         }
     }
@@ -381,7 +380,7 @@ internal sealed class CallSiteFactory : IServiceLookup
         }
         else
         {
-            throw new InvalidOperationException(Resources.InvalidServiceDescriptor);
+            throw new InvalidOperationException(ErrorMessages.InvalidServiceDescriptor);
         }
 
         return _callSiteCache[callSiteKey] = callSite;
@@ -465,7 +464,7 @@ internal sealed class CallSiteFactory : IServiceLookup
 
             if (constructors.Length == 0)
             {
-                throw new InvalidOperationException(Resources.GetNoConstructorMatchExceptionMessage(implementationType));
+                throw new InvalidOperationException(ErrorMessageFormatter.GetNoConstructorMatchExceptionMessage(implementationType));
             }
             else if (constructors.Length == 1)
             {
@@ -528,7 +527,7 @@ internal sealed class CallSiteFactory : IServiceLookup
                                 // Ambiguous match exception
                                 throw new InvalidOperationException(string.Join(
                                     Environment.NewLine,
-                                    Resources.GetAmbiguousConstructorExceptionMessage(implementationType),
+                                    ErrorMessageFormatter.GetAmbiguousConstructorExceptionMessage(implementationType),
                                     bestConstructor,
                                     constructors[i]));
                             }
@@ -540,7 +539,7 @@ internal sealed class CallSiteFactory : IServiceLookup
             if (bestConstructor == null)
             {
                 throw new InvalidOperationException(
-                    Resources.GetUnableToActivateTypeExceptionMessage(implementationType));
+                    ErrorMessageFormatter.GetUnableToActivateTypeExceptionMessage(implementationType));
             }
             else
             {
@@ -575,7 +574,7 @@ internal sealed class CallSiteFactory : IServiceLookup
             {
                 if (throwIfCallSiteNotFound)
                 {
-                    throw new InvalidOperationException(Resources.GetCannotResolveServiceExceptionMessage(
+                    throw new InvalidOperationException(ErrorMessageFormatter.GetCannotResolveServiceExceptionMessage(
                         parameterType,
                         implementationType));
                 }
@@ -695,7 +694,7 @@ internal sealed class CallSiteFactory : IServiceLookup
                 }
             }
 
-            throw new InvalidOperationException(Resources.ServiceDescriptorNotExist);
+            throw new InvalidOperationException(ErrorMessages.ServiceDescriptorNotExist);
         }
 
         public ServiceDescriptorCacheItem Add(ServiceDescriptor descriptor)

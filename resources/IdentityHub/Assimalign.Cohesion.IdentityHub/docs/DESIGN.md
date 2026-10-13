@@ -21,3 +21,12 @@ The root contracts are hosting-free (O34): `IIdentityHubApplication` exposes `Co
 `IdentityHubApplication.CreateBuilder(args)` returns the public concrete `IdentityHubApplicationBuilder`; its `Build()` returns the public `IdentityHubApplication : Host<IdentityHubApplicationContext>`. The public `IdentityHubApplicationContext` implements `IIdentityHubApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
 Background-work registration (`AddService`) is available only on the concrete Hosting builder.
+
+## Build-generated resources (#1467)
+
+Non-exception strings remain in `src/Properties/Resources.resx` (the roles XML payload). Their internal `Resources` accessor is generated in the project
+root namespace by MSBuild's GenerateResource task through
+`build/Targets/Build.ErrorMessages.targets`. The generated source stays under
+`obj/`; no checked-in designer or Visual Studio custom tool is required. Ordinary
+`dotnet build`, CI and NativeAOT publication use the same embedded resources.
+Existing message text is preserved.

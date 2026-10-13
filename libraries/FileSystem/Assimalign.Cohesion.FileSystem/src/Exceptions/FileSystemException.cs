@@ -1,10 +1,10 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-using Properties;
 
 /// <summary>
 /// Domain exception raised by Cohesion <see cref="IFileSystem"/> implementations. Carries a
@@ -52,7 +52,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] DirectoryNotFoundException? innerException = null)
     {
-        var message = string.Format(ErrorMessages.DirectoryNotFound, path);
+        var message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DirectoryNotFound, path);
         throw new FileSystemException(
             code: FileSystemErrorCode.NotFound,
             message: message,
@@ -67,7 +67,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] FileNotFoundException? innerException = null)
     {
-        var message = string.Format(ErrorMessages.FileNotFound, path);
+        var message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.FileNotFound, path);
         throw new FileSystemException(
             FileSystemErrorCode.NotFound,
             message,
@@ -97,7 +97,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] Exception? innerException = null)
     {
-        var message = string.Format(ErrorMessages.PathTooLong, path);
+        var message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.PathTooLong, path);
         throw new FileSystemException(
             FileSystemErrorCode.PathTooLong,
             message,
@@ -112,7 +112,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] Exception? innerException = null)
     {
-        var message = string.Format(ErrorMessages.AccessDeniedToPath, path);
+        var message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.AccessDeniedToPath, path);
         throw new FileSystemException(
             FileSystemErrorCode.AccessDenied,
             message,

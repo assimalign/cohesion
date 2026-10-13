@@ -163,3 +163,12 @@ string environmentName = AppEnvironment.GetEnvironmentName();
 ```
 
 `AppEnvironment.Variables.TrustBundlePath` is the additive transport trust-anchor path immediately after the bootstrap path. Its contents are certificates only; Hosting.Resources owns protected-file reading and TLS chain validation. The constant, runtime table, and golden variable list remain in identical order.
+
+## Build-generated resources (#1467)
+
+Exception messages are held in `src/Properties/ErrorMessages.resx`. The internal `ErrorMessages` accessor is generated in the project
+root namespace by MSBuild's GenerateResource task through
+`build/Targets/Build.ErrorMessages.targets`. The generated source stays under
+`obj/`; no checked-in designer or Visual Studio custom tool is required. Ordinary
+`dotnet build`, CI and NativeAOT publication use the same embedded resources.
+Existing message text is preserved.

@@ -29,7 +29,7 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 688 |
+| Projects indexed | 689 |
 | Shipped library/resource projects | 255 |
 | Library areas | 21 |
 | Resource areas | 18 |
