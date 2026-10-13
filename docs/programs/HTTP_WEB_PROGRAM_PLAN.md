@@ -1576,6 +1576,15 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
       - #1468: where reusable throw members live, starting with FileSystem's (PR comment).
       - #1469: analyzer projects by area.
     - **Analyzer placement (owner rule).** Analyzers for `libraries/Core` go into `Assimalign.Cohesion.SourceGeneration` or `Assimalign.Cohesion.CodeFixes`. Analyzers for `libraries/<Area>` and `resources/<Area>` go into `Assimalign.Cohesion.SourceGeneration.<Area>` or `Assimalign.Cohesion.CodeFixes.<Area>`.
+    - **The designs, approved the same day.**
+      - #1465: 17 conversions to public types. The implementation takes the static class's name when that name is the object returned.
+      - #1466: the cookie handler keys on the sealed `ApiEndpointMetadata`.
+      - #1467: messages in `Properties/ErrorMessages.resx`, read through a build-generated `ErrorMessages` class, for Http, Web and Connections, plus the seven projects that already had .resx files.
+      - #1468: reusable throw members live on the exception type.
+    - **No file under `resources/Database/` changes while the owner's Database PR is open.**
+      - `ResourceControlPlane` and `JsonWebTokenWriter` keep their names as public types, so Database's calls compile unchanged.
+      - Web.Health's `HealthChecks.CreateBuilder()`, which Database.Hosting calls, waits.
+      - #1470 records all three conventions for the Database area.
 
 ### 7.5 Lineup
 
