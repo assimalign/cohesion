@@ -72,6 +72,29 @@ These are also centrally managed. Don't duplicate per project unless the project
 - Use direct `throw` statements or framework guard APIs (e.g., `ArgumentNullException.ThrowIfNull`) when the logic is local.
 - If reusable throw behavior is needed, implement as a .NET 10 extension type method in `Extensions/`.
 
+### Exception messages are build-generated resources
+
+- Store exception message literals and format strings in `src/Properties/ErrorMessages.resx`.
+  Name each entry after the failure in PascalCase and reuse one entry for identical text.
+- `build/Targets/Build.ErrorMessages.targets`, imported by the shared build, configures MSBuild's
+  `GenerateResource` task with `StronglyTypedLanguage`, `StronglyTypedClassName`,
+  `StronglyTypedNamespace` and `StronglyTypedFileName`. It generates an **internal** `ErrorMessages`
+  class in the project's `RootNamespace` under `$(IntermediateOutputPath)`. A project only adds the
+  resource file; no checked-in `Designer.cs`, Visual Studio `Generator` or `LastGenOutput` metadata.
+- Read `ErrorMessages.<Name>`. For parameters use
+  `string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, args...)`, with numbered
+  placeholders and the existing text preserved. Keep messages that omit request input that way.
+- If exceptions are created on a normal path, including abort or cancellation reasons, cache the
+  message (or format string) in a `static readonly` field. Do not look up the resource on each creation.
+- Framework guards such as `ArgumentNullException.ThrowIfNull` and
+  `ArgumentOutOfRangeException.ThrowIf*` that supply no message remain unchanged.
+- EventSource templates, log messages and HTTP response bodies are outside this convention.
+  Non-exception resources remain in `Resources.resx`, with the shared build generating their
+  internal `Resources` accessor too.
+- Adoption covers Http, Web and Connections and the seven existing resource projects. Other areas
+  adopt it when next touched; [#1470](https://github.com/assimalign/cohesion/issues/1470) covers
+  Database. No file under `resources/Database/` changes while the owner's Database PR is active.
+
 ### `.NET 10 extension(...)` syntax for extension members
 ```csharp
 public static class DatabaseExtensions
@@ -210,7 +233,7 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/
 │   │   ├── EventSource/   # EventSource-derived types
 │   │   └── Exceptions/    # Internal exceptions
 │   ├── ValueObjects/      # Value objects, generated and hand-written — flat
-│   ├── Properties/        # AssemblyInfo.cs (and resx designers)
+│   ├── Properties/        # AssemblyInfo.cs and resource files (accessors generated under obj/)
 │   └── [Feature folders]  # Other public types, abstract classes included (or the src/ root)
 ├── shared/                # Source compiled into sibling assemblies — see "Shared source"
 ├── docs/
@@ -233,7 +256,7 @@ These folder rules apply to every shipped `src/` project (`libraries/`, `resourc
 | `Extensions/` | Public `static` classes that declare `extension(...)` members | Flat | `RootNamespace` |
 | `ValueObjects/` | Public value objects: structs / record structs with value equality (`IEquatable<Self>`), including every `CohesionValueType` (its `Include` path is `ValueObjects\<Name>.cs`) | Flat | `RootNamespace` |
 | `Internal/` | Every `internal` type, whatever its kind | Subfolders allowed: `Internal/EventSource/` for the assembly's one `EventSource` type (`event-source.md`), `Internal/Exceptions/` for internal exceptions, plus feature folders | `{RootNamespace}.Internal` |
-| `Properties/` | `AssemblyInfo.cs`; assembly-level attributes live here, not in the csproj | — | — |
+| `Properties/` | `AssemblyInfo.cs` and `.resx` files; assembly-level attributes live here, not in the csproj | — | — |
 | `System/` | BCL-namespace extensions (`namespace System.*`) | Mirrors the BCL namespace | `System.*` — **only** in `Assimalign.Cohesion.Core` |
 
 Precedence when a type matches more than one row: `internal` wins (an internal exception goes to
@@ -253,10 +276,9 @@ does not. An abstract exception root still goes to `Exceptions/`, and an interna
 `{Name}ErrorCode` enum in `Exceptions/` over a separate exception type per failure; consumers can
 still derive their own exception types from the root.
 
-Two narrow exceptions, each marked with a `// Deviates from ...` comment where it occurs:
-compiler polyfills such as `IsExternalInit` keep `System.Runtime.CompilerServices` because the
-compiler binds them by exact name, and `Properties/` resx designer classes keep the namespace their
-resource manifest name requires.
+Compiler polyfills such as `IsExternalInit` keep `System.Runtime.CompilerServices` because the
+compiler binds them by exact name, marked with a `// Deviates from ...` comment. Build-generated
+resource accessors live under `obj/` and use `RootNamespace`, matching their resource manifest names.
 
 ### File organization rules
 1. **One public type per file** (exceptions: nested types, related enums).
