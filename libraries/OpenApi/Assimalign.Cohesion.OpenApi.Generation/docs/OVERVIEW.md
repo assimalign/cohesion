@@ -15,7 +15,7 @@ attribute mapper — into a version-targeted `OpenApiDocument`.
 - `Assimalign.Cohesion.OpenApi` (model) and `Assimalign.Cohesion.OpenApi.Attributes` (metadata types).
 - The source generator that emits `OpenApiMetadataRegistry` ships inside the Attributes package, so a
   project that references this package gets it through that dependency. A project inside this
-  repository adds `<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />`,
+  repository adds `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.OpenApi" />`,
   because a project reference carries no analyzer.
 - The registry is internal to each assembly and combines that assembly's metadata with every annotated
   assembly it references, so one input describes an application whose endpoints span several libraries.

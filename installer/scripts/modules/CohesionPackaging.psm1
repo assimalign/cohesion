@@ -166,7 +166,7 @@ $script:CohesionReleaseLibrary = @(
     # libraries/ObjectValidation
     'libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation'
 
-    # libraries/OpenApi. OpenApi.Attributes also carries the OpenApi.SourceGeneration analyzer under
+    # libraries/OpenApi. OpenApi.Attributes also carries the SourceGeneration.OpenApi analyzer under
     # analyzers/dotnet/cs; the generator has no package of its own.
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Attributes'

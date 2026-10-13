@@ -48,11 +48,14 @@
   <Folder Name="/Assimalign.Cohesion.SourceGeneration/tests/">
     <Project Path="Assimalign.Cohesion.SourceGeneration/tests/Assimalign.Cohesion.SourceGeneration.Tests.csproj" />
   </Folder>
-  <Folder Name="/Assimalign.Cohesion.OpenApi.SourceGeneration/" />
-  <Folder Name="/Assimalign.Cohesion.OpenApi.SourceGeneration/src/">
-    <Project Path="Assimalign.Cohesion.OpenApi.SourceGeneration/src/Assimalign.Cohesion.OpenApi.SourceGeneration.csproj" />
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.OpenApi/" />
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.OpenApi/src/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.OpenApi/src/Assimalign.Cohesion.SourceGeneration.OpenApi.csproj" />
   </Folder>
-  <Folder Name="/Assimalign.Cohesion.OpenApi.SourceGeneration/tests/">
-    <Project Path="Assimalign.Cohesion.OpenApi.SourceGeneration/tests/Assimalign.Cohesion.OpenApi.SourceGeneration.Tests.csproj" />
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.OpenApi/tests/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.OpenApi/tests/Assimalign.Cohesion.SourceGeneration.OpenApi.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.OpenApi/docs/">
+    <File Path="Assimalign.Cohesion.SourceGeneration.OpenApi/docs/DESIGN.md" />
   </Folder>
 </Solution>

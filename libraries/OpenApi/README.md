@@ -9,7 +9,7 @@ service layers can compose it through contracts and adapters rather than inherit
 
 An arrow means "references": `OpenApi.Serialization --> OpenApi` reads
 `Assimalign.Cohesion.OpenApi.Serialization` references `Assimalign.Cohesion.OpenApi`. The one labeled
-edge, `OpenApi.Attributes --> OpenApi.SourceGeneration`, is an analyzer reference: the generator runs at
+edge, `OpenApi.Attributes --> SourceGeneration.OpenApi`, is an analyzer reference: the generator runs at
 build time and ships inside the Attributes package, so it is neither a runtime nor a package dependency
 (see *Source generator delivery*).
 
@@ -23,7 +23,7 @@ flowchart LR
     P5["OpenApi.Serialization"]
     P6["OpenApi.Validation"]
     P7["OpenApi.Versioning"]
-    P8["OpenApi.SourceGeneration — analyzer"]
+    P8["SourceGeneration.OpenApi — analyzer"]
     P1 --> P0
     P1 -->|"analyzer"| P8
     P2 --> P0
@@ -78,7 +78,7 @@ ApiManager, or any service runtime.
 | [`Assimalign.Cohesion.OpenApi.Validation`](./Assimalign.Cohesion.OpenApi.Validation/) | Diagnostics model; structural, semantic, and version-placement rules | model, serialization | NuGet package |
 | [`Assimalign.Cohesion.OpenApi.Fluent`](./Assimalign.Cohesion.OpenApi.Fluent/) | Version-aware fluent authoring builders | model | NuGet package |
 | [`Assimalign.Cohesion.OpenApi.Attributes`](./Assimalign.Cohesion.OpenApi.Attributes/) | Attribute authoring model + intermediate metadata + mapper | model | NuGet package, carrying the source generator |
-| [`Assimalign.Cohesion.OpenApi.SourceGeneration`](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/) | AOT-safe compile-time attribute discovery → per-assembly provider + composed metadata registry | — (build time; shipped inside attributes) | Inside the Attributes package |
+| [`Assimalign.Cohesion.SourceGeneration.OpenApi`](../../analyzers/Assimalign.Cohesion.SourceGeneration.OpenApi/) | AOT-safe compile-time attribute discovery → per-assembly provider + composed metadata registry | — (build time; shipped inside attributes) | Inside the Attributes package |
 | [`Assimalign.Cohesion.OpenApi.Generation`](./Assimalign.Cohesion.OpenApi.Generation/) | Metadata → version-targeted document generation | model, attributes | NuGet package |
 | [`Assimalign.Cohesion.OpenApi.Versioning`](./Assimalign.Cohesion.OpenApi.Versioning/) | Version targets + 3.0↔3.1↔3.2 transforms with diagnostics | model, serialization, validation | NuGet package |
 | [`Assimalign.Cohesion.OpenApi.Integration`](./Assimalign.Cohesion.OpenApi.Integration/) | Web/ApiManager integration contracts (endpoint source, description provider, import/export) | model, attributes, generation, serialization, versioning | NuGet package |
@@ -104,7 +104,7 @@ Web/ApiManager integration seam.
 
 ## Source generator delivery
 
-`Assimalign.Cohesion.OpenApi.SourceGeneration` has no package of its own. It ships inside
+`Assimalign.Cohesion.SourceGeneration.OpenApi` has no package of its own. It ships inside
 `Assimalign.Cohesion.OpenApi.Attributes` at `analyzers/dotnet/cs/`, through a
 `CohesionAnalyzerReference` in the Attributes project. That is the precedent `ObjectMapping` and `Core`
 set for an ordinary NuGet library that carries a generator.
@@ -116,7 +116,7 @@ set for an ordinary NuGet library that carries a generator.
   The emitted code compiles against Attributes' metadata records and provider contract and the root
   model's enums, so the package that brings the generator also brings everything its output needs.
 - **Inside this repository** a project reference carries no analyzer, so a project that needs the
-  registry adds `<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />`,
+  registry adds `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.OpenApi" />`,
   as the Generation and Integration test projects do.
 - **Rejected alternatives.** Carrying it in `OpenApi.Generation`: an assembly that only declares
   annotated endpoints has no reason to reference Generation, so its annotations would compile with no
@@ -129,7 +129,7 @@ set for an ordinary NuGet library that carries a generator.
   posture rules out.
 
 The full reasoning is in the generator's
-[docs/DESIGN.md](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+[docs/DESIGN.md](../../analyzers/Assimalign.Cohesion.SourceGeneration.OpenApi/docs/DESIGN.md)
 ("Delivery").
 
 ## Combining metadata from several assemblies
@@ -163,7 +163,7 @@ number of annotated assemblies compose without CS0433 or CS0436. The one excepti
 registry, which is the complete one.
 
 Design, ordering, hand-written providers, and the alternatives rejected are in the generator's
-[docs/DESIGN.md](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+[docs/DESIGN.md](../../analyzers/Assimalign.Cohesion.SourceGeneration.OpenApi/docs/DESIGN.md)
 ("Composing metadata across assemblies").
 
 ## Standards

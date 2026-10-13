@@ -9,9 +9,10 @@ using Microsoft.CodeAnalysis.CSharp;
 
 using Shouldly;
 
+using Assimalign.Cohesion.OpenApi;
 using Assimalign.Cohesion.OpenApi.Attributes;
 
-namespace Assimalign.Cohesion.OpenApi.SourceGeneration.Tests;
+namespace Assimalign.Cohesion.SourceGeneration.OpenApi.Tests;
 
 /// <summary>
 /// Compiles test sources with the OpenApi metadata generator and emits them as PE images, so a

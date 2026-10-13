@@ -151,7 +151,7 @@ flowchart LR
     P5["OpenApi.Serialization"]
     P6["OpenApi.Validation"]
     P7["OpenApi.Versioning"]
-    P8["OpenApi.SourceGeneration — analyzer"]
+    P8["SourceGeneration.OpenApi — analyzer"]
     P1 --> P0
     P1 -->|"analyzer"| P8
     P2 --> P0
@@ -177,7 +177,7 @@ flowchart LR
 | `…OpenApi.Validation` | Diagnostics + structural/semantic/version rules; official-schema stage | model, serialization |
 | `…OpenApi.Fluent` | Fluent authoring builders | model |
 | `…OpenApi.Attributes` | Attribute model, intermediate metadata, and mapper; carries the source generator | model |
-| `…OpenApi.SourceGeneration` | AOT-safe attribute discovery → metadata registry (build time, under `analyzers/`) | — |
+| `…SourceGeneration.OpenApi` | AOT-safe attribute discovery → metadata registry (build time, under `analyzers/`) | — |
 | `…OpenApi.Generation` | Metadata → version-targeted document | model, attributes |
 | `…OpenApi.Versioning` | 3.0 ↔ 3.1 ↔ 3.2 transforms with diagnostics | model, serialization, validation |
 | `…OpenApi.Integration` | Web/ApiManager contracts: endpoint source, description provider, import/export | model, attributes, generation, serialization, versioning |

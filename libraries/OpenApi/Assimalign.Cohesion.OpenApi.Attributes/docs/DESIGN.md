@@ -112,19 +112,19 @@ The contract lives here, not in a package of its own, because the generator ship
 compilation that runs the generator references this package, so the code it emits always compiles
 against the contract. Why composition has this shape, and the alternatives rejected (module
 initializers, hand composition, the former fixed public registry), are recorded in the generator's
-[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.SourceGeneration.OpenApi/docs/DESIGN.md)
 ("Composing metadata across assemblies").
 
 ## The package carries the source generator
 
-The project declares `CohesionAnalyzerReference` for `Assimalign.Cohesion.OpenApi.SourceGeneration`,
+The project declares `CohesionAnalyzerReference` for `Assimalign.Cohesion.SourceGeneration.OpenApi`,
 so the generator DLL ships in this package at `analyzers/dotnet/cs/` and runs in every project that
 references the package, directly or through `OpenApi.Generation` or `OpenApi.Integration`. Shipping the
 two together means the generator cannot version apart from what its output compiles against, the
 metadata records and the provider contract: renaming or reshaping one of them is a change to the
 generator's emitted code in the same package. Why this package is the carrier, and the alternatives
 rejected, are recorded in the generator's
-[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.SourceGeneration.OpenApi/docs/DESIGN.md)
 ("Delivery").
 
 ## Non-goals

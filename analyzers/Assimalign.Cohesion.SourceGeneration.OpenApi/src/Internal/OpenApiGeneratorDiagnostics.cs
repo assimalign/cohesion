@@ -1,6 +1,6 @@
 using Microsoft.CodeAnalysis;
 
-namespace Assimalign.Cohesion.OpenApi.SourceGeneration.Internal;
+namespace Assimalign.Cohesion.SourceGeneration.OpenApi.Internal;
 
 /// <summary>
 /// The compiler diagnostics the OpenApi metadata generator reports. The identifiers mirror the runtime

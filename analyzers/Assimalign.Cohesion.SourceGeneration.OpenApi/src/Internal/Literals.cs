@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Assimalign.Cohesion.OpenApi.SourceGeneration.Internal;
+namespace Assimalign.Cohesion.SourceGeneration.OpenApi.Internal;
 
 /// <summary>
 /// Helpers for emitting C# literal expressions for the generated metadata initializers.

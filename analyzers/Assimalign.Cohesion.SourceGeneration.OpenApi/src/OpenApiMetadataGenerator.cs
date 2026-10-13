@@ -9,9 +9,9 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
-using Assimalign.Cohesion.OpenApi.SourceGeneration.Internal;
+using Assimalign.Cohesion.SourceGeneration.OpenApi.Internal;
 
-namespace Assimalign.Cohesion.OpenApi.SourceGeneration;
+namespace Assimalign.Cohesion.SourceGeneration.OpenApi;
 
 /// <summary>
 /// Discovers the OpenApi authoring attributes at compile time and emits their flat intermediate

@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text;
 
-namespace Assimalign.Cohesion.OpenApi.SourceGeneration.Internal;
+namespace Assimalign.Cohesion.SourceGeneration.OpenApi.Internal;
 
 /// <summary>
 /// The names behind the cross-assembly provider seam: the public contract in

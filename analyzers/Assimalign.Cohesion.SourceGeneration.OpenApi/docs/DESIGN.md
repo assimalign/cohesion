@@ -1,4 +1,7 @@
-# Assimalign.Cohesion.OpenApi.SourceGeneration — Design
+# Assimalign.Cohesion.SourceGeneration.OpenApi — Design
+
+The project and analyzer namespace follow the OpenApi area (owner decision 59, 2026-10-13).
+The rename preserves diagnostic ids and generated metadata/provider APIs.
 
 ## Design intent
 
@@ -216,7 +219,7 @@ to the *generated* code (which is reflection-free static data), not to the gener
 ## Delivery
 
 The generator ships inside the `Assimalign.Cohesion.OpenApi.Attributes` package. That project declares
-`<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />`, which runs the
+`<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.OpenApi" />`, which runs the
 generator in the Attributes compile (it finds no annotations there and emits nothing) and packs the DLL
 at `analyzers/dotnet/cs/` in the Attributes `.nupkg`. This is the precedent the repository already set
 for an ordinary NuGet library: `ObjectMapping` carries `SourceGeneration` and `Core` carries

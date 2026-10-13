@@ -3,7 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
 
-namespace Assimalign.Cohesion.OpenApi.SourceGeneration.Tests;
+namespace Assimalign.Cohesion.SourceGeneration.OpenApi.Tests;
 
 /// <summary>
 /// A collectible load context that serves in-memory PE images by assembly name and defers everything

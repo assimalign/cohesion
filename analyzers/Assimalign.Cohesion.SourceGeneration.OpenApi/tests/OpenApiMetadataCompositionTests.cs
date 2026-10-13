@@ -14,7 +14,7 @@ using Assimalign.Cohesion.OpenApi;
 using Assimalign.Cohesion.OpenApi.Attributes;
 using Assimalign.Cohesion.OpenApi.Generation;
 
-namespace Assimalign.Cohesion.OpenApi.SourceGeneration.Tests;
+namespace Assimalign.Cohesion.SourceGeneration.OpenApi.Tests;
 
 /// <summary>
 /// Multi-assembly coverage for the provider seam (#1169). Each annotated library is compiled with the
@@ -125,7 +125,7 @@ public class OpenApiMetadataCompositionTests
             public IReadOnlyList<OpenApiSecuritySchemeMetadata> SecuritySchemes => [];
         """;
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: two annotated libraries and an unannotated host compile without CS0433")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: two annotated libraries and an unannotated host compile without CS0433")]
     public void Compose_TwoAnnotatedLibrariesAndUnannotatedHost_CompilesWithoutCS0433()
     {
         // Arrange
@@ -144,7 +144,7 @@ public class OpenApiMetadataCompositionTests
         host.GeneratedSource.ShouldNotContain("[assembly:", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: two annotated libraries and an annotated host compile without CS0436")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: two annotated libraries and an annotated host compile without CS0436")]
     public void Compose_TwoAnnotatedLibrariesAndAnnotatedHost_CompilesWithoutCS0436()
     {
         // Arrange
@@ -168,7 +168,7 @@ public class OpenApiMetadataCompositionTests
         shopIndex.ShouldBeGreaterThan(petsIndex);
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: the host registry exposes every assembly's operations and schemas at run time")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: the host registry exposes every assembly's operations and schemas at run time")]
     public void Compose_TwoAnnotatedLibrariesAndAnnotatedHost_ExposesEveryAssemblysMetadata()
     {
         // Arrange
@@ -214,7 +214,7 @@ public class OpenApiMetadataCompositionTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: a library that references another annotated library advertises only its own metadata")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: a library that references another annotated library advertises only its own metadata")]
     public void Compose_AnnotatedLibraryReferencingAnnotatedLibrary_ComposesEachProviderOnce()
     {
         // Arrange
@@ -234,7 +234,7 @@ public class OpenApiMetadataCompositionTests
         CountOccurrences(host.GeneratedSource, $"new {generatedNamespace}OpenApiMetadataProvider_Contoso__Orders()").ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: assembly names that differ only in punctuation get distinct providers")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: assembly names that differ only in punctuation get distinct providers")]
     public void Compose_AssemblyNamesDifferingOnlyInPunctuation_EmitDistinctProviders()
     {
         // Arrange
@@ -250,7 +250,7 @@ public class OpenApiMetadataCompositionTests
         host.GeneratedSource.ShouldContain($"new {generatedNamespace}OpenApiMetadataProvider_Contoso_x005FPets()", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: a hand-written provider a library advertises is composed")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: a hand-written provider a library advertises is composed")]
     public void Compose_HandWrittenProviderAdvertisedByLibrary_IsComposed()
     {
         // Arrange
@@ -280,7 +280,7 @@ public class OpenApiMetadataCompositionTests
         host.GeneratedSource.ShouldContain("new global::Contoso.Manual.ManualProvider()", Case.Sensitive);
     }
 
-    [Theory(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: a referenced provider that cannot be constructed is skipped with a warning")]
+    [Theory(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: a referenced provider that cannot be constructed is skipped with a warning")]
     [InlineData("internal sealed", ": IOpenApiMetadataProvider", "", "it is not public")]
     [InlineData("public abstract", ": IOpenApiMetadataProvider", "", "it is not a non-abstract class")]
     [InlineData("public sealed", "", "", "it does not implement IOpenApiMetadataProvider")]
@@ -319,7 +319,7 @@ public class OpenApiMetadataCompositionTests
         host.GeneratedSource.ShouldContain($"new {generatedNamespace}OpenApiMetadataProvider_Contoso__Shop()", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: an assembly cannot advertise a provider another assembly declares")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: an assembly cannot advertise a provider another assembly declares")]
     public void Compose_ProviderDeclaredInAnotherAssembly_ReportsWarningAndSkipsIt()
     {
         // Arrange
@@ -351,7 +351,7 @@ public class OpenApiMetadataCompositionTests
         host.GeneratedSource.ShouldNotContain("SharedProvider", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: an unusable provider advertised in source is reported at the attribute")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: an unusable provider advertised in source is reported at the attribute")]
     public void Compose_UnusableProviderAdvertisedInSource_ReportsWarningAtTheAttribute()
     {
         // Arrange
@@ -379,7 +379,7 @@ public class OpenApiMetadataCompositionTests
         run.GeneratedSource.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: an InternalsVisibleTo friend that names the registry binds its own, with CS0436")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: an InternalsVisibleTo friend that names the registry binds its own, with CS0436")]
     public void Compose_InternalsVisibleToFriendNamingTheRegistry_WarnsCS0436AndBindsItsOwnRegistry()
     {
         // Arrange: the documented limit. A friend can see the granting assembly's internal registry, so
@@ -405,7 +405,7 @@ public class OpenApiMetadataCompositionTests
         bound.ContainingAssembly.Name.ShouldBe("Contoso.Pets.Tests");
     }
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Composition: an assembly's hand-written providers precede its generated provider")]
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.OpenApi] - Composition: an assembly's hand-written providers precede its generated provider")]
     public void Compose_HandWrittenProviderAdvertisedByAnnotatedHost_PrecedesGeneratedProvider()
     {
         // Arrange

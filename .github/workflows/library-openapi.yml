@@ -8,8 +8,8 @@ on:
       - '!libraries/OpenApi/**/*.md'
       # The source generator ships inside OpenApi.Attributes and runs in the Generation and
       # Integration tests, so a generator change rebuilds and retests the packages that carry it.
-      - 'analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/**'
-      - '!analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/**/*.md'
+      - 'analyzers/Assimalign.Cohesion.SourceGeneration.OpenApi/**'
+      - '!analyzers/Assimalign.Cohesion.SourceGeneration.OpenApi/**/*.md'
       - '.github/workflows/library-openapi.yml'                 # When Pipeline File Changes
 
 permissions:

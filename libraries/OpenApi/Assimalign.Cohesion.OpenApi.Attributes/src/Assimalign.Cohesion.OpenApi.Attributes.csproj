@@ -13,9 +13,9 @@
 			carries it because every compilation that applies the attributes references it, and
 			the emitted code compiles against its metadata records and provider contract
 			(IOpenApiMetadataProvider, OpenApiMetadataProviderAttribute). Decision and rejected
-			alternatives: analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md,
+			alternatives: analyzers/Assimalign.Cohesion.SourceGeneration.OpenApi/docs/DESIGN.md,
 			"Delivery".
 		-->
-		<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.OpenApi" />
 	</ItemGroup>
 </Project>

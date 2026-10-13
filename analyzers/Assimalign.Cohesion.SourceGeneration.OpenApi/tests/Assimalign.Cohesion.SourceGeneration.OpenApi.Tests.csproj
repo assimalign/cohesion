@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.OpenApi.SourceGeneration.Tests</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.SourceGeneration.OpenApi.Tests</RootNamespace>
 		<!-- Override the analyzers-area netstandard2.0 default: a test host must be executable. -->
 		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
 		<IsRoslynComponent>false</IsRoslynComponent>
@@ -21,7 +21,7 @@
 	<ItemGroup>
 		<!-- The CohesionProjectReference resolver only searches libraries/ and resources/, so the
 		     analyzer under test is referenced directly. This is a test host, not a shipped component. -->
-		<ProjectReference Include="..\src\Assimalign.Cohesion.OpenApi.SourceGeneration.csproj" />
+		<ProjectReference Include="..\src\Assimalign.Cohesion.SourceGeneration.OpenApi.csproj" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Attributes" />

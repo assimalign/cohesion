@@ -1,4 +1,4 @@
-# Assimalign.Cohesion.OpenApi.SourceGeneration
+# Assimalign.Cohesion.SourceGeneration.OpenApi
 
 A Roslyn incremental source generator that discovers the OpenApi authoring attributes at compile time
 and emits the flat intermediate metadata as static data, so document generation needs no runtime
@@ -20,7 +20,7 @@ does not carry an analyzer, so it activates the generator itself:
 
 ```xml
 <ItemGroup>
-  <CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />
+  <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.OpenApi" />
 </ItemGroup>
 ```
 
