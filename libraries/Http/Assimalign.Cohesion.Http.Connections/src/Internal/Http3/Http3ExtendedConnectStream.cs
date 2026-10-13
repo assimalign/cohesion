@@ -88,7 +88,7 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
             {
                 throw new ObjectDisposedException(
                     nameof(Http3ExtendedConnectStream),
-                    "The server's side of the extended CONNECT tunnel has already ended.");
+                    ErrorMessages.ServerSSideOfTheExtendedConnectTunnelHasAlreadyEnded);
             }
 
             await WriteFrameAsync(Http3FrameType.Data, data, cancellationToken).ConfigureAwait(false);
@@ -130,12 +130,12 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
     {
         if (_context.RequestBody.IsReset)
         {
-            throw new IOException("The HTTP/3 request stream carrying the extended CONNECT tunnel was reset.");
+            throw new IOException(ErrorMessages.Http3RequestStreamCarryingTheExtendedConnectTunnelWasReset);
         }
 
         if (_connection.ConnectionClosed.IsCancellationRequested)
         {
-            throw new IOException("The HTTP/3 connection carrying the extended CONNECT tunnel closed.");
+            throw new IOException(ErrorMessages.Http3ConnectionCarryingTheExtendedConnectTunnelClosed);
         }
     }
 
@@ -153,7 +153,7 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
         {
             // Classify the original driver failure first: a coded peer reset may reach this writer
             // before its closure callback. Unclassified local pipe failures keep the tunnel contract.
-            throw new IOException("The HTTP/3 request stream carrying the extended CONNECT tunnel failed.", exception);
+            throw new IOException(ErrorMessages.Http3RequestStreamCarryingTheExtendedConnectTunnelFailed, exception);
         }
     }
 
@@ -173,7 +173,7 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
         if (result.IsCompleted)
         {
             // The peer stopped reading the stream (STOP_SENDING or a reset): the octets cannot reach it.
-            throw new IOException("The peer stopped reading the HTTP/3 request stream carrying the extended CONNECT tunnel.");
+            throw new IOException(ErrorMessages.PeerStoppedReadingTheHttp3RequestStreamCarryingTheExtendedConnectTunnel);
         }
     }
 }

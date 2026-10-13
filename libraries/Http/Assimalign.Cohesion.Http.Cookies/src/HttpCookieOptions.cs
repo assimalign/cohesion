@@ -79,7 +79,7 @@ public sealed class HttpCookieOptions
             if (!string.IsNullOrEmpty(value) && !HttpCookieGrammar.IsValidDomain(value))
             {
                 throw new ArgumentException(
-                    "The cookie Domain attribute is not an RFC 6265 domain-value: it must be dot-separated labels of letters, digits, and hyphens (an optional leading dot is ignored), with no ';', whitespace, or control characters. Write an internationalized name in its 'xn--' form.",
+                    ErrorMessages.CookieDomainAttributeIsNotAnRfc6265DomainValueItMust,
                     nameof(Domain));
             }
 
@@ -112,7 +112,7 @@ public sealed class HttpCookieOptions
             if (value is not null && !HttpCookieGrammar.IsValidPath(value))
             {
                 throw new ArgumentException(
-                    "The cookie Path attribute is not an RFC 6265 path-value: it must be US-ASCII with no ';' and no control characters. Percent-encode any other character.",
+                    ErrorMessages.CookiePathAttributeIsNotAnRfc6265PathValueItMust,
                     nameof(Path));
             }
 

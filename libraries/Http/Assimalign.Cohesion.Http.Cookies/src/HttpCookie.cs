@@ -46,14 +46,14 @@ public sealed class HttpCookie
         if (!HttpCookieGrammar.IsValidName(name))
         {
             throw new ArgumentException(
-                "Cookie name is not a valid RFC 6265 token: it must be non-empty and contain only token characters (no control characters, whitespace, or separators such as '=', ';', or ',').",
+                ErrorMessages.CookieNameIsNotAValidRfc6265TokenItMustBe,
                 nameof(name));
         }
 
         if (!HttpCookieGrammar.IsValidValue(value))
         {
             throw new ArgumentException(
-                "Cookie value contains characters outside the RFC 6265 cookie-octet grammar. Control characters (including CR/LF), whitespace, DQUOTE, comma, semicolon, and backslash are forbidden so the value cannot split or corrupt the Set-Cookie header line; percent- or base64-encode such values first.",
+                ErrorMessages.CookieValueContainsCharactersOutsideTheRfc6265CookieOctetGrammarControl,
                 nameof(value));
         }
 

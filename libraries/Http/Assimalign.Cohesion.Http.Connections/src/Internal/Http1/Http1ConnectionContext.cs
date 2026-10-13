@@ -147,7 +147,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     {
         if (context is not Http1Context http1Context)
         {
-            throw new InvalidOperationException("The supplied context does not belong to an HTTP/1.1 connection.");
+            throw new InvalidOperationException(ErrorMessages.SuppliedContextDoesNotBelongToAnHttp11Connection);
         }
 
         // The connection was taken over (accepted protocol upgrade / CONNECT tunnel — the
@@ -308,7 +308,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             HttpTransportEventSource.Log.ResponseRateAborted(connection.Id, "1.1", -1);
         }
         context.LatchResponseAbortedByClient();
-        connection.Abort(new IOException("The peer did not read the response at the configured minimum data rate."));
+        connection.Abort(new IOException(ErrorMessages.PeerDidNotReadTheResponseAtTheConfiguredMinimumDataRate));
         return context.AbortSlowResponse();
     }
 

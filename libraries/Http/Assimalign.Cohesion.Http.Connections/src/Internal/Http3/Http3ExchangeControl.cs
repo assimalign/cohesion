@@ -69,7 +69,7 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
         if (!CanWriteInterimResponse || !await _context.TryBeginInterimAsync(cancellationToken).ConfigureAwait(false))
         {
             throw new InvalidOperationException(
-                "An interim response cannot be sent after the final HTTP/3 response has started.");
+                ErrorMessages.InterimResponseCannotBeSentAfterTheFinalHttp3ResponseHasStarted);
         }
 
         try
@@ -90,7 +90,7 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
     public Stream TakeOver()
     {
         throw new InvalidOperationException(
-            "HTTP/3 exchanges are multiplexed QUIC streams over a shared connection and cannot be taken over (RFC 9114 §4.2).");
+            ErrorMessages.Http3ExchangesAreMultiplexedQuicStreamsOverASharedConnectionAndCannot);
     }
 
     /// <inheritdoc />
@@ -110,32 +110,32 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
     {
         if (!_isExtendedConnect)
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.NotExtendedConnectMessage);
+            throw new InvalidOperationException(ErrorMessages.ExchangeIsNotExtendedConnect);
         }
 
         if (Interlocked.Exchange(ref _tunnelAcceptCalled, 1) == 1)
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.AlreadyAcceptedMessage);
+            throw new InvalidOperationException(ErrorMessages.ExtendedConnectAcceptHasAlreadyBeenAttemptedForThisExchange);
         }
 
         if (_context.CancelRequested)
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.CancelledMessage);
+            throw new InvalidOperationException(ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedTheExchangeWasCancelled);
         }
 
         if (HasResponseStarted)
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.ResponseStartedMessage);
+            throw new InvalidOperationException(ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedAfterTheResponseHasStarted);
         }
 
         if (_context.RequestBody.IsReset)
         {
-            throw new IOException("The HTTP/3 request stream was reset before the extended CONNECT tunnel was accepted.");
+            throw new IOException(ErrorMessages.Http3RequestStreamWasResetBeforeTheExtendedConnectTunnelWasAccepted);
         }
 
         if (_connection.ConnectionClosed.IsCancellationRequested)
         {
-            throw new IOException("The HTTP/3 connection closed before the extended CONNECT tunnel was accepted.");
+            throw new IOException(ErrorMessages.Http3ConnectionClosedBeforeTheExtendedConnectTunnelWasAccepted);
         }
 
         HttpStatusCode stagedStatus = _context.Response.StatusCode;

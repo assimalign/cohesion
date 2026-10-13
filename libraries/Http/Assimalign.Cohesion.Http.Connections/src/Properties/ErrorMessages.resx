@@ -1,0 +1,1137 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently not
+    extensible. For a given mimetype the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format
+    that the ResXResourceWriter will generate, however the reader can
+    read any of the formats listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="QuotedFieldName" xml:space="preserve">
+    <value>&apos;{0}&apos;</value>
+  </data>
+  <data name="AltSvcAdvertisementIsEnabledButTheHttp3ListenerEndpointDoesNot" xml:space="preserve">
+    <value>Alt-Svc advertisement is enabled but the HTTP/3 listener endpoint does not expose a port; set {0}.{1} explicitly.</value>
+  </data>
+  <data name="AtLeastOneConnectionListenerMustBeConfiguredBeforeBindingHttpConnections" xml:space="preserve">
+    <value>At least one connection listener must be configured before binding HTTP connections.</value>
+  </data>
+  <data name="BufferBackedByArrayWasExpected" xml:space="preserve">
+    <value>Buffer backed by array was expected</value>
+  </data>
+  <data name="CachedHttpDateDidNotFitItsHpackFieldBuffer" xml:space="preserve">
+    <value>The cached HTTP date did not fit its HPACK field buffer.</value>
+  </data>
+  <data name="CarriesAMalformedFieldSection" xml:space="preserve">
+    <value>carries a malformed field section: {0}</value>
+  </data>
+  <data name="CarriesAnEmptyPathPseudoHeaderFieldRfc9113831" xml:space="preserve">
+    <value>carries an empty &apos;:path&apos; pseudo-header field (RFC 9113 §8.3.1)</value>
+  </data>
+  <data name="CarriesAnInvalidContentLength" xml:space="preserve">
+    <value>carries an invalid content-length: {0}</value>
+  </data>
+  <data name="CombinedProtocolListenerRequiresTls" xml:space="preserve">
+    <value>{0} chooses the protocol for each connection through ALPN (RFC 7301), a TLS extension, so it requires a listener whose capabilities report Security=Tls; the supplied listener reports Security={1}. Compose TLS onto the listener before registering it, or register UseHttp1 and UseHttp2 on separate listeners.</value>
+  </data>
+  <data name="ChunkedBodyExceedsTheConfiguredMaximumRequestBodySizeOctetsAtChunk" xml:space="preserve">
+    <value>Chunked body exceeds the configured maximum request body size ({0} octets) at chunk size {1} after {2} octets read.</value>
+  </data>
+  <data name="ChunkedRequestBodyCarriesMoreThanOctetsOfChunkFramingChunkExtensions" xml:space="preserve">
+    <value>RFC 9112 §7.1.1: the chunked request body carries more than {0} octets of chunk framing, chunk extensions included, beyond what its chunks&apos; data pays for.</value>
+  </data>
+  <data name="ChunkedRequestBodyIsMalformedAndIsNotReadFurther" xml:space="preserve">
+    <value>RFC 9112 §7.1: the chunked request body is malformed and is not read further.</value>
+  </data>
+  <data name="ChunkFramingLineHoldsABareCrALineEndsOnlyAt" xml:space="preserve">
+    <value>RFC 9112 §2.2: a chunk framing line holds a bare CR; a line ends only at CRLF.</value>
+  </data>
+  <data name="ChunkFramingLineHoldsABareLfALineEndsOnlyAt" xml:space="preserve">
+    <value>RFC 9112 §2.2: a chunk framing line holds a bare LF; a line ends only at CRLF.</value>
+  </data>
+  <data name="ChunkSizeHoldsTheNonHexOctet0xAtOffset" xml:space="preserve">
+    <value>RFC 9112 §7.1: the chunk-size holds the non-hex octet 0x{0:X2} at offset {1}.</value>
+  </data>
+  <data name="ChunkSizeLineChunkExtensionsIncludedExceedsTheConfiguredMaximumOfOctets" xml:space="preserve">
+    <value>RFC 9112 §7.1.1: the chunk-size line, chunk extensions included, exceeds the configured maximum of {0} octets.</value>
+  </data>
+  <data name="ChunkSizeOverflowsInt32AtItsHexDigit" xml:space="preserve">
+    <value>RFC 9112 §7.1: the chunk-size overflows Int32 at its hex digit {0}.</value>
+  </data>
+  <data name="ChunkTerminatorMustBeCrlfOnly" xml:space="preserve">
+    <value>RFC 9112 §7.1: chunk terminator must be CRLF only.</value>
+  </data>
+  <data name="ClientAbandonedTheRequestBeforeItsBodyWasReadToTheEnd" xml:space="preserve">
+    <value>The client abandoned the request before its body was read to the end.</value>
+  </data>
+  <data name="ClientOpenedAPushStreamRfc9114622" xml:space="preserve">
+    <value>A client opened a push stream (RFC 9114 §6.2.2).</value>
+  </data>
+  <data name="ClientStoppedAcceptingTheResponse" xml:space="preserve">
+    <value>The client stopped accepting the response.</value>
+  </data>
+  <data name="ConfiguredAltSvcAuthorityIsNotAValidHostPortOrPort" xml:space="preserve">
+    <value>The configured Alt-Svc authority &apos;{0}&apos; is not a valid &apos;host:port&apos; or &apos;:port&apos; value.</value>
+  </data>
+  <data name="ConflictingContentLengthValuesAndWereDeclared" xml:space="preserve">
+    <value>RFC 9112 §6.3: conflicting Content-Length values ({0} and {1}) were declared.</value>
+  </data>
+  <data name="ConnectionClosedAfterOfExpectedRequestBodyOctets" xml:space="preserve">
+    <value>The connection closed after {0} of {1} expected request-body octets.</value>
+  </data>
+  <data name="ConnectionClosedBeforeTheRequestHeadersWereFullyReceived" xml:space="preserve">
+    <value>The connection closed before the request headers were fully received.</value>
+  </data>
+  <data name="ConnectionClosedMidChunkWithOctetsOutstanding" xml:space="preserve">
+    <value>RFC 9112 §7.1: connection closed mid-chunk with {0} octets outstanding.</value>
+  </data>
+  <data name="ConnectionClosedWhileAChunkFramingLineWasBeingRead" xml:space="preserve">
+    <value>RFC 9112 §7.1: connection closed while a chunk framing line was being read.</value>
+  </data>
+  <data name="ConnectionClosedWhileAnHttpLineWasBeingRead" xml:space="preserve">
+    <value>The connection closed while an HTTP line was being read.</value>
+  </data>
+  <data name="ConnectionHasAlreadyBeenTakenOverForThisExchange" xml:space="preserve">
+    <value>The connection has already been taken over for this exchange.</value>
+  </data>
+  <data name="ConnectionListenerFactoryRegisteredForReturnedNull" xml:space="preserve">
+    <value>The connection listener factory registered for &apos;{0}&apos; returned null.</value>
+  </data>
+  <data name="ConnectionSpecificHeaderFieldIsForbiddenInHttp2Rfc911382" xml:space="preserve">
+    <value>Connection-specific header field &apos;{0}&apos; is forbidden in HTTP/2 (RFC 9113 §8.2.2).</value>
+  </data>
+  <data name="ConnectionSpecificHeaderFieldIsForbiddenInHttp3Rfc911442" xml:space="preserve">
+    <value>Connection-specific header field &apos;{0}&apos; is forbidden in HTTP/3 (RFC 9114 §4.2).</value>
+  </data>
+  <data name="ConnectionStoppedBeforeTheRequestWasDispatched" xml:space="preserve">
+    <value>The connection stopped before the request was dispatched.</value>
+  </data>
+  <data name="ContentLengthHeaderWasPresentButContainedNoValue" xml:space="preserve">
+    <value>RFC 9112 §6.3: Content-Length header was present but contained no value.</value>
+  </data>
+  <data name="ContentLengthValueCouldNotBeParsedAsANonNegativeInteger" xml:space="preserve">
+    <value>RFC 9112 §6.3: Content-Length value &apos;{0}&apos; could not be parsed as a non-negative integer.</value>
+  </data>
+  <data name="ContentLengthValueExceedsTheConfiguredMaximumRequestBodySizeOctets" xml:space="preserve">
+    <value>Content-Length value &apos;{0}&apos; exceeds the configured maximum request body size ({1} octets).</value>
+  </data>
+  <data name="ContentLengthValueIsNegative" xml:space="preserve">
+    <value>RFC 9112 §6.3: Content-Length value &apos;{0}&apos; is negative.</value>
+  </data>
+  <data name="ContentLengthValueIsNotANonNegativeAsciiDecimal" xml:space="preserve">
+    <value>RFC 9112 §6.3: Content-Length value &apos;{0}&apos; is not a non-negative ASCII decimal.</value>
+  </data>
+  <data name="DataFrame" xml:space="preserve">
+    <value>DATA frame</value>
+  </data>
+  <data name="DeclaresAContentLengthOfOctetsButEndsTheStreamWithIts" xml:space="preserve">
+    <value>declares a content-length of {0} octets but ends the stream with its head (RFC 9113 §8.1.1)</value>
+  </data>
+  <data name="DecodedHttp2HeaderListExceededTheAdvertisedSettingsMaxHeaderListSize" xml:space="preserve">
+    <value>The decoded HTTP/2 header list exceeded the advertised SETTINGS_MAX_HEADER_LIST_SIZE of {0} octets.</value>
+  </data>
+  <data name="DecodedHttp3FieldSectionExceedsTheAdvertisedSettingsMaxFieldSectionSize" xml:space="preserve">
+    <value>The decoded HTTP/3 field section exceeds the advertised SETTINGS_MAX_FIELD_SECTION_SIZE of {0} octets (RFC 9114 §4.2.2).</value>
+  </data>
+  <data name="EarlierReadOfTheChunkedRequestBodyStoppedInsideItsFramingSo" xml:space="preserve">
+    <value>RFC 9112 §7.1: an earlier read of the chunked request body stopped inside its framing, so the body is not read further.</value>
+  </data>
+  <data name="EmptyChunkSize" xml:space="preserve">
+    <value>RFC 9112 §7.1: empty chunk-size.</value>
+  </data>
+  <data name="ExceedsTheConfiguredMaximumSizeOctets" xml:space="preserve">
+    <value>The {0} exceeds the configured maximum size ({1} octets).</value>
+  </data>
+  <data name="ExchangeCanNoLongerBeTakenOverTheFinalResponseHasStarted" xml:space="preserve">
+    <value>The exchange can no longer be taken over: the final response has started or the exchange was aborted.</value>
+  </data>
+  <data name="ExchangeIsNotExtendedConnect" xml:space="preserve">
+    <value>The exchange is not an extended CONNECT (RFC 8441, RFC 9220), so no tunnel can be accepted for it.</value>
+  </data>
+  <data name="ExchangeWasCancelled" xml:space="preserve">
+    <value>The exchange was cancelled.</value>
+  </data>
+  <data name="ExpectedAnHttp2ContinuationFrameBeforeReceivingAnotherFrameType" xml:space="preserve">
+    <value>Expected an HTTP/2 CONTINUATION frame before receiving another frame type.</value>
+  </data>
+  <data name="ExpectedTheHttp2ClientSettingsFrameAsTheFirstFrameAfterThe" xml:space="preserve">
+    <value>Expected the HTTP/2 client SETTINGS frame as the first frame after the preface, but received &apos;{0}&apos;.</value>
+  </data>
+  <data name="ExtendedConnectAcceptHasAlreadyBeenAttemptedForThisExchange" xml:space="preserve">
+    <value>An extended CONNECT accept has already been attempted for this exchange.</value>
+  </data>
+  <data name="ExtendedConnectTunnelCannotBeAcceptedAfterTheResponseHasStarted" xml:space="preserve">
+    <value>The extended CONNECT tunnel cannot be accepted after the response has started.</value>
+  </data>
+  <data name="ExtendedConnectTunnelCannotBeAcceptedTheExchangeWasCancelled" xml:space="preserve">
+    <value>The extended CONNECT tunnel cannot be accepted: the exchange was cancelled.</value>
+  </data>
+  <data name="ExtendedConnectTunnelHasNoLength" xml:space="preserve">
+    <value>An extended CONNECT tunnel has no length.</value>
+  </data>
+  <data name="ExtendedConnectTunnelIsNotSeekable" xml:space="preserve">
+    <value>An extended CONNECT tunnel is not seekable.</value>
+  </data>
+  <data name="ExtendedConnectTunnelWasAbortedItsStreamWasResetItsConnectionClosed" xml:space="preserve">
+    <value>The extended CONNECT tunnel was aborted: its stream was reset, its connection closed, or the exchange was cancelled.</value>
+  </data>
+  <data name="ExtendedConnectTunnelWasClosedWhileTheOperationWasPending" xml:space="preserve">
+    <value>The extended CONNECT tunnel was closed while the operation was pending.</value>
+  </data>
+  <data name="FieldCannotBeSentInATrailerSectionRfc911065" xml:space="preserve">
+    <value>The field &apos;{0}&apos; cannot be sent in a trailer section (RFC 9110 §6.5.1, RFC 9113 §8.2.2, RFC 9114 §4.2).</value>
+  </data>
+  <data name="FieldLineHasNoColonOrAFieldNameThatIsNot" xml:space="preserve">
+    <value>RFC 9112 §5.1: a field line has no colon, or a field name that is not a token.</value>
+  </data>
+  <data name="FieldNameHoldsTheCharacter0xAtIndexWhichATokenCannot" xml:space="preserve">
+    <value>An {0} field name holds the character 0x{1:X2} at index {2}, which a token cannot carry (RFC 9110 §5.1, RFC 9113 §8.2.1, RFC 9114 §4.2).</value>
+  </data>
+  <data name="FieldNameMustBeLowercaseRfc9113821Rfc9114" xml:space="preserve">
+    <value>The {0} field name &apos;{1}&apos; must be lowercase (RFC 9113 §8.2.1, RFC 9114 §4.2).</value>
+  </data>
+  <data name="FieldSectionContainsAZeroLengthFieldName" xml:space="preserve">
+    <value>The {0} field section contains a zero-length field name.</value>
+  </data>
+  <data name="FloodDetectionWindowMustBeAPositiveDuration" xml:space="preserve">
+    <value>The flood-detection window must be a positive duration.</value>
+  </data>
+  <data name="FrameHeader" xml:space="preserve">
+    <value>frame header</value>
+  </data>
+  <data name="FramePayload" xml:space="preserve">
+    <value>frame payload</value>
+  </data>
+  <data name="FrameType0xIsNotPermittedOnAnHttp3RequestStreamRfc" xml:space="preserve">
+    <value>Frame type 0x{0:x} is not permitted on an HTTP/3 request stream (RFC 9114 §7.2).</value>
+  </data>
+  <data name="HeadersFrame" xml:space="preserve">
+    <value>HEADERS frame</value>
+  </data>
+  <data name="HostFieldHoldsTheOctet0xAtOffsetWhichIsNotA" xml:space="preserve">
+    <value>RFC 9112 §3.2: the Host field holds the octet 0x{0:X2} at offset {1}, which is not a VCHAR.</value>
+  </data>
+  <data name="HpackDynamicTableSizeExceededTheConfiguredMaximumOf" xml:space="preserve">
+    <value>The HPACK dynamic table size &apos;{0}&apos; exceeded the configured maximum of &apos;{1}&apos;.</value>
+  </data>
+  <data name="HpackDynamicTableSizeUpdateFollowedAFieldLineItMustCome" xml:space="preserve">
+    <value>An HPACK dynamic table size update followed a field line; it must come at the beginning of the field block (RFC 7541 §4.2).</value>
+  </data>
+  <data name="HpackHeaderIndexMustBeGreaterThanZero" xml:space="preserve">
+    <value>The HPACK header index must be greater than zero.</value>
+  </data>
+  <data name="HpackHeaderIndexWasOutsideTheDynamicTableRange" xml:space="preserve">
+    <value>The HPACK header index &apos;{0}&apos; was outside the dynamic table range.</value>
+  </data>
+  <data name="HpackHuffmanEncodedStringContainedAnEosSymbol" xml:space="preserve">
+    <value>HPACK Huffman-encoded string contained an EOS symbol.</value>
+  </data>
+  <data name="HpackHuffmanEncodedStringHasTrailingPartialCodeLongerThan7Bits" xml:space="preserve">
+    <value>HPACK Huffman-encoded string has trailing partial code longer than 7 bits.</value>
+  </data>
+  <data name="HpackHuffmanEncodedStringLongerThanDestinationBuffer" xml:space="preserve">
+    <value>HPACK Huffman-encoded string longer than destination buffer.</value>
+  </data>
+  <data name="HpackHuffmanEncodedStringPaddingDoesNotMatchEosPrefix" xml:space="preserve">
+    <value>HPACK Huffman-encoded string padding does not match EOS prefix.</value>
+  </data>
+  <data name="HpackHuffmanTableInternalConsistencyErrorPrefixFreeViolation" xml:space="preserve">
+    <value>HPACK Huffman table internal consistency error: prefix-free violation.</value>
+  </data>
+  <data name="HpackIntegerExceededThe31BitsThisDecoderAcceptsRfc75415" xml:space="preserve">
+    <value>The HPACK integer exceeded the 31 bits this decoder accepts (RFC 7541 §5.1).</value>
+  </data>
+  <data name="HpackIntegerHadAnOverlongEncodingItsLastOctetWasZeroRfc" xml:space="preserve">
+    <value>The HPACK integer had an overlong encoding: its last octet was zero (RFC 7541 §5.1).</value>
+  </data>
+  <data name="HpackIntegerWasIncomplete" xml:space="preserve">
+    <value>The HPACK integer was incomplete.</value>
+  </data>
+  <data name="HpackStringLiteralLengthExceededTheAvailablePayload" xml:space="preserve">
+    <value>The HPACK string literal length exceeded the available payload.</value>
+  </data>
+  <data name="HpackStringLiteralWasIncomplete" xml:space="preserve">
+    <value>The HPACK string literal was incomplete.</value>
+  </data>
+  <data name="Http11HasNoExtendedConnectStreamTunnelAConnectOrA" xml:space="preserve">
+    <value>HTTP/1.1 has no extended CONNECT stream tunnel; a CONNECT or a protocol upgrade takes the connection over instead (RFC 9110 §9.3.6, §7.8).</value>
+  </data>
+  <data name="Http11HeaderSectionIsMalformed" xml:space="preserve">
+    <value>The HTTP/1.1 header section is malformed. {0}</value>
+  </data>
+  <data name="Http11RequestLineHasAMalformedRequestTarget" xml:space="preserve">
+    <value>The HTTP/1.1 request line &apos;{0}&apos; has a malformed request-target: {1}</value>
+  </data>
+  <data name="Http11RequestLineHoldsTheOctet0xAtOffsetWhichIs" xml:space="preserve">
+    <value>RFC 9112 §3: the HTTP/1.1 request line holds the octet 0x{0:X2} at offset {1}, which is neither a VCHAR nor SP.</value>
+  </data>
+  <data name="Http11RequestLineIsInvalid" xml:space="preserve">
+    <value>The HTTP/1.1 request line &apos;{0}&apos; is invalid.</value>
+  </data>
+  <data name="Http11RequestTargetNamesAnHttpsResourceButTheConnectionIs" xml:space="preserve">
+    <value>The HTTP/1.1 request-target &apos;{0}&apos; names an https resource, but the connection is not secured (RFC 9110 §4.2.2).</value>
+  </data>
+  <data name="Http11TrailerSectionIsMalformed" xml:space="preserve">
+    <value>RFC 9112 §7.1.2: the HTTP/1.1 trailer section is malformed. {0}</value>
+  </data>
+  <data name="Http2ClientInitiatedStreamIdMustBeOdd" xml:space="preserve">
+    <value>HTTP/2 client-initiated stream id {0} must be odd.</value>
+  </data>
+  <data name="Http2ClientSettingsFrameMustBeReceivedBeforeHeaders" xml:space="preserve">
+    <value>The HTTP/2 client SETTINGS frame must be received before HEADERS.</value>
+  </data>
+  <data name="Http2ConnectionCarryingTheExtendedConnectTunnelClosed" xml:space="preserve">
+    <value>The HTTP/2 connection carrying the extended CONNECT tunnel closed.</value>
+  </data>
+  <data name="Http2ConnectionClosedBeforeTheRequestBodyOnStreamEnded" xml:space="preserve">
+    <value>The HTTP/2 connection closed before the request body on stream {0} ended.</value>
+  </data>
+  <data name="Http2ConnectionLevelSendWindowWouldExceedAfterWindowUpdate" xml:space="preserve">
+    <value>HTTP/2 connection-level send window would exceed {0} after WINDOW_UPDATE.</value>
+  </data>
+  <data name="Http2ConnectionPrefaceDidNotMatchTheExpectedSequence" xml:space="preserve">
+    <value>The HTTP/2 connection preface did not match the expected sequence.</value>
+  </data>
+  <data name="Http2ConnectionSOutputStoppedDrainingBelowTheConfiguredMinimumResponseData" xml:space="preserve">
+    <value>The HTTP/2 connection&apos;s output stopped draining below the configured minimum response data rate, so the connection was aborted.</value>
+  </data>
+  <data name="Http2ConnectionTerminatedWhileAResponseWasAwaitingSendWindowCredit" xml:space="preserve">
+    <value>The HTTP/2 connection terminated while a response was awaiting send-window credit.</value>
+  </data>
+  <data name="Http2ContinuationFrameDidNotMatchTheActiveHeaderBlockStream" xml:space="preserve">
+    <value>The HTTP/2 CONTINUATION frame did not match the active header block stream.</value>
+  </data>
+  <data name="Http2ContinuationFrameReceivedOnStreamInState" xml:space="preserve">
+    <value>HTTP/2 CONTINUATION frame received on stream {0} in state {1}.</value>
+  </data>
+  <data name="Http2ContinuationFrameReceivedOnUnknownStream" xml:space="preserve">
+    <value>HTTP/2 CONTINUATION frame received on unknown stream {0}.</value>
+  </data>
+  <data name="Http2DataFrameOfOctetsExceededTheConnectionLevelReceiveWindow" xml:space="preserve">
+    <value>HTTP/2 DATA frame of {0} octets exceeded the connection-level receive window.</value>
+  </data>
+  <data name="Http2DataFrameOfOctetsExceededTheStreamReceiveWindow" xml:space="preserve">
+    <value>HTTP/2 DATA frame of {0} octets exceeded the stream {1} receive window.</value>
+  </data>
+  <data name="Http2DataFrameOnStreamDeclaresPaddingOctetsWhichMeetsOrExceeds" xml:space="preserve">
+    <value>HTTP/2 DATA frame on stream {0} declares {1} padding octets, which meets or exceeds the frame payload length.</value>
+  </data>
+  <data name="Http2DataFrameReceivedOnClosedStream" xml:space="preserve">
+    <value>HTTP/2 DATA frame received on closed stream {0}.</value>
+  </data>
+  <data name="Http2DataFrameReceivedOnIdleStream" xml:space="preserve">
+    <value>HTTP/2 DATA frame received on idle stream {0}.</value>
+  </data>
+  <data name="Http2DataFrameReceivedOnStream0" xml:space="preserve">
+    <value>HTTP/2 DATA frame received on stream 0.</value>
+  </data>
+  <data name="Http2DataFrameReceivedOnStreamBeforeHeaders" xml:space="preserve">
+    <value>HTTP/2 DATA frame received on stream {0} before HEADERS.</value>
+  </data>
+  <data name="Http2DataFrameReceivedOnStreamInState" xml:space="preserve">
+    <value>HTTP/2 DATA frame received on stream {0} in state {1}.</value>
+  </data>
+  <data name="Http2ExchangeOnStreamWasAbandonedBeforeItsRequestBodyEnded" xml:space="preserve">
+    <value>The HTTP/2 exchange on stream {0} was abandoned before its request body ended.</value>
+  </data>
+  <data name="Http2ExchangesAreMultiplexedStreamsOverASharedConnectionAndCannotBe" xml:space="preserve">
+    <value>HTTP/2 exchanges are multiplexed streams over a shared connection and cannot be taken over (RFC 9113 §8.6).</value>
+  </data>
+  <data name="Http2FieldBlockOnStreamCouldNotBeDecoded" xml:space="preserve">
+    <value>HTTP/2 field block on stream {0} could not be decoded: {1}</value>
+  </data>
+  <data name="Http2FieldBlockOnStreamExceededTheMaximumHeaderListSize" xml:space="preserve">
+    <value>HTTP/2 field block on stream {0} exceeded the maximum header list size: {1}</value>
+  </data>
+  <data name="Http2FieldNameCannotBeEmpty" xml:space="preserve">
+    <value>The HTTP/2 field name cannot be empty.</value>
+  </data>
+  <data name="Http2FieldTeMustCarryOnlyTheValueTrailersGot" xml:space="preserve">
+    <value>HTTP/2 field &apos;TE&apos; MUST carry only the value &apos;trailers&apos;; got &apos;{0}&apos;.</value>
+  </data>
+  <data name="Http2FrameCouldNotBeParsedFromTheBufferedPayload" xml:space="preserve">
+    <value>The HTTP/2 frame could not be parsed from the buffered payload.</value>
+  </data>
+  <data name="Http2FramePayloadLengthExceededTheAdvertisedMaximum" xml:space="preserve">
+    <value>HTTP/2 frame payload length {0} exceeded the advertised maximum {1}.</value>
+  </data>
+  <data name="Http2FramePayloadLengthExceededTheNegotiatedMaximum" xml:space="preserve">
+    <value>HTTP/2 frame payload length {0} exceeded the negotiated maximum {1}.</value>
+  </data>
+  <data name="Http2FramePayloadLengthIsTooShortForItsRequiredFixedFields" xml:space="preserve">
+    <value>HTTP/2 {0} frame payload length {1} is too short for its required fixed fields.</value>
+  </data>
+  <data name="Http2GoawayReceivedOnStreamGoawayMustUseStream0" xml:space="preserve">
+    <value>HTTP/2 GOAWAY received on stream {0}; GOAWAY MUST use stream 0.</value>
+  </data>
+  <data name="Http2HeaderBlockOnStreamExceededTheMaximumOfOctetsContinuationFlood" xml:space="preserve">
+    <value>HTTP/2 header block on stream {0} exceeded the maximum of {1} octets (CONTINUATION flood).</value>
+  </data>
+  <data name="Http2HeadersFrameOnStreamDeclaresPaddingOctetsMoreThanTheLeft" xml:space="preserve">
+    <value>HTTP/2 HEADERS frame on stream {0} declares {1} padding octets, more than the {2} left after its fixed fields (RFC 9113 §6.2).</value>
+  </data>
+  <data name="Http2HeadersFrameReceivedOnStreamInStateThePeerHasAlready" xml:space="preserve">
+    <value>HTTP/2 HEADERS frame received on stream {0} in state {1}; the peer has already closed its half.</value>
+  </data>
+  <data name="Http2PingFramePayloadMustBe8OctetsGot" xml:space="preserve">
+    <value>HTTP/2 PING frame payload must be 8 octets; got {0}.</value>
+  </data>
+  <data name="Http2PingFramesExceededTheConnectionFloodLimitOfPerWindow" xml:space="preserve">
+    <value>HTTP/2 PING frames exceeded the connection flood limit of {0} per window.</value>
+  </data>
+  <data name="Http2PingReceivedOnStreamPingMustUseStream0" xml:space="preserve">
+    <value>HTTP/2 PING received on stream {0}; PING MUST use stream 0.</value>
+  </data>
+  <data name="Http2PriorityUpdateReceivedOnStreamPriorityUpdateMustUseStream0" xml:space="preserve">
+    <value>HTTP/2 PRIORITY_UPDATE received on stream {0}; PRIORITY_UPDATE MUST use stream 0.</value>
+  </data>
+  <data name="Http2PriorityUpdateReferencedInvalidPrioritizedStream" xml:space="preserve">
+    <value>HTTP/2 PRIORITY_UPDATE referenced invalid prioritized stream {0}.</value>
+  </data>
+  <data name="Http2RequestBodyLengthIsNotKnownInAdvance" xml:space="preserve">
+    <value>The HTTP/2 request body length is not known in advance.</value>
+  </data>
+  <data name="Http2RequestBodyOnStreamExceededTheMaximumRequestBodySizeOf" xml:space="preserve">
+    <value>The HTTP/2 request body on stream {0} exceeded the maximum request body size of {1} octets (413 Content Too Large).</value>
+  </data>
+  <data name="Http2RequestBodyOnStreamWasReceivedBelowTheConfiguredMinimumData" xml:space="preserve">
+    <value>The HTTP/2 request body on stream {0} was received below the configured minimum data rate of {1} octets per second (408 Request Timeout).</value>
+  </data>
+  <data name="Http2RequestBodyStreamIsNotSeekable" xml:space="preserve">
+    <value>The HTTP/2 request body stream is not seekable.</value>
+  </data>
+  <data name="Http2RequestBodyStreamIsReadOnly" xml:space="preserve">
+    <value>The HTTP/2 request body stream is read-only.</value>
+  </data>
+  <data name="Http2RequestOnStream" xml:space="preserve">
+    <value>The HTTP/2 request on stream {0} {1}.</value>
+  </data>
+  <data name="Http2RequestOnStreamIsMalformed" xml:space="preserve">
+    <value>The HTTP/2 request on stream {0} is malformed: {1}</value>
+  </data>
+  <data name="Http2RequestOnStreamIsMalformedItsDataFramesExceedItsContent" xml:space="preserve">
+    <value>The HTTP/2 request on stream {0} is malformed: its DATA frames exceed its content-length of {1} octets (RFC 9113 §8.1.1).</value>
+  </data>
+  <data name="Http2RequestOnStreamIsMalformedTheStreamEndedAfterOfThe" xml:space="preserve">
+    <value>The HTTP/2 request on stream {0} is malformed: the stream ended after {1} of the {2} octets its content-length declared (RFC 9113 §8.1.1).</value>
+  </data>
+  <data name="Http2RstStreamFrameReceivedOnStream0" xml:space="preserve">
+    <value>HTTP/2 RST_STREAM frame received on stream 0.</value>
+  </data>
+  <data name="Http2RstStreamReceivedForIdleStream" xml:space="preserve">
+    <value>HTTP/2 RST_STREAM received for idle stream {0}.</value>
+  </data>
+  <data name="Http2RstStreamReceivedOnIdleStream" xml:space="preserve">
+    <value>HTTP/2 RST_STREAM received on idle stream {0}.</value>
+  </data>
+  <data name="Http2SettingsFramesExceededTheConnectionFloodLimitOfPerWindow" xml:space="preserve">
+    <value>HTTP/2 SETTINGS frames exceeded the connection flood limit of {0} per window.</value>
+  </data>
+  <data name="Http2SettingsPayloadLengthWasInvalid" xml:space="preserve">
+    <value>The HTTP/2 SETTINGS payload length was invalid.</value>
+  </data>
+  <data name="Http2StreamBearingFrameReceivedOnStream0" xml:space="preserve">
+    <value>HTTP/2 stream-bearing frame received on stream 0.</value>
+  </data>
+  <data name="Http2StreamCarriedAMalformedPath" xml:space="preserve">
+    <value>HTTP/2 stream {0} carried a malformed :path: {1}</value>
+  </data>
+  <data name="Http2StreamCarriedATrailerSectionAfterAConnectHeadAConnect" xml:space="preserve">
+    <value>HTTP/2 stream {0} carried a trailer section after a CONNECT head; a CONNECT stream carries only DATA (RFC 9113 §8.5).</value>
+  </data>
+  <data name="Http2StreamCarryingTheExtendedConnectTunnelWasReset" xml:space="preserve">
+    <value>The HTTP/2 stream {0} carrying the extended CONNECT tunnel was reset.</value>
+  </data>
+  <data name="Http2StreamEndedBeforeACompleteFrameHeaderWasReceived" xml:space="preserve">
+    <value>The HTTP/2 stream ended before a complete frame header was received.</value>
+  </data>
+  <data name="Http2StreamEndedBeforeTheExpectedDataWasReceived" xml:space="preserve">
+    <value>The HTTP/2 stream ended before the expected data was received.</value>
+  </data>
+  <data name="Http2StreamIdIsLowerThanTheHighestPreviouslySeenClientInitiated" xml:space="preserve">
+    <value>HTTP/2 stream id {0} is lower than the highest previously seen client-initiated stream id {1}.</value>
+  </data>
+  <data name="Http2StreamIsNotReadyToCreateARequestContext" xml:space="preserve">
+    <value>The HTTP/2 stream is not ready to create a request context.</value>
+  </data>
+  <data name="Http2StreamRefusedServerIsClosingTheConnection" xml:space="preserve">
+    <value>HTTP/2 stream {0} refused: server is closing the connection.</value>
+  </data>
+  <data name="Http2StreamRefusedServerSSettingsMaxConcurrentStreamsReachedCountingReset" xml:space="preserve">
+    <value>HTTP/2 stream {0} refused: server&apos;s SETTINGS_MAX_CONCURRENT_STREAMS ({1}) reached, counting reset streams whose exchanges still run.</value>
+  </data>
+  <data name="Http2StreamResetsExceededTheConnectionFloodLimitOfPerWindowRapid" xml:space="preserve">
+    <value>HTTP/2 stream resets exceeded the connection flood limit of {0} per window (rapid reset).</value>
+  </data>
+  <data name="Http2StreamSendWindowWouldExceedAfterWindowUpdate" xml:space="preserve">
+    <value>HTTP/2 stream {0} send window would exceed {1} after WINDOW_UPDATE.</value>
+  </data>
+  <data name="Http2StreamWasRejectedByARequestParseInterceptorWithStatus" xml:space="preserve">
+    <value>HTTP/2 stream {0} was rejected by a request-parse interceptor with status &apos;{1}&apos;.</value>
+  </data>
+  <data name="Http2StreamWasResetBeforeItsRequestBodyEnded" xml:space="preserve">
+    <value>The HTTP/2 stream {0} was reset before its request body ended.</value>
+  </data>
+  <data name="Http2StreamWasResetBeforeTheExtendedConnectTunnelWasAccepted" xml:space="preserve">
+    <value>The HTTP/2 stream {0} was reset before the extended CONNECT tunnel was accepted.</value>
+  </data>
+  <data name="Http2TrailingHeadersOnStreamMustCarryEndStream" xml:space="preserve">
+    <value>HTTP/2 trailing HEADERS on stream {0} must carry END_STREAM.</value>
+  </data>
+  <data name="Http2WindowUpdateFramePayloadMustBe4OctetsGot" xml:space="preserve">
+    <value>HTTP/2 WINDOW_UPDATE frame payload must be 4 octets; got {0}.</value>
+  </data>
+  <data name="Http2WindowUpdateOnIdleStream" xml:space="preserve">
+    <value>HTTP/2 WINDOW_UPDATE on idle stream {0}.</value>
+  </data>
+  <data name="Http2WindowUpdateOnStream0WithIncrement0" xml:space="preserve">
+    <value>HTTP/2 WINDOW_UPDATE on stream 0 with increment 0.</value>
+  </data>
+  <data name="Http2WindowUpdateOnStreamWithIncrement0" xml:space="preserve">
+    <value>HTTP/2 WINDOW_UPDATE on stream {0} with increment 0.</value>
+  </data>
+  <data name="Http3ConnectionCarryingTheExtendedConnectTunnelClosed" xml:space="preserve">
+    <value>The HTTP/3 connection carrying the extended CONNECT tunnel closed.</value>
+  </data>
+  <data name="Http3ConnectionClosedBeforeTheExtendedConnectTunnelWasAccepted" xml:space="preserve">
+    <value>The HTTP/3 connection closed before the extended CONNECT tunnel was accepted.</value>
+  </data>
+  <data name="Http3ControlFrameWasTruncated" xml:space="preserve">
+    <value>An HTTP/3 control frame was truncated.</value>
+  </data>
+  <data name="Http3ExchangesAreMultiplexedQuicStreamsOverASharedConnectionAndCannot" xml:space="preserve">
+    <value>HTTP/3 exchanges are multiplexed QUIC streams over a shared connection and cannot be taken over (RFC 9114 §4.2).</value>
+  </data>
+  <data name="Http3FieldSectionContainsAZeroLengthFieldName" xml:space="preserve">
+    <value>HTTP/3 field section contains a zero-length field name.</value>
+  </data>
+  <data name="Http3FieldSectionCouldNotBeDecoded" xml:space="preserve">
+    <value>The HTTP/3 field section could not be decoded.</value>
+  </data>
+  <data name="Http3FieldSectionPrefixCouldNotBeDecoded" xml:space="preserve">
+    <value>The HTTP/3 field section prefix could not be decoded.</value>
+  </data>
+  <data name="Http3FieldTeMustCarryOnlyTheValueTrailersGot" xml:space="preserve">
+    <value>HTTP/3 field &apos;TE&apos; MUST carry only the value &apos;trailers&apos;; got &apos;{0}&apos;.</value>
+  </data>
+  <data name="Http3GoawayStreamIdentifierMustBeNonNegative" xml:space="preserve">
+    <value>An HTTP/3 GOAWAY stream identifier must be non-negative.</value>
+  </data>
+  <data name="Http3HeadersFrameOfOctetsExceedsTheOctetLimitMaxRequestHeadersFrameSize" xml:space="preserve">
+    <value>An HTTP/3 HEADERS frame of {0} octets exceeds the {1}-octet limit (MaxRequestHeadersFrameSize).</value>
+  </data>
+  <data name="Http3PseudoHeaderFieldAppearsAfterARegularFieldRfc91144" xml:space="preserve">
+    <value>HTTP/3 pseudo-header field appears after a regular field (RFC 9114 §4.3).</value>
+  </data>
+  <data name="Http3RequestBodyDoesNotSupportConcurrentReads" xml:space="preserve">
+    <value>The HTTP/3 request body does not support concurrent reads.</value>
+  </data>
+  <data name="Http3RequestBodyIsNoLongerReadableTheServerStoppedReadingThe" xml:space="preserve">
+    <value>The HTTP/3 request body is no longer readable: the server stopped reading the request stream after the response completed.</value>
+  </data>
+  <data name="Http3RequestBodyLengthIsNotKnownInAdvance" xml:space="preserve">
+    <value>The HTTP/3 request body length is not known in advance.</value>
+  </data>
+  <data name="Http3RequestBodyStreamIsNotSeekable" xml:space="preserve">
+    <value>The HTTP/3 request body stream is not seekable.</value>
+  </data>
+  <data name="Http3RequestBodyStreamIsReadOnly" xml:space="preserve">
+    <value>The HTTP/3 request body stream is read-only.</value>
+  </data>
+  <data name="Http3RequestCarriesAMalformedPathPseudoHeaderRfc911441" xml:space="preserve">
+    <value>HTTP/3 request carries a malformed :path pseudo-header (RFC 9114 §4.1.2): {0}</value>
+  </data>
+  <data name="Http3RequestContainsADuplicatePseudoHeaderFieldRfc911443" xml:space="preserve">
+    <value>HTTP/3 request contains a duplicate pseudo-header field &apos;{0}&apos; (RFC 9114 §4.3.1).</value>
+  </data>
+  <data name="Http3RequestContainsAnUnknownPseudoHeaderFieldRfc911443" xml:space="preserve">
+    <value>HTTP/3 request contains an unknown pseudo-header field {0} (RFC 9114 §4.3.1).</value>
+  </data>
+  <data name="Http3RequestHeadDidNotArriveWithinTheRequestHeadersTimeout" xml:space="preserve">
+    <value>The HTTP/3 request head did not arrive within the request-headers timeout.</value>
+  </data>
+  <data name="Http3RequestIsMissingANonEmptyPathPseudoHeaderRfc9114" xml:space="preserve">
+    <value>HTTP/3 request is missing a non-empty :path pseudo-header (RFC 9114 §4.3.1).</value>
+  </data>
+  <data name="Http3RequestIsMissingTheMethodPseudoHeaderRfc911443" xml:space="preserve">
+    <value>HTTP/3 request is missing the :method pseudo-header (RFC 9114 §4.3.1).</value>
+  </data>
+  <data name="Http3RequestIsMissingTheSchemePseudoHeaderRfc911443" xml:space="preserve">
+    <value>HTTP/3 request is missing the :scheme pseudo-header (RFC 9114 §4.3.1).</value>
+  </data>
+  <data name="Http3RequestStreamCarriedADataFrameAfterItsTrailerSectionRfc" xml:space="preserve">
+    <value>An HTTP/3 request stream carried a DATA frame after its trailer section (RFC 9114 §4.1).</value>
+  </data>
+  <data name="Http3RequestStreamCarriedADataFrameBeforeItsHeadersFrameRfc" xml:space="preserve">
+    <value>An HTTP/3 request stream carried a DATA frame before its HEADERS frame (RFC 9114 §4.1).</value>
+  </data>
+  <data name="Http3RequestStreamCarriedAHeadersFrameWhereNoneIsPermittedRfc" xml:space="preserve">
+    <value>An HTTP/3 request stream carried a HEADERS frame where none is permitted (RFC 9114 §4.1 / §4.4).</value>
+  </data>
+  <data name="Http3RequestStreamCarryingTheExtendedConnectTunnelFailed" xml:space="preserve">
+    <value>The HTTP/3 request stream carrying the extended CONNECT tunnel failed.</value>
+  </data>
+  <data name="Http3RequestStreamCarryingTheExtendedConnectTunnelWasReset" xml:space="preserve">
+    <value>The HTTP/3 request stream carrying the extended CONNECT tunnel was reset.</value>
+  </data>
+  <data name="Http3RequestStreamEndedBeforeItsHeadersFrame" xml:space="preserve">
+    <value>The HTTP/3 request stream ended before its HEADERS frame.</value>
+  </data>
+  <data name="Http3RequestStreamEndedInsideATheFrameLengthExceedsTheOctets" xml:space="preserve">
+    <value>The HTTP/3 request stream ended inside a {0}: the frame length exceeds the octets the stream carried (RFC 9114 §7.1).</value>
+  </data>
+  <data name="Http3RequestStreamFailedBeforeItsRequestHeadWasComplete" xml:space="preserve">
+    <value>The HTTP/3 request stream failed before its request head was complete.</value>
+  </data>
+  <data name="Http3RequestStreamFailedWhileTheRequestBodyWasBeingRead" xml:space="preserve">
+    <value>The HTTP/3 request stream failed while the request body was being read.</value>
+  </data>
+  <data name="Http3RequestStreamWasResetBeforeItsBodyWasRead" xml:space="preserve">
+    <value>The HTTP/3 request stream was reset before its body was read.</value>
+  </data>
+  <data name="Http3RequestStreamWasResetBeforeTheExtendedConnectTunnelWasAccepted" xml:space="preserve">
+    <value>The HTTP/3 request stream was reset before the extended CONNECT tunnel was accepted.</value>
+  </data>
+  <data name="Http3TransportsRequireAQuicCapablePlatform" xml:space="preserve">
+    <value>HTTP/3 transports require a QUIC-capable platform.</value>
+  </data>
+  <data name="HttpRequestCouldNotBeParsed" xml:space="preserve">
+    <value>The HTTP request could not be parsed</value>
+  </data>
+  <data name="HttpVersionIsNotSupportedByTheHttp11Transport" xml:space="preserve">
+    <value>The HTTP version &apos;{0}&apos; is not supported by the HTTP/1.1 transport.</value>
+  </data>
+  <data name="InterimResponseCannotBeSentAfterTheFinalHttp11ResponseHas" xml:space="preserve">
+    <value>An interim response cannot be sent after the final HTTP/1.1 response has started.</value>
+  </data>
+  <data name="InterimResponseCannotBeSentAfterTheFinalHttp2ResponseHasStarted" xml:space="preserve">
+    <value>An interim response cannot be sent after the final HTTP/2 response has started.</value>
+  </data>
+  <data name="InterimResponseCannotBeSentAfterTheFinalHttp3ResponseHasStarted" xml:space="preserve">
+    <value>An interim response cannot be sent after the final HTTP/3 response has started.</value>
+  </data>
+  <data name="InterimResponseRequiresA1xxStatusCodeRfc9110152" xml:space="preserve">
+    <value>An interim response requires a 1xx status code (RFC 9110 §15.2).</value>
+  </data>
+  <data name="Invalid101SwitchingProtocolsIsAConnectionTransitionOwnedByAssimalignCohesionHttp" xml:space="preserve">
+    <value>101 Switching Protocols is a connection transition owned by Assimalign.Cohesion.Http.ProtocolUpgrade, not an interim response.</value>
+  </data>
+  <data name="Invalid1xxStatusCodeCannotBeUsedAsTheFinalResponseStatusEmit" xml:space="preserve">
+    <value>A 1xx status code ({0}) cannot be used as the final response status; emit interim responses through IHttpInterimResponseFeature instead.</value>
+  </data>
+  <data name="InvalidHttp2SettingsValueFor" xml:space="preserve">
+    <value>Invalid HTTP/2 SETTINGS value for {0}.</value>
+  </data>
+  <data name="IsAPseudoHeaderFieldAndATrailerSectionCarriesNoneRfc" xml:space="preserve">
+    <value>&apos;{0}&apos; is a pseudo-header field, and a trailer section carries none (RFC 9113 §8.1, RFC 9114 §4.3).</value>
+  </data>
+  <data name="IsMissingTheMethodPseudoHeaderFieldRfc9113831" xml:space="preserve">
+    <value>is missing the &apos;:method&apos; pseudo-header field (RFC 9113 §8.3.1)</value>
+  </data>
+  <data name="IsMissingThePathPseudoHeaderFieldRfc9113831" xml:space="preserve">
+    <value>is missing the &apos;:path&apos; pseudo-header field (RFC 9113 §8.3.1)</value>
+  </data>
+  <data name="IsMissingTheSchemePseudoHeaderFieldRfc9113831" xml:space="preserve">
+    <value>is missing the &apos;:scheme&apos; pseudo-header field (RFC 9113 §8.3.1)</value>
+  </data>
+  <data name="MalformedChunkExtensionsEachIsAndATokenOptionallyAndAToken" xml:space="preserve">
+    <value>RFC 9112 §7.1.1: malformed chunk extensions; each is &apos;;&apos; and a token, optionally &apos;=&apos; and a token or a quoted-string, with only spaces and tabs between.</value>
+  </data>
+  <data name="MaxAgeMustBeNonNegative" xml:space="preserve">
+    <value>The max-age must be non-negative.</value>
+  </data>
+  <data name="MaximumRequestBodySizeMustBeNonNegativeOrNullUnbounded" xml:space="preserve">
+    <value>The maximum request body size must be non-negative or null (unbounded).</value>
+  </data>
+  <data name="MessageMustNotContainBothContentLengthAndTransferEncodingHeaders" xml:space="preserve">
+    <value>RFC 9112 §6.3: message MUST NOT contain both Content-Length and Transfer-Encoding headers.</value>
+  </data>
+  <data name="MultiplexedConnectionListenerFactoryRegisteredForReturnedNull" xml:space="preserve">
+    <value>The multiplexed connection listener factory registered for &apos;{0}&apos; returned null.</value>
+  </data>
+  <data name="OneOrMoreHttpConnectionListenersFailedToDispose" xml:space="preserve">
+    <value>One or more HTTP connection listeners failed to dispose.</value>
+  </data>
+  <data name="OnlyAsciiHpackLiteralsAreCurrentlySupported" xml:space="preserve">
+    <value>Only ASCII HPACK literals are currently supported.</value>
+  </data>
+  <data name="PeerAcknowledgedAFieldSectionButTheServerSFieldSectionsReference" xml:space="preserve">
+    <value>The peer acknowledged a field section, but the server&apos;s field sections reference no dynamic table entry (RFC 9204 §4.4.1).</value>
+  </data>
+  <data name="PeerCancelledAPushTheServerNeverPromisedRfc911472" xml:space="preserve">
+    <value>The peer cancelled a push the server never promised (RFC 9114 §7.2.3).</value>
+  </data>
+  <data name="PeerClosedItsControlStreamRfc9114621" xml:space="preserve">
+    <value>The peer closed its control stream (RFC 9114 §6.2.1).</value>
+  </data>
+  <data name="PeerClosedItsQpackDecoderStreamRfc920442" xml:space="preserve">
+    <value>The peer closed its QPACK decoder stream (RFC 9204 §4.2).</value>
+  </data>
+  <data name="PeerClosedItsQpackEncoderStreamRfc920442" xml:space="preserve">
+    <value>The peer closed its QPACK encoder stream (RFC 9204 §4.2).</value>
+  </data>
+  <data name="PeerClosedTheHttp2ConnectionDuringTheResponse" xml:space="preserve">
+    <value>The peer closed the HTTP/2 connection during the response.</value>
+  </data>
+  <data name="PeerDidNotAcceptTheResponseAtTheConfiguredMinimumDataRate" xml:space="preserve">
+    <value>The peer did not accept the response at the configured minimum data rate, so the exchange was aborted.</value>
+  </data>
+  <data name="PeerDidNotReadTheResponseAtTheConfiguredMinimumDataRate" xml:space="preserve">
+    <value>The peer did not read the response at the configured minimum data rate.</value>
+  </data>
+  <data name="PeerOpenedASecondControlStreamRfc9114621" xml:space="preserve">
+    <value>The peer opened a second control stream (RFC 9114 §6.2.1).</value>
+  </data>
+  <data name="PeerOpenedASecondQpackDecoderStreamRfc920442" xml:space="preserve">
+    <value>The peer opened a second QPACK decoder stream (RFC 9204 §4.2).</value>
+  </data>
+  <data name="PeerOpenedASecondQpackEncoderStreamRfc920442" xml:space="preserve">
+    <value>The peer opened a second QPACK encoder stream (RFC 9204 §4.2).</value>
+  </data>
+  <data name="PeerResetItsControlStreamBeforeItsSettingsFrameWasCompleteRfc" xml:space="preserve">
+    <value>The peer reset its control stream before its SETTINGS frame was complete (RFC 9114 §6.2.1).</value>
+  </data>
+  <data name="PeerResetItsControlStreamRfc9114621" xml:space="preserve">
+    <value>The peer reset its control stream (RFC 9114 §6.2.1).</value>
+  </data>
+  <data name="PeerResetItsQpackDecoderStreamRfc920442" xml:space="preserve">
+    <value>The peer reset its QPACK decoder stream (RFC 9204 §4.2).</value>
+  </data>
+  <data name="PeerResetItsQpackEncoderStreamOrStoppedTheServerSDecoder" xml:space="preserve">
+    <value>The peer reset its QPACK encoder stream, or stopped the server&apos;s decoder stream (RFC 9204 §4.2).</value>
+  </data>
+  <data name="PeerResetItsQpackEncoderStreamRfc920442" xml:space="preserve">
+    <value>The peer reset its QPACK encoder stream (RFC 9204 §4.2).</value>
+  </data>
+  <data name="PeerSControlStreamDidNotOpenWithASettingsFrameRfc" xml:space="preserve">
+    <value>The peer&apos;s control stream did not open with a SETTINGS frame (RFC 9114 §6.2.1).</value>
+  </data>
+  <data name="PeerSControlStreamEndedInsideAFrameHeaderRfc91147" xml:space="preserve">
+    <value>The peer&apos;s control stream ended inside a frame header (RFC 9114 §7.1).</value>
+  </data>
+  <data name="PeerSControlStreamEndedInsideAFrameRfc911471" xml:space="preserve">
+    <value>The peer&apos;s control stream ended inside a frame (RFC 9114 §7.1).</value>
+  </data>
+  <data name="PeerSentAFrameOfType0xOnItsControlStreamWhere" xml:space="preserve">
+    <value>The peer sent a frame of type 0x{0:x} on its control stream, where it is not permitted (RFC 9114 §7.2).</value>
+  </data>
+  <data name="PeerSentAnInsertCountIncrementButTheServerSEncoderInserts" xml:space="preserve">
+    <value>The peer sent an Insert Count Increment, but the server&apos;s encoder inserts nothing (RFC 9204 §4.4.3).</value>
+  </data>
+  <data name="PeerSentAPriorityUpdateForAPushAndTheServerPromises" xml:space="preserve">
+    <value>The peer sent a PRIORITY_UPDATE for a push, and the server promises none (RFC 9218 §7.2).</value>
+  </data>
+  <data name="PeerSentAQpackEncoderInstructionIncompatibleWithAMaximumTableCapacity" xml:space="preserve">
+    <value>The peer sent a QPACK encoder instruction incompatible with a maximum table capacity of zero (RFC 9204 §3.2.3, §4.3).</value>
+  </data>
+  <data name="PeerSFrameOfType0xDoesNotHoldExactlyOneVariable" xml:space="preserve">
+    <value>The peer&apos;s frame of type 0x{0:x} does not hold exactly one variable-length integer (RFC 9114 §7.1).</value>
+  </data>
+  <data name="PeerSGoawayRaisedItsIdentifierFromToRfc911452" xml:space="preserve">
+    <value>The peer&apos;s GOAWAY raised its identifier from {0} to {1} (RFC 9114 §5.2).</value>
+  </data>
+  <data name="PeerSMaxPushIdLoweredTheMaximumPushIdFromTo" xml:space="preserve">
+    <value>The peer&apos;s MAX_PUSH_ID lowered the maximum push ID from {0} to {1} (RFC 9114 §7.2.7).</value>
+  </data>
+  <data name="PeerSPriorityUpdateEndedInsideItsPrioritizedElementIdRfc9114" xml:space="preserve">
+    <value>The peer&apos;s PRIORITY_UPDATE ended inside its Prioritized Element ID (RFC 9114 §7.1).</value>
+  </data>
+  <data name="PeerSPriorityUpdateNamesStreamBeyondTheInboundStreamAllowanceRfc" xml:space="preserve">
+    <value>The peer&apos;s PRIORITY_UPDATE names stream {0}, beyond the inbound stream allowance (RFC 9218 §7.2).</value>
+  </data>
+  <data name="PeerSPriorityUpdateNamesStreamWhichIsNotARequestStream" xml:space="preserve">
+    <value>The peer&apos;s PRIORITY_UPDATE names stream {0}, which is not a request stream (RFC 9218 §7.2).</value>
+  </data>
+  <data name="PeerSSettingsFrameDeclaresOctetsBeyondTheOctetBound" xml:space="preserve">
+    <value>The peer&apos;s SETTINGS frame declares {0} octets, beyond the {1}-octet bound.</value>
+  </data>
+  <data name="PeerSSettingsFrameWasTruncatedOrMalformedRfc911471" xml:space="preserve">
+    <value>The peer&apos;s SETTINGS frame was truncated or malformed (RFC 9114 §7.1).</value>
+  </data>
+  <data name="PeerSStreamCancellationCarriesAStreamIdThatOverflowsRfc9204" xml:space="preserve">
+    <value>The peer&apos;s Stream Cancellation carries a stream ID that overflows (RFC 9204 §4.1.1).</value>
+  </data>
+  <data name="PeerStoppedReadingTheConnectionBelowTheConfiguredMinimumResponseDataRate" xml:space="preserve">
+    <value>The peer stopped reading the connection below the configured minimum response data rate.</value>
+  </data>
+  <data name="PeerStoppedReadingTheHttp3RequestStreamCarryingTheExtendedConnectTunnel" xml:space="preserve">
+    <value>The peer stopped reading the HTTP/3 request stream carrying the extended CONNECT tunnel.</value>
+  </data>
+  <data name="PseudoHeaderFieldAppearedAfterRegularFieldsPseudoHeadersMustComeFirst" xml:space="preserve">
+    <value>Pseudo-header field {0} appeared after regular fields; pseudo-headers MUST come first.</value>
+  </data>
+  <data name="PseudoHeaderFieldStatusIsResponseOnlyAndMustNotAppearIn" xml:space="preserve">
+    <value>Pseudo-header field &apos;:status&apos; is response-only and MUST NOT appear in a request.</value>
+  </data>
+  <data name="PushPromiseReceivedFromTheClientHttp2ServersDoNotAcceptPushed" xml:space="preserve">
+    <value>PUSH_PROMISE received from the client; HTTP/2 servers do not accept pushed streams (RFC 9113 §8.4).</value>
+  </data>
+  <data name="QpackDynamicTableCapacityIsInvalidOrExceedsTheAdvertisedMaximum" xml:space="preserve">
+    <value>QPACK dynamic table capacity {0} is invalid or exceeds the advertised maximum {1}.</value>
+  </data>
+  <data name="QpackDynamicTableReferenceIsNotSupportedDynamicTableDisabled" xml:space="preserve">
+    <value>QPACK dynamic-table reference is not supported (dynamic table disabled).</value>
+  </data>
+  <data name="QpackEncodedRequiredInsertCountIsOutOfRangeForTheAdvertised" xml:space="preserve">
+    <value>The QPACK encoded Required Insert Count is out of range for the advertised table capacity.</value>
+  </data>
+  <data name="QpackEncoderStreamCarriedAMalformedInstruction" xml:space="preserve">
+    <value>The QPACK encoder stream carried a malformed instruction.</value>
+  </data>
+  <data name="QpackEncoderStreamEndedInTheMiddleOfAnInstruction" xml:space="preserve">
+    <value>The QPACK encoder stream ended in the middle of an instruction.</value>
+  </data>
+  <data name="QpackEncoderStreamIntegerOverflowed" xml:space="preserve">
+    <value>A QPACK encoder-stream integer overflowed.</value>
+  </data>
+  <data name="QpackEncoderStreamStringHasANegativeLength" xml:space="preserve">
+    <value>A QPACK encoder-stream string has a negative length.</value>
+  </data>
+  <data name="QpackEncoderStreamStringHasAnInvalidHuffmanEncoding" xml:space="preserve">
+    <value>A QPACK encoder-stream string has an invalid Huffman encoding.</value>
+  </data>
+  <data name="QpackFieldLineReferencesDynamicEntryWhichIsNotAvailable" xml:space="preserve">
+    <value>QPACK field line references dynamic entry {0}, which is not available.</value>
+  </data>
+  <data name="QpackFieldSectionRequiresInsertCountButOnlyEntriesHaveBeenInserted" xml:space="preserve">
+    <value>The QPACK field section requires insert count {0} but only {1} entries have been inserted.</value>
+  </data>
+  <data name="QpackFieldSectionWouldBlockMoreThanThePermittedStreamS" xml:space="preserve">
+    <value>A QPACK field section would block more than the permitted {0} stream(s).</value>
+  </data>
+  <data name="QpackInsertOfSizeExceedsTheDynamicTableCapacity" xml:space="preserve">
+    <value>QPACK insert of size {0} exceeds the dynamic table capacity {1}.</value>
+  </data>
+  <data name="QpackInsertWithNameReferenceTargetsStaticIndexWhichIsOutOf" xml:space="preserve">
+    <value>QPACK insert with name reference targets static index {0}, which is out of range.</value>
+  </data>
+  <data name="QpackPrefixedIntegerIsTruncated" xml:space="preserve">
+    <value>The QPACK prefixed integer is truncated.</value>
+  </data>
+  <data name="QpackPrefixedIntegerOverflowed" xml:space="preserve">
+    <value>The QPACK prefixed integer overflowed.</value>
+  </data>
+  <data name="QpackRelativeIndexDoesNotResolveToALiveDynamicTableEntry" xml:space="preserve">
+    <value>QPACK relative index {0} does not resolve to a live dynamic-table entry.</value>
+  </data>
+  <data name="QpackRequiredInsertCountCouldNotBeReconstructed" xml:space="preserve">
+    <value>The QPACK Required Insert Count could not be reconstructed.</value>
+  </data>
+  <data name="QpackRequiredInsertCountMustBe0TheDynamicTableIsDisabled" xml:space="preserve">
+    <value>QPACK Required Insert Count must be 0 — the dynamic table is disabled (QPACK_MAX_TABLE_CAPACITY = 0).</value>
+  </data>
+  <data name="QpackRequiredInsertCountReconstructedToZero" xml:space="preserve">
+    <value>The QPACK Required Insert Count reconstructed to zero.</value>
+  </data>
+  <data name="QpackStaticTableIndexIsOutOfRange" xml:space="preserve">
+    <value>QPACK static-table index {0} is out of range.</value>
+  </data>
+  <data name="QpackStaticTableNameIndexIsOutOfRange" xml:space="preserve">
+    <value>QPACK static-table name index {0} is out of range.</value>
+  </data>
+  <data name="QpackStringLiteralHasAnInvalidHuffmanEncoding" xml:space="preserve">
+    <value>The QPACK string literal has an invalid Huffman encoding.</value>
+  </data>
+  <data name="QpackStringLiteralIsTruncated" xml:space="preserve">
+    <value>The QPACK string literal is truncated.</value>
+  </data>
+  <data name="QpackStringLiteralLengthExceedsTheFieldSection" xml:space="preserve">
+    <value>The QPACK string literal length exceeds the field section.</value>
+  </data>
+  <data name="QuicVariableLengthIntegerWasIncomplete" xml:space="preserve">
+    <value>The QUIC variable-length integer was incomplete.</value>
+  </data>
+  <data name="ReadWasCancelledInsideTheRequestSTrailerSectionTheRequestBody" xml:space="preserve">
+    <value>A read was cancelled inside the request&apos;s trailer section; the request body can no longer be read.</value>
+  </data>
+  <data name="RepeatsThePseudoHeaderFieldRfc911383" xml:space="preserve">
+    <value>repeats the &apos;{0}&apos; pseudo-header field (RFC 9113 §8.3)</value>
+  </data>
+  <data name="RequestBodyExceedsTheConfiguredMaximumRequestBodySizeOctetsAtA" xml:space="preserve">
+    <value>The request body exceeds the configured maximum request body size ({0} octets) at a DATA frame of {1} octets after {2} octets.</value>
+  </data>
+  <data name="RequestBodyWasReceivedBelowTheConfiguredMinimumDataRate" xml:space="preserve">
+    <value>The request body was received below the configured minimum data rate.</value>
+  </data>
+  <data name="RequestBodyWasReceivedBelowTheConfiguredMinimumDataRateOfOctets" xml:space="preserve">
+    <value>The request body was received below the configured minimum data rate of {0} octets per second.</value>
+  </data>
+  <data name="RequestBodyWasRejectedWithAndIsNotReadFurther" xml:space="preserve">
+    <value>The request body was rejected with {0} and is not read further.</value>
+  </data>
+  <data name="RequestCarriesAnEmptyContentLengthFieldRfc911086" xml:space="preserve">
+    <value>{0} request carries an empty Content-Length field (RFC 9110 §8.6).</value>
+  </data>
+  <data name="RequestContainsMoreThanTheConfiguredMaximumOfHeaderFields" xml:space="preserve">
+    <value>The request contains more than the configured maximum of {0} header fields.</value>
+  </data>
+  <data name="RequestContentLengthValueIsNotANonNegativeDecimalIntegerRfc" xml:space="preserve">
+    <value>{0} request Content-Length value &apos;{1}&apos; is not a non-negative decimal integer (RFC 9110 §8.6).</value>
+  </data>
+  <data name="RequestDeclaresConflictingContentLengthValuesAndRfc911086" xml:space="preserve">
+    <value>{0} request declares conflicting Content-Length values ({1} and {2}) (RFC 9110 §8.6).</value>
+  </data>
+  <data name="RequestHeaderSection" xml:space="preserve">
+    <value>request header section</value>
+  </data>
+  <data name="RequestHeaderSectionExceedsTheConfiguredMaximumSizeOctets" xml:space="preserve">
+    <value>The request header section exceeds the configured maximum size ({0} octets).</value>
+  </data>
+  <data name="RequestInterceptorRejectedTheRequest" xml:space="preserve">
+    <value>A request interceptor rejected the request.</value>
+  </data>
+  <data name="RequestLine" xml:space="preserve">
+    <value>request line</value>
+  </data>
+  <data name="RequestMethodIsLongerThanAnyMethodThisServerImplements" xml:space="preserve">
+    <value>RFC 9112 §3: the request method is longer than any method this server implements.</value>
+  </data>
+  <data name="RequestMethodIsNotATokenRfc911091" xml:space="preserve">
+    <value>RFC 9112 §3: the request method is not a token (RFC 9110 §9.1).</value>
+  </data>
+  <data name="RequestSDataFramesExceedItsContentLengthOfOctetsRfc9114" xml:space="preserve">
+    <value>The request&apos;s DATA frames exceed its Content-Length of {0} octets (RFC 9114 §4.1.2).</value>
+  </data>
+  <data name="RequestStreamEndedAfterOfTheOctetsItsContentLengthDeclaredRfc" xml:space="preserve">
+    <value>The request stream ended after {0} of the {1} octets its Content-Length declared (RFC 9114 §4.1.2).</value>
+  </data>
+  <data name="RequestStreamFailedUnexpectedly" xml:space="preserve">
+    <value>The request stream failed unexpectedly.</value>
+  </data>
+  <data name="RequestStreamWasOpenedAfterTheConnectionBeganToCloseRfc9114" xml:space="preserve">
+    <value>The request stream was opened after the connection began to close (RFC 9114 §5.2).</value>
+  </data>
+  <data name="StreamListenerCapabilitiesRequired" xml:space="preserve">
+    <value>{0} requires a transport whose capabilities report a reliable, ordered byte stream (Delivery=Stream, IsReliable=true, IsOrdered=true); the supplied listener reports Delivery={1}, IsReliable={2}, IsOrdered={3}.</value>
+  </data>
+  <data name="ResponseFieldNameHoldsTheCharacter0xAtIndexWhichAToken" xml:space="preserve">
+    <value>RFC 9110 §5.1: a response field name holds the character 0x{0:X2} at index {1}, which a token cannot carry. The response head was not sent.</value>
+  </data>
+  <data name="ResponseFieldNameIsEmptyTheResponseHeadWasNotSent" xml:space="preserve">
+    <value>RFC 9110 §5.1: a response field name is empty. The response head was not sent.</value>
+  </data>
+  <data name="ResponseHeadCannotBeCommittedTheExchangeWasAbortedOrItsConnection" xml:space="preserve">
+    <value>The response head cannot be committed: the exchange was aborted or its connection was taken over.</value>
+  </data>
+  <data name="ResponseSTrailerSectionCouldNotBeSent" xml:space="preserve">
+    <value>The response&apos;s trailer section could not be sent.</value>
+  </data>
+  <data name="ServerSSideOfTheExtendedConnectTunnelHasAlreadyEnded" xml:space="preserve">
+    <value>The server&apos;s side of the extended CONNECT tunnel has already ended.</value>
+  </data>
+  <data name="RequestBodyStoppedAfterCompleteResponse" xml:space="preserve">
+    <value>The server stopped reading the request stream after sending a complete response (RFC 9114 §4.1).</value>
+  </data>
+  <data name="SettingsAckFrameMustHaveAnEmptyPayloadButReceivedOctets" xml:space="preserve">
+    <value>SETTINGS ACK frame must have an empty payload, but received {0} octets.</value>
+  </data>
+  <data name="SettingsEnableConnectProtocolMustBe0Or1Got" xml:space="preserve">
+    <value>SETTINGS_ENABLE_CONNECT_PROTOCOL must be 0 or 1; got {0}.</value>
+  </data>
+  <data name="SettingsEnablePushMustBe0Or1Got" xml:space="preserve">
+    <value>SETTINGS_ENABLE_PUSH must be 0 or 1; got {0}.</value>
+  </data>
+  <data name="SettingsFramePayloadOfOctetsIsNotAMultipleOf" xml:space="preserve">
+    <value>SETTINGS frame payload of {0} octets is not a multiple of {1}.</value>
+  </data>
+  <data name="SettingsFrameReceivedOnStreamSettingsFramesMustUseStream0" xml:space="preserve">
+    <value>SETTINGS frame received on stream {0}; SETTINGS frames MUST use stream 0.</value>
+  </data>
+  <data name="SettingsInitialWindowSizeChangePushedStreamSendWindowAbove" xml:space="preserve">
+    <value>SETTINGS_INITIAL_WINDOW_SIZE change pushed stream {0} send window above {1}.</value>
+  </data>
+  <data name="SettingsInitialWindowSizeDeltaIsOutsideTheLegalRange" xml:space="preserve">
+    <value>SETTINGS_INITIAL_WINDOW_SIZE delta {0} is outside the legal range.</value>
+  </data>
+  <data name="SettingsInitialWindowSizeMustNotExceedGot" xml:space="preserve">
+    <value>SETTINGS_INITIAL_WINDOW_SIZE must not exceed {0}; got {1}.</value>
+  </data>
+  <data name="SettingsMaxFrameSizeMustBeInGot" xml:space="preserve">
+    <value>SETTINGS_MAX_FRAME_SIZE must be in [{0}, {1}]; got {2}.</value>
+  </data>
+  <data name="SettingsNoRFC7540PrioritiesMustBe0Or1Got" xml:space="preserve">
+    <value>SETTINGS_NO_RFC7540_PRIORITIES must be 0 or 1; got {0}.</value>
+  </data>
+  <data name="StreamingResponseHasAlreadyBeenCompletedNoFurtherBodyBytesCanBe" xml:space="preserve">
+    <value>The streaming response has already been completed; no further body bytes can be written.</value>
+  </data>
+  <data name="SuppliedContextDoesNotBelongToAnHttp11Connection" xml:space="preserve">
+    <value>The supplied context does not belong to an HTTP/1.1 connection.</value>
+  </data>
+  <data name="SuppliedContextDoesNotBelongToAnHttp2Connection" xml:space="preserve">
+    <value>The supplied context does not belong to an HTTP/2 connection.</value>
+  </data>
+  <data name="SuppliedContextDoesNotBelongToAnHttp3Connection" xml:space="preserve">
+    <value>The supplied context does not belong to an HTTP/3 connection.</value>
+  </data>
+  <data name="TimeoutMustBePositiveOrTimeoutInfiniteTimeSpan" xml:space="preserve">
+    <value>The timeout must be positive or Timeout.InfiniteTimeSpan.</value>
+  </data>
+  <data name="TrailerFieldLineExceedsTheConfiguredMaximumOfOctets" xml:space="preserve">
+    <value>RFC 9112 §7.1.2: a trailer field line exceeds the configured maximum of {0} octets.</value>
+  </data>
+  <data name="TrailerFieldNameCannotBeEmpty" xml:space="preserve">
+    <value>A trailer field name cannot be empty.</value>
+  </data>
+  <data name="TrailerFieldNameMustBeATokenRfc911051" xml:space="preserve">
+    <value>A trailer field name must be a token (RFC 9110 §5.1).</value>
+  </data>
+  <data name="TrailerSectionContainsAZeroLengthFieldName" xml:space="preserve">
+    <value>The {0} trailer section contains a zero-length field name.</value>
+  </data>
+  <data name="TrailerSectionContainsMoreThanTheConfiguredMaximumOfFields" xml:space="preserve">
+    <value>RFC 9112 §7.1.2: the trailer section contains more than the configured maximum of {0} fields.</value>
+  </data>
+  <data name="TrailerSectionContainsTheFieldWhichATrailerSectionCannotCarryRfc" xml:space="preserve">
+    <value>The {0} trailer section contains the field &apos;{1}&apos;, which a trailer section cannot carry (RFC 9110 §6.5.1, RFC 9113 §8.2.2, RFC 9114 §4.2).</value>
+  </data>
+  <data name="TrailerSectionContainsThePseudoHeaderFieldATrailerSectionCarriesNone" xml:space="preserve">
+    <value>The {0} trailer section contains the pseudo-header field {1}; a trailer section carries none (RFC 9113 §8.1, RFC 9114 §4.3).</value>
+  </data>
+  <data name="TrailerSectionExceedsTheConfiguredMaximumSizeOctets" xml:space="preserve">
+    <value>RFC 9112 §7.1.2: the trailer section exceeds the configured maximum size ({0} octets).</value>
+  </data>
+  <data name="TransferEncodingMustEndWithChunkedForHttp11RequestsGot" xml:space="preserve">
+    <value>RFC 9112 §7.4: Transfer-Encoding MUST end with &apos;chunked&apos; for HTTP/1.1 requests; got &apos;{0}&apos;.</value>
+  </data>
+  <data name="UnknownPseudoHeaderField" xml:space="preserve">
+    <value>Unknown pseudo-header field {0}.</value>
+  </data>
+  <data name="ValueOfTheFieldHoldsTheControlCharacter0xAtIndexA" xml:space="preserve">
+    <value>The value of the {0} field {1} holds the control character 0x{2:X2} at index {3}; a field value holds no control character but HTAB (RFC 9110 §5.5, RFC 9113 §8.2.1, RFC 9114 §4.2).</value>
+  </data>
+  <data name="ValueOfTheFieldHoldsTheControlCharacter0xOnlyHtabIs" xml:space="preserve">
+    <value>RFC 9110 §5.5: the value of the field &apos;{0}&apos; holds the control character 0x{1:X2}; only HTAB is allowed.</value>
+  </data>
+  <data name="ValueOfTheFieldStartsOrEndsWithWhitespaceRfc91138" xml:space="preserve">
+    <value>The value of the {0} field {1} starts or ends with whitespace (RFC 9113 §8.2.1, RFC 9114 §4.2).</value>
+  </data>
+  <data name="ValueOfTheResponseFieldHoldsTheControlCharacter0xAtIndex" xml:space="preserve">
+    <value>RFC 9110 §5.5: the value of the response field &apos;{0}&apos; holds the control character 0x{1:X2} at index {2}; a field value holds no control character but HTAB. The response head was not sent.</value>
+  </data>
+  <data name="ValueOfTheTrailerFieldHoldsTheControlCharacter0xAField" xml:space="preserve">
+    <value>The value of the trailer field &apos;{0}&apos; holds the control character 0x{1:X2}; a field value holds no control character but HTAB (RFC 9110 §5.5).</value>
+  </data>
+  <data name="WithANameThatIsNotAToken" xml:space="preserve">
+    <value>with a name that is not a token</value>
+  </data>
+  <data name="Http2ProtocolDescription" xml:space="preserve">
+    <value>HTTP/2</value>
+  </data>
+  <data name="CombinedHttpProtocolDescription" xml:space="preserve">
+    <value>HTTP/1.1 and HTTP/2 on one listener</value>
+  </data>
+  <data name="Http1ProtocolDescription" xml:space="preserve">
+    <value>HTTP/1.1</value>
+  </data>
+</root>

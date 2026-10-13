@@ -57,7 +57,7 @@ internal static class Http3HeaderCodec
         {
             if (name.Length == 0)
             {
-                throw new InvalidDataException("HTTP/3 field section contains a zero-length field name.");
+                throw new InvalidDataException(ErrorMessages.Http3FieldSectionContainsAZeroLengthFieldName);
             }
 
             // RFC 9114 §4.2 / RFC 9113 §8.2.1 — a value, a pseudo-header's included, holds no NUL, CR,
@@ -71,7 +71,7 @@ internal static class Http3HeaderCodec
                 // regular fields.
                 if (seenRegularField)
                 {
-                    throw new InvalidDataException("HTTP/3 pseudo-header field appears after a regular field (RFC 9114 §4.3).");
+                    throw new InvalidDataException(ErrorMessages.Http3PseudoHeaderFieldAppearsAfterARegularFieldRfc91144);
                 }
 
                 switch (name)
@@ -96,7 +96,7 @@ internal static class Http3HeaderCodec
                         AssignOncePseudoHeader(ref protocol, value, name);
                         break;
                     default:
-                        throw new InvalidDataException($"HTTP/3 request contains an unknown pseudo-header field {HttpReceivedFieldRules.DescribeName(name)} (RFC 9114 §4.3.1).");
+                        throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestContainsAnUnknownPseudoHeaderFieldRfc911443, HttpReceivedFieldRules.DescribeName(name)));
                 }
 
                 continue;
@@ -118,14 +118,14 @@ internal static class Http3HeaderCodec
             if (HttpFieldNormalization.IsForbiddenInHttp2Or3(key))
             {
                 throw new InvalidDataException(
-                    $"Connection-specific header field '{name}' is forbidden in HTTP/3 (RFC 9114 §4.2).");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionSpecificHeaderFieldIsForbiddenInHttp3Rfc911442, name));
             }
 
             if (string.Equals(name, "te", StringComparison.OrdinalIgnoreCase)
                 && !HttpFieldNormalization.IsTeValueValidInHttp2Or3(value))
             {
                 throw new InvalidDataException(
-                    $"HTTP/3 field 'TE' MUST carry only the value 'trailers'; got '{value}'.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3FieldTeMustCarryOnlyTheValueTrailersGot, value));
             }
 
             if (headers.TryGetValue(key, out HttpHeaderValue existingValue))
@@ -153,7 +153,7 @@ internal static class Http3HeaderCodec
         // of each.
         if (method is null)
         {
-            throw new InvalidDataException("HTTP/3 request is missing the :method pseudo-header (RFC 9114 §4.3.1).");
+            throw new InvalidDataException(ErrorMessages.Http3RequestIsMissingTheMethodPseudoHeaderRfc911443);
         }
 
         bool isConnect = string.Equals(method, "CONNECT", StringComparison.Ordinal);
@@ -162,12 +162,12 @@ internal static class Http3HeaderCodec
         {
             if (schemeValue is null)
             {
-                throw new InvalidDataException("HTTP/3 request is missing the :scheme pseudo-header (RFC 9114 §4.3.1).");
+                throw new InvalidDataException(ErrorMessages.Http3RequestIsMissingTheSchemePseudoHeaderRfc911443);
             }
 
             if (string.IsNullOrEmpty(pathValue))
             {
-                throw new InvalidDataException("HTTP/3 request is missing a non-empty :path pseudo-header (RFC 9114 §4.3.1).");
+                throw new InvalidDataException(ErrorMessages.Http3RequestIsMissingANonEmptyPathPseudoHeaderRfc9114);
             }
         }
 
@@ -490,7 +490,7 @@ internal static class Http3HeaderCodec
         {
             // RFC 9114 §4.3.1 — a pseudo-header field MUST NOT appear more
             // than once.
-            throw new InvalidDataException($"HTTP/3 request contains a duplicate pseudo-header field '{name}' (RFC 9114 §4.3.1).");
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestContainsADuplicatePseudoHeaderFieldRfc911443, name));
         }
 
         slot = value;
@@ -534,7 +534,7 @@ internal static class Http3HeaderCodec
             // HttpPath rejects an illegal character or a missing leading '/' with an HttpException;
             // the URL decoder rejects a decoded NUL with an InvalidOperationException.
             throw new InvalidDataException(
-                $"HTTP/3 request carries a malformed :path pseudo-header (RFC 9114 §4.1.2): {exception.Message}",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestCarriesAMalformedPathPseudoHeaderRfc911441, exception.Message),
                 exception);
         }
     }

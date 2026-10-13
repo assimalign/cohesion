@@ -1,5 +1,6 @@
 using Assimalign.Cohesion.Http.Internal;
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -161,7 +162,7 @@ public sealed class HttpFormFeature : IHttpFormFeature
                 // RFC 2046 §5.1.1 boundaries are bounded to 70 characters; a
                 // wildly long boundary is either malformed or an attempt to
                 // grow the look-ahead buffer unboundedly. Reject it up front.
-                string message = $"Multipart boundary length limit {_options.MultipartBoundaryLengthLimit} exceeded.";
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartBoundaryLengthLimitExceeded, _options.MultipartBoundaryLengthLimit);
                 throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartBoundaryLength, message));
             }
 
@@ -210,7 +211,7 @@ public sealed class HttpFormFeature : IHttpFormFeature
             // that will be discarded. Checking before incrementing also avoids counter overflow.
             if (sectionCount >= _options.ValueCountLimit)
             {
-                string message = $"Multipart section count limit {_options.ValueCountLimit} exceeded.";
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionCountLimitExceeded, _options.ValueCountLimit);
                 throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartSectionCount, message));
             }
             sectionCount++;

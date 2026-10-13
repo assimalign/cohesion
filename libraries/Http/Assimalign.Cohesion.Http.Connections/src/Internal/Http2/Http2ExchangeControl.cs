@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -75,7 +76,7 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
         if (!CanWriteInterimResponse)
         {
             throw new InvalidOperationException(
-                "An interim response cannot be sent after the final HTTP/2 response has started.");
+                ErrorMessages.InterimResponseCannotBeSentAfterTheFinalHttp2ResponseHasStarted);
         }
 
         await _connection.WriteInterimResponseAsync(_context, statusCode, headers, cancellationToken).ConfigureAwait(false);
@@ -88,7 +89,7 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
     public Stream TakeOver()
     {
         throw new InvalidOperationException(
-            "HTTP/2 exchanges are multiplexed streams over a shared connection and cannot be taken over (RFC 9113 §8.6).");
+            ErrorMessages.Http2ExchangesAreMultiplexedStreamsOverASharedConnectionAndCannotBe);
     }
 
     /// <inheritdoc />
@@ -110,27 +111,27 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
     {
         if (!_isExtendedConnect || _context.RequestBody is not { } requestBody)
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.NotExtendedConnectMessage);
+            throw new InvalidOperationException(ErrorMessages.ExchangeIsNotExtendedConnect);
         }
 
         if (Interlocked.Exchange(ref _tunnelAcceptCalled, 1) == 1)
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.AlreadyAcceptedMessage);
+            throw new InvalidOperationException(ErrorMessages.ExtendedConnectAcceptHasAlreadyBeenAttemptedForThisExchange);
         }
 
         if (_context.CancelRequested)
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.CancelledMessage);
+            throw new InvalidOperationException(ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedTheExchangeWasCancelled);
         }
 
         if (HasResponseStarted)
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.ResponseStartedMessage);
+            throw new InvalidOperationException(ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedAfterTheResponseHasStarted);
         }
 
         if (_context.Stream.IsReset)
         {
-            throw new IOException($"The HTTP/2 stream {_context.StreamId} was reset before the extended CONNECT tunnel was accepted.");
+            throw new IOException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamWasResetBeforeTheExtendedConnectTunnelWasAccepted, _context.StreamId));
         }
 
         HttpStatusCode stagedStatus = _context.Response.StatusCode;
@@ -154,7 +155,7 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
         // RFC 9113 §8.1 — the stream carries one final response, and from here it is the tunnel's.
         if (!_context.Stream.TryClaimResponse())
         {
-            throw new InvalidOperationException(HttpExtendedConnectRules.ResponseStartedMessage);
+            throw new InvalidOperationException(ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedAfterTheResponseHasStarted);
         }
 
         _context.MarkFinalResponseStarted();

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -88,7 +89,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         if (Interlocked.Exchange(ref _accepted, 1) == 1)
         {
             throw new InvalidOperationException(
-                "The protocol upgrade has already been accepted for this exchange.");
+                ErrorMessages.ProtocolUpgradeHasAlreadyBeenAcceptedForThisExchange);
         }
 
         // Resolve the status line before claiming the connection so an impossible kind fails
@@ -97,7 +98,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         {
             HttpProtocolUpgradeKind.Upgrade => HttpStatusCode.SwitchingProtocols,
             HttpProtocolUpgradeKind.Connect => HttpStatusCode.Ok,
-            _ => throw new InvalidOperationException($"Cannot accept a protocol upgrade of kind '{Kind}'."),
+            _ => throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CannotAcceptAProtocolUpgradeOfKind, Kind)),
         };
 
         // Encode the head before claiming the connection (#1183): a field it cannot carry is refused
@@ -267,7 +268,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         {
             // Not quoted: whatever makes the name invalid may be CR, LF, or NUL.
             throw new HttpInvalidResponseFieldException(
-                "RFC 9110 §5.1: a response field name is not a token. The transition response was not sent.");
+                ErrorMessages.ResponseFieldNameIsNotATokenTheTransitionResponseWasNot);
         }
 
         int invalid = HttpFieldNormalization.IndexOfInvalidControlCharacter(value);
@@ -275,7 +276,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         if (invalid >= 0)
         {
             throw new HttpInvalidResponseFieldException(
-                $"RFC 9110 §5.5: the value of the response field '{name}' holds the control character 0x{(int)value[invalid]:X2} at index {invalid}; a field value holds no control character but HTAB. The transition response was not sent.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheResponseFieldHoldsTheControlCharacter0xAtIndex, name, (int)value[invalid], invalid));
         }
     }
 }

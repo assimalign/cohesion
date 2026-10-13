@@ -64,7 +64,7 @@ public static class HttpContextAntiforgeryExtensions
                 ArgumentNullException.ThrowIfNull(context);
                 return context.Features.Get<IHttpAntiforgeryFeature>()?.Antiforgery
                     ?? throw new InvalidOperationException(
-                        "No IHttpAntiforgeryFeature has been attached to the HTTP context. Assign Antiforgery before requiring it.");
+                        ErrorMessages.NoIHttpAntiforgeryFeatureHasBeenAttachedToTheHttpContextAssignAntiforgeryBefore);
             }
         }
     }

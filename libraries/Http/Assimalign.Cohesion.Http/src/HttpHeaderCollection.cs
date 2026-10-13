@@ -98,7 +98,7 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
         ThrowIfReadOnly();
         if (_hasInlineEntry && _inlineKey.Equals(key))
         {
-            throw new ArgumentException("An item with the same key has already been added.", nameof(key));
+            throw new ArgumentException(ErrorMessages.ItemWithTheSameKeyHasAlreadyBeenAdded, nameof(key));
         }
         if (_usesInlineStorage && !_hasInlineEntry && (_store is null || !_store.ContainsKey(key)))
         {
@@ -187,7 +187,7 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
     {
         if (IsReadOnly)
         {
-            throw new InvalidOperationException("The header collection is read-only and cannot be modified.");
+            throw new InvalidOperationException(ErrorMessages.HeaderCollectionIsReadOnlyAndCannotBeModified);
         }
     }
 
@@ -211,7 +211,7 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
         public KeyValuePair<HttpHeaderKey, HttpHeaderValue> Current { get; private set; }
 
         object IEnumerator.Current => _nonGeneric && !_hasCurrent
-            ? throw new InvalidOperationException("Enumeration has either not started or has already finished.")
+            ? throw new InvalidOperationException(ErrorMessages.EnumerationHasEitherNotStartedOrHasAlreadyFinished)
             : Current;
 
         public bool MoveNext()
@@ -254,7 +254,7 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
         {
             if (_source is not null && _source._version != _version)
             {
-                throw new InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+                throw new InvalidOperationException(ErrorMessages.CollectionWasModifiedEnumerationOperationMayNotExecute);
             }
         }
     }

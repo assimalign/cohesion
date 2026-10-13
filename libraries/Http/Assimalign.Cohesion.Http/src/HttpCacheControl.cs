@@ -161,7 +161,7 @@ public readonly struct HttpCacheControl
     {
         if (!TryParse(value, out HttpCacheControl result))
         {
-            throw new HttpInvalidCacheControlException($"The value is not a valid Cache-Control field: '{value.ToString()}'.");
+            throw new HttpInvalidCacheControlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidCacheControlField, value.ToString()));
         }
         return result;
     }

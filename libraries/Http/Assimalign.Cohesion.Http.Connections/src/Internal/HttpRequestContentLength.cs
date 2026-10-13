@@ -57,19 +57,19 @@ internal static class HttpRequestContentLength
                 if (!IsAsciiDigits(element)
                     || !long.TryParse(element, NumberStyles.None, CultureInfo.InvariantCulture, out long parsed))
                 {
-                    throw new InvalidDataException($"{protocol} request Content-Length value '{element.ToString()}' is not a non-negative decimal integer (RFC 9110 §8.6).");
+                    throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestContentLengthValueIsNotANonNegativeDecimalIntegerRfc, protocol, element.ToString()));
                 }
 
                 if (agreed is { } existing && existing != parsed)
                 {
-                    throw new InvalidDataException($"{protocol} request declares conflicting Content-Length values ({existing} and {parsed}) (RFC 9110 §8.6).");
+                    throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestDeclaresConflictingContentLengthValuesAndRfc911086, protocol, existing, parsed));
                 }
 
                 agreed = parsed;
             }
         }
 
-        return agreed ?? throw new InvalidDataException($"{protocol} request carries an empty Content-Length field (RFC 9110 §8.6).");
+        return agreed ?? throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestCarriesAnEmptyContentLengthFieldRfc911086, protocol));
     }
 
     private static bool IsAsciiDigits(ReadOnlySpan<char> value)

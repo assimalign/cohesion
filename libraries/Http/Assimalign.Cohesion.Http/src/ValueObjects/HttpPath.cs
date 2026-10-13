@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Buffers;
 using System.Diagnostics;
 
@@ -33,12 +34,12 @@ public readonly struct HttpPath : IEquatable<HttpPath>
 
         if (value.AsSpan().ContainsAny(_invalidCharacters))
         {
-            throw new HttpInvalidPathException($"The following path contains invalid characters: '{value}'.");
+            throw new HttpInvalidPathException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FollowingPathContainsInvalidCharacters, value));
         }
 
         if (value[0] is not ('/' or '*'))
         {
-            throw new HttpInvalidPathException($"The following path is invalid: '{value}'. Paths must begin with '/' or '*'.");
+            throw new HttpInvalidPathException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FollowingPathIsInvalidPathsMustBeginWithOr, value));
         }
 
         Value = value;

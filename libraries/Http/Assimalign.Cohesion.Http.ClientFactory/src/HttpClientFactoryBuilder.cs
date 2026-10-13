@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -22,7 +23,7 @@ public sealed class HttpClientFactoryBuilder
     {
         if (lifetime <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(lifetime), lifetime, "Handler lifetime must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(lifetime), lifetime, ErrorMessages.HandlerLifetimeMustBePositive);
         }
         _options.DefaultHandlerLifetime = lifetime;
         return this;
@@ -49,12 +50,12 @@ public sealed class HttpClientFactoryBuilder
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new ArgumentException("Client name must be non-empty.", nameof(name));
+            throw new ArgumentException(ErrorMessages.ClientNameMustBeNonEmpty, nameof(name));
         }
         if (_options.NamedClients.ContainsKey(name))
         {
             throw new ArgumentException(
-                $"A client with the name '{name}' has already been registered.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientWithTheNameHasAlreadyBeenRegistered, name),
                 nameof(name));
         }
 
@@ -76,7 +77,7 @@ public sealed class HttpClientFactoryBuilder
         if (_options.NamedClients.Count == 0)
         {
             throw new InvalidOperationException(
-                "At least one named client must be registered before the factory can be built.");
+                ErrorMessages.AtLeastOneNamedClientMustBeRegisteredBeforeTheFactoryCan);
         }
         return new HttpClientFactory(_options);
     }

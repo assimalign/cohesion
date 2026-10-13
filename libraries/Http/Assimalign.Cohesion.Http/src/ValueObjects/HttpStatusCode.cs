@@ -117,7 +117,10 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     /// <exception cref="ArgumentException"><paramref name="statusCode"/> is outside the valid range.</exception>
     public HttpStatusCode(int statusCode)
     {
-        ArgumentException.ThrowIf(!IsValid(statusCode), $"The provided status code is invalid: '{statusCode}'");
+        if (!IsValid(statusCode))
+        {
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ProvidedStatusCodeIsInvalid, statusCode));
+        }
 
         Value = statusCode;
     }

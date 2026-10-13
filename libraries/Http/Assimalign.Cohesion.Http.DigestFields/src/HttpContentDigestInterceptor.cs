@@ -86,7 +86,7 @@ public sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
         {
             // Fail closed: an operator-installed verifier treats a malformed Content-Digest as a
             // client error rather than silently ignoring it (RFC 9530 §2 permits either).
-            throw new HttpRequestRejectedException(HttpStatusCode.BadRequest, "The Content-Digest field is malformed.");
+            throw new HttpRequestRejectedException(HttpStatusCode.BadRequest, ErrorMessages.ContentDigestFieldIsMalformed);
         }
 
         if (!field.HasSupportedAlgorithm)
@@ -108,7 +108,7 @@ public sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
         if (field.VerifyContent(content) == HttpDigestVerificationResult.Mismatched)
         {
             throw new HttpRequestRejectedException(
-                HttpStatusCode.BadRequest, "The request body does not match its Content-Digest.");
+                HttpStatusCode.BadRequest, ErrorMessages.ContentDigestMismatch);
         }
 
         return new HttpDigestReplayStream(content, body);

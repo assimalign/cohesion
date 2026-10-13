@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Security.Cryptography;
 
 namespace Assimalign.Cohesion.Http;
@@ -35,7 +36,7 @@ public sealed class HttpContentDigester : IDisposable
         ArgumentNullException.ThrowIfNull(algorithms);
         if (algorithms.Length == 0)
         {
-            throw new ArgumentException("At least one algorithm is required.", nameof(algorithms));
+            throw new ArgumentException(ErrorMessages.AtLeastOneAlgorithmIsRequired, nameof(algorithms));
         }
 
         _algorithms = new HttpDigestAlgorithm[algorithms.Length];
@@ -51,7 +52,7 @@ public sealed class HttpContentDigester : IDisposable
                     _hashes[j].Dispose();
                 }
                 throw new ArgumentException(
-                    $"The digest algorithm '{algorithm}' cannot be used to generate a digest (RFC 9530 §5).", nameof(algorithms));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmCannotBeUsedToGenerateADigestRfc95305, algorithm), nameof(algorithms));
             }
             _algorithms[i] = algorithm;
             _hashes[i] = algorithm.CreateIncrementalHash();

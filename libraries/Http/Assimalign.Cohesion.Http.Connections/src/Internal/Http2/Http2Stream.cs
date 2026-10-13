@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -37,6 +38,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal sealed class Http2Stream
 {
+    // These diagnostics also run during ordinary validation, cancellation or completion.
+    private static readonly string _exchangeAbandonedBeforeBodyEndedFormat = ErrorMessages.Http2ExchangeOnStreamWasAbandonedBeforeItsRequestBodyEnded;
+    private static readonly string _connectionClosedBeforeBodyEndedFormat = ErrorMessages.Http2ConnectionClosedBeforeTheRequestBodyOnStreamEnded;
+    private static readonly string _requestBodyResetFormat = ErrorMessages.Http2StreamWasResetBeforeItsRequestBodyEnded;
+
     // _responseOwner values. RFC 9113 §8.1 — a stream carries exactly one final response, written
     // either by the application or, when the transport rejects the request itself (413 or 408), by the
     // transport; the transport also claims it, recording 400, for a stream it resets as malformed (#1378),
@@ -593,7 +599,7 @@ internal sealed class Http2Stream
                     {
                         throw new Http2ConnectionException(
                             Http2ErrorCode.ProtocolError,
-                            $"HTTP/2 trailing HEADERS on stream {StreamId} must carry END_STREAM.");
+                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2TrailingHeadersOnStreamMustCarryEndStream, StreamId));
                     }
 
                     State = State == Http2StreamState.Open
@@ -612,7 +618,7 @@ internal sealed class Http2Stream
                 case Http2StreamState.Closed:
                     throw new Http2ConnectionException(
                         Http2ErrorCode.StreamClosed,
-                        $"HTTP/2 HEADERS frame received on stream {StreamId} in state {State}; the peer has already closed its half.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2HeadersFrameReceivedOnStreamInStateThePeerHasAlready, StreamId, State));
             }
         }
 
@@ -659,7 +665,7 @@ internal sealed class Http2Stream
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.ProtocolError,
-                    $"HTTP/2 CONTINUATION frame received on stream {StreamId} in state {State}.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ContinuationFrameReceivedOnStreamInState, StreamId, State));
             }
         }
 
@@ -720,7 +726,7 @@ internal sealed class Http2Stream
             if (_isConnect)
             {
                 throw new InvalidDataException(
-                    $"HTTP/2 stream {StreamId} carried a trailer section after a CONNECT head; a CONNECT stream carries only DATA (RFC 9113 §8.5).");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamCarriedATrailerSectionAfterAConnectHeadAConnect, StreamId));
             }
 
             HttpTrailerFieldRules.AddReceivedFields(fields, trailers, "HTTP/2");
@@ -757,8 +763,8 @@ internal sealed class Http2Stream
         _requestBodyRejected = true;
 
         string message = _requestBodyReceived > declared
-            ? $"The HTTP/2 request on stream {StreamId} is malformed: its DATA frames exceed its content-length of {declared} octets (RFC 9113 §8.1.1)."
-            : $"The HTTP/2 request on stream {StreamId} is malformed: the stream ended after {_requestBodyReceived} of the {declared} octets its content-length declared (RFC 9113 §8.1.1).";
+            ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestOnStreamIsMalformedItsDataFramesExceedItsContent, StreamId, declared)
+            : string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestOnStreamIsMalformedTheStreamEndedAfterOfThe, StreamId, _requestBodyReceived, declared);
 
         FailMalformedBody(new IOException(message));
         return new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, message);
@@ -858,7 +864,7 @@ internal sealed class Http2Stream
                 case Http2StreamState.Idle:
                     throw new Http2ConnectionException(
                         Http2ErrorCode.ProtocolError,
-                        $"HTTP/2 DATA frame received on stream {StreamId} before HEADERS.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataFrameReceivedOnStreamBeforeHeaders, StreamId));
                 case Http2StreamState.Open:
                     if (endStream)
                     {
@@ -880,7 +886,7 @@ internal sealed class Http2Stream
                     throw new Http2StreamException(
                         StreamId,
                         Http2ErrorCode.StreamClosed,
-                        $"HTTP/2 DATA frame received on stream {StreamId} in state {State}.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataFrameReceivedOnStreamInState, StreamId, State));
             }
         }
 
@@ -914,7 +920,7 @@ internal sealed class Http2Stream
             rejectionClaimed = TryClaimResponseForRejection(HttpStatusCode.RequestEntityTooLarge);
             FailBody(LatchClientFault(
                 HttpStatusCode.RequestEntityTooLarge,
-                new IOException($"The HTTP/2 request body on stream {StreamId} exceeded the maximum request body size of {limit} octets (413 Content Too Large).")));
+                new IOException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestBodyOnStreamExceededTheMaximumRequestBodySizeOf, StreamId, limit))));
             return false;
         }
 
@@ -950,7 +956,7 @@ internal sealed class Http2Stream
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.ProtocolError,
-                    $"HTTP/2 RST_STREAM received on idle stream {StreamId}.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RstStreamReceivedOnIdleStream, StreamId));
             }
 
             LatchResponseAbortedByClient();
@@ -959,7 +965,7 @@ internal sealed class Http2Stream
             _reset = true;
         }
 
-        CutOffBody($"The HTTP/2 stream {StreamId} was reset before its request body ended.");
+        CutOffBody(string.Format(CultureInfo.CurrentCulture, _requestBodyResetFormat, StreamId));
     }
 
     /// <summary>
@@ -995,7 +1001,7 @@ internal sealed class Http2Stream
             _reset = true;
         }
 
-        CutOffBody($"The HTTP/2 stream {StreamId} was reset before its request body ended.");
+        CutOffBody(string.Format(CultureInfo.CurrentCulture, _requestBodyResetFormat, StreamId));
     }
 
     /// <summary>
@@ -1053,7 +1059,7 @@ internal sealed class Http2Stream
         // still be able to read it, so do NOT fire the abort for it.
         if (!InputCompleted)
         {
-            CutOffBody($"The HTTP/2 connection closed before the request body on stream {StreamId} ended.");
+            CutOffBody(string.Format(CultureInfo.CurrentCulture, _connectionClosedBeforeBodyEndedFormat, StreamId));
             return true;
         }
 
@@ -1070,7 +1076,7 @@ internal sealed class Http2Stream
     /// </summary>
     public void AbortOnCancellation()
     {
-        CutOffBody($"The HTTP/2 exchange on stream {StreamId} was abandoned before its request body ended.");
+        CutOffBody(string.Format(CultureInfo.CurrentCulture, _exchangeAbandonedBeforeBodyEndedFormat, StreamId));
     }
 
     /// <summary>
@@ -1151,7 +1157,7 @@ internal sealed class Http2Stream
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.EnhanceYourCalm,
-                $"HTTP/2 header block on stream {StreamId} exceeded the maximum of {_maxHeaderBlockSize} octets (CONTINUATION flood).");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2HeaderBlockOnStreamExceededTheMaximumOfOctetsContinuationFlood, StreamId, _maxHeaderBlockSize));
         }
 
         _headerBlock.Write(payload);
@@ -1213,7 +1219,7 @@ internal sealed class Http2Stream
     {
         if (!HeadersCompleted)
         {
-            throw new InvalidOperationException("The HTTP/2 stream is not ready to create a request context.");
+            throw new InvalidOperationException(ErrorMessages.Http2StreamIsNotReadyToCreateARequestContext);
         }
 
         // RFC 9113 §5.4.2 — the exchange is aborted through this stream's own token alone: the stream
@@ -1236,7 +1242,7 @@ internal sealed class Http2Stream
         }
         catch (InvalidDataException exception)
         {
-            throw CreateMalformedRequestError($"carries a malformed field section: {exception.Message}");
+            throw CreateMalformedRequestError(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CarriesAMalformedFieldSection, exception.Message));
         }
         finally
         {
@@ -1249,7 +1255,7 @@ internal sealed class Http2Stream
         // decoded, so this is a stream error (RFC 9113 §8.1.1), as are the §8.3.1 checks below.
         if (decodedHeaders.RepeatedPseudoHeader is { } repeatedPseudoHeader)
         {
-            throw CreateMalformedRequestError($"repeats the '{repeatedPseudoHeader}' pseudo-header field (RFC 9113 §8.3)");
+            throw CreateMalformedRequestError(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RepeatsThePseudoHeaderFieldRfc911383, repeatedPseudoHeader));
         }
 
         // RFC 8441 §4 / RFC 9220 — validate extended CONNECT before materializing
@@ -1272,7 +1278,7 @@ internal sealed class Http2Stream
             throw new Http2StreamException(
                 StreamId,
                 Http2ErrorCode.ProtocolError,
-                $"The HTTP/2 request on stream {StreamId} is malformed: {extendedConnectViolation}");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestOnStreamIsMalformed, StreamId, extendedConnectViolation));
         }
 
         // RFC 9113 §8.3.1 — every request carries :method, and every request but a CONNECT carries
@@ -1283,24 +1289,24 @@ internal sealed class Http2Stream
         // reaches the application, and the connection keeps serving its other streams.
         if (decodedHeaders.Path is { Length: 0 })
         {
-            throw CreateMalformedRequestError("carries an empty ':path' pseudo-header field (RFC 9113 §8.3.1)");
+            throw CreateMalformedRequestError(ErrorMessages.CarriesAnEmptyPathPseudoHeaderFieldRfc9113831);
         }
 
         if (decodedHeaders.Method is not { } methodValue)
         {
-            throw CreateMalformedRequestError("is missing the ':method' pseudo-header field (RFC 9113 §8.3.1)");
+            throw CreateMalformedRequestError(ErrorMessages.IsMissingTheMethodPseudoHeaderFieldRfc9113831);
         }
 
         if (!string.Equals(methodValue, HttpMethod.Connect.Value, StringComparison.Ordinal))
         {
             if (decodedHeaders.Scheme is null)
             {
-                throw CreateMalformedRequestError("is missing the ':scheme' pseudo-header field (RFC 9113 §8.3.1)");
+                throw CreateMalformedRequestError(ErrorMessages.IsMissingTheSchemePseudoHeaderFieldRfc9113831);
             }
 
             if (decodedHeaders.Path is null)
             {
-                throw CreateMalformedRequestError("is missing the ':path' pseudo-header field (RFC 9113 §8.3.1)");
+                throw CreateMalformedRequestError(ErrorMessages.IsMissingThePathPseudoHeaderFieldRfc9113831);
             }
         }
 
@@ -1322,7 +1328,7 @@ internal sealed class Http2Stream
             throw new Http2StreamException(
                 StreamId,
                 Http2ErrorCode.ProtocolError,
-                $"The HTTP/2 request on stream {StreamId} is malformed: {requestTargetViolation}");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestOnStreamIsMalformed, StreamId, requestTargetViolation));
         }
 
         // RFC 9113 §8.1.1 / RFC 9110 §8.6 — a declared content-length is held against the DATA the stream
@@ -1334,7 +1340,7 @@ internal sealed class Http2Stream
         }
         catch (InvalidDataException exception)
         {
-            throw CreateMalformedRequestError($"carries an invalid content-length: {exception.Message}");
+            throw CreateMalformedRequestError(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CarriesAnInvalidContentLength, exception.Message));
         }
 
         // RFC 3986 §2.4 — the :path is percent-decoded through the same HttpPath.FromUriComponent
@@ -1358,7 +1364,7 @@ internal sealed class Http2Stream
             throw new Http2StreamException(
                 StreamId,
                 Http2ErrorCode.ProtocolError,
-                $"HTTP/2 stream {StreamId} carried a malformed :path: {exception.Message}");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamCarriedAMalformedPath, StreamId, exception.Message));
         }
 
         HttpMethod method = HttpMethod.GetCanonicalizedValue(methodValue);
@@ -1372,7 +1378,7 @@ internal sealed class Http2Stream
         if (InputCompleted && _declaredContentLength is > 0)
         {
             throw CreateMalformedRequestError(
-                $"declares a content-length of {_declaredContentLength} octets but ends the stream with its head (RFC 9113 §8.1.1)");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeclaresAContentLengthOfOctetsButEndsTheStreamWithIts, _declaredContentLength));
         }
 
         // RFC 9110 §4.2.2 / §7.4: reject an https target on h2c before constructing the body or
@@ -1489,7 +1495,7 @@ internal sealed class Http2Stream
         return new Http2StreamException(
             StreamId,
             Http2ErrorCode.ProtocolError,
-            $"The HTTP/2 request on stream {StreamId} {reason}.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestOnStream, StreamId, reason));
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)

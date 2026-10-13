@@ -52,7 +52,7 @@ internal static class HPackHuffmanDecoder
                     if (_isLeaf[node, direction])
                     {
                         throw new InvalidOperationException(
-                            "HPACK Huffman table internal consistency error: prefix-free violation.");
+                            ErrorMessages.HpackHuffmanTableInternalConsistencyErrorPrefixFreeViolation);
                     }
 
                     if (_children[node, direction] == 0)
@@ -112,13 +112,13 @@ internal static class HPackHuffmanDecoder
                     if (symbol == HPackHuffmanCodes.EndOfString)
                     {
                         throw new HPackDecodingException(
-                            "HPACK Huffman-encoded string contained an EOS symbol.");
+                            ErrorMessages.HpackHuffmanEncodedStringContainedAnEosSymbol);
                     }
 
                     if (written >= destination.Length)
                     {
                         throw new HPackDecodingException(
-                            "HPACK Huffman-encoded string longer than destination buffer.");
+                            ErrorMessages.HpackHuffmanEncodedStringLongerThanDestinationBuffer);
                     }
 
                     destination[written++] = (byte)symbol;
@@ -142,13 +142,13 @@ internal static class HPackHuffmanDecoder
             if (bitsSinceLastSymbol > 7)
             {
                 throw new HPackDecodingException(
-                    "HPACK Huffman-encoded string has trailing partial code longer than 7 bits.");
+                    ErrorMessages.HpackHuffmanEncodedStringHasTrailingPartialCodeLongerThan7Bits);
             }
 
             if (!onlyOnesSinceLastSymbol)
             {
                 throw new HPackDecodingException(
-                    "HPACK Huffman-encoded string padding does not match EOS prefix.");
+                    ErrorMessages.HpackHuffmanEncodedStringPaddingDoesNotMatchEosPrefix);
             }
         }
 

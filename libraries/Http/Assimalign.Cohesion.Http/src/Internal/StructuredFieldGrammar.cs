@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Text;
 
 namespace Assimalign.Cohesion.Http.Internal;
@@ -94,7 +95,7 @@ internal static class StructuredFieldGrammar
     {
         if (!IsValidKey(key))
         {
-            throw new HttpInvalidStructuredFieldException($"'{key}' is not a valid RFC 9651 key.");
+            throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.InvalidStructuredFieldKey, key));
         }
         builder.Append(key);
     }
@@ -110,7 +111,7 @@ internal static class StructuredFieldGrammar
         decimal integerDecimal = decimal.Truncate(abs);
         if (integerDecimal >= 1_000_000_000_000m)
         {
-            throw new HttpInvalidStructuredFieldException("Decimal integer component exceeds the RFC 9651 limit of 12 digits.");
+            throw new HttpInvalidStructuredFieldException(ErrorMessages.DecimalIntegerComponentExceedsTheRfc9651LimitOf12Digits);
         }
 
         long integerPart = (long)integerDecimal;
@@ -155,7 +156,7 @@ internal static class StructuredFieldGrammar
         {
             if (c < ' ' || c > '~')
             {
-                throw new HttpInvalidStructuredFieldException("String contains a character outside the printable ASCII range (%x20-7E).");
+                throw new HttpInvalidStructuredFieldException(ErrorMessages.StringContainsACharacterOutsideThePrintableAsciiRangeX207E);
             }
             if (c == '"' || c == '\\')
             {
@@ -171,7 +172,7 @@ internal static class StructuredFieldGrammar
     {
         if (!IsValidToken(value))
         {
-            throw new HttpInvalidStructuredFieldException($"'{value}' is not a valid RFC 9651 sf-token.");
+            throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.InvalidStructuredFieldToken, value));
         }
         builder.Append(value);
     }
@@ -194,7 +195,7 @@ internal static class StructuredFieldGrammar
         }
         catch (EncoderFallbackException)
         {
-            throw new HttpInvalidStructuredFieldException("Display String contains an unpaired surrogate and cannot be encoded as UTF-8.");
+            throw new HttpInvalidStructuredFieldException(ErrorMessages.DisplayStringContainsAnUnpairedSurrogateAndCannotBeEncodedAsUtf);
         }
 
         builder.Append('%').Append('"');

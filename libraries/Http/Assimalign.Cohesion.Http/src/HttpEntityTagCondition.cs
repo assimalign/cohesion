@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
@@ -58,7 +59,7 @@ public readonly struct HttpEntityTagCondition
     {
         if (!TryParse(value, out HttpEntityTagCondition result))
         {
-            throw new HttpInvalidEntityTagException($"The value is not a valid If-Match/If-None-Match condition: '{value.ToString()}'.");
+            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidIfMatchIfNoneMatchCondition, value.ToString()));
         }
         return result;
     }

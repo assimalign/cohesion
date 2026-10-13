@@ -78,7 +78,7 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         if (!CanWriteInterimResponse)
         {
             throw new InvalidOperationException(
-                "An interim response cannot be sent after the final HTTP/1.1 response has started.");
+                ErrorMessages.InterimResponseCannotBeSentAfterTheFinalHttp11ResponseHas);
         }
 
         await Http1MessageWriter.WriteInterimResponseAsync(_stream, statusCode, headers, cancellationToken).ConfigureAwait(false);
@@ -97,13 +97,13 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         if (HasResponseStarted || _context.CancelRequested)
         {
             throw new InvalidOperationException(
-                "The exchange can no longer be taken over: the final response has started or the exchange was aborted.");
+                ErrorMessages.ExchangeCanNoLongerBeTakenOverTheFinalResponseHasStarted);
         }
 
         if (Interlocked.Exchange(ref _takenOver, 1) == 1)
         {
             throw new InvalidOperationException(
-                "The connection has already been taken over for this exchange.");
+                ErrorMessages.ConnectionHasAlreadyBeenTakenOverForThisExchange);
         }
 
         _context.ResponseFinalized = true;
@@ -122,6 +122,6 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
     public ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
     {
         return ValueTask.FromException<Stream>(new InvalidOperationException(
-            "HTTP/1.1 has no extended CONNECT stream tunnel; a CONNECT or a protocol upgrade takes the connection over instead (RFC 9110 §9.3.6, §7.8)."));
+            ErrorMessages.Http11HasNoExtendedConnectStreamTunnelAConnectOrA));
     }
 }

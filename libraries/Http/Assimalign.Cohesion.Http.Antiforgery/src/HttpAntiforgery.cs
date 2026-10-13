@@ -40,7 +40,7 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
         catch (ArgumentException exception)
         {
             throw new ArgumentException(
-                "HttpAntiforgeryOptions.CookieName must be a non-empty RFC 6265 token with no control characters, whitespace, or separators.",
+                ErrorMessages.HttpAntiforgeryOptionsCookieNameMustBeANonEmptyRfc6265TokenWithNo,
                 nameof(options),
                 exception);
         }
@@ -56,7 +56,7 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
         {
             // The value is not echoed: it may hold the control character that made it invalid.
             throw new ArgumentException(
-                "HttpAntiforgeryOptions.CookiePath is not an RFC 6265 path-value: it must be US-ASCII with no ';' and no control characters. Percent-encode any other character.",
+                ErrorMessages.HttpAntiforgeryOptionsCookiePathIsNotAnRfc6265PathValueItMustBe,
                 nameof(options),
                 exception);
         }
@@ -176,7 +176,7 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
         if (!await IsRequestValidAsync(httpContext).ConfigureAwait(false))
         {
             throw new AntiforgeryValidationException(
-                "The required antiforgery token was missing or invalid.");
+                ErrorMessages.RequiredAntiforgeryTokenWasMissingOrInvalid);
         }
     }
 

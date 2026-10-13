@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Diagnostics;
 
 using Assimalign.Cohesion.Http.Internal;
@@ -118,12 +119,12 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
 
         if (raw.IsEmpty)
         {
-            error = "Request-target is empty.";
+            error = ErrorMessages.RequestTargetIsEmpty;
             return false;
         }
         if (ContainsControlOrSpace(raw, out int badIndex))
         {
-            error = $"Request-target contains an invalid character at position {badIndex}.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestTargetContainsAnInvalidCharacterAtPosition, badIndex);
             return false;
         }
 
@@ -132,7 +133,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
         {
             if (!IsOptions(method))
             {
-                error = $"Asterisk-form request-target is reserved for OPTIONS; got method '{method.Value}'.";
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.AsteriskFormRequestTargetIsReservedForOptionsGotMethod, method.Value);
                 return false;
             }
             result = Asterisk;
@@ -158,7 +159,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
         }
 
         // Anything else (e.g. authority-form with a non-CONNECT method) is malformed.
-        error = $"Request-target '{raw.ToString()}' does not match any RFC 9112 §3.2 form for method '{method.Value}'.";
+        error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestTargetDoesNotMatchAnyRfc911232FormFor, raw.ToString(), method.Value);
         return false;
     }
 
@@ -174,7 +175,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
     {
         if (!TryParse(raw, method, out HttpRequestTarget result, out string? error))
         {
-            throw new HttpInvalidRequestTargetException(error ?? "Malformed request-target.");
+            throw new HttpInvalidRequestTargetException(error ?? ErrorMessages.MalformedRequestTarget);
         }
         return result;
     }
@@ -193,7 +194,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
 
         if (pathSpan.IsEmpty || pathSpan[0] != '/')
         {
-            error = "origin-form request-target must begin with '/'.";
+            error = ErrorMessages.OriginFormRequestTargetMustBeginWithSlash;
             return false;
         }
 
@@ -228,7 +229,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
 
         if (!Uri.TryCreate(raw.ToString(), UriKind.Absolute, out Uri? uri))
         {
-            error = "absolute-form request-target is not a valid absolute URI.";
+            error = ErrorMessages.AbsoluteFormRequestTargetIsNotAValidAbsoluteUri;
             return false;
         }
 
@@ -240,12 +241,12 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
         };
         if (scheme == HttpScheme.None)
         {
-            error = $"absolute-form request-target uses unsupported scheme '{uri.Scheme}'.";
+            error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.AbsoluteFormRequestTargetUsesUnsupportedScheme, uri.Scheme);
             return false;
         }
         if (string.IsNullOrEmpty(uri.Host))
         {
-            error = "absolute-form request-target is missing the authority component.";
+            error = ErrorMessages.AbsoluteFormRequestTargetIsMissingTheAuthorityComponent;
             return false;
         }
 
@@ -292,7 +293,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
             int closeBracket = raw.IndexOf(']');
             if (closeBracket < 0)
             {
-                error = "authority-form request-target has an unmatched '['.";
+                error = ErrorMessages.AuthorityFormRequestTargetUnmatchedBracket;
                 return false;
             }
             hostEnd = closeBracket + 1;
@@ -302,7 +303,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
             hostEnd = raw.IndexOf(':');
             if (hostEnd < 0)
             {
-                error = "authority-form request-target must include a port (host:port).";
+                error = ErrorMessages.AuthorityFormRequestTargetMustIncludeAPortHostPort;
                 return false;
             }
         }
@@ -312,7 +313,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
             // hostEnd == raw.Length when the bracket-IPv6 has no trailing port.
             if (raw[0] == '[' && hostEnd == raw.Length)
             {
-                error = "authority-form request-target must include a port (host:port).";
+                error = ErrorMessages.AuthorityFormRequestTargetMustIncludeAPortHostPort;
                 return false;
             }
         }
@@ -324,7 +325,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
         {
             if (portStart >= raw.Length || raw[portStart] != ':')
             {
-                error = "authority-form request-target with IPv6 host must include a port (e.g. [::1]:8080).";
+                error = ErrorMessages.AuthorityFormRequestTargetWithIpv6HostRequiresPort;
                 return false;
             }
         }
@@ -335,19 +336,19 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
 
         if (hostSpan.IsEmpty)
         {
-            error = "authority-form request-target has an empty host.";
+            error = ErrorMessages.AuthorityFormRequestTargetHasAnEmptyHost;
             return false;
         }
         if (portSpan.IsEmpty)
         {
-            error = "authority-form request-target has an empty port.";
+            error = ErrorMessages.AuthorityFormRequestTargetHasAnEmptyPort;
             return false;
         }
         foreach (char c in portSpan)
         {
             if (c < '0' || c > '9')
             {
-                error = $"authority-form request-target port '{portSpan.ToString()}' contains non-digit characters.";
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorityFormRequestTargetPortContainsNonDigitCharacters, portSpan.ToString());
                 return false;
             }
         }

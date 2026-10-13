@@ -6089,3 +6089,31 @@ changes to the baseline request/response model — they attach as an
 opt-in capability on an already-upgraded exchange — so de-scoping now does
 not paint the design into a corner. The decision is recorded here so the
 absence is understood as intentional rather than an oversight.
+
+## Exception message resources (#1467)
+
+Exception diagnostics live in `src/Properties/ErrorMessages.resx`. The shared build targets
+use MSBuild strongly typed resource generation to produce an internal `ErrorMessages` class
+in this assembly's `RootNamespace`, under the intermediate output directory. No designer source
+is checked in, and a command-line or NativeAOT build uses the same embedded resources.
+Formatted diagnostics use `string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`.
+The invariant messages, exception types, error codes and existing input-redaction rules stay
+unchanged; this introduces no public API or breaking behavior against 10.0.0-preview.1.
+EventSource templates, log messages and HTTP response bodies keep their existing owners.
+
+The ordinary HTTP/3 completion path may stop an unread request body with `H3_NO_ERROR`.
+`Http3RequestBodyStream.CompleteInput` caches that exception's message in a `static readonly`
+field. `MarkReset` caches the unread-body failure used by cancellation and shutdown.
+`ReadTrailerSectionAsync` caches the failure used when the caller cancels a trailer read.
+HTTP/3 application cancellation and shutdown rejection likewise cache the reasons used by
+`CancelRequestStream` and `RejectUndispatchedAsync` (also reused when request-head reading stops).
+HTTP/2 caches the format strings passed to `CutOffBody` by `ReceiveReset`, `SendReset`,
+`AbortOnShutdown` and `AbortOnCancellation`; the stream identifier is still formatted at use.
+These lifecycle paths can run without a protocol defect, so they do not perform resource lookups
+for each completion or cancellation. HTTP/1.1 also caches the request-line/header subjects passed
+to its normal reader path. Listener capability validation caches its protocol descriptions.
+Truncated HTTP/3 frame subjects are cached once as fixed diagnostics.
+
+Parser errors propagated through `out` values and exception factories use the same resources as
+direct throws. Field-value diagnostics retain their existing character/index reporting and do not
+start echoing rejected values; event payloads and their type-only boundaries are unchanged.

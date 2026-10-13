@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -72,7 +73,7 @@ internal sealed class HttpMultipartFormReader
         int minBuffer = boundary.Length + 10;
         if (bufferSize < minBuffer)
         {
-            throw new ArgumentOutOfRangeException(nameof(bufferSize), $"Buffer must be at least {minBuffer} bytes to accommodate the boundary.");
+            throw new ArgumentOutOfRangeException(nameof(bufferSize), string.Format(CultureInfo.CurrentCulture, ErrorMessages.BufferMustBeAtLeastBytesToAccommodateTheBoundary, minBuffer));
         }
 
         _stream = new BufferedReadStream(stream, bufferSize);
@@ -149,7 +150,7 @@ internal sealed class HttpMultipartFormReader
             {
                 // Defensive: a peer that just emits non-boundary lines forever
                 // should not be allowed to drain the buffer indefinitely.
-                const string message = "Multipart preamble exceeded the headers-length limit.";
+                string message = ErrorMessages.MultipartPreambleExceededTheHeadersLengthLimit;
                 throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersLength, message));
             }
 
@@ -212,12 +213,12 @@ internal sealed class HttpMultipartFormReader
             int colon = line.IndexOf(':');
             if (colon <= 0)
             {
-                throw new InvalidDataException($"Invalid multipart header line '{line}'.");
+                throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.InvalidMultipartHeaderLine, line));
             }
 
             if (headers.Count >= HeadersCountLimit)
             {
-                string message = $"Multipart section header count exceeded the {HeadersCountLimit} limit.";
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionHeaderCountExceededTheLimit, HeadersCountLimit);
                 throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersCount, message));
             }
 

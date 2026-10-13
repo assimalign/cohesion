@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
@@ -53,7 +54,7 @@ internal static class Http1MessageBodyReader
         if (hasTransferEncoding && hasContentLength)
         {
             throw new InvalidDataException(
-                "RFC 9112 §6.3: message MUST NOT contain both Content-Length and Transfer-Encoding headers.");
+                ErrorMessages.MessageMustNotContainBothContentLengthAndTransferEncodingHeaders);
         }
 
         if (hasTransferEncoding)
@@ -103,7 +104,7 @@ internal static class Http1MessageBodyReader
         if (last is null || !string.Equals(last, "chunked", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"RFC 9112 §7.4: Transfer-Encoding MUST end with 'chunked' for HTTP/1.1 requests; got '{te.Value}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransferEncodingMustEndWithChunkedForHttp11RequestsGot, te.Value));
         }
     }
 
@@ -138,22 +139,22 @@ internal static class Http1MessageBodyReader
                 if (!IsAllAsciiDigits(segment))
                 {
                     throw new InvalidDataException(
-                        $"RFC 9112 §6.3: Content-Length value '{segment}' is not a non-negative ASCII decimal.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueIsNotANonNegativeAsciiDecimal, segment));
                 }
                 if (!long.TryParse(segment, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long parsed))
                 {
                     throw new InvalidDataException(
-                        $"RFC 9112 §6.3: Content-Length value '{segment}' could not be parsed as a non-negative integer.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueCouldNotBeParsedAsANonNegativeInteger, segment));
                 }
                 if (parsed < 0)
                 {
                     throw new InvalidDataException(
-                        $"RFC 9112 §6.3: Content-Length value '{segment}' is negative.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueIsNegative, segment));
                 }
                 if (agreed is { } existing && existing != parsed)
                 {
                     throw new InvalidDataException(
-                        $"RFC 9112 §6.3: conflicting Content-Length values ({existing} and {parsed}) were declared.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConflictingContentLengthValuesAndWereDeclared, existing, parsed));
                 }
                 agreed = parsed;
             }
@@ -163,7 +164,7 @@ internal static class Http1MessageBodyReader
         // Split's RemoveEmptyEntries → the value was empty / whitespace-only. RFC 9112 §6.3 — an
         // empty Content-Length is not a valid declaration.
         return agreed ?? throw new InvalidDataException(
-            "RFC 9112 §6.3: Content-Length header was present but contained no value.");
+            ErrorMessages.ContentLengthHeaderWasPresentButContainedNoValue);
     }
 
     private static bool IsAllAsciiDigits(string value)

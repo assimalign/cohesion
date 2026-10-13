@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -99,7 +100,7 @@ internal static class HttpResponseFieldRules
         {
             // The name passed EnsureValidName, so it is a token and safe to quote; the value is not.
             throw new HttpInvalidResponseFieldException(
-                $"RFC 9110 §5.5: the value of the response field '{key.Value}' holds the control character 0x{(int)value[invalid]:X2} at index {invalid}; a field value holds no control character but HTAB. The response head was not sent.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheResponseFieldHoldsTheControlCharacter0xAtIndex, key.Value, (int)value[invalid], invalid));
         }
     }
 
@@ -119,7 +120,7 @@ internal static class HttpResponseFieldRules
     {
         if (name.Length == 0)
         {
-            return "RFC 9110 §5.1: a response field name is empty. The response head was not sent.";
+            return ErrorMessages.ResponseFieldNameIsEmptyTheResponseHeadWasNotSent;
         }
 
         int index = 0;
@@ -130,6 +131,6 @@ internal static class HttpResponseFieldRules
         }
 
         // The name is not quoted: whatever made it invalid may be CR, LF, or NUL.
-        return $"RFC 9110 §5.1: a response field name holds the character 0x{(int)name[index]:X2} at index {index}, which a token cannot carry. The response head was not sent.";
+        return string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResponseFieldNameHoldsTheCharacter0xAtIndexWhichAToken, (int)name[index], index);
     }
 }

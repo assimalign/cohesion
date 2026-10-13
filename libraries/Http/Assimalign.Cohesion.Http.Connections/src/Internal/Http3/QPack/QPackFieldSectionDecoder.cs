@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 
@@ -67,7 +68,7 @@ internal static class QPackFieldSectionDecoder
         if (requiredInsertCount != 0)
         {
             throw new InvalidDataException(
-                "QPACK Required Insert Count must be 0 — the dynamic table is disabled (QPACK_MAX_TABLE_CAPACITY = 0).");
+                ErrorMessages.QpackRequiredInsertCountMustBe0TheDynamicTableIsDisabled);
         }
 
         // Delta Base (S flag + Base). With Required Insert Count 0 there is
@@ -106,7 +107,7 @@ internal static class QPackFieldSectionDecoder
             // did not, the section is unsatisfiable (RFC 9204 §2.2).
             throw new QPackException(
                 Http3ErrorCode.QPackDecompressionFailed,
-                $"The QPACK field section requires insert count {prefix.RequiredInsertCount} but only {table.InsertCount} entries have been inserted.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackFieldSectionRequiresInsertCountButOnlyEntriesHaveBeenInserted, prefix.RequiredInsertCount, table.InsertCount));
         }
 
         return DecodeFieldLines(buffer, prefix.BodyOffset, table, prefix.Base, maxFieldSectionSize);
@@ -207,7 +208,7 @@ internal static class QPackFieldSectionDecoder
             {
                 throw new Http3LimitExceededException(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    $"The decoded HTTP/3 field section exceeds the advertised SETTINGS_MAX_FIELD_SECTION_SIZE of {maxFieldSectionSize} octets (RFC 9114 §4.2.2).");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DecodedHttp3FieldSectionExceedsTheAdvertisedSettingsMaxFieldSectionSize, maxFieldSectionSize));
             }
 
             fields.Add(field);
@@ -220,7 +221,7 @@ internal static class QPackFieldSectionDecoder
     {
         if (!QPackStaticTable.TryGet((int)staticIndex, out string name, out string value))
         {
-            throw new InvalidDataException($"QPACK static-table index {staticIndex} is out of range.");
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackStaticTableIndexIsOutOfRange, staticIndex));
         }
 
         return (name, value);
@@ -230,7 +231,7 @@ internal static class QPackFieldSectionDecoder
     {
         if (!QPackStaticTable.TryGet((int)nameIndex, out string name, out _))
         {
-            throw new InvalidDataException($"QPACK static-table name index {nameIndex} is out of range.");
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackStaticTableNameIndexIsOutOfRange, nameIndex));
         }
 
         return name;
@@ -240,14 +241,14 @@ internal static class QPackFieldSectionDecoder
     {
         if (table is null)
         {
-            throw new InvalidDataException("QPACK dynamic-table reference is not supported (dynamic table disabled).");
+            throw new InvalidDataException(ErrorMessages.QpackDynamicTableReferenceIsNotSupportedDynamicTableDisabled);
         }
 
         if (!table.TryGetByAbsoluteIndex(absoluteIndex, out string name, out string value))
         {
             throw new QPackException(
                 Http3ErrorCode.QPackDecompressionFailed,
-                $"QPACK field line references dynamic entry {absoluteIndex}, which is not available.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackFieldLineReferencesDynamicEntryWhichIsNotAvailable, absoluteIndex));
         }
 
         return (name, value);

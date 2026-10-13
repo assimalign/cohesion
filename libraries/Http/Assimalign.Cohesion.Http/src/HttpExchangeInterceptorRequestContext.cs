@@ -160,12 +160,12 @@ public sealed class HttpExchangeInterceptorRequestContext
             if (IsMaxRequestBodySizeReadOnly)
             {
                 throw new InvalidOperationException(
-                    "The maximum request body size cannot be modified after the transport has started reading the request body.");
+                    ErrorMessages.MaximumRequestBodySizeCannotBeModifiedAfterTheTransportHasStarted);
             }
 
             if (value is < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "The maximum request body size must be non-negative or null (unbounded).");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.MaximumRequestBodySizeMustBeNonNegativeOrNullUnbounded);
             }
 
             _maxRequestBodySize = value;
@@ -221,7 +221,7 @@ public sealed class HttpExchangeInterceptorRequestContext
             if (IsMinRequestBodyDataRateReadOnly)
             {
                 throw new InvalidOperationException(
-                    "The minimum request body data rate cannot be modified after the transport has started reading the request body.");
+                    ErrorMessages.MinimumRequestBodyDataRateCannotBeModifiedAfterTheTransportHas);
             }
 
             _minRequestBodyDataRate = value;
@@ -277,7 +277,7 @@ public sealed class HttpExchangeInterceptorRequestContext
             if (IsMinResponseDataRateReadOnly)
             {
                 throw new InvalidOperationException(
-                    "The minimum response data rate cannot be modified after the transport has started writing the response.");
+                    ErrorMessages.MinimumResponseDataRateCannotBeModifiedAfterTheTransportHasStarted);
             }
 
             _minResponseDataRate = value;

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -245,7 +246,7 @@ internal class HttpFormReader : IDisposable
         }
         if (_builder.Length >= limit)
         {
-            string message = $"Form key or value length limit {limit} exceeded.";
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.FormKeyOrValueLengthLimitExceeded, limit);
             throw new InvalidDataException(message, new HttpFormLimitExceededException(limitKind, message));
         }
         _builder.Append(c);
@@ -322,7 +323,7 @@ internal class HttpFormReader : IDisposable
             accumulator.Append(_currentKey, _currentValue);
             if (accumulator.ValueCount > ValueCountLimit)
             {
-                string message = $"Form value count limit {ValueCountLimit} exceeded.";
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.FormValueCountLimitExceeded, ValueCountLimit);
                 throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.ValueCount, message));
             }
         }

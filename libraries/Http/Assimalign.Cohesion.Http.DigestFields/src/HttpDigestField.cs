@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
@@ -134,7 +135,7 @@ public readonly struct HttpDigestField
 
         if (dictionary.Count == 0)
         {
-            error = "A digest field must carry at least one algorithm entry.";
+            error = ErrorMessages.DigestFieldRequiresAlgorithmEntry;
             return false;
         }
 
@@ -144,7 +145,7 @@ public readonly struct HttpDigestField
             StructuredFieldMember value = member.Value;
             if (value.IsInnerList || value.Item.Value.Type != StructuredFieldType.ByteSequence)
             {
-                error = $"The digest field member '{member.Key}' must be a Byte Sequence (RFC 9530 §2/§3).";
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestFieldMemberMustBeAByteSequenceRfc953023, member.Key);
                 return false;
             }
 
@@ -170,7 +171,7 @@ public readonly struct HttpDigestField
     {
         if (!TryParse(input, out HttpDigestField field, out string? error))
         {
-            throw new HttpDigestException(error ?? "Malformed digest field.");
+            throw new HttpDigestException(error ?? ErrorMessages.MalformedDigestField);
         }
         return field;
     }
@@ -191,7 +192,7 @@ public readonly struct HttpDigestField
         if (!algorithm.IsSupported)
         {
             throw new ArgumentException(
-                $"The digest algorithm '{algorithm}' cannot be used to generate a digest (RFC 9530 §5).", nameof(algorithm));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmCannotBeUsedToGenerateADigestRfc95305, algorithm), nameof(algorithm));
         }
 
         var entry = new HttpDigestEntry(algorithm, ComputeHash(algorithm, content));
@@ -211,7 +212,7 @@ public readonly struct HttpDigestField
         ArgumentNullException.ThrowIfNull(algorithms);
         if (algorithms.Length == 0)
         {
-            throw new ArgumentException("At least one algorithm is required.", nameof(algorithms));
+            throw new ArgumentException(ErrorMessages.AtLeastOneAlgorithmIsRequired, nameof(algorithms));
         }
 
         var entries = new HttpDigestEntry[algorithms.Length];
@@ -221,7 +222,7 @@ public readonly struct HttpDigestField
             if (!algorithm.IsSupported)
             {
                 throw new ArgumentException(
-                    $"The digest algorithm '{algorithm}' cannot be used to generate a digest (RFC 9530 §5).", nameof(algorithms));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmCannotBeUsedToGenerateADigestRfc95305, algorithm), nameof(algorithms));
             }
             entries[i] = new HttpDigestEntry(algorithm, ComputeHash(algorithm, content));
         }
@@ -248,7 +249,7 @@ public readonly struct HttpDigestField
         ArgumentNullException.ThrowIfNull(algorithms);
         if (algorithms.Length == 0)
         {
-            throw new ArgumentException("At least one algorithm is required.", nameof(algorithms));
+            throw new ArgumentException(ErrorMessages.AtLeastOneAlgorithmIsRequired, nameof(algorithms));
         }
 
         using var digester = new HttpContentDigester(algorithms);

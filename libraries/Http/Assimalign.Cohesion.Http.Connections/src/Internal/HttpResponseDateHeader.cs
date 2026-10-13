@@ -14,7 +14,7 @@ internal sealed class HttpResponseDateHeader
         Span<byte> hpack = stackalloc byte[64];
         if (!HPackEncoder.EncodeLiteralHeaderFieldWithoutIndexing(HPackStaticTable.Date, value, Encoding.ASCII, hpack, out int written))
         {
-            throw new InvalidOperationException("The cached HTTP date did not fit its HPACK field buffer.");
+            throw new InvalidOperationException(ErrorMessages.CachedHttpDateDidNotFitItsHpackFieldBuffer);
         }
         Http2Field = hpack[..written].ToArray();
         Http3Field = QPackFieldSectionEncoder.EncodeField("date", value);

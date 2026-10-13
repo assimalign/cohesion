@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.WebSockets;
@@ -96,8 +97,7 @@ internal sealed class HttpWebSocketFeature : IHttpWebSocketFeature
         if (HandshakeStatus != HttpWebSocketHandshakeStatus.Valid || _context is null || _bootstrap is null)
         {
             throw new InvalidOperationException(
-                $"The request is not a valid WebSocket opening handshake (status '{HandshakeStatus}'), so it cannot be accepted. " +
-                "Check IsWebSocketRequest first; an invalid handshake is refused with RejectHandshake.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestIsNotAValidWebSocketOpeningHandshakeStatusSoItCannot, HandshakeStatus));
         }
 
         string? subProtocol = options?.SubProtocol;
@@ -107,13 +107,13 @@ internal sealed class HttpWebSocketFeature : IHttpWebSocketFeature
         if (subProtocol is not null && !IsRequested(subProtocol))
         {
             throw new ArgumentException(
-                $"The subprotocol '{subProtocol}' was not offered by the client. Select one of RequestedProtocols, or none.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.SubprotocolWasNotOfferedByTheClientSelectOneOfRequestedProtocolsOr, subProtocol),
                 nameof(options));
         }
 
         if (Interlocked.Exchange(ref _accepted, 1) == 1)
         {
-            throw new InvalidOperationException("The WebSocket opening handshake has already been accepted for this exchange.");
+            throw new InvalidOperationException(ErrorMessages.WebSocketOpeningHandshakeHasAlreadyBeenAcceptedForThisExchange);
         }
 
         WebSocketDeflateOptions? deflateOptions = null;
@@ -156,8 +156,7 @@ internal sealed class HttpWebSocketFeature : IHttpWebSocketFeature
             || HandshakeStatus is not (HttpWebSocketHandshakeStatus.Invalid or HttpWebSocketHandshakeStatus.UnsupportedVersion))
         {
             throw new InvalidOperationException(
-                $"Only an invalid WebSocket opening handshake can be refused; this one's status is '{HandshakeStatus}'. " +
-                "A valid handshake is refused by not accepting it.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.OnlyAnInvalidWebSocketOpeningHandshakeCanBeRefusedThisOneS, HandshakeStatus));
         }
 
         IHttpResponse response = _context.Response;

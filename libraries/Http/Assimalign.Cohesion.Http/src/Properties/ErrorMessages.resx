@@ -1,0 +1,519 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently not
+    extensible. For a given mimetype the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format
+    that the ResXResourceWriter will generate, however the reader can
+    read any of the formats listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AbsoluteFormRequestTargetIsMissingTheAuthorityComponent" xml:space="preserve">
+    <value>absolute-form request-target is missing the authority component.</value>
+  </data>
+  <data name="AbsoluteFormRequestTargetIsNotAValidAbsoluteUri" xml:space="preserve">
+    <value>absolute-form request-target is not a valid absolute URI.</value>
+  </data>
+  <data name="AbsoluteFormRequestTargetUsesUnsupportedScheme" xml:space="preserve">
+    <value>absolute-form request-target uses unsupported scheme &apos;{0}&apos;.</value>
+  </data>
+  <data name="AsteriskFormPathIsValidOnlyForAnOptionsRequestRfc9110" xml:space="preserve">
+    <value>The asterisk-form &apos;:path&apos; &apos;*&apos; is valid only for an OPTIONS request (RFC 9110 §7.1, RFC 9113 §8.3.1, RFC 9114 §4.3.1).</value>
+  </data>
+  <data name="AsteriskFormRequestTargetIsReservedForOptionsGotMethod" xml:space="preserve">
+    <value>Asterisk-form request-target is reserved for OPTIONS; got method &apos;{0}&apos;.</value>
+  </data>
+  <data name="AtLeastOneHostAllowlistPatternIsRequiredToAcceptEveryHost" xml:space="preserve">
+    <value>At least one host allowlist pattern is required. To accept every host, pass &apos;*&apos; or apply no host filtering.</value>
+  </data>
+  <data name="AuthorityFormRequestTargetHasAnEmptyHost" xml:space="preserve">
+    <value>authority-form request-target has an empty host.</value>
+  </data>
+  <data name="AuthorityFormRequestTargetHasAnEmptyPort" xml:space="preserve">
+    <value>authority-form request-target has an empty port.</value>
+  </data>
+  <data name="AuthorityFormRequestTargetUnmatchedBracket" xml:space="preserve">
+    <value>authority-form request-target has an unmatched &apos;[&apos;.</value>
+  </data>
+  <data name="AuthorityFormRequestTargetMustIncludeAPortHostPort" xml:space="preserve">
+    <value>authority-form request-target must include a port (host:port).</value>
+  </data>
+  <data name="AuthorityFormRequestTargetPortContainsNonDigitCharacters" xml:space="preserve">
+    <value>authority-form request-target port &apos;{0}&apos; contains non-digit characters.</value>
+  </data>
+  <data name="AuthorityFormRequestTargetWithIpv6HostRequiresPort" xml:space="preserve">
+    <value>authority-form request-target with IPv6 host must include a port (e.g. [::1]:8080).</value>
+  </data>
+  <data name="AuthorityOfAConnectRequestMustBeTheHostAndPortTo" xml:space="preserve">
+    <value>The &apos;:authority&apos; of a CONNECT request MUST be the host and port to connect to, host:port (RFC 9113 §8.5, RFC 9114 §4.4).</value>
+  </data>
+  <data name="AuthorityPseudoHeaderHoldsOnlyVisibleUsAsciiCharactersRfc39863" xml:space="preserve">
+    <value>The &apos;:authority&apos; pseudo-header holds only visible US-ASCII characters (RFC 3986 §3.2, RFC 9113 §8.3.1).</value>
+  </data>
+  <data name="BooleanMustBe0Or1" xml:space="preserve">
+    <value>Boolean must be &apos;?0&apos; or &apos;?1&apos;.</value>
+  </data>
+  <data name="ByNodeIsEmpty" xml:space="preserve">
+    <value>The &apos;by&apos; node is empty.</value>
+  </data>
+  <data name="ByteSequenceContainsACharacterOutsideTheBase64Alphabet" xml:space="preserve">
+    <value>Byte sequence contains a character outside the base64 alphabet.</value>
+  </data>
+  <data name="ByteSequenceIsNotValidBase64" xml:space="preserve">
+    <value>Byte sequence is not valid base64.</value>
+  </data>
+  <data name="CollectionWasModifiedEnumerationOperationMayNotExecute" xml:space="preserve">
+    <value>Collection was modified; enumeration operation may not execute.</value>
+  </data>
+  <data name="ConnectRequestMustIncludeTheAuthorityPseudoHeaderRfc911385" xml:space="preserve">
+    <value>A CONNECT request MUST include the &apos;:authority&apos; pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).</value>
+  </data>
+  <data name="ConnectRequestMustNotIncludeThePathPseudoHeaderRfc91138" xml:space="preserve">
+    <value>A CONNECT request MUST NOT include the &apos;:path&apos; pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).</value>
+  </data>
+  <data name="ConnectRequestMustNotIncludeTheSchemePseudoHeaderRfc91138" xml:space="preserve">
+    <value>A CONNECT request MUST NOT include the &apos;:scheme&apos; pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).</value>
+  </data>
+  <data name="DateIsOutsideTheRfc9651RangeOf999999999999" xml:space="preserve">
+    <value>Date is outside the RFC 9651 range of ±999,999,999,999,999 seconds.</value>
+  </data>
+  <data name="DateMustBeAnIntegerNumberOfSeconds" xml:space="preserve">
+    <value>Date must be an integer number of seconds.</value>
+  </data>
+  <data name="DecimalHasMoreThan12IntegerDigits" xml:space="preserve">
+    <value>Decimal has more than 12 integer digits.</value>
+  </data>
+  <data name="DecimalHasMoreThanThreeFractionalDigits" xml:space="preserve">
+    <value>Decimal has more than three fractional digits.</value>
+  </data>
+  <data name="DecimalHasNoDigitsAfterTheDecimalPoint" xml:space="preserve">
+    <value>Decimal has no digits after the decimal point.</value>
+  </data>
+  <data name="DecimalIntegerComponentExceedsTheRfc9651LimitOf12Digits" xml:space="preserve">
+    <value>Decimal integer component exceeds the RFC 9651 limit of 12 digits.</value>
+  </data>
+  <data name="DecimalIsTooLong" xml:space="preserve">
+    <value>Decimal is too long.</value>
+  </data>
+  <data name="DisplayStringContainsACharacterOutsideThePrintableAsciiRange" xml:space="preserve">
+    <value>Display string contains a character outside the printable ASCII range.</value>
+  </data>
+  <data name="DisplayStringContainsAnUnpairedSurrogateAndCannotBeEncodedAsUtf" xml:space="preserve">
+    <value>Display String contains an unpaired surrogate and cannot be encoded as UTF-8.</value>
+  </data>
+  <data name="DisplayStringIsNotValidUtf8" xml:space="preserve">
+    <value>Display string is not valid UTF-8.</value>
+  </data>
+  <data name="DisplayStringMustBeginWith" xml:space="preserve">
+    <value>Display string must begin with &apos;%&quot;&apos;.</value>
+  </data>
+  <data name="DisplayStringPercentEncodingMustUseTwoLowercaseHexDigits" xml:space="preserve">
+    <value>Display string percent-encoding must use two lowercase hex digits.</value>
+  </data>
+  <data name="EnumerationHasEitherNotStartedOrHasAlreadyFinished" xml:space="preserve">
+    <value>Enumeration has either not started or has already finished.</value>
+  </data>
+  <data name="Expected0Or1After" xml:space="preserve">
+    <value>Expected &apos;0&apos; or &apos;1&apos; after &apos;?&apos;.</value>
+  </data>
+  <data name="ExpectedABareItem" xml:space="preserve">
+    <value>Expected a bare item.</value>
+  </data>
+  <data name="ExpectedADigit" xml:space="preserve">
+    <value>Expected a digit.</value>
+  </data>
+  <data name="ExpectedADigitAfter" xml:space="preserve">
+    <value>Expected a digit after &apos;-&apos;.</value>
+  </data>
+  <data name="ExpectedAKey" xml:space="preserve">
+    <value>Expected a key.</value>
+  </data>
+  <data name="ExpectedANumber" xml:space="preserve">
+    <value>Expected a number.</value>
+  </data>
+  <data name="ExpectedSeparatingDictionaryMembers" xml:space="preserve">
+    <value>Expected &apos;,&apos; separating dictionary members.</value>
+  </data>
+  <data name="ExpectedSeparatingListMembers" xml:space="preserve">
+    <value>Expected &apos;,&apos; separating list members.</value>
+  </data>
+  <data name="ExtendedConnectRequestMustIncludeTheAuthorityPseudoHeaderRfc84414" xml:space="preserve">
+    <value>An extended CONNECT request MUST include the &apos;:authority&apos; pseudo-header (RFC 8441 §4).</value>
+  </data>
+  <data name="ExtendedConnectRequestMustIncludeThePathPseudoHeaderRfc84414" xml:space="preserve">
+    <value>An extended CONNECT request MUST include the &apos;:path&apos; pseudo-header (RFC 8441 §4).</value>
+  </data>
+  <data name="ExtendedConnectRequestMustIncludeTheSchemePseudoHeaderRfc84414" xml:space="preserve">
+    <value>An extended CONNECT request MUST include the &apos;:scheme&apos; pseudo-header (RFC 8441 §4).</value>
+  </data>
+  <data name="ExtensionParameterReusesARegisteredParameterName" xml:space="preserve">
+    <value>Extension parameter &apos;{0}&apos; reuses a registered parameter name.</value>
+  </data>
+  <data name="FollowingPathContainsInvalidCharacters" xml:space="preserve">
+    <value>The following path contains invalid characters: &apos;{0}&apos;.</value>
+  </data>
+  <data name="FollowingPathIsInvalidPathsMustBeginWithOr" xml:space="preserve">
+    <value>The following path is invalid: &apos;{0}&apos;. Paths must begin with &apos;/&apos; or &apos;*&apos;.</value>
+  </data>
+  <data name="ForNodeIsEmpty" xml:space="preserve">
+    <value>The &apos;for&apos; node is empty.</value>
+  </data>
+  <data name="GracePeriodMustBeGreaterThanZero" xml:space="preserve">
+    <value>The grace period must be greater than zero.</value>
+  </data>
+  <data name="HeaderCollectionIsReadOnlyAndCannotBeModified" xml:space="preserve">
+    <value>The header collection is read-only and cannot be modified.</value>
+  </data>
+  <data name="HostAllowlistPatternCarriesAPortHostFilteringMatchesTheHostComponent" xml:space="preserve">
+    <value>The host allowlist pattern &apos;{0}&apos; carries a port. Host filtering matches the host component only; remove the &apos;:{1}&apos;.</value>
+  </data>
+  <data name="HostAllowlistPatternIsNotAValidWildcardExpectedSuffixWithA" xml:space="preserve">
+    <value>The host allowlist pattern &apos;{0}&apos; is not a valid wildcard: expected &apos;*.suffix&apos; with a non-empty suffix and no further &apos;*&apos;.</value>
+  </data>
+  <data name="HostAllowlistPatternIsNotAWellFormedHost" xml:space="preserve">
+    <value>The host allowlist pattern &apos;{0}&apos; is not a well-formed host.</value>
+  </data>
+  <data name="HostAllowlistPatternMisusesTheWildcardIsOnlyValidAsTheWhole" xml:space="preserve">
+    <value>The host allowlist pattern &apos;{0}&apos; misuses &apos;*&apos;: the wildcard is only valid as the whole pattern (&apos;*&apos;) or as a leading &apos;*.&apos; label.</value>
+  </data>
+  <data name="HostAllowlistPatternMustNotBeNullEmptyOrWhitespace" xml:space="preserve">
+    <value>A host allowlist pattern must not be null, empty, or whitespace.</value>
+  </data>
+  <data name="HostFieldHoldsOnlyVisibleUsAsciiCharactersRfc911072" xml:space="preserve">
+    <value>The &apos;host&apos; field holds only visible US-ASCII characters (RFC 9110 §7.2, RFC 9112 §3.2).</value>
+  </data>
+  <data name="HostValueIsEmpty" xml:space="preserve">
+    <value>The &apos;host&apos; value is empty.</value>
+  </data>
+  <data name="InnerListItemsMustBeSeparatedByASpace" xml:space="preserve">
+    <value>Inner list items must be separated by a space.</value>
+  </data>
+  <data name="IntegerHasMoreThan15Digits" xml:space="preserve">
+    <value>Integer has more than 15 digits.</value>
+  </data>
+  <data name="IntegerIsOutsideTheRfc9651RangeOf999999999999" xml:space="preserve">
+    <value>Integer is outside the RFC 9651 range of ±999,999,999,999,999.</value>
+  </data>
+  <data name="InvalidEscapeSequenceInString" xml:space="preserve">
+    <value>Invalid escape sequence in string.</value>
+  </data>
+  <data name="InvalidStructuredFieldKey" xml:space="preserve">
+    <value>&apos;{0}&apos; is not a valid RFC 9651 key.</value>
+  </data>
+  <data name="InvalidStructuredFieldToken" xml:space="preserve">
+    <value>&apos;{0}&apos; is not a valid RFC 9651 sf-token.</value>
+  </data>
+  <data name="DestinationArrayTooShort" xml:space="preserve">
+    <value>&apos;{0}&apos; is not long enough to copy all the items in the collection. Check &apos;{1}&apos; and &apos;{2}&apos; length.</value>
+  </data>
+  <data name="ItemWithTheSameKeyHasAlreadyBeenAdded" xml:space="preserve">
+    <value>An item with the same key has already been added.</value>
+  </data>
+  <data name="LengthOfTheDestinationByteSpanIsLessThanTheSource" xml:space="preserve">
+    <value>Length of the destination byte span is less than the source.</value>
+  </data>
+  <data name="MalformedRequestTarget" xml:space="preserve">
+    <value>Malformed request-target.</value>
+  </data>
+  <data name="MalformedStructuredFieldDictionary" xml:space="preserve">
+    <value>Malformed structured field dictionary.</value>
+  </data>
+  <data name="MalformedStructuredFieldItem" xml:space="preserve">
+    <value>Malformed structured field item.</value>
+  </data>
+  <data name="MalformedStructuredFieldList" xml:space="preserve">
+    <value>Malformed structured field list.</value>
+  </data>
+  <data name="MaxAgeMustBeNonNegative" xml:space="preserve">
+    <value>The max-age must be non-negative.</value>
+  </data>
+  <data name="MaximumRequestBodySizeCannotBeModifiedAfterTheTransportHasStarted" xml:space="preserve">
+    <value>The maximum request body size cannot be modified after the transport has started reading the request body.</value>
+  </data>
+  <data name="MaximumRequestBodySizeMustBeNonNegativeOrNullUnbounded" xml:space="preserve">
+    <value>The maximum request body size must be non-negative or null (unbounded).</value>
+  </data>
+  <data name="MediaRangeCannotBeEncodedAsAnAcceptQueryMember" xml:space="preserve">
+    <value>The media range &apos;{0}&apos; cannot be encoded as an Accept-Query member.</value>
+  </data>
+  <data name="MediaTypeParameterNameIsNotAValidAcceptQueryStructuredField" xml:space="preserve">
+    <value>The media-type parameter name &apos;{0}&apos; is not a valid Accept-Query structured-field key.</value>
+  </data>
+  <data name="MethodExceedsMaximumLength" xml:space="preserve">
+    <value>The method is too long. It must be {0} characters or fewer.</value>
+  </data>
+  <data name="MethodPseudoHeaderIsLongerThanTheCharactersOfAnyMethodThis" xml:space="preserve">
+    <value>The &apos;:method&apos; pseudo-header is longer than the {0} characters of any method this server implements (RFC 9112 §3).</value>
+  </data>
+  <data name="MethodPseudoHeaderIsNotAMethodTokenRfc911091" xml:space="preserve">
+    <value>The &apos;:method&apos; pseudo-header is not a method token (RFC 9110 §9.1, RFC 9113 §8.3.1, RFC 9114 §4.3.1).</value>
+  </data>
+  <data name="MinimumDataRateMustBeGreaterThanZeroOctetsPerSecond" xml:space="preserve">
+    <value>The minimum data rate must be greater than zero octets per second.</value>
+  </data>
+  <data name="MinimumRequestBodyDataRateCannotBeModifiedAfterTheTransportHas" xml:space="preserve">
+    <value>The minimum request body data rate cannot be modified after the transport has started reading the request body.</value>
+  </data>
+  <data name="MinimumResponseDataRateCannotBeModifiedAfterTheTransportHasStarted" xml:space="preserve">
+    <value>The minimum response data rate cannot be modified after the transport has started writing the response.</value>
+  </data>
+  <data name="OriginFormRequestTargetMustBeginWithSlash" xml:space="preserve">
+    <value>origin-form request-target must begin with &apos;/&apos;.</value>
+  </data>
+  <data name="PathContainsNullCharacters" xml:space="preserve">
+    <value>The path contains null characters.</value>
+  </data>
+  <data name="PathHoldsOnlyVisibleUsAsciiCharactersRfc39862Rfc9113" xml:space="preserve">
+    <value>A &apos;:path&apos; holds only visible US-ASCII characters (RFC 3986 §2, RFC 9113 §8.3.1); an octet outside them is not part of a request target.</value>
+  </data>
+  <data name="PathThatStartsWithIsNotARequestTargetAsteriskFormIs" xml:space="preserve">
+    <value>A &apos;:path&apos; that starts with &apos;*&apos; is not a request target; asterisk-form is the single character &apos;*&apos; (RFC 9112 §3.2.4, RFC 9113 §8.3.1).</value>
+  </data>
+  <data name="PortMustBeWithin065535" xml:space="preserve">
+    <value>The port must be within 0..65535.</value>
+  </data>
+  <data name="ProtocolIdentifierMustBeANonEmptyRfc7230Token" xml:space="preserve">
+    <value>The protocol identifier must be a non-empty RFC 7230 token.</value>
+  </data>
+  <data name="ProtocolPseudoHeaderIsOnlyValidOnAConnectRequestRfc8441" xml:space="preserve">
+    <value>The &apos;:protocol&apos; pseudo-header is only valid on a CONNECT request (RFC 8441 §4).</value>
+  </data>
+  <data name="ProtocolPseudoHeaderMustCarryAProtocolNameAnEmptyValueIs" xml:space="preserve">
+    <value>The &apos;:protocol&apos; pseudo-header MUST carry a protocol name; an empty value is not a token (RFC 9110 §5.6.2, RFC 8441 §4).</value>
+  </data>
+  <data name="ProtoValueIsEmpty" xml:space="preserve">
+    <value>The &apos;proto&apos; value is empty.</value>
+  </data>
+  <data name="ProvidedMethodIsInvalid" xml:space="preserve">
+    <value>The provided method is invalid: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ProvidedStatusCodeIsInvalid" xml:space="preserve">
+    <value>The provided status code is invalid: &apos;{0}&apos;</value>
+  </data>
+  <data name="QueryCollectionCannotBeModifiedBecauseItIsReadOnly" xml:space="preserve">
+    <value>The query collection cannot be modified because it is read-only.</value>
+  </data>
+  <data name="RequestRejectionMustCarryAnErrorStatus4xxOr5xx" xml:space="preserve">
+    <value>A request rejection must carry an error status (4xx or 5xx).</value>
+  </data>
+  <data name="RequestTargetContainsAnInvalidCharacterAtPosition" xml:space="preserve">
+    <value>Request-target contains an invalid character at position {0}.</value>
+  </data>
+  <data name="RequestTargetDoesNotMatchAnyRfc911232FormFor" xml:space="preserve">
+    <value>Request-target &apos;{0}&apos; does not match any RFC 9112 §3.2 form for method &apos;{1}&apos;.</value>
+  </data>
+  <data name="RequestTargetIsEmpty" xml:space="preserve">
+    <value>Request-target is empty.</value>
+  </data>
+  <data name="RequestWasRejectedWithStatus" xml:space="preserve">
+    <value>The request was rejected with status &apos;{0}&apos;.</value>
+  </data>
+  <data name="StringContainsACharacterOutsideThePrintableAsciiRange" xml:space="preserve">
+    <value>String contains a character outside the printable ASCII range.</value>
+  </data>
+  <data name="StringContainsACharacterOutsideThePrintableAsciiRangeX207E" xml:space="preserve">
+    <value>String contains a character outside the printable ASCII range (%x20-7E).</value>
+  </data>
+  <data name="StringEndsWithATrailingBackslash" xml:space="preserve">
+    <value>String ends with a trailing backslash.</value>
+  </data>
+  <data name="StructuredFieldBareItemIsOfTypeNot" xml:space="preserve">
+    <value>Structured field bare item is of type &apos;{0}&apos;, not &apos;{1}&apos;.</value>
+  </data>
+  <data name="StructuredFieldMemberIsAnInnerListNotAnItem" xml:space="preserve">
+    <value>Structured field member is an inner list, not an item.</value>
+  </data>
+  <data name="StructuredFieldMemberIsAnItemNotAnInnerList" xml:space="preserve">
+    <value>Structured field member is an item, not an inner list.</value>
+  </data>
+  <data name="ThisExchangeDoesNotSupportATrailerSectionSoTrailersCannotBe" xml:space="preserve">
+    <value>This exchange does not support a trailer section, so trailers cannot be added. Check IHttpTrailerCollection.IsSupported before adding trailers.</value>
+  </data>
+  <data name="TrailingCommaInDictionary" xml:space="preserve">
+    <value>Trailing comma in dictionary.</value>
+  </data>
+  <data name="TrailingCommaInList" xml:space="preserve">
+    <value>Trailing comma in list.</value>
+  </data>
+  <data name="TruncatedPercentEncodingInDisplayString" xml:space="preserve">
+    <value>Truncated percent-encoding in display string.</value>
+  </data>
+  <data name="UnexpectedCharacterAtStartOfABareItem" xml:space="preserve">
+    <value>Unexpected character &apos;{0}&apos; at start of a bare item.</value>
+  </data>
+  <data name="UnexpectedTrailingCharactersAfterDictionary" xml:space="preserve">
+    <value>Unexpected trailing characters after dictionary.</value>
+  </data>
+  <data name="UnexpectedTrailingCharactersAfterItem" xml:space="preserve">
+    <value>Unexpected trailing characters after item.</value>
+  </data>
+  <data name="UnexpectedTrailingCharactersAfterList" xml:space="preserve">
+    <value>Unexpected trailing characters after list.</value>
+  </data>
+  <data name="UnknownStructuredFieldBareItemType" xml:space="preserve">
+    <value>Unknown structured field bare item type &apos;{0}&apos;.</value>
+  </data>
+  <data name="UnterminatedByteSequence" xml:space="preserve">
+    <value>Unterminated byte sequence.</value>
+  </data>
+  <data name="UnterminatedDisplayString" xml:space="preserve">
+    <value>Unterminated display string.</value>
+  </data>
+  <data name="UnterminatedInnerList" xml:space="preserve">
+    <value>Unterminated inner list.</value>
+  </data>
+  <data name="UnterminatedString" xml:space="preserve">
+    <value>Unterminated string.</value>
+  </data>
+  <data name="UrgencyMustBeWithinTheRfc9218RangeOf07" xml:space="preserve">
+    <value>Urgency must be within the RFC 9218 range of 0..7.</value>
+  </data>
+  <data name="ValueDoesNotMatchTheRfc9651SfTokenGrammar" xml:space="preserve">
+    <value>Value does not match the RFC 9651 sf-token grammar.</value>
+  </data>
+  <data name="ValueIsNotAValidAcceptQueryField" xml:space="preserve">
+    <value>The value is not a valid Accept-Query field: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidByteRangeHeader" xml:space="preserve">
+    <value>The value is not a valid byte-range header: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidCacheControlField" xml:space="preserve">
+    <value>The value is not a valid Cache-Control field: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidContentRange" xml:space="preserve">
+    <value>The value is not a valid content-range: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidEntityTag" xml:space="preserve">
+    <value>The value is not a valid entity-tag: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidForwardedElement" xml:space="preserve">
+    <value>The value is not a valid forwarded element: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidForwardedHeader" xml:space="preserve">
+    <value>The value is not a valid Forwarded header: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidForwardedNode" xml:space="preserve">
+    <value>The value is not a valid forwarded node: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidIfMatchIfNoneMatchCondition" xml:space="preserve">
+    <value>The value is not a valid If-Match/If-None-Match condition: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidIfRangeHeader" xml:space="preserve">
+    <value>The value is not a valid If-Range header: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidMediaType" xml:space="preserve">
+    <value>The value is not a valid media type: &apos;{0}&apos;.</value>
+  </data>
+  <data name="ValueIsNotAValidXForwardedList" xml:space="preserve">
+    <value>The value is not a valid X-Forwarded-* list: &apos;{0}&apos;.</value>
+  </data>
+</root>

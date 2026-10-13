@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -91,7 +92,7 @@ internal static class HttpInterimResponseRules
             throw new ArgumentOutOfRangeException(
                 nameof(statusCode),
                 statusCode.Value,
-                "An interim response requires a 1xx status code (RFC 9110 §15.2).");
+                ErrorMessages.InterimResponseRequiresA1xxStatusCodeRfc9110152);
         }
 
         if ((int)statusCode == SwitchingProtocolsStatus)
@@ -99,7 +100,7 @@ internal static class HttpInterimResponseRules
             throw new ArgumentOutOfRangeException(
                 nameof(statusCode),
                 statusCode.Value,
-                "101 Switching Protocols is a connection transition owned by Assimalign.Cohesion.Http.ProtocolUpgrade, not an interim response.");
+                ErrorMessages.Invalid101SwitchingProtocolsIsAConnectionTransitionOwnedByAssimalignCohesionHttp);
         }
     }
 
@@ -119,7 +120,7 @@ internal static class HttpInterimResponseRules
         if (IsInformational(statusCode))
         {
             throw new InvalidOperationException(
-                $"A 1xx status code ({statusCode}) cannot be used as the final response status; emit interim responses through IHttpInterimResponseFeature instead.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Invalid1xxStatusCodeCannotBeUsedAsTheFinalResponseStatusEmit, statusCode));
         }
     }
 }

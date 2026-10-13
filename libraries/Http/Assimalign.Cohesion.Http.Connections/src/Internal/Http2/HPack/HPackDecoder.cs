@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Text;
 
@@ -97,7 +98,7 @@ internal sealed class HPackDecoder
                 if (fieldLineDecoded)
                 {
                     throw new HPackDecodingException(
-                        "An HPACK dynamic table size update followed a field line; it must come at the beginning of the field block (RFC 7541 §4.2).");
+                        ErrorMessages.HpackDynamicTableSizeUpdateFollowedAFieldLineItMustCome);
                 }
 
                 int dynamicTableSize = DecodeInteger(headerBlock, ref index, 5);
@@ -182,7 +183,7 @@ internal sealed class HPackDecoder
         if (_currentHeaderListSize > _maxHeaderListSize)
         {
             throw new HPackHeaderListSizeExceededException(
-                $"The decoded HTTP/2 header list exceeded the advertised SETTINGS_MAX_HEADER_LIST_SIZE of {_maxHeaderListSize} octets.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DecodedHttp2HeaderListExceededTheAdvertisedSettingsMaxHeaderListSize, _maxHeaderListSize));
         }
 
         addField(name, value);
@@ -192,7 +193,7 @@ internal sealed class HPackDecoder
     {
         if (index <= 0)
         {
-            throw new HPackDecodingException("The HPACK header index must be greater than zero.");
+            throw new HPackDecodingException(ErrorMessages.HpackHeaderIndexMustBeGreaterThanZero);
         }
 
         if (index <= HPackStaticTable.Count)
@@ -204,7 +205,7 @@ internal sealed class HPackDecoder
 
         if ((uint)dynamicIndex >= _dynamicTable.Count)
         {
-            throw new HPackDecodingException($"The HPACK header index '{index}' was outside the dynamic table range.");
+            throw new HPackDecodingException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.HpackHeaderIndexWasOutsideTheDynamicTableRange, index));
         }
 
         return ref _dynamicTable[dynamicIndex];
@@ -214,7 +215,7 @@ internal sealed class HPackDecoder
     {
         if (size > _maxDynamicTableSize)
         {
-            throw new HPackDecodingException($"The HPACK dynamic table size '{size}' exceeded the configured maximum of '{_maxDynamicTableSize}'.");
+            throw new HPackDecodingException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.HpackDynamicTableSizeExceededTheConfiguredMaximumOf, size, _maxDynamicTableSize));
         }
 
         _dynamicTable.Resize(size);
@@ -224,7 +225,7 @@ internal sealed class HPackDecoder
     {
         if (index >= headerBlock.Length)
         {
-            throw new HPackDecodingException("The HPACK string literal was incomplete.");
+            throw new HPackDecodingException(ErrorMessages.HpackStringLiteralWasIncomplete);
         }
 
         // RFC 7541 §5.2 — the high bit ("H") of the first octet indicates
@@ -238,7 +239,7 @@ internal sealed class HPackDecoder
         // the sum and slip past the check.
         if (length > headerBlock.Length - index)
         {
-            throw new HPackDecodingException("The HPACK string literal length exceeded the available payload.");
+            throw new HPackDecodingException(ErrorMessages.HpackStringLiteralLengthExceededTheAvailablePayload);
         }
 
         ReadOnlySpan<byte> raw = headerBlock.Slice(index, length);
@@ -253,7 +254,7 @@ internal sealed class HPackDecoder
     {
         if (index >= buffer.Length)
         {
-            throw new HPackDecodingException("The HPACK integer was incomplete.");
+            throw new HPackDecodingException(ErrorMessages.HpackIntegerWasIncomplete);
         }
 
         IntegerDecoder integerDecoder = new();
@@ -272,7 +273,7 @@ internal sealed class HPackDecoder
             }
         }
 
-        throw new HPackDecodingException("The HPACK integer was incomplete.");
+        throw new HPackDecodingException(ErrorMessages.HpackIntegerWasIncomplete);
     }
 
     private static string ToLatin1String(ReadOnlySpan<byte> value)

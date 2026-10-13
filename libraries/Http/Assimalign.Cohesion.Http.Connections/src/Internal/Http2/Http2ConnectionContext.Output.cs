@@ -197,7 +197,7 @@ internal sealed partial class Http2ConnectionContext
             AbortResponsesOnPeerConnectionLoss();
             if (response is not null)
             {
-                throw new OperationCanceledException("The peer closed the HTTP/2 connection during the response.", exception, response.RequestCancelled);
+                throw new OperationCanceledException(ErrorMessages.PeerClosedTheHttp2ConnectionDuringTheResponse, exception, response.RequestCancelled);
             }
             throw;
         }
@@ -243,7 +243,7 @@ internal sealed partial class Http2ConnectionContext
         }
         response?.LatchResponseAbortedByClient();
         LatchResponsesAbortedByClient();
-        Connection.Abort(new IOException("The peer stopped reading the connection below the configured minimum response data rate."));
+        Connection.Abort(new IOException(ErrorMessages.PeerStoppedReadingTheConnectionBelowTheConfiguredMinimumResponseDataRate));
         StopPumpOnStall();
         return CreateOutputStalledException(response);
     }
@@ -251,7 +251,7 @@ internal sealed partial class Http2ConnectionContext
     private static Exception CreateOutputStalledException(Http2Context? response)
     {
         return response is null
-            ? new IOException("The HTTP/2 connection's output stopped draining below the configured minimum response data rate, so the connection was aborted.")
+            ? new IOException(ErrorMessages.Http2ConnectionSOutputStoppedDrainingBelowTheConfiguredMinimumResponseData)
             : response.AbortSlowResponse();
     }
 }

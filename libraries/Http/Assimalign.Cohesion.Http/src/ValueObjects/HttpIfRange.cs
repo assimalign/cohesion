@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Diagnostics;
 
 using Assimalign.Cohesion.Http.Internal;
@@ -157,7 +158,7 @@ public readonly struct HttpIfRange : IEquatable<HttpIfRange>
     {
         if (!TryParse(value, out HttpIfRange result))
         {
-            throw new HttpInvalidConditionalException($"The value is not a valid If-Range header: '{value.ToString()}'.");
+            throw new HttpInvalidConditionalException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidIfRangeHeader, value.ToString()));
         }
         return result;
     }

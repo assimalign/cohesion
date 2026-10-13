@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Buffers;
 using System.IO;
 using System.IO.Pipelines;
@@ -37,6 +38,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal sealed class Http3RequestStreamReader
 {
+    // These diagnostics also run during ordinary validation, cancellation or completion.
+    private static readonly string _headersFrameSubject = ErrorMessages.HeadersFrame;
+    private static readonly string _dataFrameSubject = ErrorMessages.DataFrame;
+    private static readonly string _framePayloadSubject = ErrorMessages.FramePayload;
+    private static readonly string _frameHeaderSubject = ErrorMessages.FrameHeader;
+
     private readonly PipeReader _input;
     private readonly IMultiplexedConnectionStream? _inputCompletion;
 
@@ -133,14 +140,14 @@ internal sealed class Http3RequestStreamReader
             {
                 throw new Http3ConnectionException(
                     Http3ErrorCode.UnexpectedFrame,
-                    "An HTTP/3 request stream carried a DATA frame before its HEADERS frame (RFC 9114 §4.1).");
+                    ErrorMessages.Http3RequestStreamCarriedADataFrameBeforeItsHeadersFrameRfc);
             }
 
             if (IsProhibitedOnRequestStream(frame.Type))
             {
                 throw new Http3ConnectionException(
                     Http3ErrorCode.UnexpectedFrame,
-                    $"Frame type 0x{frame.Type:x} is not permitted on an HTTP/3 request stream (RFC 9114 §7.2).");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.FrameType0xIsNotPermittedOnAnHttp3RequestStreamRfc, frame.Type));
             }
 
             await SkipPayloadAsync(frame.Length, cancellationToken).ConfigureAwait(false);
@@ -172,7 +179,7 @@ internal sealed class Http3RequestStreamReader
         {
             throw new Http3StreamException(
                 Http3ErrorCode.FrameError,
-                $"An HTTP/3 HEADERS frame of {frame.Length} octets exceeds the {maxHeadersFrameSize}-octet limit (MaxRequestHeadersFrameSize).");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3HeadersFrameOfOctetsExceedsTheOctetLimitMaxRequestHeadersFrameSize, frame.Length, maxHeadersFrameSize));
         }
 
         return ReadPayloadAsync((int)frame.Length, cancellationToken);
@@ -274,7 +281,7 @@ internal sealed class Http3RequestStreamReader
                     return null;
                 }
 
-                throw Truncated("frame header");
+                throw Truncated(_frameHeaderSubject);
             }
 
             // Not enough octets for both varints yet: mark everything examined so the next read waits
@@ -332,7 +339,7 @@ internal sealed class Http3RequestStreamReader
             if (result.IsCompleted)
             {
                 _input.AdvanceTo(buffer.End);
-                throw Truncated("frame payload");
+                throw Truncated(_framePayloadSubject);
             }
 
             _input.AdvanceTo(buffer.Start, buffer.End);
@@ -370,7 +377,7 @@ internal sealed class Http3RequestStreamReader
             if (result.IsCompleted)
             {
                 _input.AdvanceTo(buffer.End);
-                throw Truncated("DATA frame");
+                throw Truncated(_dataFrameSubject);
             }
 
             _input.AdvanceTo(buffer.Start, buffer.End);
@@ -400,7 +407,7 @@ internal sealed class Http3RequestStreamReader
             if (result.IsCompleted)
             {
                 _input.AdvanceTo(buffer.End);
-                throw Truncated("HEADERS frame");
+                throw Truncated(_headersFrameSubject);
             }
 
             _input.AdvanceTo(buffer.Start, buffer.End);
@@ -429,6 +436,6 @@ internal sealed class Http3RequestStreamReader
         // truncated, this MUST be treated as a connection error of type H3_FRAME_ERROR."
         return new Http3ConnectionException(
             Http3ErrorCode.FrameError,
-            $"The HTTP/3 request stream ended inside a {what}: the frame length exceeds the octets the stream carried (RFC 9114 §7.1).");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestStreamEndedInsideATheFrameLengthExceedsTheOctets, what));
     }
 }

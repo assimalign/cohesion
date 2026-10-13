@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.Diagnostics;
 using System.Collections;
 using System.Collections.Generic;
@@ -389,7 +390,7 @@ public readonly partial struct HttpHeaderValue :
             if (array.Length - arrayIndex < 1)
             {
                 throw new ArgumentException(
-                    $"'{nameof(array)}' is not long enough to copy all the items in the collection. Check '{nameof(arrayIndex)}' and '{nameof(array)}' length.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DestinationArrayTooShort, nameof(array), nameof(arrayIndex), nameof(array)));
             }
 
             // value not array, can only be string

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.Connections;
 
@@ -14,6 +15,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </summary>
 internal sealed class HttpListenerRegistration
 {
+    // Capability validation selects these diagnostic fragments on every registration.
+    private static readonly string _http2ProtocolDescription = ErrorMessages.Http2ProtocolDescription;
+    private static readonly string _combinedHttpProtocolDescription = ErrorMessages.CombinedHttpProtocolDescription;
+    private static readonly string _http1ProtocolDescription = ErrorMessages.Http1ProtocolDescription;
+
     private readonly Func<IDuplexConnectionListener>? _streamListenerFactory;
     private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory>? _streamConnectionFactoryBuilder;
     private readonly Func<IMultiplexedConnectionListener>? _multiplexedListenerFactory;
@@ -66,7 +72,7 @@ internal sealed class HttpListenerRegistration
     public IDuplexConnectionListener CreateStreamListener()
     {
         IDuplexConnectionListener listener = _streamListenerFactory!.Invoke()
-            ?? throw new InvalidOperationException($"The connection listener factory registered for '{Protocol}' returned null.");
+            ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionListenerFactoryRegisteredForReturnedNull, Protocol));
 
         ValidateStreamCapabilities(listener.Capabilities, Protocol, paramName: null);
 
@@ -94,7 +100,7 @@ internal sealed class HttpListenerRegistration
     public IMultiplexedConnectionListener CreateMultiplexedListener()
     {
         return _multiplexedListenerFactory!.Invoke()
-            ?? throw new InvalidOperationException($"The multiplexed connection listener factory registered for '{Protocol}' returned null.");
+            ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultiplexedConnectionListenerFactoryRegisteredForReturnedNull, Protocol));
     }
 
     /// <summary>
@@ -126,27 +132,22 @@ internal sealed class HttpListenerRegistration
     {
         string protocolName = protocol switch
         {
-            HttpProtocol.Http20 => "HTTP/2",
-            HttpProtocol.Http11 | HttpProtocol.Http20 => "HTTP/1.1 and HTTP/2 on one listener",
-            _ => "HTTP/1.1",
+            HttpProtocol.Http20 => _http2ProtocolDescription,
+            HttpProtocol.Http11 | HttpProtocol.Http20 => _combinedHttpProtocolDescription,
+            _ => _http1ProtocolDescription,
         };
 
         if (capabilities.Delivery != ConnectionDelivery.Stream || !capabilities.IsReliable || !capabilities.IsOrdered)
         {
             throw CreateCapabilityException(
-                $"{protocolName} requires a transport whose capabilities report a reliable, ordered byte stream " +
-                $"(Delivery=Stream, IsReliable=true, IsOrdered=true); the supplied listener reports " +
-                $"Delivery={capabilities.Delivery}, IsReliable={capabilities.IsReliable}, IsOrdered={capabilities.IsOrdered}.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.StreamListenerCapabilitiesRequired, protocolName, capabilities.Delivery, capabilities.IsReliable, capabilities.IsOrdered),
                 paramName);
         }
 
         if (protocol == (HttpProtocol.Http11 | HttpProtocol.Http20) && capabilities.Security != ConnectionSecurity.Tls)
         {
             throw CreateCapabilityException(
-                $"{protocolName} chooses the protocol for each connection through ALPN (RFC 7301), a TLS extension, " +
-                $"so it requires a listener whose capabilities report Security=Tls; the supplied listener reports " +
-                $"Security={capabilities.Security}. Compose TLS onto the listener before registering it, or register " +
-                $"UseHttp1 and UseHttp2 on separate listeners.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CombinedProtocolListenerRequiresTls, protocolName, capabilities.Security),
                 paramName);
         }
     }

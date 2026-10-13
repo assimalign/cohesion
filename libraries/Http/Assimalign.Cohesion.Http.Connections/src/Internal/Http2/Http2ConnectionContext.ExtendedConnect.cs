@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -252,16 +253,16 @@ internal sealed partial class Http2ConnectionContext
     {
         if (stream.IsReset)
         {
-            return new IOException($"The HTTP/2 stream {stream.StreamId} carrying the extended CONNECT tunnel was reset.");
+            return new IOException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamCarryingTheExtendedConnectTunnelWasReset, stream.StreamId));
         }
 
         if (stream.IsResponseCompleted)
         {
             return new ObjectDisposedException(
                 nameof(Http2ExtendedConnectStream),
-                "The server's side of the extended CONNECT tunnel has already ended.");
+                ErrorMessages.ServerSSideOfTheExtendedConnectTunnelHasAlreadyEnded);
         }
 
-        return new IOException("The HTTP/2 connection carrying the extended CONNECT tunnel closed.");
+        return new IOException(ErrorMessages.Http2ConnectionCarryingTheExtendedConnectTunnelClosed);
     }
 }

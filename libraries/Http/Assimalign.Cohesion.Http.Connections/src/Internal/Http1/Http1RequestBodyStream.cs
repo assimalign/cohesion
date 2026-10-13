@@ -347,7 +347,7 @@ internal sealed class Http1RequestBodyStream : Stream
         {
             throw Reject(
                 HttpStatusCode.RequestEntityTooLarge,
-                $"Content-Length value '{_contentLength}' exceeds the configured maximum request body size ({cap} octets).");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueExceedsTheConfiguredMaximumRequestBodySizeOctets, _contentLength, cap));
         }
 
         // RFC 9110 §10.1.1 — the peer declared Expect: 100-continue and is withholding the body
@@ -403,7 +403,7 @@ internal sealed class Http1RequestBodyStream : Stream
         {
             return ValueTask.FromException<int>(new Http1LimitExceededException(
                 rejectedStatus,
-                $"The request body was rejected with {rejectedStatus} and is not read further."));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestBodyWasRejectedWithAndIsNotReadFurther, rejectedStatus)));
         }
 
         if (!IsMalformed)
@@ -431,7 +431,7 @@ internal sealed class Http1RequestBodyStream : Stream
         if (read == 0)
         {
             throw Truncated(
-                $"The connection closed after {_totalRead} of {_contentLength} expected request-body octets.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionClosedAfterOfExpectedRequestBodyOctets, _totalRead, _contentLength));
         }
 
         _remaining -= read;
@@ -451,7 +451,7 @@ internal sealed class Http1RequestBodyStream : Stream
         // read fails again, and the drain gives up so the connection closes (#1333).
         if (IsMalformed)
         {
-            throw new InvalidDataException("RFC 9112 §7.1: the chunked request body is malformed and is not read further.");
+            throw new InvalidDataException(ErrorMessages.ChunkedRequestBodyIsMalformedAndIsNotReadFurther);
         }
 
         // A read that stopped inside a framing line cannot be resumed: the line's octets read so far are
@@ -460,7 +460,7 @@ internal sealed class Http1RequestBodyStream : Stream
         if (_framingInterrupted)
         {
             throw new IOException(
-                "RFC 9112 §7.1: an earlier read of the chunked request body stopped inside its framing, so the body is not read further.");
+                ErrorMessages.EarlierReadOfTheChunkedRequestBodyStoppedInsideItsFramingSo);
         }
 
         bool succeeded = false;
@@ -519,7 +519,7 @@ internal sealed class Http1RequestBodyStream : Stream
                     // offending chunk is delivered.
                     throw Reject(
                         HttpStatusCode.RequestEntityTooLarge,
-                        $"Chunked body exceeds the configured maximum request body size ({cap} octets) at chunk size {chunkSize} after {_totalRead} octets read.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkedBodyExceedsTheConfiguredMaximumRequestBodySizeOctetsAtChunk, cap, chunkSize, _totalRead));
                 }
 
                 _chunkRemaining = chunkSize;
@@ -531,7 +531,7 @@ internal sealed class Http1RequestBodyStream : Stream
             if (read == 0)
             {
                 throw Truncated(
-                    $"RFC 9112 §7.1: connection closed mid-chunk with {_chunkRemaining} octets outstanding.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionClosedMidChunkWithOctetsOutstanding, _chunkRemaining));
             }
 
             _chunkRemaining -= read;
@@ -571,7 +571,7 @@ internal sealed class Http1RequestBodyStream : Stream
 
         if (sizeText.IsEmpty)
         {
-            throw new InvalidDataException("RFC 9112 §7.1: empty chunk-size.");
+            throw new InvalidDataException(ErrorMessages.EmptyChunkSize);
         }
 
         // The extensions are ignored, but they must keep to their grammar, so nothing that another
@@ -579,7 +579,7 @@ internal sealed class Http1RequestBodyStream : Stream
         if (semicolon >= 0 && !Http1ChunkExtensions.IsWellFormed(sizeLine.AsSpan(semicolon)))
         {
             throw new InvalidDataException(
-                "RFC 9112 §7.1.1: malformed chunk extensions; each is ';' and a token, optionally '=' and a token or a quoted-string, with only spaces and tabs between.");
+                ErrorMessages.MalformedChunkExtensionsEachIsAndATokenOptionallyAndAToken);
         }
 
         // chunk-size = 1*HEXDIG — ASCII hex only, no leading sign, no whitespace. Neither rejection
@@ -604,7 +604,7 @@ internal sealed class Http1RequestBodyStream : Stream
             else
             {
                 throw new InvalidDataException(
-                    $"RFC 9112 §7.1: the chunk-size holds the non-hex octet 0x{(int)c:X2} at offset {index}.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeHoldsTheNonHexOctet0xAtOffset, (int)c, index));
             }
 
             // A single chunk-size is bounded by Int32; the accumulated body is separately bounded by
@@ -612,7 +612,7 @@ internal sealed class Http1RequestBodyStream : Stream
             if (value > (int.MaxValue - digit) / 16)
             {
                 throw new InvalidDataException(
-                    $"RFC 9112 §7.1: the chunk-size overflows Int32 at its hex digit {index + 1}.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeOverflowsInt32AtItsHexDigit, index + 1));
             }
             value = (value * 16) + digit;
         }
@@ -642,7 +642,7 @@ internal sealed class Http1RequestBodyStream : Stream
         if (_framingExcess > _maxFramingExcess)
         {
             throw new InvalidDataException(
-                $"RFC 9112 §7.1.1: the chunked request body carries more than {_maxFramingExcess} octets of chunk framing, chunk extensions included, beyond what its chunks' data pays for.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkedRequestBodyCarriesMoreThanOctetsOfChunkFramingChunkExtensions, _maxFramingExcess));
         }
     }
 
@@ -677,7 +677,7 @@ internal sealed class Http1RequestBodyStream : Stream
             {
                 throw Reject(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    $"RFC 9112 §7.1.2: the trailer section exceeds the configured maximum size ({_maxTrailerSectionSize} octets).");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionExceedsTheConfiguredMaximumSizeOctets, _maxTrailerSectionSize));
             }
 
             sectionRemaining -= consumed;
@@ -686,7 +686,7 @@ internal sealed class Http1RequestBodyStream : Stream
             {
                 throw Reject(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    $"RFC 9112 §7.1.2: the trailer section contains more than the configured maximum of {_maxTrailerFieldCount} fields.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionContainsMoreThanTheConfiguredMaximumOfFields, _maxTrailerFieldCount));
             }
 
             // RFC 9112 §5.1 / §7.1.2 — a trailer field line has the header section's syntax: the name
@@ -694,7 +694,7 @@ internal sealed class Http1RequestBodyStream : Stream
             // holds no control character but HTAB (RFC 9110 §5.5, #1341).
             if (!Http1FieldLine.TryParse(line, out string name, out string value, out string? violation))
             {
-                throw new InvalidDataException($"RFC 9112 §7.1.2: the HTTP/1.1 trailer section is malformed. {violation}");
+                throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http11TrailerSectionIsMalformed, violation));
             }
 
             HttpHeaderKey key = new(name);
@@ -770,7 +770,7 @@ internal sealed class Http1RequestBodyStream : Stream
             int read = await ReadFromConnectionAsync(_oneByte, cancellationToken).ConfigureAwait(false);
             if (read == 0)
             {
-                throw Truncated("RFC 9112 §7.1: connection closed while a chunk framing line was being read.");
+                throw Truncated(ErrorMessages.ConnectionClosedWhileAChunkFramingLineWasBeingRead);
             }
 
             byte b = _oneByte[0];
@@ -781,7 +781,7 @@ internal sealed class Http1RequestBodyStream : Stream
                     return builder.ToString();
                 }
 
-                throw new InvalidDataException("RFC 9112 §2.2: a chunk framing line holds a bare CR; a line ends only at CRLF.");
+                throw new InvalidDataException(ErrorMessages.ChunkFramingLineHoldsABareCrALineEndsOnlyAt);
             }
 
             if (b == (byte)'\r')
@@ -792,7 +792,7 @@ internal sealed class Http1RequestBodyStream : Stream
 
             if (b == (byte)'\n')
             {
-                throw new InvalidDataException("RFC 9112 §2.2: a chunk framing line holds a bare LF; a line ends only at CRLF.");
+                throw new InvalidDataException(ErrorMessages.ChunkFramingLineHoldsABareLfALineEndsOnlyAt);
             }
 
             AppendFramingOctet(builder, (char)b, maxLength, line);
@@ -817,15 +817,15 @@ internal sealed class Http1RequestBodyStream : Stream
     private Exception FramingLineTooLong(FramingLine line, int maxLength) => line switch
     {
         FramingLine.ChunkTerminator => new InvalidDataException(
-            "RFC 9112 §7.1: chunk terminator must be CRLF only."),
+            ErrorMessages.ChunkTerminatorMustBeCrlfOnly),
         FramingLine.ChunkSize => new InvalidDataException(
-            $"RFC 9112 §7.1.1: the chunk-size line, chunk extensions included, exceeds the configured maximum of {maxLength} octets."),
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeLineChunkExtensionsIncludedExceedsTheConfiguredMaximumOfOctets, maxLength)),
         FramingLine.TrailerField => Reject(
             HttpStatusCode.RequestHeaderFieldsTooLarge,
-            $"RFC 9112 §7.1.2: a trailer field line exceeds the configured maximum of {maxLength} octets."),
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerFieldLineExceedsTheConfiguredMaximumOfOctets, maxLength)),
         _ => Reject(
             HttpStatusCode.RequestHeaderFieldsTooLarge,
-            $"RFC 9112 §7.1.2: the trailer section exceeds the configured maximum size ({_maxTrailerSectionSize} octets)."),
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionExceedsTheConfiguredMaximumSizeOctets, _maxTrailerSectionSize)),
     };
 
     private async ValueTask<int> ReadFromConnectionAsync(Memory<byte> buffer, CancellationToken cancellationToken)
@@ -917,7 +917,7 @@ internal sealed class Http1RequestBodyStream : Stream
         // with 408 Request Timeout semantics.
         return Reject(
             HttpStatusCode.RequestTimeout,
-            "The request body was received below the configured minimum data rate.");
+            ErrorMessages.RequestBodyWasReceivedBelowTheConfiguredMinimumDataRate);
     }
 
     /// <summary>

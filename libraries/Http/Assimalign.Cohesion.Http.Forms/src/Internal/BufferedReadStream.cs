@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Buffers;
 using System.Diagnostics;
 using System.IO;
@@ -144,7 +145,7 @@ internal sealed class BufferedReadStream : Stream
 
         if (minCount > _buffer.Length)
         {
-            throw new ArgumentOutOfRangeException(nameof(minCount), $"Requested look-ahead {minCount} exceeds buffer size {_buffer.Length}.");
+            throw new ArgumentOutOfRangeException(nameof(minCount), string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestedLookAheadExceedsBufferSize, minCount, _buffer.Length));
         }
 
         while (_bufferCount < minCount)
@@ -168,7 +169,7 @@ internal sealed class BufferedReadStream : Stream
 
         if (minCount > _buffer.Length)
         {
-            throw new ArgumentOutOfRangeException(nameof(minCount), $"Requested look-ahead {minCount} exceeds buffer size {_buffer.Length}.");
+            throw new ArgumentOutOfRangeException(nameof(minCount), string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestedLookAheadExceedsBufferSize, minCount, _buffer.Length));
         }
 
         while (_bufferCount < minCount)
@@ -208,7 +209,7 @@ internal sealed class BufferedReadStream : Stream
             {
                 if (_bufferCount == 0 && !await EnsureBufferedAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    throw new InvalidDataException("End of stream reached before line terminator.");
+                    throw new InvalidDataException(ErrorMessages.EndOfStreamReachedBeforeLineTerminator);
                 }
 
                 byte b = _buffer[_bufferOffset++];
@@ -220,7 +221,7 @@ internal sealed class BufferedReadStream : Stream
                     {
                         return System.Text.Encoding.UTF8.GetString(rented, 0, collected);
                     }
-                    throw new InvalidDataException("Invalid line terminator (CR without LF).");
+                    throw new InvalidDataException(ErrorMessages.InvalidLineTerminatorCrWithoutLf);
                 }
 
                 if (b == CR)
@@ -231,7 +232,7 @@ internal sealed class BufferedReadStream : Stream
 
                 if (collected >= lengthLimit)
                 {
-                    string message = $"Line length limit {lengthLimit} exceeded.";
+                    string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.LineLengthLimitExceeded, lengthLimit);
                     throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersLength, message));
                 }
 
@@ -300,7 +301,7 @@ internal sealed class BufferedReadStream : Stream
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         if (buffer.Length - offset < count)
         {
-            throw new ArgumentException("Buffer too small for requested offset + count.");
+            throw new ArgumentException(ErrorMessages.BufferTooSmallForRequestedOffsetCount);
         }
         Debug.Assert(buffer.Length - offset >= count);
     }

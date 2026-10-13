@@ -56,7 +56,7 @@ internal abstract class TransportHttpContext : HttpContext
     {
         LatchResponseAbortedByClient();
         return new OperationCanceledException(
-            "The client stopped accepting the response.", reason, TripRequestCancelled());
+            ErrorMessages.ClientStoppedAcceptingTheResponse, reason, TripRequestCancelled());
     }
 
     /// <summary>
@@ -260,7 +260,7 @@ internal abstract class TransportHttpContext : HttpContext
     {
         LatchResponseAbortedByClient();
         return new OperationCanceledException(
-            "The peer did not accept the response at the configured minimum data rate, so the exchange was aborted.",
+            ErrorMessages.PeerDidNotAcceptTheResponseAtTheConfiguredMinimumDataRate,
             TripRequestCancelled());
     }
 
@@ -280,7 +280,7 @@ internal abstract class TransportHttpContext : HttpContext
     internal OperationCanceledException AbortRequestForPeer(Exception reason)
     {
         return new OperationCanceledException(
-            "The client abandoned the request before its body was read to the end.",
+            ErrorMessages.ClientAbandonedTheRequestBeforeItsBodyWasReadToTheEnd,
             reason,
             TripRequestCancelled());
     }

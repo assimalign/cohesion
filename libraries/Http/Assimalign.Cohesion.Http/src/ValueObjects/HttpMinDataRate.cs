@@ -46,12 +46,12 @@ public sealed class HttpMinDataRate
         // Written as a negated comparison so NaN, which compares false either way, is refused too.
         if (!(bytesPerSecond > 0))
         {
-            throw new ArgumentOutOfRangeException(nameof(bytesPerSecond), bytesPerSecond, "The minimum data rate must be greater than zero octets per second.");
+            throw new ArgumentOutOfRangeException(nameof(bytesPerSecond), bytesPerSecond, ErrorMessages.MinimumDataRateMustBeGreaterThanZeroOctetsPerSecond);
         }
 
         if (gracePeriod <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(gracePeriod), gracePeriod, "The grace period must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(gracePeriod), gracePeriod, ErrorMessages.GracePeriodMustBeGreaterThanZero);
         }
 
         BytesPerSecond = bytesPerSecond;

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
@@ -66,7 +67,7 @@ internal static class Http1FieldLine
 
         if (colon <= 0 || !HttpFieldNormalization.IsValidFieldName(line.AsSpan(0, colon)))
         {
-            violation = "RFC 9112 §5.1: a field line has no colon, or a field name that is not a token.";
+            violation = ErrorMessages.FieldLineHasNoColonOrAFieldNameThatIsNot;
             return false;
         }
 
@@ -78,7 +79,7 @@ internal static class Http1FieldLine
         if (invalid >= 0)
         {
             // The name is a token, so it is safe to quote.
-            violation = $"RFC 9110 §5.5: the value of the field '{line[..colon]}' holds the control character 0x{(int)fieldValue[invalid]:X2}; only HTAB is allowed.";
+            violation = string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheFieldHoldsTheControlCharacter0xOnlyHtabIs, line[..colon], (int)fieldValue[invalid]);
             return false;
         }
 

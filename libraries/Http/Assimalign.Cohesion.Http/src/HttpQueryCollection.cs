@@ -168,7 +168,7 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     {
         if (IsReadOnly)
         {
-            throw new InvalidOperationException("The query collection cannot be modified because it is read-only.");
+            throw new InvalidOperationException(ErrorMessages.QueryCollectionCannotBeModifiedBecauseItIsReadOnly);
         }
     }
 }

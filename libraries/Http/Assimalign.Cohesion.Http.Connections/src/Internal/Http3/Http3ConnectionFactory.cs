@@ -37,7 +37,7 @@ internal sealed class Http3ConnectionFactory : HttpMultiplexedConnectionFactory
     {
         if (!IsSupportedPlatform())
         {
-            throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
+            throw new PlatformNotSupportedException(ErrorMessages.Http3TransportsRequireAQuicCapablePlatform);
         }
 
         return new Http3Connection(connection, isSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _qpackOptions, ResponseHeaderPolicy);

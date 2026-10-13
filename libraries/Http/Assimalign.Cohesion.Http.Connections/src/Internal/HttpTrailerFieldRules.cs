@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 
@@ -49,26 +50,26 @@ internal static class HttpTrailerFieldRules
     {
         if (key.IsEmpty)
         {
-            throw new ArgumentException("A trailer field name cannot be empty.", nameof(key));
+            throw new ArgumentException(ErrorMessages.TrailerFieldNameCannotBeEmpty, nameof(key));
         }
 
         if (key.Value[0] == ':')
         {
             throw new ArgumentException(
-                $"'{key.Value}' is a pseudo-header field, and a trailer section carries none (RFC 9113 §8.1, RFC 9114 §4.3).",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.IsAPseudoHeaderFieldAndATrailerSectionCarriesNoneRfc, key.Value),
                 nameof(key));
         }
 
         if (!HttpFieldNormalization.IsValidFieldName(key.Value))
         {
             // Not quoted: whatever makes the name invalid may be CR, LF, or NUL.
-            throw new ArgumentException("A trailer field name must be a token (RFC 9110 §5.1).", nameof(key));
+            throw new ArgumentException(ErrorMessages.TrailerFieldNameMustBeATokenRfc911051, nameof(key));
         }
 
         if (IsExcluded(key))
         {
             throw new ArgumentException(
-                $"The field '{key.Value}' cannot be sent in a trailer section (RFC 9110 §6.5.1, RFC 9113 §8.2.2, RFC 9114 §4.2).",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.FieldCannotBeSentInATrailerSectionRfc911065, key.Value),
                 nameof(key));
         }
 
@@ -79,7 +80,7 @@ internal static class HttpTrailerFieldRules
             if (invalid >= 0)
             {
                 throw new ArgumentException(
-                    $"The value of the trailer field '{key.Value}' holds the control character 0x{(int)element![invalid]:X2}; a field value holds no control character but HTAB (RFC 9110 §5.5).",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheTrailerFieldHoldsTheControlCharacter0xAField, key.Value, (int)element![invalid]),
                     nameof(value));
             }
         }
@@ -105,13 +106,13 @@ internal static class HttpTrailerFieldRules
         {
             if (name.Length == 0)
             {
-                throw new InvalidDataException($"The {protocol} trailer section contains a zero-length field name.");
+                throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionContainsAZeroLengthFieldName, protocol));
             }
 
             if (name[0] == ':')
             {
                 throw new InvalidDataException(
-                    $"The {protocol} trailer section contains the pseudo-header field {HttpReceivedFieldRules.DescribeName(name)}; a trailer section carries none (RFC 9113 §8.1, RFC 9114 §4.3).");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionContainsThePseudoHeaderFieldATrailerSectionCarriesNone, protocol, HttpReceivedFieldRules.DescribeName(name)));
             }
 
             // The field syntax a head's fields follow (#1376): a lowercase token name, and a value with
@@ -150,7 +151,7 @@ internal static class HttpTrailerFieldRules
         if (IsExcluded(key))
         {
             throw new InvalidDataException(
-                $"The {protocol} trailer section contains the field '{key.Value}', which a trailer section cannot carry (RFC 9110 §6.5.1, RFC 9113 §8.2.2, RFC 9114 §4.2).");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionContainsTheFieldWhichATrailerSectionCannotCarryRfc, protocol, key.Value));
         }
     }
 

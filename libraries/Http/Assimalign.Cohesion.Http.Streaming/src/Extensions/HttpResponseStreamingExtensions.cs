@@ -39,8 +39,7 @@ public static class HttpResponseStreamingExtensions
                 ArgumentNullException.ThrowIfNull(response);
                 return response.HttpContext.Features.Get<IHttpResponseStreamingFeature>()
                     ?? throw new NotSupportedException(
-                        "Response streaming is not enabled for this exchange. Register HttpResponseStreamingInterceptor.Create() " +
-                        "on the transport's Interceptors list.");
+                        ErrorMessages.ResponseStreamingIsNotEnabledForThisExchangeRegisterHttpResponseStreamingInterceptorCreateOn);
             }
         }
     }

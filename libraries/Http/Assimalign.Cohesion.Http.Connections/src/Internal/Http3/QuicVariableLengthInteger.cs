@@ -77,7 +77,7 @@ internal static class QuicVariableLengthInteger
 
             if (bytesRead == 0)
             {
-                throw new EndOfStreamException("The QUIC variable-length integer was incomplete.");
+                throw new EndOfStreamException(ErrorMessages.QuicVariableLengthIntegerWasIncomplete);
             }
 
             value = (value << 8) | buffer[0];
@@ -102,7 +102,7 @@ internal static class QuicVariableLengthInteger
         {
             if (index >= buffer.Length)
             {
-                throw new InvalidDataException("The QUIC variable-length integer was incomplete.");
+                throw new InvalidDataException(ErrorMessages.QuicVariableLengthIntegerWasIncomplete);
             }
 
             value = (value << 8) | buffer[index++];

@@ -25,23 +25,23 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal static class HttpExtendedConnectRules
 {
     /// <summary>The refusal for an exchange that is not an extended CONNECT.</summary>
-    public const string NotExtendedConnectMessage =
-        "The exchange is not an extended CONNECT (RFC 8441, RFC 9220), so no tunnel can be accepted for it.";
+    public static readonly string NotExtendedConnectMessage =
+        ErrorMessages.ExchangeIsNotExtendedConnect;
 
     /// <summary>
     /// The refusal for a second accept attempt. The first attempt latches even when a later guard
     /// refuses it, so the tunnel may never have been accepted.
     /// </summary>
-    public const string AlreadyAcceptedMessage =
-        "An extended CONNECT accept has already been attempted for this exchange.";
+    public static readonly string AlreadyAcceptedMessage =
+        ErrorMessages.ExtendedConnectAcceptHasAlreadyBeenAttemptedForThisExchange;
 
     /// <summary>The refusal for a cancelled exchange.</summary>
-    public const string CancelledMessage =
-        "The extended CONNECT tunnel cannot be accepted: the exchange was cancelled.";
+    public static readonly string CancelledMessage =
+        ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedTheExchangeWasCancelled;
 
     /// <summary>The refusal for an exchange whose response has started.</summary>
-    public const string ResponseStartedMessage =
-        "The extended CONNECT tunnel cannot be accepted after the response has started.";
+    public static readonly string ResponseStartedMessage =
+        ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedAfterTheResponseHasStarted;
 
     /// <summary>
     /// Prepares the response head that establishes the tunnel: status <c>200</c>, and no

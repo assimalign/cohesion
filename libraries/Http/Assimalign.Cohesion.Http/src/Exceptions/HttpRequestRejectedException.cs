@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -26,7 +27,7 @@ public sealed class HttpRequestRejectedException : HttpException
     /// Thrown when <paramref name="statusCode"/> is not an error status (4xx / 5xx).
     /// </exception>
     public HttpRequestRejectedException(HttpStatusCode statusCode)
-        : this(statusCode, $"The request was rejected with status '{statusCode}'.")
+        : this(statusCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestWasRejectedWithStatus, statusCode))
     {
     }
 
@@ -46,7 +47,7 @@ public sealed class HttpRequestRejectedException : HttpException
             throw new ArgumentOutOfRangeException(
                 nameof(statusCode),
                 statusCode.Value,
-                "A request rejection must carry an error status (4xx or 5xx).");
+                ErrorMessages.RequestRejectionMustCarryAnErrorStatus4xxOr5xx);
         }
 
         StatusCode = statusCode;

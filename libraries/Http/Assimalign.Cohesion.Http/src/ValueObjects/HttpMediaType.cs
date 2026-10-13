@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
@@ -215,7 +216,7 @@ public readonly struct HttpMediaType : IEquatable<HttpMediaType>
     {
         if (!TryParse(value, out HttpMediaType result))
         {
-            throw new HttpInvalidMediaTypeException($"The value is not a valid media type: '{value.ToString()}'.");
+            throw new HttpInvalidMediaTypeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidMediaType, value.ToString()));
         }
         return result;
     }

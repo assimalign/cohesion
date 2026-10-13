@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Diagnostics;
 
 using Assimalign.Cohesion.Http.Internal;
@@ -78,7 +79,7 @@ public readonly struct HttpEntityTag : IEquatable<HttpEntityTag>
         ArgumentNullException.ThrowIfNull(tag);
         if (!IsValidOpaqueContent(tag.AsSpan()))
         {
-            throw new HttpInvalidEntityTagException($"The value is not a valid entity-tag: '{tag}'.");
+            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidEntityTag, tag));
         }
         return new HttpEntityTag(tag, isWeak);
     }
@@ -93,7 +94,7 @@ public readonly struct HttpEntityTag : IEquatable<HttpEntityTag>
     {
         if (!TryParse(value, out HttpEntityTag result))
         {
-            throw new HttpInvalidEntityTagException($"The value is not a valid entity-tag: '{value.ToString()}'.");
+            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidEntityTag, value.ToString()));
         }
         return result;
     }

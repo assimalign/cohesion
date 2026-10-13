@@ -234,3 +234,14 @@ with `HttpContentDigestInterceptor.Create()` and rebuild. Removing the old type 
 Assignments to `IHttpExchangeInterceptor` continue to work after the call is renamed. The
 interceptor's registration order, scopes, feature installation, and request/response behavior
 are unchanged.
+
+## Exception message resources (#1467)
+
+Exception diagnostics live in `src/Properties/ErrorMessages.resx`. The shared build targets
+use MSBuild strongly typed resource generation to produce an internal `ErrorMessages` class
+in this assembly's `RootNamespace`, under the intermediate output directory. No designer source
+is checked in, and a command-line or NativeAOT build uses the same embedded resources.
+Formatted diagnostics use `string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`.
+The invariant messages, exception types, error codes and existing input-redaction rules stay
+unchanged; this introduces no public API or breaking behavior against 10.0.0-preview.1.
+EventSource templates, log messages and HTTP response bodies keep their existing owners.

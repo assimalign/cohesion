@@ -26,7 +26,7 @@ internal sealed class HmacHttpAntiforgeryProtector : IHttpAntiforgeryProtector
         ArgumentNullException.ThrowIfNull(key);
         if (key.Length == 0)
         {
-            throw new ArgumentException("The antiforgery HMAC key must not be empty.", nameof(key));
+            throw new ArgumentException(ErrorMessages.AntiforgeryHmacKeyMustNotBeEmpty, nameof(key));
         }
 
         _key = key;

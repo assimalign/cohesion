@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -42,8 +43,15 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     public HttpMethod(string? value)
     {
         ArgumentNullException.ThrowIfNullOrEmpty(value);
-        ArgumentException.ThrowIf(value.Length > MaximumLength, $"The method is too long. It must be {MaximumLength} characters or fewer.");
-        ArgumentException.ThrowIf(value.AsSpan().ContainsAnyExcept(_allowedCharacters), $"The provided method is invalid: '{value}'.");
+        if (value.Length > MaximumLength)
+        {
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MethodExceedsMaximumLength, MaximumLength));
+        }
+
+        if (value.AsSpan().ContainsAnyExcept(_allowedCharacters))
+        {
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ProvidedMethodIsInvalid, value));
+        }
 
         Value = value;
     }

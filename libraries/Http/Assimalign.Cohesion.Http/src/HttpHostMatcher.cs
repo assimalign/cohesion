@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Http;
@@ -120,7 +121,7 @@ public abstract class HttpHostMatcher
             if (string.IsNullOrWhiteSpace(pattern))
             {
                 throw new ArgumentException(
-                    "A host allowlist pattern must not be null, empty, or whitespace.",
+                    ErrorMessages.HostAllowlistPatternMustNotBeNullEmptyOrWhitespace,
                     nameof(patterns));
             }
 
@@ -141,14 +142,14 @@ public abstract class HttpHostMatcher
             if (!parsed.TryGetComponents(out ReadOnlySpan<char> host, out int? port) || host.IsEmpty)
             {
                 throw new ArgumentException(
-                    $"The host allowlist pattern '{pattern}' is not a well-formed host.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPatternIsNotAWellFormedHost, pattern),
                     nameof(patterns));
             }
 
             if (port is not null)
             {
                 throw new ArgumentException(
-                    $"The host allowlist pattern '{pattern}' carries a port. Host filtering matches the host component only; remove the ':{port}'.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPatternCarriesAPortHostFilteringMatchesTheHostComponent, pattern, port),
                     nameof(patterns));
             }
 
@@ -160,7 +161,7 @@ public abstract class HttpHostMatcher
                 if (suffix.Length <= 1 || suffix[1..].IndexOf('*') >= 0)
                 {
                     throw new ArgumentException(
-                        $"The host allowlist pattern '{pattern}' is not a valid wildcard: expected '*.suffix' with a non-empty suffix and no further '*'.",
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPatternIsNotAValidWildcardExpectedSuffixWithA, pattern),
                         nameof(patterns));
                 }
 
@@ -169,7 +170,7 @@ public abstract class HttpHostMatcher
             else if (host.IndexOf('*') >= 0)
             {
                 throw new ArgumentException(
-                    $"The host allowlist pattern '{pattern}' misuses '*': the wildcard is only valid as the whole pattern ('*') or as a leading '*.' label.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPatternMisusesTheWildcardIsOnlyValidAsTheWhole, pattern),
                     nameof(patterns));
             }
             else
@@ -181,7 +182,7 @@ public abstract class HttpHostMatcher
         if (count == 0)
         {
             throw new ArgumentException(
-                "At least one host allowlist pattern is required. To accept every host, pass '*' or apply no host filtering.",
+                ErrorMessages.AtLeastOneHostAllowlistPatternIsRequiredToAcceptEveryHost,
                 nameof(patterns));
         }
 

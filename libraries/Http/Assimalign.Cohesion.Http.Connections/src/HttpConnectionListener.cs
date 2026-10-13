@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Net;
 using System.Runtime.ExceptionServices;
@@ -167,7 +168,7 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
 
             if (_streamListeners.Count == 0 && _multiplexedListeners.Count == 0)
             {
-                throw new InvalidOperationException("At least one connection listener must be configured before binding HTTP connections.");
+                throw new InvalidOperationException(ErrorMessages.AtLeastOneConnectionListenerMustBeConfiguredBeforeBindingHttpConnections);
             }
 
             try
@@ -241,7 +242,7 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
             if (!TryParseAuthority(authority, out string? host, out int port))
             {
                 throw new InvalidOperationException(
-                    $"The configured Alt-Svc authority '{authority}' is not a valid 'host:port' or ':port' value.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredAltSvcAuthorityIsNotAValidHostPortOrPort, authority));
             }
 
             alternative = HttpAltService.Http3(host, port, maxAgeSeconds);
@@ -254,8 +255,7 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
         else
         {
             throw new InvalidOperationException(
-                "Alt-Svc advertisement is enabled but the HTTP/3 listener endpoint does not expose a port; " +
-                $"set {nameof(HttpAltServiceAdvertisementOptions)}.{nameof(HttpAltServiceAdvertisementOptions.Authority)} explicitly.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AltSvcAdvertisementIsEnabledButTheHttp3ListenerEndpointDoesNot, nameof(HttpAltServiceAdvertisementOptions), nameof(HttpAltServiceAdvertisementOptions.Authority)));
         }
 
         return alternative.Format();
@@ -452,7 +452,7 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
 
         if (disposalFailures is { Count: > 1 })
         {
-            throw new AggregateException("One or more HTTP connection listeners failed to dispose.", disposalFailures);
+            throw new AggregateException(ErrorMessages.OneOrMoreHttpConnectionListenersFailedToDispose, disposalFailures);
         }
     }
 

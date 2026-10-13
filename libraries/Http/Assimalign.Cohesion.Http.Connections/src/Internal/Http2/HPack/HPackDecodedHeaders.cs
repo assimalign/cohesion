@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
@@ -74,7 +75,7 @@ internal sealed class HPackDecodedHeaders
     {
         if (string.IsNullOrEmpty(name))
         {
-            throw new InvalidDataException("The HTTP/2 field name cannot be empty.");
+            throw new InvalidDataException(ErrorMessages.Http2FieldNameCannotBeEmpty);
         }
 
         // RFC 9113 §8.2.1 — a value, a pseudo-header's included, holds no NUL, CR, or LF and no
@@ -134,7 +135,7 @@ internal sealed class HPackDecodedHeaders
         if (_sawRegularField)
         {
             throw new InvalidDataException(
-                $"Pseudo-header field {HttpReceivedFieldRules.DescribeName(name)} appeared after regular fields; pseudo-headers MUST come first.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PseudoHeaderFieldAppearedAfterRegularFieldsPseudoHeadersMustComeFirst, HttpReceivedFieldRules.DescribeName(name)));
         }
 
         // RFC 9113 §8.3 — each pseudo-header field appears at most once. A repeat is recorded for the
@@ -169,13 +170,13 @@ internal sealed class HPackDecodedHeaders
                 // RFC 9113 §8.3 — :status is a response pseudo-header.
                 // Receiving it in a request field section is malformed.
                 throw new InvalidDataException(
-                    "Pseudo-header field ':status' is response-only and MUST NOT appear in a request.");
+                    ErrorMessages.PseudoHeaderFieldStatusIsResponseOnlyAndMustNotAppearIn);
 
             default:
                 // RFC 9113 §8.3 — pseudo-header names that are not
                 // defined for the given message type are malformed.
                 throw new InvalidDataException(
-                    $"Unknown pseudo-header field {HttpReceivedFieldRules.DescribeName(name)}.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.UnknownPseudoHeaderField, HttpReceivedFieldRules.DescribeName(name)));
         }
     }
 
@@ -205,7 +206,7 @@ internal sealed class HPackDecodedHeaders
         if (HttpFieldNormalization.IsForbiddenInHttp2Or3(key))
         {
             throw new InvalidDataException(
-                $"Connection-specific header field '{name}' is forbidden in HTTP/2 (RFC 9113 §8.2.2).");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionSpecificHeaderFieldIsForbiddenInHttp2Rfc911382, name));
         }
 
         // RFC 9113 §8.2.2 — TE is the one exception: it MAY appear, but its
@@ -214,7 +215,7 @@ internal sealed class HPackDecodedHeaders
             && !HttpFieldNormalization.IsTeValueValidInHttp2Or3(value))
         {
             throw new InvalidDataException(
-                $"HTTP/2 field 'TE' MUST carry only the value 'trailers'; got '{value}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FieldTeMustCarryOnlyTheValueTrailersGot, value));
         }
     }
 }

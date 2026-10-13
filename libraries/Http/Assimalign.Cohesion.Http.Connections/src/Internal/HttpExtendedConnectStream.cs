@@ -60,13 +60,13 @@ internal abstract class HttpExtendedConnectStream : Stream
     public override bool CanSeek => false;
 
     /// <inheritdoc />
-    public override long Length => throw new NotSupportedException("An extended CONNECT tunnel has no length.");
+    public override long Length => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelHasNoLength);
 
     /// <inheritdoc />
     public override long Position
     {
-        get => throw new NotSupportedException("An extended CONNECT tunnel is not seekable.");
-        set => throw new NotSupportedException("An extended CONNECT tunnel is not seekable.");
+        get => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelIsNotSeekable);
+        set => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelIsNotSeekable);
     }
 
     /// <summary>
@@ -161,10 +161,10 @@ internal abstract class HttpExtendedConnectStream : Stream
     }
 
     /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException("An extended CONNECT tunnel is not seekable.");
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelIsNotSeekable);
 
     /// <inheritdoc />
-    public override void SetLength(long value) => throw new NotSupportedException("An extended CONNECT tunnel has no length.");
+    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelHasNoLength);
 
     /// <summary>
     /// Ends the server's side of the tunnel, once: wakes any read or write still waiting, then writes
@@ -315,13 +315,13 @@ internal abstract class HttpExtendedConnectStream : Stream
         {
             return new ObjectDisposedException(
                 GetType().FullName,
-                "The extended CONNECT tunnel was closed while the operation was pending.");
+                ErrorMessages.ExtendedConnectTunnelWasClosedWhileTheOperationWasPending);
         }
 
         // The transport cancelled the operation because the exchange ended underneath it: the peer reset
         // the stream, the connection closed, or the exchange was cancelled.
         return new IOException(
-            "The extended CONNECT tunnel was aborted: its stream was reset, its connection closed, or the exchange was cancelled.",
+            ErrorMessages.ExtendedConnectTunnelWasAbortedItsStreamWasResetItsConnectionClosed,
             exception);
     }
 }

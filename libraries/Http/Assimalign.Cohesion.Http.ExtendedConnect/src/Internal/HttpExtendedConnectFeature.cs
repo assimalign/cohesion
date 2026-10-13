@@ -57,7 +57,7 @@ internal sealed class HttpExtendedConnectFeature : IHttpExtendedConnectFeature
             // Only reachable when the transport never ran the exchange's response phase, so no
             // control exists to perform the accept.
             return ValueTask.FromException<Stream>(new InvalidOperationException(
-                "The extended CONNECT tunnel cannot be accepted: the exchange offers no exchange control."));
+                ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedTheExchangeOffersNoExchangeControl));
         }
 
         return control.AcceptTunnelAsync(cancellationToken);

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Buffers;
 
 using Assimalign.Cohesion.Http.Internal;
@@ -287,31 +288,31 @@ public static class HttpFieldNormalization
         // method (RFC 8441 §4, RFC 9220 §3).
         if (protocol.Length == 0)
         {
-            return "The ':protocol' pseudo-header MUST carry a protocol name; an empty value is not a token (RFC 9110 §5.6.2, RFC 8441 §4).";
+            return ErrorMessages.ProtocolPseudoHeaderMustCarryAProtocolNameAnEmptyValueIs;
         }
 
         // RFC 8441 §4 — the :protocol pseudo-header is only defined on a
         // CONNECT request; on any other method the request is malformed.
         if (!string.Equals(method, HttpMethod.Connect.Value, StringComparison.Ordinal))
         {
-            return "The ':protocol' pseudo-header is only valid on a CONNECT request (RFC 8441 §4).";
+            return ErrorMessages.ProtocolPseudoHeaderIsOnlyValidOnAConnectRequestRfc8441;
         }
 
         // RFC 8441 §4 — unlike a classic CONNECT, an extended CONNECT carries a
         // normal request shape and MUST include :scheme, :path, and :authority.
         if (string.IsNullOrEmpty(scheme))
         {
-            return "An extended CONNECT request MUST include the ':scheme' pseudo-header (RFC 8441 §4).";
+            return ErrorMessages.ExtendedConnectRequestMustIncludeTheSchemePseudoHeaderRfc84414;
         }
 
         if (string.IsNullOrEmpty(path))
         {
-            return "An extended CONNECT request MUST include the ':path' pseudo-header (RFC 8441 §4).";
+            return ErrorMessages.ExtendedConnectRequestMustIncludeThePathPseudoHeaderRfc84414;
         }
 
         if (string.IsNullOrEmpty(authority))
         {
-            return "An extended CONNECT request MUST include the ':authority' pseudo-header (RFC 8441 §4).";
+            return ErrorMessages.ExtendedConnectRequestMustIncludeTheAuthorityPseudoHeaderRfc84414;
         }
 
         return null;
@@ -398,12 +399,12 @@ public static class HttpFieldNormalization
         {
             if (!IsValidFieldName(method))
             {
-                return "The ':method' pseudo-header is not a method token (RFC 9110 §9.1, RFC 9113 §8.3.1, RFC 9114 §4.3.1).";
+                return ErrorMessages.MethodPseudoHeaderIsNotAMethodTokenRfc911091;
             }
 
             if (method.Length > HttpMethod.MaximumLength)
             {
-                return $"The ':method' pseudo-header is longer than the {HttpMethod.MaximumLength} characters of any method this server implements (RFC 9112 §3).";
+                return string.Format(CultureInfo.CurrentCulture, ErrorMessages.MethodPseudoHeaderIsLongerThanTheCharactersOfAnyMethodThis, HttpMethod.MaximumLength);
             }
         }
 
@@ -413,7 +414,7 @@ public static class HttpFieldNormalization
         // front end routing on the raw octets sees as another. Neither value is echoed.
         if (authority is not null && !IsVisibleAscii(authority))
         {
-            return "The ':authority' pseudo-header holds only visible US-ASCII characters (RFC 3986 §3.2, RFC 9113 §8.3.1).";
+            return ErrorMessages.AuthorityPseudoHeaderHoldsOnlyVisibleUsAsciiCharactersRfc39863;
         }
 
         if (headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue host))
@@ -422,7 +423,7 @@ public static class HttpFieldNormalization
             {
                 if (entry is not null && !IsVisibleAscii(entry))
                 {
-                    return "The 'host' field holds only visible US-ASCII characters (RFC 9110 §7.2, RFC 9112 §3.2).";
+                    return ErrorMessages.HostFieldHoldsOnlyVisibleUsAsciiCharactersRfc911072;
                 }
             }
         }
@@ -438,7 +439,7 @@ public static class HttpFieldNormalization
         // split the path from a query that was never sent.
         if (path is not null && !IsVisibleAscii(path))
         {
-            return "A ':path' holds only visible US-ASCII characters (RFC 3986 §2, RFC 9113 §8.3.1); an octet outside them is not part of a request target.";
+            return ErrorMessages.PathHoldsOnlyVisibleUsAsciiCharactersRfc39862Rfc9113;
         }
 
         // RFC 9112 §3.2.4 — asterisk-form is exactly '*', and RFC 9110 §7.1 reserves it for OPTIONS.
@@ -447,12 +448,12 @@ public static class HttpFieldNormalization
         {
             if (path.Length > 1)
             {
-                return "A ':path' that starts with '*' is not a request target; asterisk-form is the single character '*' (RFC 9112 §3.2.4, RFC 9113 §8.3.1).";
+                return ErrorMessages.PathThatStartsWithIsNotARequestTargetAsteriskFormIs;
             }
 
             if (!string.Equals(method, HttpMethod.Options.Value, StringComparison.Ordinal))
             {
-                return "The asterisk-form ':path' '*' is valid only for an OPTIONS request (RFC 9110 §7.1, RFC 9113 §8.3.1, RFC 9114 §4.3.1).";
+                return ErrorMessages.AsteriskFormPathIsValidOnlyForAnOptionsRequestRfc9110;
             }
         }
 
@@ -465,17 +466,17 @@ public static class HttpFieldNormalization
         // else: the :scheme and :path pseudo-header fields MUST be omitted.
         if (scheme is not null)
         {
-            return "A CONNECT request MUST NOT include the ':scheme' pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).";
+            return ErrorMessages.ConnectRequestMustNotIncludeTheSchemePseudoHeaderRfc91138;
         }
 
         if (path is not null)
         {
-            return "A CONNECT request MUST NOT include the ':path' pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).";
+            return ErrorMessages.ConnectRequestMustNotIncludeThePathPseudoHeaderRfc91138;
         }
 
         if (string.IsNullOrEmpty(authority))
         {
-            return "A CONNECT request MUST include the ':authority' pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).";
+            return ErrorMessages.ConnectRequestMustIncludeTheAuthorityPseudoHeaderRfc911385;
         }
 
         // RFC 9113 §8.5 — :authority is the authority-form of HTTP/1.1's CONNECT target (RFC 9112 §3.2.3).
@@ -483,7 +484,7 @@ public static class HttpFieldNormalization
         // the rule and never the peer's text, as every other violation here does.
         if (!HttpRequestTarget.TryParse(authority, HttpMethod.Connect, out _, out _))
         {
-            return "The ':authority' of a CONNECT request MUST be the host and port to connect to, host:port (RFC 9113 §8.5, RFC 9114 §4.4).";
+            return ErrorMessages.AuthorityOfAConnectRequestMustBeTheHostAndPortTo;
         }
 
         return null;
