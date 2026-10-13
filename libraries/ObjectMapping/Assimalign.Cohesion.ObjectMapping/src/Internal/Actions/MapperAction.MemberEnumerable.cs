@@ -51,7 +51,7 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
         }
         if (member.Member.DeclaringType != typeof(TTarget))
         {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MapperExceptionInvalidChaining, target, typeof(TTarget).Name));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TargetMappingChainInvalid, target, typeof(TTarget).Name));
         }
 
         _sourceGetter = source.Compile();

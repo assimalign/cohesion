@@ -117,7 +117,7 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="MapperExceptionInvalidChaining" xml:space="preserve">
+  <data name="TargetMappingChainInvalid" xml:space="preserve">
     <value>Chained mapping is not allowed for target. The target member expression: '{0}' Target values must be of the parent type: '{1}'.</value>
   </data>
 </root>
