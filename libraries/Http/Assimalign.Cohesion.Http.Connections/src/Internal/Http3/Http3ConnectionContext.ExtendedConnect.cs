@@ -52,6 +52,9 @@ internal sealed partial class Http3ConnectionContext
             return;
         }
 
+        // The handler completed successfully. Refusing unread input can close the stream
+        // synchronously, before the tunnel sends its FIN, so stop observing first.
+        context.StopObservingStreamClosure();
         requestBody.RefuseRemainder();
         await tunnel.CloseAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
         StopReadingRequestStream(requestBody, context.StreamId);

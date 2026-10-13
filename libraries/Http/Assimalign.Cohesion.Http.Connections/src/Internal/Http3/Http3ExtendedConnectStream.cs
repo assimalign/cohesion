@@ -110,6 +110,9 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
                 return;
             }
 
+            // CloseAsync has ended application I/O, and the write lock lets the last frame finish.
+            // Both FINs can signal ConnectionClosed: detach before our successful terminal FIN.
+            _context.StopObservingStreamClosure();
             _writeCompleted = true;
 
             // RFC 9114 §4.1 — the server's side of the stream ends with its FIN; completing the outbound

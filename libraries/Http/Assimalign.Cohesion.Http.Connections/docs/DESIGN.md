@@ -55,6 +55,15 @@ STOP_SENDING may signal the stream token synchronously; it must follow that deta
 Successful buffered and streamed responses therefore retain an uncancelled request
 token, and locally abandoned body reads retain their `IOException` contract.
 
+Extended CONNECT tunnels detach at the same terminal boundary: an application close
+first ends tunnel I/O and waits for its serialized writer, then detaches before the FIN.
+Server finalization detaches before refusing unread input, whether or not the application
+already closed the tunnel. A client FIN alone does not detach observation; active tunnel
+reads and writes still observe peer resets, STOP_SENDING and connection loss. Both a clean
+EOF followed by application close and a tunnel finalized by the server therefore keep
+`RequestCancelled` unset, so Web completion callbacks remain eligible to run. This corrects
+an unreleased #1459 regression; it adds no signature or wire-format break against preview.1.
+
 The hierarchy and its transport projections are:
 
 ```mermaid

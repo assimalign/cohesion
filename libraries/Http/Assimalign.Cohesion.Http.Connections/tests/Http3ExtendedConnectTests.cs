@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -154,6 +155,44 @@ public class Http3ExtendedConnectTests
         // Assert — the tunnel's own octets and nothing of the buffered response; the tunnel is closed.
         output.Frames.Select(frame => frame.FrameType).ShouldBe(new[] { (long)Http3FrameType.Headers, (long)Http3FrameType.Data });
         output.DataPayload().ShouldBe(Encoding.ASCII.GetBytes("open"));
+        tunnel.CanWrite.ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 ExtendedConnect: Graceful application close or server finalization should leave the exchange uncancelled")]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task SendAsync_OnGracefulTunnelCompletion_ShouldLeaveRequestUncancelled(bool applicationCloses, bool clientFin)
+    {
+        // Arrange — cover both a consumed clean EOF and a peer still sending when the handler ends.
+        using CancellationTokenSource timeout = new(_timeout);
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
+        (IDuplexConnection request, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
+        await using IHttpContext ownedContext = context;
+        await using Stream ownedTunnel = tunnel;
+        if (clientFin)
+        {
+            await request.Output.CompleteAsync();
+            (await tunnel.ReadAsync(new byte[1], timeout.Token)).ShouldBe(0);
+        }
+        await tunnel.WriteAsync("done"u8.ToArray(), timeout.Token);
+        context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
+
+        // Act — an application close owns its FIN; otherwise SendAsync must finalize the tunnel.
+        if (applicationCloses)
+        {
+            await tunnel.DisposeAsync().AsTask().WaitAsync(timeout.Token);
+            context.RequestCancelled.IsCancellationRequested.ShouldBeFalse("the application's graceful FIN must not cancel the exchange");
+        }
+        await peer.ConnectionContext.SendAsync(context, timeout.Token);
+        await output.ReadUntilAsync(collector => collector.IsCompleted, "the successful tunnel's FIN");
+
+        // Assert — the lifecycle may be closed, but Web.Hosting must still run completion callbacks.
+        context.RequestCancelled.IsCancellationRequested.ShouldBeFalse("successful tunnel finalization must not look like client cancellation");
+        output.Failure.ShouldBeNull();
+        output.Frames.Count(frame => frame.FrameType == (long)Http3FrameType.Headers).ShouldBe(1);
+        output.DataPayload().ShouldBe("done"u8.ToArray());
         tunnel.CanWrite.ShouldBeFalse();
     }
 
