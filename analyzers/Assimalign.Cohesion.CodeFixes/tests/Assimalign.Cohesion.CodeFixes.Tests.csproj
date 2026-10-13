@@ -1,14 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.SourceGeneration.DatabaseTests</RootNamespace>
-		<!-- Override the analyzers-area netstandard2.0 default: a test host must be executable. -->
-		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
-		<IsRoslynComponent>false</IsRoslynComponent>
-		<EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
-		<IncludeBuildOutput>true</IncludeBuildOutput>
-		<IsPackable>false</IsPackable>
-		<EnablePreviewFeatures>true</EnablePreviewFeatures>
-		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+		<RootNamespace>Assimalign.Cohesion.CodeFixes.Tests</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
@@ -19,5 +11,8 @@
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp"  />
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.Analyzers" />
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp.SourceGenerators.Testing"  />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.CodeFixes" />
 	</ItemGroup>
 </Project>

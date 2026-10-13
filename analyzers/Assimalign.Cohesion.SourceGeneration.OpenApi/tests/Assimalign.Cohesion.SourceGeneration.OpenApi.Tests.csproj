@@ -1,14 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.SourceGeneration.OpenApi.Tests</RootNamespace>
-		<!-- Override the analyzers-area netstandard2.0 default: a test host must be executable. -->
-		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
-		<IsRoslynComponent>false</IsRoslynComponent>
-		<EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
-		<IncludeBuildOutput>true</IncludeBuildOutput>
-		<IsPackable>false</IsPackable>
-		<EnablePreviewFeatures>true</EnablePreviewFeatures>
-		<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

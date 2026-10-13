@@ -462,4 +462,16 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Runtime/src/">
 		<Project Path="Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj" />
 	</Folder>
+	<Folder Name="/Web/analyzers/Assimalign.Cohesion.CodeFixes.Web/src/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.CodeFixes.Web/src/Assimalign.Cohesion.CodeFixes.Web.csproj" />
+	</Folder>
+	<Folder Name="/Web/analyzers/Assimalign.Cohesion.CodeFixes.Web/tests/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.CodeFixes.Web/tests/Assimalign.Cohesion.CodeFixes.Web.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Web/analyzers/Assimalign.Cohesion.SourceGeneration.Web/src/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.Web/src/Assimalign.Cohesion.SourceGeneration.Web.csproj" />
+	</Folder>
+	<Folder Name="/Web/analyzers/Assimalign.Cohesion.SourceGeneration.Web/tests/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.Web/tests/Assimalign.Cohesion.SourceGeneration.Web.Tests.csproj" />
+	</Folder>
 </Solution>

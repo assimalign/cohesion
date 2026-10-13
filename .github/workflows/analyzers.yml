@@ -53,7 +53,7 @@ jobs:
         run: dotnet build "./analyzers/${{ matrix.projects }}/src/${{ matrix.projects }}.csproj" --configuration Release
 
       - name: "Test: ${{ matrix.projects }}"
-        run: dotnet test "./analyzers/${{ matrix.projects }}/tests/" --configuration Release
+        run: dotnet test "./analyzers/${{ matrix.projects }}/tests/${{ matrix.projects }}.Tests.csproj" --configuration Release
 
   integration-check:
     name: "IntegrationCheck [ubuntu-latest]"

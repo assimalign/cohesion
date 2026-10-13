@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-<PropertyGroup>
-	<RootNamespace>Assimalign.Cohesion.CodeFixes.DatabaseTests</RootNamespace>
-		<IsPackable>false</IsPackable>
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.CodeFixes.Database.Tests</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
@@ -9,9 +8,9 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
-        <CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp.SourceGenerators.Testing"  />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp.SourceGenerators.Testing"  />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.CodeFixes.Database" />
+		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.CodeFixes.Database" />
 	</ItemGroup>
 </Project>
