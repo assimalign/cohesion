@@ -14,6 +14,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 // rate is measured over.
 internal sealed partial class Http2ConnectionContext
 {
+    private static readonly string _peerClosedDuringResponseMessage = ErrorMessages.PeerClosedTheHttp2ConnectionDuringTheResponse;
+    private static readonly string _peerStoppedReadingMessage = ErrorMessages.PeerStoppedReadingTheConnectionBelowTheConfiguredMinimumResponseDataRate;
+    private static readonly string _outputStalledMessage = ErrorMessages.Http2ConnectionSOutputStoppedDrainingBelowTheConfiguredMinimumResponseData;
+
     // #1384 — the allowance of the connection's output: the listener's MinResponseDataRate measured over
     // every octet any writer hands to the output and every wait any writer spends on it. Null when the
     // listener holds responses to no rate. Only the holder of the write gate touches it.
@@ -197,7 +201,7 @@ internal sealed partial class Http2ConnectionContext
             AbortResponsesOnPeerConnectionLoss();
             if (response is not null)
             {
-                throw new OperationCanceledException(ErrorMessages.PeerClosedTheHttp2ConnectionDuringTheResponse, exception, response.RequestCancelled);
+                throw new OperationCanceledException(_peerClosedDuringResponseMessage, exception, response.RequestCancelled);
             }
             throw;
         }
@@ -243,7 +247,7 @@ internal sealed partial class Http2ConnectionContext
         }
         response?.LatchResponseAbortedByClient();
         LatchResponsesAbortedByClient();
-        Connection.Abort(new IOException(ErrorMessages.PeerStoppedReadingTheConnectionBelowTheConfiguredMinimumResponseDataRate));
+        Connection.Abort(new IOException(_peerStoppedReadingMessage));
         StopPumpOnStall();
         return CreateOutputStalledException(response);
     }
@@ -251,7 +255,7 @@ internal sealed partial class Http2ConnectionContext
     private static Exception CreateOutputStalledException(Http2Context? response)
     {
         return response is null
-            ? new IOException(ErrorMessages.Http2ConnectionSOutputStoppedDrainingBelowTheConfiguredMinimumResponseData)
+            ? new IOException(_outputStalledMessage)
             : response.AbortSlowResponse();
     }
 }

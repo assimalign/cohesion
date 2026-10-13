@@ -6109,6 +6109,10 @@ HTTP/3 application cancellation and shutdown rejection likewise cache the reason
 `CancelRequestStream` and `RejectUndispatchedAsync` (also reused when request-head reading stops).
 HTTP/2 caches the format strings passed to `CutOffBody` by `ReceiveReset`, `SendReset`,
 `AbortOnShutdown` and `AbortOnCancellation`; the stream identifier is still formatted at use.
+Extended CONNECT caches the messages for pending operations interrupted by tunnel close or abort.
+The transport context caches peer-abandoned request/response and slow-response cancellation messages.
+HTTP/2 output caches its peer-closed connection and stalled-output abort messages. Each cache belongs
+to the type constructing the exception.
 These lifecycle paths can run without a protocol defect, so they do not perform resource lookups
 for each completion or cancellation. HTTP/1.1 also caches the request-line/header subjects passed
 to its normal reader path. Listener capability validation caches its protocol descriptions.

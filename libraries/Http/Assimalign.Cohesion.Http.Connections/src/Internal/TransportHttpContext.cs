@@ -19,6 +19,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal abstract class TransportHttpContext : HttpContext
 {
+    private static readonly string _clientStoppedAcceptingResponseMessage = ErrorMessages.ClientStoppedAcceptingTheResponse;
+    private static readonly string _responseDataRateMessage = ErrorMessages.PeerDidNotAcceptTheResponseAtTheConfiguredMinimumDataRate;
+    private static readonly string _clientAbandonedRequestMessage = ErrorMessages.ClientAbandonedTheRequestBeforeItsBodyWasReadToTheEnd;
+
     // Backs RequestAborted. Linked to the transport-supplied token(s) so the
     // exchange is aborted when the connection/stream is torn down, and can also
     // be tripped locally by Cancel().
@@ -56,7 +60,7 @@ internal abstract class TransportHttpContext : HttpContext
     {
         LatchResponseAbortedByClient();
         return new OperationCanceledException(
-            ErrorMessages.ClientStoppedAcceptingTheResponse, reason, TripRequestCancelled());
+            _clientStoppedAcceptingResponseMessage, reason, TripRequestCancelled());
     }
 
     /// <summary>
@@ -260,7 +264,7 @@ internal abstract class TransportHttpContext : HttpContext
     {
         LatchResponseAbortedByClient();
         return new OperationCanceledException(
-            ErrorMessages.PeerDidNotAcceptTheResponseAtTheConfiguredMinimumDataRate,
+            _responseDataRateMessage,
             TripRequestCancelled());
     }
 
@@ -280,7 +284,7 @@ internal abstract class TransportHttpContext : HttpContext
     internal OperationCanceledException AbortRequestForPeer(Exception reason)
     {
         return new OperationCanceledException(
-            ErrorMessages.ClientAbandonedTheRequestBeforeItsBodyWasReadToTheEnd,
+            _clientAbandonedRequestMessage,
             reason,
             TripRequestCancelled());
     }

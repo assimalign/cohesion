@@ -30,6 +30,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal abstract class HttpExtendedConnectStream : Stream
 {
+    private static readonly string _tunnelClosedMessage = ErrorMessages.ExtendedConnectTunnelWasClosedWhileTheOperationWasPending;
+    private static readonly string _tunnelAbortedMessage = ErrorMessages.ExtendedConnectTunnelWasAbortedItsStreamWasResetItsConnectionClosed;
+
     // Cancelled when the stream closes, so a read or write still waiting — for the peer's DATA, for
     // flow-control credit, for the write gate — ends instead of outliving the stream.
     private readonly CancellationTokenSource _closing = new();
@@ -315,13 +318,13 @@ internal abstract class HttpExtendedConnectStream : Stream
         {
             return new ObjectDisposedException(
                 GetType().FullName,
-                ErrorMessages.ExtendedConnectTunnelWasClosedWhileTheOperationWasPending);
+                _tunnelClosedMessage);
         }
 
         // The transport cancelled the operation because the exchange ended underneath it: the peer reset
         // the stream, the connection closed, or the exchange was cancelled.
         return new IOException(
-            ErrorMessages.ExtendedConnectTunnelWasAbortedItsStreamWasResetItsConnectionClosed,
+            _tunnelAbortedMessage,
             exception);
     }
 }
