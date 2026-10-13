@@ -302,6 +302,32 @@ namespace Assimalign.Cohesion.Database;
 4. **Nested types:** match outer type visibility unless explicitly different.
 5. **Before introducing a new abstraction, check whether one already exists** in the same service root or shared library. Placeholder folders and placeholder projects are not final architecture boundaries — add projects when needed to preserve modularity and clean dependency flow.
 
+### Creation-only facades become public implementations
+
+A static utility class must not exist only to construct a hidden implementation. Make that
+implementation `public sealed`, keep its constructor private (internal only when its own assembly
+constructs it elsewhere), and move the creation methods onto it. Keep their parameters and
+validation, return the concrete type, and delete the static class. Interfaces remain the contracts
+consumers can depend on; this is the approved exception to the default internal implementation rule
+(owner decision 59, #1464 and #1465).
+
+The implementation takes the static class's name when that name describes the object returned
+(`AuthenticationService`, `ResourceControlPlane`, `DataProtectionProvider`). Otherwise keep its
+descriptive name (`HttpProtocolUpgradeInterceptor`, `CookieAuthenticationHandler`) and use `Create`.
+When a facade creates different implementations, each implementation owns its creation method.
+Use `git mv` when promoting or renaming the implementation, and document every public member,
+including inherited contracts and their argument validation.
+
+A facade or builder DSL that composes operations is not this pattern: `RoutePatternFactory`,
+`ResourceControlPlaneMiddleware`, `ResourceRuntime` and `ResourceTelemetry` stay as they are.
+Component-integration factories whose required value arguments cannot be expressed by a builder
+remain governed by [component-integration.md](component-integration.md).
+
+Database adoption is tracked by [#1470](https://github.com/assimalign/cohesion/issues/1470).
+No `resources/Database/` file changes during the owner's active Database PR. The Web.Health
+`HealthChecks.CreateBuilder()` conversion is deferred because Database.Hosting calls it;
+`ResourceControlPlane.Create` and `JsonWebTokenWriter.CreateEs256` keep their existing spelling.
+
 ### `InternalsVisibleTo` is for tests
 
 A shipped library grants `InternalsVisibleTo` only to its own **test** assembly. Do not add a
