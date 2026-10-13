@@ -17,11 +17,12 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections.Quic.Internal;
+using Assimalign.Cohesion.Connections.Quic.Tests.TestObjects;
 using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Connections.Quic.Tests;
 
-// The lifecycle test gates on QuicListener.IsSupported and no-ops where the platform lacks a QUIC
+// Lifecycle tests report a discovery-time skip where the platform lacks a QUIC
 // implementation, like the rest of this suite; the name and manifest tests need no QUIC support.
 [Collection(nameof(EventSourceCollection))]
 [SupportedOSPlatform("windows")]
@@ -55,14 +56,9 @@ public class QuicConnectionEventSourceTests
         manifest.ShouldContain("Assimalign.Cohesion.Connections.Quic", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - QuicConnectionEventSource: Should report each listener, connection, and stream transition once and restore the gauges")]
+    [QuicFact(DisplayName = "Cohesion Test [Connections.Quic] - QuicConnectionEventSource: Should report each listener, connection, and stream transition once and restore the gauges")]
     public async Task ConnectionLifecycle_LoopbackPairWithStream_ShouldReportEachTransitionOnceAndRestoreGauges()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
@@ -128,14 +124,9 @@ public class QuicConnectionEventSourceTests
         events.Where(e => e.EventName == "ListenerClosed").ShouldHaveSingleItem().Payload![0].ShouldBe(listenerId);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - QuicConnectionEventSource: Should report a handshake the listener dropped once")]
+    [QuicFact(DisplayName = "Cohesion Test [Connections.Quic] - QuicConnectionEventSource: Should report a handshake the listener dropped once")]
     public async Task HandshakeFailed_OnClientRefusedByCertificatePolicy_ShouldReportOnce()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange — the listener requires a client certificate the first client does not have.
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();

@@ -16,11 +16,12 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections.Quic.Internal;
+using Assimalign.Cohesion.Connections.Quic.Tests.TestObjects;
 using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Connections.Quic.Tests;
 
-// Every test gates on QuicListener.IsSupported and no-ops where the platform lacks a QUIC
+// Real-QUIC tests report a discovery-time skip where the platform lacks a QUIC
 // implementation (for example, a missing libmsquic); xunit 2.x has no runtime skip.
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
@@ -29,14 +30,9 @@ public class QuicConnectionListenerTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
-    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Construction should remain unbound until explicit bind")]
+    [QuicFact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Construction should remain unbound until explicit bind")]
     public async Task BindAsync_OnUnboundListener_ShouldBindConcreteEndPoint()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
@@ -55,14 +51,9 @@ public class QuicConnectionListenerTests
         listener.EndPoint.ShouldBe(firstBoundEndPoint);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Dispose should release a fixed endpoint for a new listener")]
+    [QuicFact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Dispose should release a fixed endpoint for a new listener")]
     public async Task BindAsync_AfterDisposedListenerOnSameEndPoint_ShouldSucceed()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
@@ -83,11 +74,6 @@ public class QuicConnectionListenerTests
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Disposed listener should reject bind and accept")]
     public async Task BindAsync_AfterDispose_ShouldThrowObjectDisposedException()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         using X509Certificate2 certificate = QuicTestCertificate.Create();
         QuicConnectionListener listener = new(CreateOptions(certificate, new IPEndPoint(IPAddress.Loopback, 0)));
@@ -98,14 +84,9 @@ public class QuicConnectionListenerTests
         await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.AcceptAsync());
     }
 
-    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - AcceptAsync: A client the certificate policy refuses should not end the accept")]
+    [QuicFact(DisplayName = "Cohesion Test [Connections.Quic] - AcceptAsync: A client the certificate policy refuses should not end the accept")]
     public async Task AcceptAsync_AfterRefusingAClientWithoutACertificate_ShouldAcceptTheNextClient()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange — the listener requires a client certificate, so a client without one fails its handshake,
         // which System.Net.Quic reports from the next accept while it keeps listening (#1304).
         using CancellationTokenSource cancellation = new(_testTimeout);
@@ -132,14 +113,9 @@ public class QuicConnectionListenerTests
         server.Tls.ShouldNotBeNull().RemoteCertificate!.Thumbprint.ShouldBe(clientCertificate.Thumbprint);
     }
 
-    [Fact]
+    [QuicFact]
     public async Task CreateAsync_WithEphemeralEndPoint_ShouldBindConcreteEndPoint()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
@@ -163,14 +139,9 @@ public class QuicConnectionListenerTests
         boundEndPoint.Port.ShouldNotBe(0);
     }
 
-    [Fact]
+    [QuicFact]
     public async Task CreateAsync_WithoutServerCertificate_ShouldThrowInvalidOperationException()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         // The default options carry an ALPN list but no server certificate.
         QuicConnectionListenerOptions options = new()
@@ -183,14 +154,9 @@ public class QuicConnectionListenerTests
             async () => await QuicConnectionListener.CreateAsync(options));
     }
 
-    [Fact]
+    [QuicFact]
     public async Task CreateAsync_WithEmptyApplicationProtocols_ShouldThrowInvalidOperationException()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
@@ -210,24 +176,14 @@ public class QuicConnectionListenerTests
     [Fact]
     public async Task CreateAsync_WithNullOptions_ShouldThrowArgumentNullException()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange / Act / Assert
         await Should.ThrowAsync<ArgumentNullException>(
             async () => await QuicConnectionListener.CreateAsync((QuicConnectionListenerOptions)null!));
     }
 
-    [Fact]
+    [QuicFact]
     public async Task Capabilities_OnCreatedListener_ShouldDescribeMultiplexedTlsQuicStream()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();

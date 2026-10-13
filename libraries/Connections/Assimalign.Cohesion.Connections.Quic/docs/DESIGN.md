@@ -418,6 +418,15 @@ NativeAOT compatible. Platform support follows `System.Net.Quic`
 (`windows` / `linux` / `macos`, gated by `QuicListener.IsSupported` at
 runtime).
 
+## Platform-dependent tests (#1460)
+
+Real-QUIC tests use `QuicFact` or `QuicTheory` to report a discovery-time skip when
+`QuicListener.IsSupported` is false, including a missing native msquic provider.
+On supported platforms the same cases execute all their behavior assertions.
+The skip path can be checked with `DOTNET_SYSTEM_NET_DISABLEIPV6=1` for the test process:
+.NET requires IPv6 support for QUIC and returns false before loading msquic.
+This changes test infrastructure only, with no behavior change from 10.0.0-preview.1.
+
 ## Breaking changes
 
 These are behavior breaks against 10.0.0-preview.1, which shipped this
