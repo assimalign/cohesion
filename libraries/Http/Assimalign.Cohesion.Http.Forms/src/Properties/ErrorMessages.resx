@@ -120,7 +120,7 @@
   <data name="BoundaryBufferTooSmall" xml:space="preserve">
     <value>Buffer must be at least {0} bytes to accommodate the boundary.</value>
   </data>
-  <data name="BufferTooSmallForRequestedOffsetCount" xml:space="preserve">
+  <data name="RequestedBufferRangeTooLarge" xml:space="preserve">
     <value>Buffer too small for requested offset + count.</value>
   </data>
   <data name="LineTerminatorMissing" xml:space="preserve">

@@ -301,7 +301,7 @@ internal sealed class BufferedReadStream : Stream
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         if (buffer.Length - offset < count)
         {
-            throw new ArgumentException(ErrorMessages.BufferTooSmallForRequestedOffsetCount);
+            throw new ArgumentException(ErrorMessages.RequestedBufferRangeTooLarge);
         }
         Debug.Assert(buffer.Length - offset >= count);
     }

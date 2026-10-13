@@ -89,7 +89,7 @@ internal ref struct StructuredFieldParser
         SkipSp();
         if (!Eof)
         {
-            return Fail(ErrorMessages.UnexpectedTrailingCharactersAfterItem);
+            return Fail(ErrorMessages.ItemTrailingCharacters);
         }
         result = item;
         return true;
@@ -106,7 +106,7 @@ internal ref struct StructuredFieldParser
         SkipSp();
         if (!Eof)
         {
-            return Fail(ErrorMessages.UnexpectedTrailingCharactersAfterList);
+            return Fail(ErrorMessages.ListTrailingCharacters);
         }
         result = StructuredFieldList.CreateRaw(members);
         return true;

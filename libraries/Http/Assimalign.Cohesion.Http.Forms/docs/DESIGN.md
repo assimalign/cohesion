@@ -313,7 +313,9 @@ Transport integration tests consume duplex byte pipes through `IDuplexConnection
 ## Exception message resources (#1467)
 
 Resource keys name the failure with a short PascalCase noun phrase, at most 40 characters
-(#1471). These internal names are independent of the preserved message text and placeholders.
+(#1471). The rule also applies to names below that limit: never copy or truncate the message.
+These internal names are independent of the preserved message text and placeholders.
+`RequestedBufferRangeTooLarge` names the offset/count validation failure in `BufferedReadStream`.
 
 Exception diagnostics live in `src/Properties/ErrorMessages.resx`. The shared build targets
 use MSBuild strongly typed resource generation to produce an internal `ErrorMessages` class

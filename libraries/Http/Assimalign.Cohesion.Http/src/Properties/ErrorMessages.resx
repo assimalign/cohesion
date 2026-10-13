@@ -453,10 +453,10 @@
   <data name="DictionaryTrailingCharacters" xml:space="preserve">
     <value>Unexpected trailing characters after dictionary.</value>
   </data>
-  <data name="UnexpectedTrailingCharactersAfterItem" xml:space="preserve">
+  <data name="ItemTrailingCharacters" xml:space="preserve">
     <value>Unexpected trailing characters after item.</value>
   </data>
-  <data name="UnexpectedTrailingCharactersAfterList" xml:space="preserve">
+  <data name="ListTrailingCharacters" xml:space="preserve">
     <value>Unexpected trailing characters after list.</value>
   </data>
   <data name="UnknownStructuredFieldBareItemType" xml:space="preserve">
