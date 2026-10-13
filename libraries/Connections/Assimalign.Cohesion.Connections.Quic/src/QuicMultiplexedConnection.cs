@@ -183,7 +183,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         {
             ConnectionDirection.Bidirectional => QuicStreamType.Bidirectional,
             ConnectionDirection.WriteOnly => QuicStreamType.Unidirectional,
-            _ => throw new ArgumentException(ErrorMessages.ReadOnlyStreamCannotBeOpened, nameof(direction))
+            _ => throw new ArgumentException(ErrorMessages.ReadOnlyStreamNotSupported, nameof(direction))
         };
 
         QuicStream stream = await _connection.OpenOutboundStreamAsync(streamType, cancellationToken).ConfigureAwait(false);

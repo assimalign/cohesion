@@ -135,19 +135,19 @@
   <data name="MultiplexedListenerDisposed" xml:space="preserve">
     <value>The in-memory multiplexed listener has been disposed.</value>
   </data>
-  <data name="MultiplexedListenerNoLongerAcceptingConnections" xml:space="preserve">
+  <data name="MultiplexedListenerNotAccepting" xml:space="preserve">
     <value>The in-memory multiplexed listener has been disposed and is no longer accepting connections.</value>
   </data>
-  <data name="PeerResetStream" xml:space="preserve">
+  <data name="StreamResetByPeer" xml:space="preserve">
     <value>The peer reset the stream with application error code 0x{0:x}.</value>
   </data>
-  <data name="PeerStoppedReadingStream" xml:space="preserve">
+  <data name="PeerReadingStopped" xml:space="preserve">
     <value>The peer stopped reading the stream with application error code 0x{0:x}.</value>
   </data>
-  <data name="ReadOnlyConnectionCannotWrite" xml:space="preserve">
+  <data name="ConnectionReadOnly" xml:space="preserve">
     <value>Cannot write to the output of a read-only connection.</value>
   </data>
-  <data name="ReadOnlyStreamCannotBeOpened" xml:space="preserve">
+  <data name="ReadOnlyStreamNotSupported" xml:space="preserve">
     <value>A peer cannot open a read-only stream; only the remote side would be able to write to it.</value>
   </data>
   <data name="StreamReadingAborted" xml:space="preserve">

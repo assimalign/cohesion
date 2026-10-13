@@ -97,7 +97,7 @@ complete cache inventory for these paths.
 | Connections.InMemory / `InMemoryConnectionListener.AcceptCoreAsync` during disposal | `_listenerDisposedMessage`: `ListenerDisposed` |
 | Connections.InMemory / `InMemoryMultiplexedConnectionListener` accept during disposal | `_listenerDisposedMessage`: `MultiplexedListenerDisposed` |
 | Connections.InMemory / `InMemoryMultiplexedConnection.AcceptStreamAsync` and `Close`, including disposal | `_connectionClosedMessage`: `MultiplexedConnectionClosed`; `_connectionClosedWithErrorCodeMessage`: `MultiplexedConnectionClosedWithErrorCode` |
-| Connections.InMemory / `InMemoryConnection.AbortInput`, `AbortOutput`, and `ReadAborted` | `_peerStoppedReadingStreamMessage`: `PeerStoppedReadingStream`; `_peerResetStreamMessage`: `PeerResetStream`; `_streamReadingAbortedMessage`: `StreamReadingAborted` |
+| Connections.InMemory / `InMemoryConnection.AbortInput`, `AbortOutput`, and `ReadAborted` | `_peerReadingStoppedMessage`: `PeerReadingStopped`; `_streamResetByPeerMessage`: `StreamResetByPeer`; `_streamReadingAbortedMessage`: `StreamReadingAborted` |
 | Connections.NamedPipes / `NamedPipeConnectionListener` accept during disposal | `_listenerDisposedMessage`: `ListenerDisposed` |
 | Connections.Quic / `QuicStreamConnection.ReadAborted` | `_streamReadingAbortedMessage`: `StreamReadingAborted` |
 | Http.Connections / `Http2Stream.ReceiveReset`, `SendReset`, `AbortOnShutdown`, and `AbortOnCancellation` | `_exchangeAbandonedBeforeBodyEndedFormat`: `Http2ExchangeOnStreamWasAbandonedBeforeItsRequestBodyEnded`; `_connectionClosedBeforeBodyEndedFormat`: `Http2ConnectionClosedBeforeTheRequestBodyOnStreamEnded`; `_requestBodyResetFormat`: `Http2StreamWasResetBeforeItsRequestBodyEnded` |

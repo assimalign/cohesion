@@ -133,6 +133,6 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
         _ = client.DisposeAsync();
         _ = server.DisposeAsync();
 
-        throw new ConnectionAbortedException(ErrorMessages.MultiplexedListenerNoLongerAcceptingConnections);
+        throw new ConnectionAbortedException(ErrorMessages.MultiplexedListenerNotAccepting);
     }
 }

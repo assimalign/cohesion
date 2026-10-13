@@ -50,8 +50,8 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 internal sealed class InMemoryConnection : DuplexConnection
 {
     // Teardown and cancellation can be normal paths; resolve resource text once.
-    private static readonly string _peerStoppedReadingStreamMessage = ErrorMessages.PeerStoppedReadingStream;
-    private static readonly string _peerResetStreamMessage = ErrorMessages.PeerResetStream;
+    private static readonly string _peerReadingStoppedMessage = ErrorMessages.PeerReadingStopped;
+    private static readonly string _streamResetByPeerMessage = ErrorMessages.StreamResetByPeer;
     private static readonly string _streamReadingAbortedMessage = ErrorMessages.StreamReadingAborted;
 
     // RFC 9000 §16 — the codes the QUIC driver accepts, so a test over this driver fails where QUIC would.
@@ -406,7 +406,7 @@ internal sealed class InMemoryConnection : DuplexConnection
         try
         {
             _input.Complete(new ConnectionResetException(
-                string.Format(CultureInfo.CurrentCulture, _peerStoppedReadingStreamMessage, errorCode),
+                string.Format(CultureInfo.CurrentCulture, _peerReadingStoppedMessage, errorCode),
                 errorCode));
         }
         catch (InvalidOperationException)
@@ -439,7 +439,7 @@ internal sealed class InMemoryConnection : DuplexConnection
         try
         {
             _outputInner.Complete(new ConnectionResetException(
-                string.Format(CultureInfo.CurrentCulture, _peerResetStreamMessage, errorCode),
+                string.Format(CultureInfo.CurrentCulture, _streamResetByPeerMessage, errorCode),
                 errorCode));
         }
         catch (InvalidOperationException)
@@ -931,7 +931,7 @@ internal sealed class InMemoryConnection : DuplexConnection
         public static ThrowingPipeWriter Instance { get; } = new();
 
         private static InvalidOperationException Fail()
-            => new(ErrorMessages.ReadOnlyConnectionCannotWrite);
+            => new(ErrorMessages.ConnectionReadOnly);
 
         public override void Advance(int bytes) => throw Fail();
 

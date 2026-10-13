@@ -129,7 +129,7 @@
   <data name="QuicUnsupported" xml:space="preserve">
     <value>QUIC is not supported on the current platform.</value>
   </data>
-  <data name="ReadOnlyStreamCannotBeOpened" xml:space="preserve">
+  <data name="ReadOnlyStreamNotSupported" xml:space="preserve">
     <value>A peer cannot open a stream that only the remote side writes to.</value>
   </data>
   <data name="ServerCertificateRequired" xml:space="preserve">

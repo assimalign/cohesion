@@ -245,6 +245,9 @@ remains a half-close and leaves both lifecycle tokens unsignaled.
 
 ## Exception message resources (#1467)
 
+Resource keys name the failure with a short PascalCase noun phrase, at most 40 characters
+(#1471). These internal names are independent of the preserved message text and placeholders.
+
 Exception text lives in `src/Properties/ErrorMessages.resx`. The shared MSBuild targets generate
 an internal `ErrorMessages` accessor in the project's root namespace during CLI and CI builds;
 its embedded resources are available under NativeAOT. Formatted messages use

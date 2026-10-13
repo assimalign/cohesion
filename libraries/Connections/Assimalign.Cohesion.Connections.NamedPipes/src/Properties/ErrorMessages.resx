@@ -129,7 +129,7 @@
   <data name="ListenerEndpointRequired" xml:space="preserve">
     <value>A named-pipe listener requires an endpoint.</value>
   </data>
-  <data name="ListenerRequiresLocalHost" xml:space="preserve">
+  <data name="ListenerHostNotLocal" xml:space="preserve">
     <value>A named-pipe listener can only bind a pipe on the local host ('.').</value>
   </data>
   <data name="PipeNameEmpty" xml:space="preserve">

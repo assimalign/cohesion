@@ -112,7 +112,7 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
         if (direction == ConnectionDirection.ReadOnly)
         {
             throw new ArgumentException(
-                ErrorMessages.ReadOnlyStreamCannotBeOpened,
+                ErrorMessages.ReadOnlyStreamNotSupported,
                 nameof(direction));
         }
 

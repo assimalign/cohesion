@@ -58,7 +58,7 @@ public sealed class NamedPipeConnectionListener : DuplexConnectionListener
         if (!options.EndPoint.IsLocal)
         {
             throw new ArgumentException(
-                ErrorMessages.ListenerRequiresLocalHost,
+                ErrorMessages.ListenerHostNotLocal,
                 nameof(options));
         }
 
