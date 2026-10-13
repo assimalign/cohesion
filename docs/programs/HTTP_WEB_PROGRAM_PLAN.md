@@ -399,7 +399,7 @@ The issue list:
 
 ### Stage 14 — Performance, operations and DX
 
-**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation.
+**Status:** delivered (2026-10-12), in owner review. The owner approved Stage 13 and every recommendation from its review (decisions 50–55). Decision 56 added sessions 17 and 18, and #1455 joined from wave 3's validation. Decision 57, from the review, adds sessions 20 and 21; the review resumes after them.
 - Sessions run in the Codex CLI on Astra 6 at ultra effort, as in Stage 13. A pipeline script drives each session's implement, review, verify and fix runs in its own worktree.
 - Sessions in one row edit the same files, so each runs as one serial session; the rows of a wave run in parallel.
 - Wave 2 needs wave 1 integrated:
@@ -429,6 +429,9 @@ The issue list:
 | 16 | #1398 → #1399 → #1408: `WebServerEventSource` replaces #147's `ILogger` diagnostics, then default forwarding and NativeAOT delivery in the same integration, then conformance and the docs roll-up | 3 |
 | 17 | #1452: connection features and the `Tls`, `StreamAbort` and `StreamLimits` packages (decision 56) | 2, ahead of session 7 |
 | 18 | #1453 → #1451: the multiplexed roots, then the in-memory peer close (decision 56) | 2, after 17, ahead of session 7 |
+| 19 | #1455: the HTTP/2 write-scheduler deadlock that session 16 found from a hang dump | 3 |
+| 20 | #1457: `Web.Hosting.Health` and `Web.Hosting.Resources` roll into `Web.Hosting` (decision 57 (a)) | review |
+| 21 | #1458: `WebApplicationServer` moves into `Web.Server`, behind a public host-service wrapper (decision 57 (b)) | review, after 20 |
 
 Not scheduled in this stage:
 - #1433 belongs to the Security program.
@@ -1490,6 +1493,18 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
       
       Per-direction aborts and the cumulative stream allowance stay features.
     - **Order:** #1452, then #1453, then #1300 (session 7), which instruments the code both change.
+57. **The Web hosting module absorbs its hosting integrations, and the server engine moves to Web.Server (owner, 2026-10-13; #1456, from the Stage 14 review).**
+    - **(a) Roll-up (#1457).** `Web.Hosting.Health` and `Web.Hosting.Resources` roll into `Web.Hosting`. Their public members keep their namespaces, under `src/Health/` and `src/Resources/`.
+      - The rules change: an area's `<Area>.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself. A separate `<Area>.Hosting.<Suffix>` package stays permitted only for an integration that must stay out of every framework that carries the module.
+      - The split predated the ApplicationModel integration, and every consumer of `Web.Hosting.Resources` also took `Web.Hosting`.
+      - `IWebApplicationLifetime` (#1412) is deleted. It existed only because the control plane could not reference `Web.Hosting`, which settles part of Stage 14's first review question.
+      - `Web.Health` joins the 16 area frameworks that lacked it. The release inventory loses two packages that shipped in preview.1.
+    - **(b) Server engine (#1458).** `WebApplicationServer` and its engine move into `Web.Server` as public API, so an application can run the server without the hosting module. `Web.Hosting` wraps any `IWebApplicationServer` in a public, non-owning `WebApplicationServerHostService`.
+      - The server builds its listener from `WebApplicationServerOptions` and installs its own interceptors, so a server constructed directly behaves like a hosted one. Hosting keeps the HTTP default interceptors, configuration binding and the TCP and QUIC listener helpers.
+      - The server's EventSource, Meter and ActivitySource take the `Assimalign.Cohesion.Web.Server` name (`event-source.md` rules 4 and 15). None shipped under the old name.
+      - The 19 Web feature packages that reference `Web.Server` for its request-feature contracts take the transport into their package closure; every framework already carries it. `Web.Routing` can never reference `Web.Server`, because the server reads the route template.
+      - Pending: the listener seam that replaces Web.Hosting's endpoint capture (Stage 14's `ServerBound` question). The owner proposed `IHttpConnectionListener.Connections`; the recommendation is `EndPoints`, because no connection exists when the server reports its bind.
+    - **Order:** #1457, then #1458.
 
 ### 7.5 Lineup
 
