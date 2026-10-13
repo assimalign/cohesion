@@ -161,7 +161,9 @@ semicolon-delimited, in its own csproj:
   `Assimalign.Cohesion.<Area>.Testing`. The test factory drives the concrete runtime, which
   cannot be done through abstractions alone. Precedents:
   `resources/Web/Assimalign.Cohesion.Web.Testing` and
-  `resources/Database/Assimalign.Cohesion.Database.Testing`. Any other project needs the
+  `resources/Database/Assimalign.Cohesion.Database.Testing`. Web.Testing names only
+  `Assimalign.Cohesion.Web.Hosting`: that module now owns its health and resource integrations
+  (owner decision 57, 2026-10-13). Any other project needs the
   deviation protocol case-by-case; there is no standing `.Application` exemption.
 - The former standing exemption for `Assimalign.Cohesion.<Area>.ApplicationModel` is retired by
   the signed-off realization-plan design. An area ApplicationModel directly references
@@ -329,13 +331,20 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   the area exception root — the layer that owns both vocabularies translates at its boundary).
   Child-to-child references are fine. The breakdown signal for either shape is the root (or a
   child root) pulling in anything feature- or model-specific.
-- **The hosting integration family:** `Assimalign.Cohesion.<Area>.Hosting.<Suffix>`
-  integrates `Assimalign.Cohesion.Hosting.<Suffix>`; precedents are
-  `Web.Hosting.Resources` and `Web.Hosting.Health`. These libraries may reference the
-  base Hosting library and siblings, the area root, features, other hosting-family
-  integrations, and other areas' packages. They may never reference their own exact
-  `<Area>.Hosting` module; roots and features may not reference them. The exact
-  `<Area>.Hosting` module may consume them; they may never reference it (COHRES001).
+- **Hosting integrations live in the runtime module:** an area's
+  `Assimalign.Cohesion.<Area>.Hosting` integrates `Assimalign.Cohesion.Hosting.Health` and
+  `Assimalign.Cohesion.Hosting.Resources` itself. Public members live in `src/Health/` and
+  `src/Resources/`, with namespaces `Assimalign.Cohesion.<Area>.Hosting.Health` and
+  `Assimalign.Cohesion.<Area>.Hosting.Resources`. The precedent is `Web.Hosting` (owner
+  decision 57, 2026-10-13).
+  A separate `Assimalign.Cohesion.<Area>.Hosting.<Suffix>` package is permitted only for an
+  integration that must stay out of every framework that carries the runtime module; no area
+  has one today. Such a package keeps the hosting-family constraints: it may reference the base
+  Hosting library and siblings, the area root, features, other hosting-family integrations,
+  and other areas' packages. It may never reference its own exact `<Area>.Hosting` module,
+  and roots and features may not reference it (COHRES001). The exact module may consume
+  hosting-family packages under the generic guard, but doing so brings their closure into every
+  framework that carries the module and defeats that package's required exclusion.
 - **The application builder seam:** the area root provides `I<Area>ApplicationBuilder` (and the
   `I<Area>Application` it builds); the hosting module implements them and exposes the creation
   entry point (`<Area>Application.CreateBuilder(string[] args)` — every resource is a `Program.cs` executable;

@@ -132,15 +132,15 @@ Canonical shape, the Web area's dependency direction:
 ```mermaid
 flowchart LR
     Hosting["Web.Hosting — runtime module"] --> Root["Assimalign.Cohesion.Web — area root"]
-    Hosting --> Health["Web.Hosting.Health"]
-    Hosting --> Resources["Web.Hosting.Resources"]
-    Health --> Root
-    Resources --> Root
+    Hosting --> Routing["Web.Routing — feature"]
+    Routing --> Root
     Auth["Web.Authentication — feature"] --> Root
     Auth -.->|"COHRES001 ✗"| Hosting
 ```
 
-Solid edges are the references the area permits; the dotted edge is the one `COHRES001` rejects —
+Web.Hosting references the Web root and routing feature; its health and resource integrations
+live inside the module (owner decision 57, 2026-10-13). Solid edges are the references the area
+permits; the dotted edge is the one `COHRES001` rejects —
 a feature library may never reference its area's runtime module, which the surrounding prose has
 to say in words as well.
 

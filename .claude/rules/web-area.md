@@ -22,12 +22,13 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 - **Never reference `Assimalign.Cohesion.Web.Hosting`** from a feature library. Hosting composes
   DI, configuration, logging, and transports; a reference to it drags that surface into every
   consumer and pushes users toward container-driven design.
-- The hosting family includes `Web.Hosting.Resources` and `Web.Hosting.Health`, integrating
-  the corresponding shared `Hosting.*` libraries. These may reference the Web root,
-  feature libraries, other hosting-family integrations, and other areas' packages, but
-  never the exact `Web.Hosting` module. The exact module may consume its own hosting family
-  under COHRES002. Roots and features may not reference the hosting
-  family (COHRES001) or shared Hosting libraries (COHRES004).
+- `Web.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself (owner decision 57,
+  2026-10-13). Its public integrations live in `src/Health/` and `src/Resources/`, keeping the
+  `Assimalign.Cohesion.Web.Hosting.Health` and `.Resources` namespaces. No separate Web
+  hosting-family package exists. A future `Web.Hosting.<Suffix>` package is permitted only for
+  an integration that must stay out of every framework carrying `Web.Hosting`; it retains the
+  family constraints in `resource-areas.md`. Roots and features may reference neither the
+  hosting module or family (COHRES001) nor shared Hosting libraries (COHRES004).
 - **`Web.Hosting` references a Web library only when the runtime itself needs it** — runtime
   machinery it composes, such as a router it drives or a server package. COHRES002 permits any
   Web library but the exclusions above. Applications still get the whole family through the
@@ -35,8 +36,9 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   feature, so hosting a feature never needs the reference. Every reference costs more than one
   framework: `Web.Hosting` is a private member of all 17 other area frameworks, so its new
   reference's closure must be added to each of them.
-- Sole sanctioned exception: `Assimalign.Cohesion.Web.Testing → Web.Hosting` and
-  `Web.Hosting.Resources` (the test factory drives the concrete runtime and its control plane), declared via `CohesionHostingIsolationExemptions` in its own
+- Sole sanctioned exception: `Assimalign.Cohesion.Web.Testing → Web.Hosting` (the test factory
+  drives the concrete runtime and its integrated control plane; owner decision 57, 2026-10-13),
+  declared via `CohesionHostingIsolationExemptions` in its own
   csproj. Do not add others without the deviation protocol (`deviations.md`) — see
   `resource-areas.md` for the opt-out mechanism.
 
@@ -125,22 +127,25 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
 
 ## Adding a new Web feature or hosting-family library — required wiring
 
-A new `resources/Web/Assimalign.Cohesion.Web.<Feature>/` or `Web.Hosting.<Suffix>` project
-(precedents: `Web.Hosting.Resources`, `Web.Hosting.Health`) is not done until all of these
-are updated (each has bitten before):
+A new `resources/Web/Assimalign.Cohesion.Web.<Feature>/` project (precedents: `Web.Routing`,
+`Web.Server`) is not done until all of these are updated (each has bitten before). A future
+`Web.Hosting.<Suffix>` integration must meet decision 57's framework-exclusion condition first;
+no current Web package is a precedent for a separate hosting-family package:
 
 1. **csproj** — references per the dependency rule above; `CohesionProjectReference` only. A
    package that registers an `IHttpFeature` declares its `builder.Services.Add<Feature>` verb as a
    component integration (above), adds itself to `build/IntegrationCheck` (reference plus a call to
    every overload), and adds its `src/**` path to the `.github/workflows/analyzers.yml` push filter
    so a signature change rebuilds the canary.
-2. **Framework membership** — add the assembly to the `Assimalign.Cohesion.App.Web` list in
+2. **Framework membership** — add a framework-delivered feature assembly to the
+   `Assimalign.Cohesion.App.Web` list in
    `resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props` (the Refs producer
    imports the same file), plus any new outside-area transitive dependencies the App/App.Web
    lists don't already carry. Validate with
    `dotnet pack resources/Web/Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj`
    (its collection target hard-fails on unresolvable assemblies). Exclusions from the list are
-   documented in that file's comment. **If `Web.Hosting` references the new library**, its closure
+   documented in that file's comment. A separate hosting-family integration remains outside
+   every framework carrying `Web.Hosting` (decision 57). **If `Web.Hosting` references the new library**, its closure
    also becomes a `CohesionFrameworkPrivateAssembly` in every other area's
    `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (all 17 carry
    `Web.Hosting` privately); pack each of those producers too.

@@ -220,6 +220,7 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Hosting/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/examples/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/">
