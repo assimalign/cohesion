@@ -1179,6 +1179,26 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - #1461 `b21d3199`: the SDK Smoke and Templates feeds lacked `Connections.Tls`, `.StreamAbort` and `.StreamLimits`. All four feed lists now carry them.
     - #1462 `45ca3055`, `617f4905`: #1389's allocation test measured 160 B on x64 because the JIT placed the test's own setup allocation inside the measured window. The setup moved into a non-inlined factory, and the product was never at fault. Five runs on each architecture measure 32 B.
     - Stage verification now reads every workflow for the final commit, and allocation tests also run under `--arch x64`.
+  - **PR #1094 cleanup (decision 59, #1463), delivered 2026-10-13, in owner review.** Sessions 24–28 ran on Codex with the same review pipeline. No file under `resources/Database/` changed.
+    - #1464 `ae19d692`, `c0ec0d7c`: `HttpAntiforgery` is the public implementation, as the owner's review comment asked.
+    - #1469 `2b57ceab` … `3ea28722`: analyzers by area. `SourceGeneration.OpenApi` and `SourceGeneration.ObjectMapping` are their own projects, ComponentModel merged into `SourceGeneration`, test projects are named `<Project>.Tests`, and `.claude/rules/analyzers.md` holds the placement rule.
+    - #1465 and #1466 `04033e78` … `fb64f850`:
+      - 17 static factory classes became public implementation types;
+      - `IApiEndpointMetadata` is gone;
+      - `ResourceControlPlane` and `JsonWebTokenWriter` kept their spelling for Database;
+      - `HealthChecks.CreateBuilder` waits for #1470.
+    - #1467 and #1468 `9eb6d137` … `a0506890`:
+      - exception messages moved into `Properties/ErrorMessages.resx`, with MSBuild generating `ErrorMessages` at build time, proven under NativeAOT;
+      - 56 messages on normal paths are cached;
+      - `FileSystemException.ThrowPathOutsideRoot` replaced its extension member.
+    - #1471 `574483c9` … `63bed91f`: 612 resource names were renamed after their failure. Every name is 40 characters or fewer, and no message value changed.
+    - **Process fixes:**
+      - A fixer run replied to the owner's review thread on its own; session conventions now forbid every GitHub write by a run.
+      - The rules pass (`dc79ec89`) moved every convention into the pre-completion checklist and the session conventions.
+    - **Verification:**
+      - Each session ran its scope's tests: 5,854 tests in session 26, about 8,600 in session 27 and 7,550 in session 28.
+      - Each session's Web NativeAOT guard showed only the 11 known IL warnings.
+      - Docs site: `8166434`, `cfec2f9` and `d93ea2f`.
 
   Behavior changes for the review (decision 15's terms):
   - **Client faults:**
