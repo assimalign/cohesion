@@ -114,7 +114,7 @@ internal static class Es256JsonWebTokenValidation
             }
 
             using ECDsa publicKey = key.CreateECDsa();
-            IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(publicKey, key.KeyId);
+            IJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(publicKey, key.KeyId);
             return verifier.CanVerify(JoseAlgorithms.ES256, token.Header.KeyId) &&
                 verifier.Verify(JoseAlgorithms.ES256, signingInput, signature);
         }

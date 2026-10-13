@@ -374,3 +374,11 @@ parser (`TestObjects/SetCookieField.cs`), not by the model under test.
 - `CookiePolicyProtocolUpgradeTests` covers a `101 Switching Protocols`: the upgrade writer sends the
   cookies the policy rewrote, each once on its own field line, because it reads the `Set-Cookie` header
   the policy's collection keeps and not the cookie feature (#1154).
+
+## Cookie-authentication test composition (#1465)
+
+The cookie-authentication integration tests now use `FileSystemKeyRepository.Create(path)` to
+compose their data-protection provider. Rebuild the tests against the updated DataProtection
+package; its DESIGN records the factory source and binary breaks against 10.0.0-preview.1 on
+decision 15's terms. This cleanup changes no Web.CookiePolicy API, consent or emission behavior,
+or shipped dependency. Advisory: not applicable: API shape.

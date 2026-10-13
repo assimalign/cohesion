@@ -27,7 +27,7 @@ public sealed class RsaJwtSignatureVerifier : IJwtSignatureVerifier
     /// <returns>An RSA verifier.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="publicKey"/> is <see langword="null"/>.</exception>
     public static RsaJwtSignatureVerifier Create(RSA publicKey, string? keyId = null)
-        => new RsaJwtSignatureVerifier(JsonWebTokenSignatureVerifier.CreateRsa(publicKey, keyId));
+        => new RsaJwtSignatureVerifier(RsaJsonWebTokenSignatureVerifier.Create(publicKey, keyId));
 
     /// <inheritdoc />
     public bool CanVerify(string algorithm, string? keyId) => _verifier.CanVerify(algorithm, keyId);

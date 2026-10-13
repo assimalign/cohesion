@@ -227,3 +227,13 @@ naming the issuer and kind. It does not dispatch the command or release existing
 Manifest advertisement, command-token scope and owner-equals-issuer checks remain in force.
 
 The HTTP accept loop calls `HttpConnectionListener.AcceptAsync` and owns each returned `IHttpConnection` until its serving task disposes it. The listener exposes the common identity, live-connection observation and bind/accept lifecycle, while each HTTP connection preserves its transport features.
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

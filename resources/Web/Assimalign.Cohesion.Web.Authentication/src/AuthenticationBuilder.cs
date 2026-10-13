@@ -129,6 +129,6 @@ public sealed class AuthenticationBuilder
 
         // Fully qualified: the DataProtectionProvider property on this type shadows the static
         // factory class of the same name inside the type body.
-        return Security.DataProtection.DataProtectionProvider.Create(KeyRepository.CreateFileSystem(keysDirectory));
+        return Security.DataProtection.DataProtectionProvider.Create(FileSystemKeyRepository.Create(keysDirectory));
     }
 }

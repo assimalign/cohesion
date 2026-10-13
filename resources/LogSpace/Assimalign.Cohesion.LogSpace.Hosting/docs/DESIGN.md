@@ -61,3 +61,13 @@ Background-work registration belongs to the concrete `LogSpaceApplicationBuilder
 
 `LogSegmentStore` is a singleton shared by `SegmentFlushService`, `OtlpReceiverEndpointService`, and the query endpoint. When the ambient `otlp` endpoint exists, the flush service registers in the builder constructor, directly after telemetry and ahead of every `AddService` call, so segments flush for the whole lifetime of the other services.
 
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

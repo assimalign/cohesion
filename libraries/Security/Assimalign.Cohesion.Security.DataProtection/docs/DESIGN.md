@@ -17,8 +17,7 @@ on instead.
 The shape mirrors the parts of ASP.NET Core Data Protection that matter here — a
 provider/protector split, purpose chaining, a key ring with rotation and a grace window — while
 staying inside Cohesion's constraints: **BCL `System.Security.Cryptography` only**, no
-`Microsoft.Extensions.*`, AOT/trim-safe with zero reflection, interface-first with internal
-implementations, and builder-time composition pushed out to consumers' `*.Hosting` projects.
+`Microsoft.Extensions.*`, AOT/trim-safe with zero reflection, interface-first contracts with public sealed provider and repository implementations, and builder-time composition pushed out to consumers' `*.Hosting` projects.
 
 ## Surface
 
@@ -32,14 +31,15 @@ implementations, and builder-time composition pushed out to consumers' `*.Hostin
 - `IKey` — read-only key metadata (id, created/activated/expires, revoked). Never exposes
   material.
 - `IKeyRepository` + `KeyDocument` — the persistence seam; a pure opaque-blob store.
-- `KeyRepository.CreateFileSystem(path)` — the default file-system repository.
+- `FileSystemKeyRepository.Create(path)` — the default file-system repository.
 - `DataProtectionOptions` — discriminator, key lifetime, unprotect grace period, unknown-key
   reload interval.
-- `DataProtectionProvider.Create(...)` — factory that assembles the ring + provider.
+- `DataProtectionProvider.Create(...)` — creates the public sealed provider and its ring.
 - `DataProtectionException` — the area-scoped exception root.
 
-Everything else (`AesGcmDataProtector`, `KeyRing`, `KeyRingProtectionProvider`, `ManagedKey`,
-`KeySerializer`, `PurposeChain`, `FileSystemKeyRepository`) is `internal`.
+The provider and file-system repository have private constructors and creation methods that
+return their own types. Everything else (`AesGcmDataProtector`, `KeyRing`, `ManagedKey`,
+`KeySerializer`, `PurposeChain`) is `internal`.
 
 ## Cryptographic construction
 
@@ -239,3 +239,17 @@ inherited from the libraries build props.
   when the application passes a provider to `AddAntiforgery`.
 - Future consumers: auth cookie handlers (#790), sessions (#785), and any TempData-equivalent —
   each asks the provider for its own purpose instead of hand-rolling key handling.
+
+## Preview.1 compatibility — public implementations (#1465)
+
+On owner decisions 59 and 15's preview terms, `DataProtectionProvider` becomes the public sealed
+implementation of `IDataProtectionProvider`, with a private constructor. Both `Create` calls
+keep their parameters and spelling and now return `DataProtectionProvider`; existing calls are
+source-compatible. `KeyRepository`, which shipped in 10.0.0-preview.1, is removed: migrate
+`KeyRepository.CreateFileSystem(path)` to `FileSystemKeyRepository.Create(path)`, which returns
+the public sealed repository and retains its private constructor.
+
+Both conversions are binary-breaking: creation return types change, and the repository facade
+is removed. Recompile consumers and apply the repository rename. The interfaces, purpose
+isolation, rotation, persistence and argument validation are unchanged. No compatibility facade
+remains. Advisory: not applicable: API shape.

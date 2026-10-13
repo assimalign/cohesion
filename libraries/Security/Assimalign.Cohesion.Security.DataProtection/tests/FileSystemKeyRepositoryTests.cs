@@ -43,14 +43,14 @@ public class FileSystemKeyRepositoryTests
 
         // "Node A" protects and persists a key to the shared directory.
         IDataProtector nodeA = DataProtectionProvider
-            .Create(KeyRepository.CreateFileSystem(temp.Path), o => o.ApplicationDiscriminator = "app")
+            .Create(FileSystemKeyRepository.Create(temp.Path), o => o.ApplicationDiscriminator = "app")
             .CreateProtector("purpose");
         byte[] protectedData = nodeA.Protect(_sample);
 
         // "Node B" is a fresh provider over the same directory — as after a restart or on a
         // second instance. It must read Node A's key and unprotect the payload.
         IDataProtector nodeB = DataProtectionProvider
-            .Create(KeyRepository.CreateFileSystem(temp.Path), o => o.ApplicationDiscriminator = "app")
+            .Create(FileSystemKeyRepository.Create(temp.Path), o => o.ApplicationDiscriminator = "app")
             .CreateProtector("purpose");
 
         nodeB.Unprotect(protectedData).ShouldBe(_sample);
@@ -60,7 +60,7 @@ public class FileSystemKeyRepositoryTests
     public void Protect_ShouldWriteAKeyDocumentToDisk()
     {
         using TempDirectory temp = new();
-        IKeyRepository repository = KeyRepository.CreateFileSystem(temp.Path);
+        FileSystemKeyRepository repository = FileSystemKeyRepository.Create(temp.Path);
 
         DataProtectionProvider.Create(repository).CreateProtector("purpose").Protect(_sample);
 
@@ -73,14 +73,14 @@ public class FileSystemKeyRepositoryTests
     {
         using TempDirectory temp = new();
 
-        KeyRepository.CreateFileSystem(temp.Path).GetAllKeys().ShouldBeEmpty();
+        FileSystemKeyRepository.Create(temp.Path).GetAllKeys().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - FileRepository: Should replace an existing document by name")]
     public void StoreKey_OnSameName_ShouldOverwrite()
     {
         using TempDirectory temp = new();
-        IKeyRepository repository = KeyRepository.CreateFileSystem(temp.Path);
+        FileSystemKeyRepository repository = FileSystemKeyRepository.Create(temp.Path);
 
         repository.StoreKey(new KeyDocument("dup", Encoding.UTF8.GetBytes("first")));
         repository.StoreKey(new KeyDocument("dup", Encoding.UTF8.GetBytes("second")));

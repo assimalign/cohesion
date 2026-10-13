@@ -231,7 +231,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         ProtectedFileStore.HardenKeyDirectory(keyRingPath);
 
         Services.AddSingleton<IDataProtectionProvider>(_ => DataProtectionProvider.Create(
-            KeyRepository.CreateFileSystem(keyRingPath),
+            FileSystemKeyRepository.Create(keyRingPath),
             protectionOptions =>
             {
                 protectionOptions.ApplicationDiscriminator =

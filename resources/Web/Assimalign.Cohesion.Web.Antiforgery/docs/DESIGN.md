@@ -448,3 +448,12 @@ token, a replaced exchange service, and the verbs on routes and groups with and 
 attached requirement: rejection without a token, binding from the parsed form, a header token, a route
 opt-out, fail-closed dispatch, a group opt-out that does not reach the endpoint, and no requirement on
 endpoints that bind no form.
+
+## Data-protection example migration (#1465)
+
+The overview's composition example now uses `FileSystemKeyRepository.Create(path)` inside the
+existing `DataProtectionProvider.Create(...)` call. Applications following that example must
+rename the repository call and rebuild against the updated DataProtection package; its DESIGN
+records the source and binary breaks against 10.0.0-preview.1 on decision 15's terms. This
+cleanup changes no Web.Antiforgery API, protector selection, or request behavior.
+Advisory: not applicable: API shape.

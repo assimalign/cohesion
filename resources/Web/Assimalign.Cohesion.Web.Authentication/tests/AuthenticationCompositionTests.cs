@@ -36,7 +36,7 @@ public sealed class AuthenticationCompositionTests : IDisposable
     public AuthenticationCompositionTests()
     {
         _keysDirectory = Path.Combine(Path.GetTempPath(), "cohesion-web-auth-tests", Guid.NewGuid().ToString("N"));
-        _dataProtection = DataProtectionProvider.Create(KeyRepository.CreateFileSystem(_keysDirectory));
+        _dataProtection = DataProtectionProvider.Create(FileSystemKeyRepository.Create(_keysDirectory));
     }
 
     public void Dispose()
@@ -109,7 +109,7 @@ public sealed class AuthenticationCompositionTests : IDisposable
     {
         // Arrange
         IDataProtectionProvider other = DataProtectionProvider.Create(
-            KeyRepository.CreateFileSystem(Path.Combine(_keysDirectory, "other")));
+            FileSystemKeyRepository.Create(Path.Combine(_keysDirectory, "other")));
         AuthenticationBuilder auth = new AuthenticationBuilder().UseDataProtection(_dataProtection).AddCookie();
 
         // Act / Assert — the cookie scheme already derived its protector from the first provider.
@@ -123,7 +123,7 @@ public sealed class AuthenticationCompositionTests : IDisposable
     {
         // Arrange
         IDataProtectionProvider other = DataProtectionProvider.Create(
-            KeyRepository.CreateFileSystem(Path.Combine(_keysDirectory, "other")));
+            FileSystemKeyRepository.Create(Path.Combine(_keysDirectory, "other")));
         AuthenticationBuilder auth = new AuthenticationBuilder().UseDataProtection(_dataProtection);
         _ = auth.DataProtectionProvider;
 

@@ -31,7 +31,7 @@ public sealed class EcdsaJwtSignatureVerifier : IJwtSignatureVerifier
     /// <paramref name="publicKey"/> does not use a NIST curve defined by a JOSE ECDSA algorithm.
     /// </exception>
     public static EcdsaJwtSignatureVerifier Create(ECDsa publicKey, string? keyId = null)
-        => new EcdsaJwtSignatureVerifier(JsonWebTokenSignatureVerifier.CreateEcdsa(publicKey, keyId));
+        => new EcdsaJwtSignatureVerifier(EcdsaJsonWebTokenSignatureVerifier.Create(publicKey, keyId));
 
     /// <inheritdoc />
     public bool CanVerify(string algorithm, string? keyId) => _verifier.CanVerify(algorithm, keyId);

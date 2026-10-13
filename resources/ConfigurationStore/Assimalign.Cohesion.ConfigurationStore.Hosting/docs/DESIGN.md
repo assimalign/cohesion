@@ -132,3 +132,13 @@ The concrete application and IHost route share it. Startup failures still roll b
 
 Each `AddNamespace` declaration is a registration, and `ConfigurationStoreRepository` is a singleton seeded from the resolved declarations. `AddNamespace` is an explicit `IConfigurationStoreApplicationBuilder` shim over the public concrete verb, which returns the builder for chaining and still rejects a repeated namespace name at registration. `ConfigurationEndpointService` is disposable; the application now disposes it through the provider.
 
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

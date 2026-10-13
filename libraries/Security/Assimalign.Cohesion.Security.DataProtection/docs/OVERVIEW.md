@@ -18,6 +18,10 @@ key ring, and pluggable persistence — so consumers stop hand-rolling key manag
 - **Pluggable persistence.** An `IKeyRepository` seam with a file-system default; point every
   node at one shared directory to share keys with no raw bytes copied by hand.
 
+`DataProtectionProvider` and `FileSystemKeyRepository` are public sealed implementations with
+private constructors. Their `Create` methods return the concrete type; application code can
+continue to use `IDataProtectionProvider` and `IKeyRepository` contracts.
+
 ## Quick use
 
 ```csharp
@@ -25,7 +29,7 @@ using Assimalign.Cohesion.Security.DataProtection;
 
 // Composition root (a *.Hosting project), created once and shared:
 IDataProtectionProvider provider = DataProtectionProvider.Create(
-    KeyRepository.CreateFileSystem("/var/lib/myapp/keys"),
+    FileSystemKeyRepository.Create("/var/lib/myapp/keys"),
     options =>
     {
         options.ApplicationDiscriminator = "myapp";        // isolates co-located apps

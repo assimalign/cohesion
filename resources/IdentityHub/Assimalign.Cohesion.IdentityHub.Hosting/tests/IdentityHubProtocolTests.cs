@@ -531,7 +531,7 @@ public sealed class IdentityHubProtocolTests
                 Curve = ECCurve.NamedCurves.nistP256,
                 Q = new ECPoint { X = x, Y = y },
             });
-            IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(
+            IJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(
                 key,
                 jwk.GetProperty("kid").GetString()!);
             verifier.Verify("ES256", signingInput, signature).ShouldBeTrue();

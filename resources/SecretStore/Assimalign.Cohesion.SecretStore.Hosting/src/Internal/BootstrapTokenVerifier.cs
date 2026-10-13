@@ -2,6 +2,7 @@ using System;
 
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel;
+using Assimalign.Cohesion.IdentityModel.Token;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
@@ -66,7 +67,7 @@ internal sealed class BootstrapTokenVerifier
                 ? ResourceCallerKind.Gateway
                 : ResourceCallerKind.Peer,
             issuer.AllowedCommandKinds);
-        return JsonWebTokenValidator.HasAudience(token, expectedAudience)
+        return token.HasAudience(expectedAudience)
             ? new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, caller, null)
             : new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, caller, null);
     }

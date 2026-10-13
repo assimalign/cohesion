@@ -1,18 +1,21 @@
 using System;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
+using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
+namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+
+// Deviates from the internal-implementation rule per owner decision 59 (#1465): the implementation is public.
 /// <summary>
 /// Verifies JOSE ECDSA signatures in their fixed-size IEEE P1363 <c>r||s</c> representation.
 /// </summary>
-internal sealed class EcdsaJsonWebTokenSignatureVerifier : IJsonWebTokenSignatureVerifier
+public sealed class EcdsaJsonWebTokenSignatureVerifier : IJsonWebTokenSignatureVerifier
 {
     private readonly ECDsa _publicKey;
     private readonly string? _keyId;
     private readonly string _algorithm;
 
-    public EcdsaJsonWebTokenSignatureVerifier(ECDsa publicKey, string? keyId)
+    private EcdsaJsonWebTokenSignatureVerifier(ECDsa publicKey, string? keyId)
     {
         ArgumentNullException.ThrowIfNull(publicKey);
 
@@ -27,6 +30,24 @@ internal sealed class EcdsaJsonWebTokenSignatureVerifier : IJsonWebTokenSignatur
         _keyId = keyId;
         _algorithm = algorithm;
     }
+
+    /// <summary>
+    /// Creates a verifier for ECDSA signatures, binding ES256 to NIST P-256, ES384 to NIST
+    /// P-384, and ES512 to NIST P-521.
+    /// </summary>
+    /// <param name="publicKey">
+    /// The ECDSA verification key. The verifier does not dispose it; the caller must keep it
+    /// alive for the verifier's lifetime.
+    /// </param>
+    /// <param name="keyId">The <c>kid</c> this key answers to, or <see langword="null" /> to match any key identifier.</param>
+    /// <returns>An ECDSA JSON Web Token signature verifier.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="publicKey" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="publicKey" /> does not use a NIST curve defined by the JOSE ECDSA
+    /// algorithms.
+    /// </exception>
+    public static EcdsaJsonWebTokenSignatureVerifier Create(ECDsa publicKey, string? keyId = null)
+        => new EcdsaJsonWebTokenSignatureVerifier(publicKey, keyId);
 
     /// <inheritdoc />
     public bool CanVerify(string algorithm, string? keyId)

@@ -45,7 +45,7 @@ public sealed class AuthorizationChallengeTests : IDisposable
     public AuthorizationChallengeTests()
     {
         _keysDirectory = Path.Combine(Path.GetTempPath(), "cohesion-web-authorization-tests", Guid.NewGuid().ToString("N"));
-        _dataProtection = DataProtectionProvider.Create(KeyRepository.CreateFileSystem(_keysDirectory));
+        _dataProtection = DataProtectionProvider.Create(FileSystemKeyRepository.Create(_keysDirectory));
     }
 
     public void Dispose()

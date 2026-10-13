@@ -1,7 +1,9 @@
 using System;
+using System.Linq;
 using System.Security.Cryptography;
 
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.IdentityModel.Token;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
@@ -68,7 +70,11 @@ internal sealed class BootstrapTokenVerifier
         }
 
         var caller = new ResourceCaller(_application, _gateway, ResourceCallerKind.Gateway, []);
-        return JsonWebTokenValidator.HasAudience(token!, expectedAudience)
+        // The extension rejects null/blank audiences; retain the previous ordinal match for them.
+        bool hasAudience = string.IsNullOrWhiteSpace(expectedAudience)
+            ? token!.Audiences.Contains(expectedAudience!, StringComparer.Ordinal)
+            : token!.HasAudience(expectedAudience);
+        return hasAudience
             ? new(new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, caller, null),
                 CredentialRejectionReason.None)
             : new(new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, caller, null),
@@ -84,7 +90,7 @@ internal sealed class BootstrapTokenVerifier
                 ECDsa? publicKey = _key.CreateECDsa();
                 try
                 {
-                    _signatureVerifier = JsonWebTokenSignatureVerifier.CreateEcdsa(publicKey, _key.KeyId);
+                    _signatureVerifier = EcdsaJsonWebTokenSignatureVerifier.Create(publicKey, _key.KeyId);
                     _publicKey = publicKey;
                     publicKey = null;
                 }

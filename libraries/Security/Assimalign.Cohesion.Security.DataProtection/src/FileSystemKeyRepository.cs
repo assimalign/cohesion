@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace Assimalign.Cohesion.Security.DataProtection.Internal;
+namespace Assimalign.Cohesion.Security.DataProtection;
 
+// Deviates from the internal-implementation rule per owner decision 59 (#1465): the implementation is public.
 /// <summary>
 /// The default file-system-backed <see cref="IKeyRepository"/>: one file per key
 /// (<c>&lt;keyId&gt;.key</c>) under a directory. Writes go to a temporary sibling and are then
@@ -14,17 +15,35 @@ namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 /// permissions are the confidentiality boundary. At-rest encryption of the documents is a
 /// tracked follow-up. The store is safe for concurrent readers; the ring serializes its writes.
 /// </remarks>
-internal sealed class FileSystemKeyRepository : IKeyRepository
+public sealed class FileSystemKeyRepository : IKeyRepository
 {
     private const string Extension = ".key";
     private const string TempExtension = ".tmp";
 
     private readonly string _directory;
 
-    public FileSystemKeyRepository(string directory)
+    private FileSystemKeyRepository(string directory)
     {
         _directory = directory;
         Directory.CreateDirectory(directory);
+    }
+
+    /// <summary>
+    /// Creates a file-system-backed key repository rooted at <paramref name="directoryPath"/>.
+    /// The directory is created if it does not exist. For a multi-node deployment, point every
+    /// node at the same shared directory.
+    /// </summary>
+    /// <param name="directoryPath">The directory that will hold one file per key.</param>
+    /// <returns>A file-system-backed key repository.</returns>
+    /// <exception cref="ArgumentException"><paramref name="directoryPath"/> is <see langword="null"/> or empty.</exception>
+    public static FileSystemKeyRepository Create(string directoryPath)
+    {
+        if (string.IsNullOrEmpty(directoryPath))
+        {
+            throw new ArgumentException("A key repository directory path is required.", nameof(directoryPath));
+        }
+
+        return new FileSystemKeyRepository(directoryPath);
     }
 
     /// <inheritdoc />
@@ -60,6 +79,8 @@ internal sealed class FileSystemKeyRepository : IKeyRepository
     }
 
     /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="DataProtectionException">The key document name is not a valid file name.</exception>
     public void StoreKey(KeyDocument key)
     {
         ArgumentNullException.ThrowIfNull(key);

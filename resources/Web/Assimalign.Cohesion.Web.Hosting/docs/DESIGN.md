@@ -959,6 +959,13 @@ replacement spellings. Hosted applications using only `WebApplicationServerBuild
 source calls. Applications registering those Http factories themselves must rename the calls and
 rebuild against the updated packages.
 
+The bootstrap credential verifier also uses `EcdsaJsonWebTokenSignatureVerifier.Create` and
+IdentityModel.Token's `token.HasAudience(...)`. For null or blank expected audiences it retains
+the former ordinal audience-list lookup locally, because the extension rejects those inputs.
+This preserves the previous authorization result. Existing Hosting public calls remain
+source-compatible; consumers must rebuild for the IdentityModel binary changes recorded in
+that package's preview.1 compatibility section.
+
 ### What it is
 
 Hosting installs request limits, protocol upgrade and extended CONNECT before user configurations

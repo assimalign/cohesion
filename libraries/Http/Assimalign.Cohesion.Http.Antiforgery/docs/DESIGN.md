@@ -248,3 +248,12 @@ small and use stack buffers, so the hot paths are allocation-light.
   Pipeline enforcement is the Web layer's: `Assimalign.Cohesion.Web.Antiforgery`
   validates the unsafe requests of endpoints that declare a requirement (and
   reads the form for the form-token flow, which this package does not trigger).
+
+## Data-protection test composition (#1465)
+
+The protector-seam tests now construct their key repository with
+`FileSystemKeyRepository.Create(path)`. `DataProtectionProvider.Create(...)` keeps its spelling
+and returns the public provider. These upstream factory changes require rebuilding the tests;
+the preview.1 source and binary breaks are recorded in Security.DataProtection's DESIGN on
+decision 15's terms. This cleanup changes no Http.Antiforgery API or token behavior and adds no
+shipped data-protection dependency. Advisory: not applicable: API shape.

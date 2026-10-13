@@ -30,3 +30,13 @@ Background-work registration belongs to the concrete `SchedulerApplicationBuilde
 
 Declared jobs are `IScheduleJob` registrations and schedule providers are `IScheduleProvider` registrations. The root verbs `AddJob` and `AddScheduleProvider` are explicit `ISchedulerApplicationBuilder` shims over those registrations, forwarding to public concrete counterparts that return the builder for chaining; the Cron and Timer packages therefore register through the dependency-free root contract while this module owns the container. Registration-time checks read the container, so `AddJob` still rejects a different job with a declared identifier and `AddScheduleProvider` a repeated instance. `Build` resolves both aggregates once, rejects conflicts that arrived through direct registrations, validates every schedule binding, and only then resolves the lifecycle services.
 
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

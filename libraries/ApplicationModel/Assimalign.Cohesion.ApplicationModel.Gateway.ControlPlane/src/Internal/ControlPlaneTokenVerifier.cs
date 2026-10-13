@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel;
+using Assimalign.Cohesion.IdentityModel.Token;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
@@ -30,7 +31,7 @@ internal static class ControlPlaneTokenVerifier
             ClockSkew = ResourceCredentialProfile.ClockSkew,
         });
         if (!validator.TryValidate(compactToken, now, out JsonWebToken? token) ||
-            !JsonWebTokenValidator.HasAudience(token, ResourceCredentialProfile.ExportAudience) ||
+            !token.HasAudience(ResourceCredentialProfile.ExportAudience) ||
             FindIssuer(token.Issuer!, trustedIssuers) is not TrustedIssuer issuer)
         {
             return false;

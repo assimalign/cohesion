@@ -239,3 +239,13 @@ The concrete application and IHost route share it. Startup failures still roll b
 
 Each `AddSecret` declaration and the `AddCertificateAuthority` options snapshot are registrations. The data-protection provider, `SecretStoreRepository`, `TrustedIssuerStore`, and `CertificateAuthorityManager` are singletons the endpoint factory resolves, so the provider owns them and disposes them after the endpoint. `SecretsEndpointService` no longer disposes the certificate authority it is given, and `SecretStoreApplication` no longer holds the endpoint to dispose it. Both root verbs are explicit `ISecretStoreApplicationBuilder` shims over public concrete counterparts that return the builder for chaining.
 
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

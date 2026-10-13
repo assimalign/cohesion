@@ -32,9 +32,9 @@ a Web dependency. Bearer keeps the orchestration and its public compatibility se
 - **HMAC** (`HS256/384/512`) &mdash; `HMACSHA*.HashData`, compared in fixed
   time via `CryptographicOperations.FixedTimeEquals`.
 - **RSA** (`RS*` PKCS#1 and `PS*` PSS) &mdash; a thin adapter over
-  `JsonWebTokenSignatureVerifier.CreateRsa` in IdentityModel.
+  `RsaJsonWebTokenSignatureVerifier.Create` in IdentityModel.
 - **ECDSA** (`ES256/384/512`) &mdash; a thin adapter over
-  `JsonWebTokenSignatureVerifier.CreateEcdsa`, including named-curve and P1363-length binding.
+  `EcdsaJsonWebTokenSignatureVerifier.Create`, including named-curve and P1363-length binding.
 
 `HmacJwtSignatureVerifier.Create`, `RsaJwtSignatureVerifier.Create` and
 `EcdsaJwtSignatureVerifier.Create` return their public sealed implementations. The RSA and

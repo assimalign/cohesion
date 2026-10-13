@@ -1,14 +1,23 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
+// Deviates from the internal-implementation rule per owner decision 59 (#1465): the implementation is public.
 /// <summary>
-/// Creates JSON Web Token validators and evaluates the audience rule profiles leave to their callers.
+/// Verifies ES256 compact JSON Web Tokens against a profile's trusted issuer keys and claim rules.
 /// </summary>
-public static class JsonWebTokenValidator
+public sealed class JsonWebTokenValidator : IJsonWebTokenValidator
 {
+    private JsonWebTokenValidator(JsonWebTokenValidationProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        Profile = profile;
+    }
+
     /// <summary>
     /// Creates a validator that accepts only ES256 tokens signed by an EC P-256 key the profile trusts for
     /// the token's issuer.
@@ -22,29 +31,13 @@ public static class JsonWebTokenValidator
     /// <c>ES256</c>, and an unsecured token are rejected. The ECDSA instance is created from the selected
     /// <see cref="JsonWebKey"/> per validation and disposed before the method returns.
     /// </remarks>
-    public static IJsonWebTokenValidator CreateEs256(JsonWebTokenValidationProfile profile)
-        => new Es256JsonWebTokenValidator(profile);
+    public static JsonWebTokenValidator CreateEs256(JsonWebTokenValidationProfile profile)
+        => new JsonWebTokenValidator(profile);
 
-    /// <summary>Determines whether a token's <c>aud</c> claim contains an audience.</summary>
-    /// <param name="token">The token to inspect.</param>
-    /// <param name="audience">The audience to look for.</param>
-    /// <returns>
-    /// <see langword="true"/> when an <c>aud</c> entry ordinally equals <paramref name="audience"/>;
-    /// otherwise, <see langword="false"/>.
-    /// </returns>
-    /// <exception cref="ArgumentNullException"><paramref name="token"/> is <see langword="null"/>.</exception>
-    public static bool HasAudience(IJsonWebToken token, string? audience)
-    {
-        ArgumentNullException.ThrowIfNull(token);
+    /// <inheritdoc />
+    public JsonWebTokenValidationProfile Profile { get; }
 
-        for (int index = 0; index < token.Audiences.Count; index++)
-        {
-            if (string.Equals(token.Audiences[index], audience, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    /// <inheritdoc />
+    public bool TryValidate(string compactToken, DateTimeOffset now, [NotNullWhen(true)] out JsonWebToken? token)
+        => Es256JsonWebTokenValidation.TryValidate(Profile, compactToken, now, null, out token);
 }

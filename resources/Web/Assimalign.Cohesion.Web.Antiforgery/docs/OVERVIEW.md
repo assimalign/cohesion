@@ -64,7 +64,7 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // One key ring for every protected artifact; point every instance at the same repository.
 IDataProtectionProvider dataProtection = DataProtectionProvider.Create(
-    KeyRepository.CreateFileSystem("/var/lib/app/keys"));
+    FileSystemKeyRepository.Create("/var/lib/app/keys"));
 
 builder.Services.AddRouting();
 builder.Services.AddAntiforgery(antiforgery => antiforgery.UseDataProtection(dataProtection));

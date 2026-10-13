@@ -20,9 +20,10 @@ This assembly is the concrete JOSE/JWT document layer of the IdentityModel token
 | Type | Role |
 | --- | --- |
 | `IJsonWebTokenWriter` | Interface-first compact-JWS writer contract over `JsonWebTokenDescriptor`. |
-| `JsonWebTokenWriter` | Creates an internal ES256 writer bound to a caller-owned NIST P-256 private key and non-empty `kid`. |
+| `JsonWebTokenWriter` | Public sealed ES256 writer created through `CreateEs256`, bound to a caller-owned NIST P-256 private key and non-empty `kid`. |
 | `IJsonWebTokenSignatureVerifier` | Raw asymmetric signature seam: algorithm/key-id selection plus verification over decoded octets. |
-| `JsonWebTokenSignatureVerifier` | Creates internal RSA (`RS*`/`PS*`) and named-curve ECDSA (`ES*`) verifiers. |
+| `RsaJsonWebTokenSignatureVerifier` | Public sealed RSA (`RS*`/`PS*`) verifier created through `Create`. |
+| `EcdsaJsonWebTokenSignatureVerifier` | Public sealed named-curve ECDSA (`ES*`) verifier created through `Create`. |
 
 ### Public keys and verify-and-validate
 
@@ -31,7 +32,7 @@ This assembly is the concrete JOSE/JWT document layer of the IdentityModel token
 | `JsonWebKey` | Structural public JWK (`kty`, `crv`, `x`, `y`, `n`, `e`, `kid`, `alg`, `use`): `TryParse` from UTF-8 JSON or a `JsonElement`, RFC 7638 `ComputeThumbprint` (EC and RSA), caller-owned `CreateECDsa`, the lenient `TryValidateEcdsaVerificationKey` verification-key rule, and the strict `TryValidateEs256SigningKey` trusted-issuer profile. |
 | `JsonWebKeySet` | An issuer's keys in lookup order; `Find(kid)` selects by exact `kid` and never matches a missing one. |
 | `IJsonWebTokenValidator` | Verifies a compact token's signature against its issuer's trusted keys and applies the profile rules; every failure is the same `false`. |
-| `JsonWebTokenValidator` | Creates the ES256 validator and evaluates `HasAudience`, the audience rule profiles leave to callers. |
+| `JsonWebTokenValidator` | Public sealed ES256 validator created through `CreateEs256`; audience checks remain the caller's responsibility. |
 | `JsonWebTokenValidationProfile` | Issuer-to-key-set resolver (or one issuer and set), lifetime ceiling, clock skew, and subject rule. |
 
 ### JOSE header
@@ -112,7 +113,7 @@ using System.Text;
 if (JsonWebToken.TryParse(compact, out var token) && token?.Parts is { } parts)
 {
     IJsonWebTokenSignatureVerifier verifier =
-        JsonWebTokenSignatureVerifier.CreateEcdsa(verificationKey, "bootstrap-key-1");
+        EcdsaJsonWebTokenSignatureVerifier.Create(verificationKey, "bootstrap-key-1");
     byte[] signingInput = Encoding.ASCII.GetBytes(parts.SigningInput);
     byte[] signature = Base64Url.DecodeFromChars(parts.Signature);
     bool authentic = verifier.CanVerify(token.Algorithm!, token.Header.KeyId) &&
@@ -136,7 +137,7 @@ IJsonWebTokenValidator validator = JsonWebTokenValidator.CreateEs256(
 
 if (validator.TryValidate(compact, DateTimeOffset.UtcNow, out JsonWebToken? verified))
 {
-    bool forThisResource = JsonWebTokenValidator.HasAudience(verified, "secret-store");
+    bool forThisResource = verified.HasAudience("secret-store");
 }
 ```
 

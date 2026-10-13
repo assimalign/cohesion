@@ -16,7 +16,8 @@ takes the neutral token base (`…Token`) to OIDC-grade JWT document fidelity:
 - **Writing** — `JsonWebTokenWriter.CreateEs256`: compact JWS creation over the existing
   `JsonWebTokenDescriptor`, with `alg`/`kid` headers, registered-claim helpers, NIST P-256
   curve binding, and IEEE P1363 signatures produced by `ECDsa.SignData`.
-- **Signature verification** — `JsonWebTokenSignatureVerifier.CreateEcdsa/CreateRsa`: reusable,
+- **Signature verification** — `EcdsaJsonWebTokenSignatureVerifier.Create` and
+  `RsaJsonWebTokenSignatureVerifier.Create`: reusable,
   key-bound ECDSA (`ES*`) and RSA (`RS*`/`PS*`) verification over the exact compact signing input.
 - **Public keys** — `JsonWebKey` (`TryParse` from UTF-8 JSON, RFC 7638 `ComputeThumbprint`,
   `CreateECDsa`, the lenient `TryValidateEcdsaVerificationKey` rule, and the strict
@@ -25,7 +26,7 @@ takes the neutral token base (`…Token`) to OIDC-grade JWT document fidelity:
 - **Verify-and-validate** — `JsonWebTokenValidator.CreateEs256(JsonWebTokenValidationProfile)`:
   one ES256 call that resolves the issuer's key set, selects the key by `kid`, verifies the
   signature, and applies the required-claim, temporal, lifetime, and subject rules the Cohesion
-  resource and gateway credential verifiers share; `HasAudience` leaves the 401/403 audience
+  resource and gateway credential verifiers share; `token.HasAudience(...)` in IdentityModel.Token leaves the 401/403 audience
   decision to the caller.
 - **Validation** — `JsonWebToken.Validate(JsonWebTokenValidationOptions)`: algorithm presence /
   `none` rejection (RFC 8725) / allowed-set membership, required-claim presence, `b64`/`crit`
@@ -33,6 +34,10 @@ takes the neutral token base (`…Token`) to OIDC-grade JWT document fidelity:
   §3.3.2.11), composing the neutral issuer/audience/temporal base rules.
 - **Constants** — `JoseAlgorithms`, `JoseHeaderParameterNames`, `JsonWebTokenClaimTypes`,
   `JsonWebTokenValidationCodes`.
+
+The writer, validator and asymmetric verifiers are public sealed implementations; their creation
+methods return the concrete type, and constructors are private. Consumers can continue to depend
+on the corresponding interfaces.
 
 ## Status
 

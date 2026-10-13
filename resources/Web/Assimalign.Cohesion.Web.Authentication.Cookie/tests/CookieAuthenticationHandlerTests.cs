@@ -29,7 +29,7 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
     public CookieAuthenticationHandlerTests()
     {
         _keysDirectory = Path.Combine(Path.GetTempPath(), "cohesion-cookie-tests", Guid.NewGuid().ToString("N"));
-        IDataProtectionProvider provider = DataProtectionProvider.Create(KeyRepository.CreateFileSystem(_keysDirectory));
+        IDataProtectionProvider provider = DataProtectionProvider.Create(FileSystemKeyRepository.Create(_keysDirectory));
         _protector = provider.CreateProtector("cookie-tests");
     }
 
