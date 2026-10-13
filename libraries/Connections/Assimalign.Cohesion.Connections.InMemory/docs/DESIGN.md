@@ -160,8 +160,8 @@ The parent root accepts coded aborts in the same 62-bit
 range as streams; the first abort or disposal decides the pair close and notifies both ends as
 described above.
 
-The stream return types change from `ValueTask<IDuplexConnection>` to `ValueTask<IMultiplexedConnectionStream>`
-(and from `ValueTask<DuplexConnection>` to `ValueTask<MultiplexedConnectionStream>` on guided bases). Together
+The stream return types change from `ValueTask<IConnection>` to `ValueTask<IMultiplexedConnectionStream>`
+(and from `ValueTask<Connection>` to `ValueTask<MultiplexedConnectionStream>` on guided bases). Together
 with the required coded connection abort, these break preview.1 binaries and external implementers,
 accepted during previews on decisions 15 and 56. Awaited streams can still be assigned to
 `IDuplexConnection`. Stream reset and completion members are new; the removed optional contracts
