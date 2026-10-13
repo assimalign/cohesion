@@ -153,7 +153,7 @@ public readonly struct HttpAcceptQuery : IEquatable<HttpAcceptQuery>
     {
         if (!TryParse(input, out HttpAcceptQuery result))
         {
-            throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidAcceptQueryField, input.ToString()));
+            throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AcceptQueryFieldInvalid, input.ToString()));
         }
         return result;
     }
@@ -236,7 +236,7 @@ public readonly struct HttpAcceptQuery : IEquatable<HttpAcceptQuery>
         }
         catch (ArgumentException)
         {
-            throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MediaRangeCannotBeEncodedAsAnAcceptQueryMember, rangeText));
+            throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AcceptQueryMediaRangeInvalid, rangeText));
         }
 
         IReadOnlyList<HttpMediaTypeParameter> parameters = mediaRange.Parameters;
@@ -251,7 +251,7 @@ public readonly struct HttpAcceptQuery : IEquatable<HttpAcceptQuery>
             HttpMediaTypeParameter parameter = parameters[i];
             if (!StructuredFieldGrammar.IsValidKey(parameter.Name))
             {
-                throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MediaTypeParameterNameIsNotAValidAcceptQueryStructuredField, parameter.Name));
+                throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AcceptQueryParameterNameInvalid, parameter.Name));
             }
             pairs[i] = new KeyValuePair<string, StructuredFieldBareItem>(parameter.Name, StructuredFieldBareItem.FromString(parameter.Value));
         }

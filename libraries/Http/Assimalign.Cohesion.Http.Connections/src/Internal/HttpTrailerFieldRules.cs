@@ -50,26 +50,26 @@ internal static class HttpTrailerFieldRules
     {
         if (key.IsEmpty)
         {
-            throw new ArgumentException(ErrorMessages.TrailerFieldNameCannotBeEmpty, nameof(key));
+            throw new ArgumentException(ErrorMessages.TrailerFieldNameEmpty, nameof(key));
         }
 
         if (key.Value[0] == ':')
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.IsAPseudoHeaderFieldAndATrailerSectionCarriesNoneRfc, key.Value),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerPseudoHeaderNotSupported, key.Value),
                 nameof(key));
         }
 
         if (!HttpFieldNormalization.IsValidFieldName(key.Value))
         {
             // Not quoted: whatever makes the name invalid may be CR, LF, or NUL.
-            throw new ArgumentException(ErrorMessages.TrailerFieldNameMustBeATokenRfc911051, nameof(key));
+            throw new ArgumentException(ErrorMessages.TrailerFieldNameInvalid, nameof(key));
         }
 
         if (IsExcluded(key))
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.FieldCannotBeSentInATrailerSectionRfc911065, key.Value),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerFieldNotSupported, key.Value),
                 nameof(key));
         }
 
@@ -80,7 +80,7 @@ internal static class HttpTrailerFieldRules
             if (invalid >= 0)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheTrailerFieldHoldsTheControlCharacter0xAField, key.Value, (int)element![invalid]),
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerFieldValueControlCharacter, key.Value, (int)element![invalid]),
                     nameof(value));
             }
         }
@@ -106,13 +106,13 @@ internal static class HttpTrailerFieldRules
         {
             if (name.Length == 0)
             {
-                throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionContainsAZeroLengthFieldName, protocol));
+                throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReceivedTrailerFieldNameEmpty, protocol));
             }
 
             if (name[0] == ':')
             {
                 throw new InvalidDataException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionContainsThePseudoHeaderFieldATrailerSectionCarriesNone, protocol, HttpReceivedFieldRules.DescribeName(name)));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReceivedTrailerPseudoHeaderNotSupported, protocol, HttpReceivedFieldRules.DescribeName(name)));
             }
 
             // The field syntax a head's fields follow (#1376): a lowercase token name, and a value with
@@ -151,7 +151,7 @@ internal static class HttpTrailerFieldRules
         if (IsExcluded(key))
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionContainsTheFieldWhichATrailerSectionCannotCarryRfc, protocol, key.Value));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReceivedTrailerFieldNotSupported, protocol, key.Value));
         }
     }
 

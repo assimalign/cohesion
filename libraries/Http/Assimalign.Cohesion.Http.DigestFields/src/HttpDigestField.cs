@@ -135,7 +135,7 @@ public readonly struct HttpDigestField
 
         if (dictionary.Count == 0)
         {
-            error = ErrorMessages.DigestFieldRequiresAlgorithmEntry;
+            error = ErrorMessages.DigestFieldEntryRequired;
             return false;
         }
 
@@ -145,7 +145,7 @@ public readonly struct HttpDigestField
             StructuredFieldMember value = member.Value;
             if (value.IsInnerList || value.Item.Value.Type != StructuredFieldType.ByteSequence)
             {
-                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestFieldMemberMustBeAByteSequenceRfc953023, member.Key);
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestFieldMemberTypeInvalid, member.Key);
                 return false;
             }
 
@@ -192,7 +192,7 @@ public readonly struct HttpDigestField
         if (!algorithm.IsSupported)
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmCannotBeUsedToGenerateADigestRfc95305, algorithm), nameof(algorithm));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestGenerationAlgorithmNotSupported, algorithm), nameof(algorithm));
         }
 
         var entry = new HttpDigestEntry(algorithm, ComputeHash(algorithm, content));
@@ -212,7 +212,7 @@ public readonly struct HttpDigestField
         ArgumentNullException.ThrowIfNull(algorithms);
         if (algorithms.Length == 0)
         {
-            throw new ArgumentException(ErrorMessages.AtLeastOneAlgorithmIsRequired, nameof(algorithms));
+            throw new ArgumentException(ErrorMessages.DigestAlgorithmRequired, nameof(algorithms));
         }
 
         var entries = new HttpDigestEntry[algorithms.Length];
@@ -222,7 +222,7 @@ public readonly struct HttpDigestField
             if (!algorithm.IsSupported)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmCannotBeUsedToGenerateADigestRfc95305, algorithm), nameof(algorithms));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestGenerationAlgorithmNotSupported, algorithm), nameof(algorithms));
             }
             entries[i] = new HttpDigestEntry(algorithm, ComputeHash(algorithm, content));
         }
@@ -249,7 +249,7 @@ public readonly struct HttpDigestField
         ArgumentNullException.ThrowIfNull(algorithms);
         if (algorithms.Length == 0)
         {
-            throw new ArgumentException(ErrorMessages.AtLeastOneAlgorithmIsRequired, nameof(algorithms));
+            throw new ArgumentException(ErrorMessages.DigestAlgorithmRequired, nameof(algorithms));
         }
 
         using var digester = new HttpContentDigester(algorithms);

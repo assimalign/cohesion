@@ -40,7 +40,7 @@ internal sealed class UrlDecoder
     {
         if (destination.Length < source.Length)
         {
-            throw new ArgumentException(ErrorMessages.LengthOfTheDestinationByteSpanIsLessThanTheSource, "destination");
+            throw new ArgumentException(ErrorMessages.DestinationByteSpanTooShort, "destination");
         }
         source.CopyTo(destination);
         return DecodeInPlace(destination.Slice(0, source.Length), isFormEncoding);
@@ -82,7 +82,7 @@ internal sealed class UrlDecoder
         }
         if (num == 0)
         {
-            throw new InvalidOperationException(ErrorMessages.PathContainsNullCharacters);
+            throw new InvalidOperationException(ErrorMessages.PathNullCharacter);
         }
         if (num <= 127)
         {
@@ -319,7 +319,7 @@ internal sealed class UrlDecoder
         }
         if (num == 0)
         {
-            throw new InvalidOperationException(ErrorMessages.PathContainsNullCharacters);
+            throw new InvalidOperationException(ErrorMessages.PathNullCharacter);
         }
         if (num <= 127)
         {

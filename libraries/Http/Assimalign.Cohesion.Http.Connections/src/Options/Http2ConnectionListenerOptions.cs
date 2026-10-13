@@ -212,7 +212,7 @@ public sealed class Http2ConnectionListenerOptions
             {
                 if (value <= TimeSpan.Zero)
                 {
-                    throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.FloodDetectionWindowMustBeAPositiveDuration);
+                    throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.FloodDetectionWindowInvalid);
                 }
 
                 _floodDetectionWindow = value;

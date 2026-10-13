@@ -91,7 +91,7 @@ public readonly struct HttpForwardedElementCollection : IReadOnlyList<HttpForwar
     {
         if (!TryParse(value, out HttpForwardedElementCollection result))
         {
-            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidForwardedHeader, value.ToString()));
+            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardedHeaderInvalid, value.ToString()));
         }
         return result;
     }

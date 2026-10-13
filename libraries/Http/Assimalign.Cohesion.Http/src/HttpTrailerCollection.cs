@@ -107,7 +107,7 @@ public sealed class HttpTrailerCollection : IHttpTrailerCollection
         if (!IsSupported)
         {
             throw new InvalidOperationException(
-                ErrorMessages.ThisExchangeDoesNotSupportATrailerSectionSoTrailersCannotBe);
+                ErrorMessages.TrailersNotSupported);
         }
     }
 }

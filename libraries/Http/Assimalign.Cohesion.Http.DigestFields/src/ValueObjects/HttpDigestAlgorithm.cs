@@ -126,7 +126,7 @@ public readonly struct HttpDigestAlgorithm : IEquatable<HttpDigestAlgorithm>
         if (!_supported)
         {
             throw new NotSupportedException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmIsNotSupportedForComputationOrValidationRfc95305, _key ?? ErrorMessages.UnregisteredDigestAlgorithm));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmNotSupported, _key ?? ErrorMessages.UnregisteredDigestAlgorithm));
         }
 
         return IncrementalHash.CreateHash(_hashName);

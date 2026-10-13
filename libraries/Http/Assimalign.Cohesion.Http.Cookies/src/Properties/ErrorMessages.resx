@@ -117,16 +117,16 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="CookieDomainAttributeIsNotAnRfc6265DomainValueItMust" xml:space="preserve">
+  <data name="CookieDomainInvalid" xml:space="preserve">
     <value>The cookie Domain attribute is not an RFC 6265 domain-value: it must be dot-separated labels of letters, digits, and hyphens (an optional leading dot is ignored), with no &apos;;&apos;, whitespace, or control characters. Write an internationalized name in its &apos;xn--&apos; form.</value>
   </data>
-  <data name="CookieNameIsNotAValidRfc6265TokenItMustBe" xml:space="preserve">
+  <data name="CookieNameInvalid" xml:space="preserve">
     <value>Cookie name is not a valid RFC 6265 token: it must be non-empty and contain only token characters (no control characters, whitespace, or separators such as &apos;=&apos;, &apos;;&apos;, or &apos;,&apos;).</value>
   </data>
-  <data name="CookiePathAttributeIsNotAnRfc6265PathValueItMust" xml:space="preserve">
+  <data name="CookiePathInvalid" xml:space="preserve">
     <value>The cookie Path attribute is not an RFC 6265 path-value: it must be US-ASCII with no &apos;;&apos; and no control characters. Percent-encode any other character.</value>
   </data>
-  <data name="CookieValueContainsCharactersOutsideTheRfc6265CookieOctetGrammarControl" xml:space="preserve">
+  <data name="CookieValueInvalid" xml:space="preserve">
     <value>Cookie value contains characters outside the RFC 6265 cookie-octet grammar. Control characters (including CR/LF), whitespace, DQUOTE, comma, semicolon, and backslash are forbidden so the value cannot split or corrupt the Set-Cookie header line; percent- or base64-encode such values first.</value>
   </data>
 </root>

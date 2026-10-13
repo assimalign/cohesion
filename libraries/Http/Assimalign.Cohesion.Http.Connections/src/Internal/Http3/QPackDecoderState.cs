@@ -188,7 +188,7 @@ internal sealed class QPackDecoderState
                             // to (RFC 9204 §2.1.2) — a connection error.
                             throw new QPackException(
                                 Http3ErrorCode.QPackDecompressionFailed,
-                                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackFieldSectionWouldBlockMoreThanThePermittedStreamS, _maxBlockedStreams));
+                                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackBlockedStreamLimitExceeded, _maxBlockedStreams));
                         }
 
                         _blockedStreams++;

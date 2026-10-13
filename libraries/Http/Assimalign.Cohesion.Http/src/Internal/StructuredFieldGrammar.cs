@@ -111,7 +111,7 @@ internal static class StructuredFieldGrammar
         decimal integerDecimal = decimal.Truncate(abs);
         if (integerDecimal >= 1_000_000_000_000m)
         {
-            throw new HttpInvalidStructuredFieldException(ErrorMessages.DecimalIntegerComponentExceedsTheRfc9651LimitOf12Digits);
+            throw new HttpInvalidStructuredFieldException(ErrorMessages.DecimalIntegerLimitExceeded);
         }
 
         long integerPart = (long)integerDecimal;
@@ -156,7 +156,7 @@ internal static class StructuredFieldGrammar
         {
             if (c < ' ' || c > '~')
             {
-                throw new HttpInvalidStructuredFieldException(ErrorMessages.StringContainsACharacterOutsideThePrintableAsciiRangeX207E);
+                throw new HttpInvalidStructuredFieldException(ErrorMessages.StringAsciiCharactersInvalid);
             }
             if (c == '"' || c == '\\')
             {
@@ -195,7 +195,7 @@ internal static class StructuredFieldGrammar
         }
         catch (EncoderFallbackException)
         {
-            throw new HttpInvalidStructuredFieldException(ErrorMessages.DisplayStringContainsAnUnpairedSurrogateAndCannotBeEncodedAsUtf);
+            throw new HttpInvalidStructuredFieldException(ErrorMessages.DisplayStringSurrogateUnpaired);
         }
 
         builder.Append('%').Append('"');

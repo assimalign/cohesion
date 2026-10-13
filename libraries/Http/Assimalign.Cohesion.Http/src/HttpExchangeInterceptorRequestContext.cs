@@ -160,12 +160,12 @@ public sealed class HttpExchangeInterceptorRequestContext
             if (IsMaxRequestBodySizeReadOnly)
             {
                 throw new InvalidOperationException(
-                    ErrorMessages.MaximumRequestBodySizeCannotBeModifiedAfterTheTransportHasStarted);
+                    ErrorMessages.RequestBodySizeLimitReadOnly);
             }
 
             if (value is < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.MaximumRequestBodySizeMustBeNonNegativeOrNullUnbounded);
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.RequestBodySizeLimitInvalid);
             }
 
             _maxRequestBodySize = value;
@@ -221,7 +221,7 @@ public sealed class HttpExchangeInterceptorRequestContext
             if (IsMinRequestBodyDataRateReadOnly)
             {
                 throw new InvalidOperationException(
-                    ErrorMessages.MinimumRequestBodyDataRateCannotBeModifiedAfterTheTransportHas);
+                    ErrorMessages.RequestBodyDataRateReadOnly);
             }
 
             _minRequestBodyDataRate = value;
@@ -277,7 +277,7 @@ public sealed class HttpExchangeInterceptorRequestContext
             if (IsMinResponseDataRateReadOnly)
             {
                 throw new InvalidOperationException(
-                    ErrorMessages.MinimumResponseDataRateCannotBeModifiedAfterTheTransportHasStarted);
+                    ErrorMessages.ResponseDataRateReadOnly);
             }
 
             _minResponseDataRate = value;

@@ -288,6 +288,9 @@ Transport integration tests consume duplex byte pipes through `IDuplexConnection
 
 ## Exception message resources (#1467)
 
+Resource keys name the failure with a short PascalCase noun phrase, at most 40 characters
+(#1471). These internal names are independent of the preserved message text and placeholders.
+
 Exception diagnostics live in `src/Properties/ErrorMessages.resx`. The shared build targets
 use MSBuild strongly typed resource generation to produce an internal `ErrorMessages` class
 in this assembly's `RootNamespace`, under the intermediate output directory. No designer source

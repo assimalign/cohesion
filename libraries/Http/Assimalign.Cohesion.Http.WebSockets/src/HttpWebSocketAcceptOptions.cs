@@ -105,7 +105,7 @@ public sealed class HttpWebSocketAcceptOptions
                 throw new ArgumentOutOfRangeException(
                     nameof(ServerMaxWindowBits),
                     value,
-                    ErrorMessages.ServerSMaximumWindowSizeMustBeFrom9To15Bits);
+                    ErrorMessages.ServerWindowSizeInvalid);
             }
 
             _serverMaxWindowBits = value;
@@ -119,7 +119,7 @@ public sealed class HttpWebSocketAcceptOptions
             throw new ArgumentOutOfRangeException(
                 propertyName,
                 interval,
-                ErrorMessages.IntervalMustBeZeroOrPositiveOrTimeoutInfiniteTimeSpan);
+                ErrorMessages.IntervalInvalid);
         }
 
         return value;

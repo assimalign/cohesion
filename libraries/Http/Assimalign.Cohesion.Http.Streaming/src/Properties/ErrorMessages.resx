@@ -117,10 +117,10 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="ResponseStreamingIsNotEnabledForThisExchangeRegisterHttpResponseStreamingInterceptorCreateOn" xml:space="preserve">
+  <data name="StreamingNotEnabled" xml:space="preserve">
     <value>Response streaming is not enabled for this exchange. Register HttpResponseStreamingInterceptor.Create() on the transport&apos;s Interceptors list.</value>
   </data>
-  <data name="StreamingResponseHasAlreadyBeenCompletedNoFurtherBodyBytesCanBe" xml:space="preserve">
+  <data name="StreamingResponseAlreadyCompleted" xml:space="preserve">
     <value>The streaming response has already been completed; no further body bytes can be written.</value>
   </data>
 </root>

@@ -64,7 +64,7 @@ public abstract class HttpConnectionListenerLimits
         {
             if (value is < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.MaximumRequestBodySizeMustBeNonNegativeOrNullUnbounded);
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.RequestBodySizeLimitInvalid);
             }
 
             _maxRequestBodySize = value;
@@ -267,7 +267,7 @@ public abstract class HttpConnectionListenerLimits
 
         if (value <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.TimeoutMustBePositiveOrTimeoutInfiniteTimeSpan);
+            throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.TimeoutInvalid);
         }
     }
 }

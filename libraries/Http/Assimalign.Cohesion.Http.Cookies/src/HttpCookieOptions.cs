@@ -79,7 +79,7 @@ public sealed class HttpCookieOptions
             if (!string.IsNullOrEmpty(value) && !HttpCookieGrammar.IsValidDomain(value))
             {
                 throw new ArgumentException(
-                    ErrorMessages.CookieDomainAttributeIsNotAnRfc6265DomainValueItMust,
+                    ErrorMessages.CookieDomainInvalid,
                     nameof(Domain));
             }
 
@@ -112,7 +112,7 @@ public sealed class HttpCookieOptions
             if (value is not null && !HttpCookieGrammar.IsValidPath(value))
             {
                 throw new ArgumentException(
-                    ErrorMessages.CookiePathAttributeIsNotAnRfc6265PathValueItMust,
+                    ErrorMessages.CookiePathInvalid,
                     nameof(Path));
             }
 

@@ -117,19 +117,19 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AntiforgeryHmacKeyMustNotBeEmpty" xml:space="preserve">
+  <data name="AntiforgeryHmacKeyEmpty" xml:space="preserve">
     <value>The antiforgery HMAC key must not be empty.</value>
   </data>
-  <data name="HttpAntiforgeryOptionsCookieNameMustBeANonEmptyRfc6265TokenWithNo" xml:space="preserve">
+  <data name="CookieNameInvalid" xml:space="preserve">
     <value>HttpAntiforgeryOptions.CookieName must be a non-empty RFC 6265 token with no control characters, whitespace, or separators.</value>
   </data>
-  <data name="HttpAntiforgeryOptionsCookiePathIsNotAnRfc6265PathValueItMustBe" xml:space="preserve">
+  <data name="CookiePathInvalid" xml:space="preserve">
     <value>HttpAntiforgeryOptions.CookiePath is not an RFC 6265 path-value: it must be US-ASCII with no &apos;;&apos; and no control characters. Percent-encode any other character.</value>
   </data>
-  <data name="NoIHttpAntiforgeryFeatureHasBeenAttachedToTheHttpContextAssignAntiforgeryBefore" xml:space="preserve">
+  <data name="AntiforgeryFeatureMissing" xml:space="preserve">
     <value>No IHttpAntiforgeryFeature has been attached to the HTTP context. Assign Antiforgery before requiring it.</value>
   </data>
-  <data name="RequiredAntiforgeryTokenWasMissingOrInvalid" xml:space="preserve">
+  <data name="AntiforgeryTokenMissingOrInvalid" xml:space="preserve">
     <value>The required antiforgery token was missing or invalid.</value>
   </data>
 </root>

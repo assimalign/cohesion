@@ -130,7 +130,7 @@ internal sealed class HttpMultipartFormReaderStream : Stream
 
         if (LengthLimit is long cap && _observedLength > cap)
         {
-            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionBodyExceededTheByteLimit, cap);
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionBodyTooLarge, cap);
             throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartBodyLength, message));
         }
 

@@ -377,7 +377,7 @@ internal static partial class HPackEncoder
                 // guard; Latin1 accepts the full 0-255 octet range.
                 if (valueEncoding is null && (character & 0xFF80) != 0)
                 {
-                    throw new InvalidOperationException(ErrorMessages.OnlyAsciiHpackLiteralsAreCurrentlySupported);
+                    throw new InvalidOperationException(ErrorMessages.HpackNonAsciiLiteralNotSupported);
                 }
 
                 octets[index] = (byte)character;

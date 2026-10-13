@@ -707,7 +707,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     {
         if (context is not Http2Context http2Context)
         {
-            throw new InvalidOperationException(ErrorMessages.SuppliedContextDoesNotBelongToAnHttp2Connection);
+            throw new InvalidOperationException(ErrorMessages.Http2ContextMismatch);
         }
 
         Http2Stream stream = http2Context.Stream;
@@ -1040,7 +1040,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             await EmitGoAwayAsync(Http2ErrorCode.ProtocolError, cancellationToken).ConfigureAwait(false);
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                ErrorMessages.Http2ConnectionPrefaceDidNotMatchTheExpectedSequence);
+                ErrorMessages.Http2ConnectionPrefaceInvalid);
         }
 
         // RFC 9113 §3.4 + §6.5 — immediately after sending or receiving
@@ -1075,14 +1075,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExpectedTheHttp2ClientSettingsFrameAsTheFirstFrameAfterThe, receivedFrame.Frame.Type));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2InitialFrameInvalid, receivedFrame.Frame.Type));
         }
 
         if (_continuationStreamId.HasValue && receivedFrame.Frame.Type != Http2FrameType.Continuation)
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                ErrorMessages.ExpectedAnHttp2ContinuationFrameBeforeReceivingAnotherFrameType);
+                ErrorMessages.Http2ContinuationMissing);
         }
 
         switch (receivedFrame.Frame.Type)
@@ -1122,7 +1122,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 // silently ignored.
                 throw new Http2ConnectionException(
                     Http2ErrorCode.ProtocolError,
-                    ErrorMessages.PushPromiseReceivedFromTheClientHttp2ServersDoNotAcceptPushed);
+                    ErrorMessages.Http2ClientPushNotSupported);
             default:
                 // RFC 9113 §5.1 — frame types the endpoint does not recognise
                 // MUST be ignored. PRIORITY (0x2, deprecated) and any unknown
@@ -1140,7 +1140,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2GoawayReceivedOnStreamGoawayMustUseStream0, receivedFrame.Frame.StreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2GoawayStreamIdInvalid, receivedFrame.Frame.StreamId));
         }
 
         // The frame reader has already parsed last-stream-id + error code
@@ -1169,7 +1169,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PriorityUpdateReceivedOnStreamPriorityUpdateMustUseStream0, receivedFrame.Frame.StreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PriorityUpdateStreamIdInvalid, receivedFrame.Frame.StreamId));
         }
 
         int prioritizedStreamId = receivedFrame.Frame.PriorityUpdatePrioritizedStreamId;
@@ -1181,7 +1181,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PriorityUpdateReferencedInvalidPrioritizedStream, prioritizedStreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PrioritizedStreamIdInvalid, prioritizedStreamId));
         }
 
         // RFC 9218 §7.1 — a Priority Field Value that cannot be parsed leaves the
@@ -1239,7 +1239,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.FrameSizeError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2WindowUpdateFramePayloadMustBe4OctetsGot, receivedFrame.Frame.PayloadLength));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2WindowUpdatePayloadLengthInvalid, receivedFrame.Frame.PayloadLength));
         }
 
         int increment = receivedFrame.Frame.WindowUpdateSizeIncrement;
@@ -1251,7 +1251,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.ProtocolError,
-                    ErrorMessages.Http2WindowUpdateOnStream0WithIncrement0);
+                    ErrorMessages.Http2ConnectionWindowIncrementZero);
             }
 
             // Connection-level credit. Overflow → FLOW_CONTROL_ERROR
@@ -1263,7 +1263,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 {
                     throw new Http2ConnectionException(
                         Http2ErrorCode.FlowControlError,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ConnectionLevelSendWindowWouldExceedAfterWindowUpdate, Http2FlowControlWindow.MaxValue));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ConnectionSendWindowOverflow, Http2FlowControlWindow.MaxValue));
                 }
 
                 _connectionSendCreditAt = _timeProvider.GetTimestamp();
@@ -1304,7 +1304,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 throw new Http2StreamException(
                     receivedFrame.Frame.StreamId,
                     Http2ErrorCode.ProtocolError,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2WindowUpdateOnStreamWithIncrement0, receivedFrame.Frame.StreamId));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamWindowIncrementZero, receivedFrame.Frame.StreamId));
             }
 
             if (!stream.SendWindow.TryReplenish(increment))
@@ -1312,7 +1312,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 throw new Http2StreamException(
                     receivedFrame.Frame.StreamId,
                     Http2ErrorCode.FlowControlError,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamSendWindowWouldExceedAfterWindowUpdate, receivedFrame.Frame.StreamId, Http2FlowControlWindow.MaxValue));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamSendWindowOverflow, receivedFrame.Frame.StreamId, Http2FlowControlWindow.MaxValue));
             }
 
             SignalSendWindowReplenished();
@@ -1406,7 +1406,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 if (_sendCreditClosed)
                 {
                     throw new IOException(
-                        ErrorMessages.Http2ConnectionTerminatedWhileAResponseWasAwaitingSendWindowCredit);
+                        ErrorMessages.Http2SendWindowConnectionClosed);
                 }
 
                 signal = _sendWindowSignal.Task;
@@ -1625,7 +1625,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                ErrorMessages.Http2RstStreamFrameReceivedOnStream0);
+                ErrorMessages.Http2ResetStreamIdZero);
         }
 
         // CVE-2023-44487 (HTTP/2 Rapid Reset) — a client opening a stream and immediately
@@ -1640,7 +1640,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.EnhanceYourCalm,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamResetsExceededTheConnectionFloodLimitOfPerWindowRapid, _http2Limits.MaxResetStreamsPerWindow));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ResetFlood, _http2Limits.MaxResetStreamsPerWindow));
         }
 
         // Remove-and-reclaim: the peer is abandoning the stream, so its buffered
@@ -1664,7 +1664,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // RFC 9113 §6.4.
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RstStreamReceivedForIdleStream, receivedFrame.Frame.StreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ResetOnUnopenedStream, receivedFrame.Frame.StreamId));
         }
 
         if (_continuationStreamId == receivedFrame.Frame.StreamId)
@@ -1687,14 +1687,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                ErrorMessages.Http2StreamBearingFrameReceivedOnStream0);
+                ErrorMessages.Http2FrameStreamIdZero);
         }
 
         if ((streamId & 1) == 0)
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ClientInitiatedStreamIdMustBeOdd, streamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ClientStreamIdEven, streamId));
         }
 
         // Re-using a stream id is legal if the stream is still tracked
@@ -1707,7 +1707,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamIdIsLowerThanTheHighestPreviouslySeenClientInitiated, streamId, _lastInboundStreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamIdNotIncreasing, streamId, _lastInboundStreamId));
         }
     }
 
@@ -1718,7 +1718,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsFrameReceivedOnStreamSettingsFramesMustUseStream0, receivedFrame.Frame.StreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2SettingsStreamIdInvalid, receivedFrame.Frame.StreamId));
         }
 
         // CVE-class defence — a peer that streams SETTINGS frames forces repeated re-parsing and
@@ -1728,7 +1728,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.EnhanceYourCalm,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2SettingsFramesExceededTheConnectionFloodLimitOfPerWindow, _http2Limits.MaxSettingsFramesPerWindow));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2SettingsFlood, _http2Limits.MaxSettingsFramesPerWindow));
         }
 
         if (receivedFrame.Frame.SettingsAck)
@@ -1740,7 +1740,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.FrameSizeError,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsAckFrameMustHaveAnEmptyPayloadButReceivedOctets, receivedFrame.Payload.Length));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2SettingsAckPayloadNotEmpty, receivedFrame.Payload.Length));
             }
 
             return;
@@ -1753,7 +1753,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.FrameSizeError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsFramePayloadOfOctetsIsNotAMultipleOf, receivedFrame.Payload.Length, Http2FrameReader.SettingSize));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2SettingsPayloadMisaligned, receivedFrame.Payload.Length, Http2FrameReader.SettingSize));
         }
 
         // Validate every parameter before applying any. RFC 9113 §6.5.2
@@ -1767,7 +1767,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             (Http2ErrorCode errorCode, string? message) = Http2ConnectionSettings.Validate(setting);
             if (errorCode != Http2ErrorCode.NoError)
             {
-                throw new Http2ConnectionException(errorCode, message ?? string.Format(CultureInfo.CurrentCulture, ErrorMessages.InvalidHttp2SettingsValueFor, setting.Parameter));
+                throw new Http2ConnectionException(errorCode, message ?? string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2SettingInvalid, setting.Parameter));
             }
         }
 
@@ -1794,7 +1794,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.FlowControlError,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsInitialWindowSizeDeltaIsOutsideTheLegalRange, delta));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2InitialWindowDeltaInvalid, delta));
             }
 
             int signedDelta = (int)delta;
@@ -1810,7 +1810,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     {
                         throw new Http2ConnectionException(
                             Http2ErrorCode.FlowControlError,
-                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsInitialWindowSizeChangePushedStreamSendWindowAbove, existingStream.StreamId, Http2FlowControlWindow.MaxValue));
+                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2InitialSendWindowOverflow, existingStream.StreamId, Http2FlowControlWindow.MaxValue));
                     }
                 }
 
@@ -1843,7 +1843,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                ErrorMessages.Http2ClientSettingsFrameMustBeReceivedBeforeHeaders);
+                ErrorMessages.Http2InitialSettingsMissing);
         }
 
         Http2Frame frame = receivedFrame.Frame;
@@ -1855,7 +1855,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2HeadersFrameOnStreamDeclaresPaddingOctetsMoreThanTheLeft, frame.StreamId, frame.HeadersPadLength, receivedFrame.Payload.Length));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2HeadersPaddingInvalid, frame.StreamId, frame.HeadersPadLength, receivedFrame.Payload.Length));
         }
 
         ReadOnlyMemory<byte> fragment = receivedFrame.Payload.AsMemory(0, receivedFrame.Payload.Length - frame.HeadersPadLength);
@@ -1930,7 +1930,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     refusal = new Http2StreamException(
                         frame.StreamId,
                         Http2ErrorCode.RefusedStream,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamRefusedServerIsClosingTheConnection, frame.StreamId));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ConnectionClosing, frame.StreamId));
                 }
                 // RFC 9113 §5.1.2 — endpoints MUST NOT exceed
                 // SETTINGS_MAX_CONCURRENT_STREAMS. We advertise this in our
@@ -1943,7 +1943,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     refusal = new Http2StreamException(
                         frame.StreamId,
                         Http2ErrorCode.RefusedStream,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamRefusedServerSSettingsMaxConcurrentStreamsReachedCountingReset, frame.StreamId, _localSettings.MaxConcurrentStreams));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ConcurrentStreamLimitExceeded, frame.StreamId, _localSettings.MaxConcurrentStreams));
                 }
 
                 // RFC 9113 §5.1.1 — the peer has used the id even when the stream is refused, so the
@@ -1974,7 +1974,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                ErrorMessages.Http2ContinuationFrameDidNotMatchTheActiveHeaderBlockStream);
+                ErrorMessages.Http2ContinuationStreamMismatch);
         }
 
         if (_discardedHeaderBlock is not null)
@@ -1990,7 +1990,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         // decoded.
         Http2Stream stream = _continuationStream ?? throw new Http2ConnectionException(
             Http2ErrorCode.ProtocolError,
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ContinuationFrameReceivedOnUnknownStream, receivedFrame.Frame.StreamId));
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ContinuationStreamUnknown, receivedFrame.Frame.StreamId));
 
         stream.ReceiveContinuation(receivedFrame.Payload, receivedFrame.Frame.HeadersEndHeaders);
 
@@ -2041,7 +2041,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.EnhanceYourCalm,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2HeaderBlockOnStreamExceededTheMaximumOfOctetsContinuationFlood, streamId, _http2Limits.MaxRequestHeaderListSize));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2HeaderBlockTooLarge, streamId, _http2Limits.MaxRequestHeaderListSize));
         }
 
         block.Write(payload);
@@ -2084,10 +2084,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         return error is HPackHeaderListSizeExceededException
             ? new Http2ConnectionException(
                 Http2ErrorCode.EnhanceYourCalm,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FieldBlockOnStreamExceededTheMaximumHeaderListSize, streamId, error.Message))
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FieldBlockTooLarge, streamId, error.Message))
             : new Http2ConnectionException(
                 Http2ErrorCode.CompressionError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FieldBlockOnStreamCouldNotBeDecoded, streamId, error.Message));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FieldBlockInvalid, streamId, error.Message));
     }
 
     /// <summary>
@@ -2115,7 +2115,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                ErrorMessages.Http2DataFrameReceivedOnStream0);
+                ErrorMessages.Http2DataStreamIdZero);
         }
 
         // RFC 9113 §6.1 — if the padding length equals the frame payload length
@@ -2126,7 +2126,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataFrameOnStreamDeclaresPaddingOctetsWhichMeetsOrExceeds, receivedFrame.Frame.StreamId, receivedFrame.Frame.DataPadLength));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataPaddingInvalid, receivedFrame.Frame.StreamId, receivedFrame.Frame.DataPadLength));
         }
 
         // RFC 9113 §5.2.2 / §6.9.1 — the DATA frame's *full payload length*
@@ -2146,7 +2146,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.FlowControlError,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataFrameOfOctetsExceededTheConnectionLevelReceiveWindow, flowControlLength));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ConnectionReceiveWindowExceeded, flowControlLength));
             }
 
             TrackReceiveWindowLocked();
@@ -2161,7 +2161,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 {
                     throw new Http2ConnectionException(
                         Http2ErrorCode.ProtocolError,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataFrameReceivedOnIdleStream, receivedFrame.Frame.StreamId));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataOnIdleStream, receivedFrame.Frame.StreamId));
                 }
 
                 recentlyClosed = true;
@@ -2174,7 +2174,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 throw new Http2StreamException(
                     receivedFrame.Frame.StreamId,
                     Http2ErrorCode.FlowControlError,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataFrameOfOctetsExceededTheStreamReceiveWindow, flowControlLength, receivedFrame.Frame.StreamId));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamReceiveWindowExceeded, flowControlLength, receivedFrame.Frame.StreamId));
             }
         }
 
@@ -2206,7 +2206,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             throw new Http2StreamException(
                 receivedFrame.Frame.StreamId,
                 Http2ErrorCode.StreamClosed,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataFrameReceivedOnClosedStream, receivedFrame.Frame.StreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DataOnClosedStream, receivedFrame.Frame.StreamId));
         }
 
         // Deliver the de-padded application data to the stream's body pipe,
@@ -2240,7 +2240,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.FrameSizeError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PingFramePayloadMustBe8OctetsGot, receivedFrame.Frame.PayloadLength));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PingPayloadLengthInvalid, receivedFrame.Frame.PayloadLength));
         }
 
         // RFC 9113 §6.7 — PING is a connection-control frame and MUST be sent on stream 0.
@@ -2248,7 +2248,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PingReceivedOnStreamPingMustUseStream0, receivedFrame.Frame.StreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PingStreamIdInvalid, receivedFrame.Frame.StreamId));
         }
 
         // CVE-class defence — an unbounded PING stream forces a matching flood of PING ACKs
@@ -2257,7 +2257,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.EnhanceYourCalm,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PingFramesExceededTheConnectionFloodLimitOfPerWindow, _http2Limits.MaxPingFramesPerWindow));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PingFlood, _http2Limits.MaxPingFramesPerWindow));
         }
 
         if (receivedFrame.Frame.PingAck)
@@ -2375,7 +2375,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             throw new Http2StreamException(
                 stream.StreamId,
                 Http2ErrorCode.Cancel,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamWasRejectedByARequestParseInterceptorWithStatus, stream.StreamId, rejection.StatusCode));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestParseRejected, stream.StreamId, rejection.StatusCode));
         }
 
         if (context is null)
@@ -3290,7 +3290,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
             if (bytesRead == 0)
             {
-                return offset == 0 ? null : throw new EndOfStreamException(ErrorMessages.Http2StreamEndedBeforeACompleteFrameHeaderWasReceived);
+                return offset == 0 ? null : throw new EndOfStreamException(ErrorMessages.Http2FrameHeaderTruncated);
             }
 
             offset += bytesRead;
@@ -3305,7 +3305,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         if (buffer is null)
         {
-            throw new EndOfStreamException(ErrorMessages.Http2StreamEndedBeforeTheExpectedDataWasReceived);
+            throw new EndOfStreamException(ErrorMessages.Http2FramePayloadTruncated);
         }
 
         return buffer;
@@ -3344,7 +3344,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.FrameSizeError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FramePayloadLengthExceededTheAdvertisedMaximum, payloadLength, maxFrameSize));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2AdvertisedFrameLimitExceeded, payloadLength, maxFrameSize));
         }
 
         byte[] buffer = new byte[Http2FrameReader.HeaderLength + payloadLength];
@@ -3363,7 +3363,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                ErrorMessages.Http2FrameCouldNotBeParsedFromTheBufferedPayload);
+                ErrorMessages.Http2FrameInvalid);
         }
 
         return new ReceivedFrame(frame, payloadSequence.IsEmpty ? Array.Empty<byte>() : payloadSequence.ToArray());

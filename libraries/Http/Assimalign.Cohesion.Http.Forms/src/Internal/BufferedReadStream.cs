@@ -145,7 +145,7 @@ internal sealed class BufferedReadStream : Stream
 
         if (minCount > _buffer.Length)
         {
-            throw new ArgumentOutOfRangeException(nameof(minCount), string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestedLookAheadExceedsBufferSize, minCount, _buffer.Length));
+            throw new ArgumentOutOfRangeException(nameof(minCount), string.Format(CultureInfo.CurrentCulture, ErrorMessages.LookAheadTooLarge, minCount, _buffer.Length));
         }
 
         while (_bufferCount < minCount)
@@ -169,7 +169,7 @@ internal sealed class BufferedReadStream : Stream
 
         if (minCount > _buffer.Length)
         {
-            throw new ArgumentOutOfRangeException(nameof(minCount), string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestedLookAheadExceedsBufferSize, minCount, _buffer.Length));
+            throw new ArgumentOutOfRangeException(nameof(minCount), string.Format(CultureInfo.CurrentCulture, ErrorMessages.LookAheadTooLarge, minCount, _buffer.Length));
         }
 
         while (_bufferCount < minCount)
@@ -209,7 +209,7 @@ internal sealed class BufferedReadStream : Stream
             {
                 if (_bufferCount == 0 && !await EnsureBufferedAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    throw new InvalidDataException(ErrorMessages.EndOfStreamReachedBeforeLineTerminator);
+                    throw new InvalidDataException(ErrorMessages.LineTerminatorMissing);
                 }
 
                 byte b = _buffer[_bufferOffset++];

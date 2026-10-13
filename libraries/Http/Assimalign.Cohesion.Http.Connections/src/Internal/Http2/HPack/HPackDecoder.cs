@@ -98,7 +98,7 @@ internal sealed class HPackDecoder
                 if (fieldLineDecoded)
                 {
                     throw new HPackDecodingException(
-                        ErrorMessages.HpackDynamicTableSizeUpdateFollowedAFieldLineItMustCome);
+                        ErrorMessages.HpackTableSizeUpdateMisplaced);
                 }
 
                 int dynamicTableSize = DecodeInteger(headerBlock, ref index, 5);
@@ -183,7 +183,7 @@ internal sealed class HPackDecoder
         if (_currentHeaderListSize > _maxHeaderListSize)
         {
             throw new HPackHeaderListSizeExceededException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DecodedHttp2HeaderListExceededTheAdvertisedSettingsMaxHeaderListSize, _maxHeaderListSize));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2DecodedHeadersTooLarge, _maxHeaderListSize));
         }
 
         addField(name, value);
@@ -193,7 +193,7 @@ internal sealed class HPackDecoder
     {
         if (index <= 0)
         {
-            throw new HPackDecodingException(ErrorMessages.HpackHeaderIndexMustBeGreaterThanZero);
+            throw new HPackDecodingException(ErrorMessages.HpackHeaderIndexInvalid);
         }
 
         if (index <= HPackStaticTable.Count)
@@ -205,7 +205,7 @@ internal sealed class HPackDecoder
 
         if ((uint)dynamicIndex >= _dynamicTable.Count)
         {
-            throw new HPackDecodingException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.HpackHeaderIndexWasOutsideTheDynamicTableRange, index));
+            throw new HPackDecodingException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.HpackDynamicIndexInvalid, index));
         }
 
         return ref _dynamicTable[dynamicIndex];
@@ -215,7 +215,7 @@ internal sealed class HPackDecoder
     {
         if (size > _maxDynamicTableSize)
         {
-            throw new HPackDecodingException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.HpackDynamicTableSizeExceededTheConfiguredMaximumOf, size, _maxDynamicTableSize));
+            throw new HPackDecodingException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.HpackDynamicTableTooLarge, size, _maxDynamicTableSize));
         }
 
         _dynamicTable.Resize(size);
@@ -225,7 +225,7 @@ internal sealed class HPackDecoder
     {
         if (index >= headerBlock.Length)
         {
-            throw new HPackDecodingException(ErrorMessages.HpackStringLiteralWasIncomplete);
+            throw new HPackDecodingException(ErrorMessages.HpackStringLiteralTruncated);
         }
 
         // RFC 7541 §5.2 — the high bit ("H") of the first octet indicates
@@ -239,7 +239,7 @@ internal sealed class HPackDecoder
         // the sum and slip past the check.
         if (length > headerBlock.Length - index)
         {
-            throw new HPackDecodingException(ErrorMessages.HpackStringLiteralLengthExceededTheAvailablePayload);
+            throw new HPackDecodingException(ErrorMessages.HpackStringPayloadTooShort);
         }
 
         ReadOnlySpan<byte> raw = headerBlock.Slice(index, length);
@@ -254,7 +254,7 @@ internal sealed class HPackDecoder
     {
         if (index >= buffer.Length)
         {
-            throw new HPackDecodingException(ErrorMessages.HpackIntegerWasIncomplete);
+            throw new HPackDecodingException(ErrorMessages.HpackIntegerTruncated);
         }
 
         IntegerDecoder integerDecoder = new();
@@ -273,7 +273,7 @@ internal sealed class HPackDecoder
             }
         }
 
-        throw new HPackDecodingException(ErrorMessages.HpackIntegerWasIncomplete);
+        throw new HPackDecodingException(ErrorMessages.HpackIntegerTruncated);
     }
 
     private static string ToLatin1String(ReadOnlySpan<byte> value)

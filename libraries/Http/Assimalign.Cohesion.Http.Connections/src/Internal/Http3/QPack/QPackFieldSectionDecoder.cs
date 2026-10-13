@@ -68,7 +68,7 @@ internal static class QPackFieldSectionDecoder
         if (requiredInsertCount != 0)
         {
             throw new InvalidDataException(
-                ErrorMessages.QpackRequiredInsertCountMustBe0TheDynamicTableIsDisabled);
+                ErrorMessages.QpackDisabledTableInsertCountInvalid);
         }
 
         // Delta Base (S flag + Base). With Required Insert Count 0 there is
@@ -107,7 +107,7 @@ internal static class QPackFieldSectionDecoder
             // did not, the section is unsatisfiable (RFC 9204 §2.2).
             throw new QPackException(
                 Http3ErrorCode.QPackDecompressionFailed,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackFieldSectionRequiresInsertCountButOnlyEntriesHaveBeenInserted, prefix.RequiredInsertCount, table.InsertCount));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackInsertCountUnavailable, prefix.RequiredInsertCount, table.InsertCount));
         }
 
         return DecodeFieldLines(buffer, prefix.BodyOffset, table, prefix.Base, maxFieldSectionSize);
@@ -208,7 +208,7 @@ internal static class QPackFieldSectionDecoder
             {
                 throw new Http3LimitExceededException(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DecodedHttp3FieldSectionExceedsTheAdvertisedSettingsMaxFieldSectionSize, maxFieldSectionSize));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3DecodedFieldSectionTooLarge, maxFieldSectionSize));
             }
 
             fields.Add(field);
@@ -221,7 +221,7 @@ internal static class QPackFieldSectionDecoder
     {
         if (!QPackStaticTable.TryGet((int)staticIndex, out string name, out string value))
         {
-            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackStaticTableIndexIsOutOfRange, staticIndex));
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackStaticIndexInvalid, staticIndex));
         }
 
         return (name, value);
@@ -231,7 +231,7 @@ internal static class QPackFieldSectionDecoder
     {
         if (!QPackStaticTable.TryGet((int)nameIndex, out string name, out _))
         {
-            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackStaticTableNameIndexIsOutOfRange, nameIndex));
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackStaticNameIndexInvalid, nameIndex));
         }
 
         return name;
@@ -241,14 +241,14 @@ internal static class QPackFieldSectionDecoder
     {
         if (table is null)
         {
-            throw new InvalidDataException(ErrorMessages.QpackDynamicTableReferenceIsNotSupportedDynamicTableDisabled);
+            throw new InvalidDataException(ErrorMessages.QpackDynamicReferenceNotSupported);
         }
 
         if (!table.TryGetByAbsoluteIndex(absoluteIndex, out string name, out string value))
         {
             throw new QPackException(
                 Http3ErrorCode.QPackDecompressionFailed,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackFieldLineReferencesDynamicEntryWhichIsNotAvailable, absoluteIndex));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackDynamicEntryUnavailable, absoluteIndex));
         }
 
         return (name, value);

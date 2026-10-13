@@ -26,22 +26,22 @@ internal static class HttpExtendedConnectRules
 {
     /// <summary>The refusal for an exchange that is not an extended CONNECT.</summary>
     public static readonly string NotExtendedConnectMessage =
-        ErrorMessages.ExchangeIsNotExtendedConnect;
+        ErrorMessages.ExtendedConnectRequired;
 
     /// <summary>
     /// The refusal for a second accept attempt. The first attempt latches even when a later guard
     /// refuses it, so the tunnel may never have been accepted.
     /// </summary>
     public static readonly string AlreadyAcceptedMessage =
-        ErrorMessages.ExtendedConnectAcceptHasAlreadyBeenAttemptedForThisExchange;
+        ErrorMessages.ExtendedConnectAcceptAlreadyAttempted;
 
     /// <summary>The refusal for a cancelled exchange.</summary>
     public static readonly string CancelledMessage =
-        ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedTheExchangeWasCancelled;
+        ErrorMessages.ExtendedConnectExchangeCancelled;
 
     /// <summary>The refusal for an exchange whose response has started.</summary>
     public static readonly string ResponseStartedMessage =
-        ErrorMessages.ExtendedConnectTunnelCannotBeAcceptedAfterTheResponseHasStarted;
+        ErrorMessages.ExtendedConnectResponseAlreadyStarted;
 
     /// <summary>
     /// Prepares the response head that establishes the tunnel: status <c>200</c>, and no

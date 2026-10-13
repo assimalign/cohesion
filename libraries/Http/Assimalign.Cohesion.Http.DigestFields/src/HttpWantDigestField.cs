@@ -73,7 +73,7 @@ public readonly struct HttpWantDigestField
 
         if (dictionary.Count == 0)
         {
-            error = ErrorMessages.WantDigestFieldRequiresAlgorithmPreference;
+            error = ErrorMessages.WantDigestPreferenceRequired;
             return false;
         }
 
@@ -83,7 +83,7 @@ public readonly struct HttpWantDigestField
             StructuredFieldMember value = member.Value;
             if (value.IsInnerList || value.Item.Value.Type != StructuredFieldType.Integer)
             {
-                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.WantDigestFieldMemberMustBeAnIntegerPreferenceRfc95304, member.Key);
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.WantDigestMemberTypeInvalid, member.Key);
                 return false;
             }
 
@@ -127,7 +127,7 @@ public readonly struct HttpWantDigestField
         ArgumentNullException.ThrowIfNull(preferences);
         if (preferences.Length == 0)
         {
-            throw new ArgumentException(ErrorMessages.AtLeastOnePreferenceIsRequired, nameof(preferences));
+            throw new ArgumentException(ErrorMessages.DigestPreferenceRequired, nameof(preferences));
         }
 
         var members = new KeyValuePair<string, StructuredFieldMember>[preferences.Length];
@@ -136,7 +136,7 @@ public readonly struct HttpWantDigestField
             HttpWantDigestPreference preference = preferences[i];
             if (!preference.Algorithm.IsRegistered)
             {
-                throw new ArgumentException(ErrorMessages.WantDigestPreferenceMustReferenceARegisteredAlgorithm, nameof(preferences));
+                throw new ArgumentException(ErrorMessages.WantDigestAlgorithmNotRegistered, nameof(preferences));
             }
             StructuredFieldBareItem integer = StructuredFieldBareItem.FromInteger(preference.Preference);
             members[i] = new KeyValuePair<string, StructuredFieldMember>(

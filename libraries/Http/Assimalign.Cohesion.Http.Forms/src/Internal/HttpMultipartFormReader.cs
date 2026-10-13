@@ -73,7 +73,7 @@ internal sealed class HttpMultipartFormReader
         int minBuffer = boundary.Length + 10;
         if (bufferSize < minBuffer)
         {
-            throw new ArgumentOutOfRangeException(nameof(bufferSize), string.Format(CultureInfo.CurrentCulture, ErrorMessages.BufferMustBeAtLeastBytesToAccommodateTheBoundary, minBuffer));
+            throw new ArgumentOutOfRangeException(nameof(bufferSize), string.Format(CultureInfo.CurrentCulture, ErrorMessages.BoundaryBufferTooSmall, minBuffer));
         }
 
         _stream = new BufferedReadStream(stream, bufferSize);
@@ -150,7 +150,7 @@ internal sealed class HttpMultipartFormReader
             {
                 // Defensive: a peer that just emits non-boundary lines forever
                 // should not be allowed to drain the buffer indefinitely.
-                string message = ErrorMessages.MultipartPreambleExceededTheHeadersLengthLimit;
+                string message = ErrorMessages.MultipartPreambleTooLarge;
                 throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersLength, message));
             }
 
@@ -218,7 +218,7 @@ internal sealed class HttpMultipartFormReader
 
             if (headers.Count >= HeadersCountLimit)
             {
-                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionHeaderCountExceededTheLimit, HeadersCountLimit);
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionHeaderCountExceeded, HeadersCountLimit);
                 throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersCount, message));
             }
 

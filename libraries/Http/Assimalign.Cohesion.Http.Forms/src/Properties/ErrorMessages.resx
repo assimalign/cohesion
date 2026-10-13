@@ -117,13 +117,13 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="BufferMustBeAtLeastBytesToAccommodateTheBoundary" xml:space="preserve">
+  <data name="BoundaryBufferTooSmall" xml:space="preserve">
     <value>Buffer must be at least {0} bytes to accommodate the boundary.</value>
   </data>
   <data name="BufferTooSmallForRequestedOffsetCount" xml:space="preserve">
     <value>Buffer too small for requested offset + count.</value>
   </data>
-  <data name="EndOfStreamReachedBeforeLineTerminator" xml:space="preserve">
+  <data name="LineTerminatorMissing" xml:space="preserve">
     <value>End of stream reached before line terminator.</value>
   </data>
   <data name="FormKeyOrValueLengthLimitExceeded" xml:space="preserve">
@@ -144,19 +144,19 @@
   <data name="MultipartBoundaryLengthLimitExceeded" xml:space="preserve">
     <value>Multipart boundary length limit {0} exceeded.</value>
   </data>
-  <data name="MultipartPreambleExceededTheHeadersLengthLimit" xml:space="preserve">
+  <data name="MultipartPreambleTooLarge" xml:space="preserve">
     <value>Multipart preamble exceeded the headers-length limit.</value>
   </data>
-  <data name="MultipartSectionBodyExceededTheByteLimit" xml:space="preserve">
+  <data name="MultipartSectionBodyTooLarge" xml:space="preserve">
     <value>Multipart section body exceeded the {0}-byte limit.</value>
   </data>
   <data name="MultipartSectionCountLimitExceeded" xml:space="preserve">
     <value>Multipart section count limit {0} exceeded.</value>
   </data>
-  <data name="MultipartSectionHeaderCountExceededTheLimit" xml:space="preserve">
+  <data name="MultipartSectionHeaderCountExceeded" xml:space="preserve">
     <value>Multipart section header count exceeded the {0} limit.</value>
   </data>
-  <data name="RequestedLookAheadExceedsBufferSize" xml:space="preserve">
+  <data name="LookAheadTooLarge" xml:space="preserve">
     <value>Requested look-ahead {0} exceeds buffer size {1}.</value>
   </data>
 </root>

@@ -62,7 +62,7 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
     {
         if (value < MinInteger || value > MaxInteger)
         {
-            throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.IntegerIsOutsideTheRfc9651RangeOf999999999999);
+            throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.IntegerOutOfRange);
         }
         return new StructuredFieldBareItem(StructuredFieldType.Integer, value, 0m, null);
     }
@@ -78,7 +78,7 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
         decimal integerPart = decimal.Truncate(Math.Abs(value));
         if (integerPart >= 1_000_000_000_000m)
         {
-            throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.DecimalIntegerComponentExceedsTheRfc9651LimitOf12Digits);
+            throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.DecimalIntegerLimitExceeded);
         }
         return new StructuredFieldBareItem(StructuredFieldType.Decimal, 0L, value, null);
     }
@@ -97,7 +97,7 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
         {
             if (c < ' ' || c > '~')
             {
-                throw new ArgumentException(ErrorMessages.StringContainsACharacterOutsideThePrintableAsciiRangeX207E, nameof(value));
+                throw new ArgumentException(ErrorMessages.StringAsciiCharactersInvalid, nameof(value));
             }
         }
         return new StructuredFieldBareItem(StructuredFieldType.String, 0L, 0m, value);
@@ -115,7 +115,7 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
         ArgumentNullException.ThrowIfNull(value);
         if (!StructuredFieldGrammar.IsValidToken(value))
         {
-            throw new ArgumentException(ErrorMessages.ValueDoesNotMatchTheRfc9651SfTokenGrammar, nameof(value));
+            throw new ArgumentException(ErrorMessages.TokenGrammarInvalid, nameof(value));
         }
         return new StructuredFieldBareItem(StructuredFieldType.Token, 0L, 0m, value);
     }
@@ -146,7 +146,7 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
     {
         if (unixTimeSeconds < MinInteger || unixTimeSeconds > MaxInteger)
         {
-            throw new ArgumentOutOfRangeException(nameof(unixTimeSeconds), unixTimeSeconds, ErrorMessages.DateIsOutsideTheRfc9651RangeOf999999999999);
+            throw new ArgumentOutOfRangeException(nameof(unixTimeSeconds), unixTimeSeconds, ErrorMessages.DateOutOfRange);
         }
         return new StructuredFieldBareItem(StructuredFieldType.Date, unixTimeSeconds, 0m, null);
     }
@@ -234,7 +234,7 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
     public string AsDisplayString() => _type == StructuredFieldType.DisplayString ? (string)_reference! : throw WrongType(StructuredFieldType.DisplayString);
 
     private InvalidOperationException WrongType(StructuredFieldType expected)
-        => new(string.Format(CultureInfo.CurrentCulture, ErrorMessages.StructuredFieldBareItemIsOfTypeNot, _type, expected));
+        => new(string.Format(CultureInfo.CurrentCulture, ErrorMessages.StructuredFieldBareItemTypeMismatch, _type, expected));
 
     #endregion
 

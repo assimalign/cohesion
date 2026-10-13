@@ -73,7 +73,7 @@ internal struct IntegerDecoder
         //   if (_m + additionalBitsRequired > 31)
         if (BitOperations.LeadingZeroCount((uint)b) <= _m)
         {
-            throw new HPackDecodingException(ErrorMessages.HpackIntegerExceededThe31BitsThisDecoderAcceptsRfc75415);
+            throw new HPackDecodingException(ErrorMessages.HpackIntegerOverflow);
         }
 
         _i += ((b & 0x7f) << _m);
@@ -81,7 +81,7 @@ internal struct IntegerDecoder
         // If the addition overflowed, the result will be negative.
         if (_i < 0)
         {
-            throw new HPackDecodingException(ErrorMessages.HpackIntegerExceededThe31BitsThisDecoderAcceptsRfc75415);
+            throw new HPackDecodingException(ErrorMessages.HpackIntegerOverflow);
         }
 
         _m += 7;
@@ -91,7 +91,7 @@ internal struct IntegerDecoder
             if (b == 0 && _m / 7 > 1)
             {
                 // Do not accept overlong encodings.
-                throw new HPackDecodingException(ErrorMessages.HpackIntegerHadAnOverlongEncodingItsLastOctetWasZeroRfc);
+                throw new HPackDecodingException(ErrorMessages.HpackIntegerEncodingOverlong);
             }
 
             result = _i;

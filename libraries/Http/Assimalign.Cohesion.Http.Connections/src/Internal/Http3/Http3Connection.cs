@@ -73,7 +73,7 @@ internal sealed class Http3Connection : HttpConnection
 
         if (!IsSupportedPlatform())
         {
-            throw new PlatformNotSupportedException(ErrorMessages.Http3TransportsRequireAQuicCapablePlatform);
+            throw new PlatformNotSupportedException(ErrorMessages.QuicPlatformNotSupported);
         }
 
         return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _qpackOptions, _responseHeaderPolicy);

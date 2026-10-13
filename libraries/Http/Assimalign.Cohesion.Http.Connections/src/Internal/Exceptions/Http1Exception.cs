@@ -18,7 +18,7 @@ internal class Http1Exception : HttpException
 
     public static Http1Exception InvalidRequest(Exception inner = null!)
     {
-        return new Http1Exception(ErrorMessages.HttpRequestCouldNotBeParsed, inner)
+        return new Http1Exception(ErrorMessages.HttpRequestInvalid, inner)
         {
             Code = HttpErrorCode.ReadingError
         };

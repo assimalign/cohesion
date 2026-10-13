@@ -117,22 +117,22 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="IntervalMustBeZeroOrPositiveOrTimeoutInfiniteTimeSpan" xml:space="preserve">
+  <data name="IntervalInvalid" xml:space="preserve">
     <value>The interval must be zero or positive, or Timeout.InfiniteTimeSpan.</value>
   </data>
-  <data name="OnlyAnInvalidWebSocketOpeningHandshakeCanBeRefusedThisOneS" xml:space="preserve">
+  <data name="HandshakeRejectionNotSupported" xml:space="preserve">
     <value>Only an invalid WebSocket opening handshake can be refused; this one&apos;s status is &apos;{0}&apos;. A valid handshake is refused by not accepting it.</value>
   </data>
-  <data name="RequestIsNotAValidWebSocketOpeningHandshakeStatusSoItCannot" xml:space="preserve">
+  <data name="HandshakeInvalid" xml:space="preserve">
     <value>The request is not a valid WebSocket opening handshake (status &apos;{0}&apos;), so it cannot be accepted. Check IsWebSocketRequest first; an invalid handshake is refused with RejectHandshake.</value>
   </data>
-  <data name="ServerSMaximumWindowSizeMustBeFrom9To15Bits" xml:space="preserve">
+  <data name="ServerWindowSizeInvalid" xml:space="preserve">
     <value>The server&apos;s maximum window size must be from 9 to 15 bits.</value>
   </data>
-  <data name="SubprotocolWasNotOfferedByTheClientSelectOneOfRequestedProtocolsOr" xml:space="preserve">
+  <data name="SubprotocolNotOffered" xml:space="preserve">
     <value>The subprotocol &apos;{0}&apos; was not offered by the client. Select one of RequestedProtocols, or none.</value>
   </data>
-  <data name="WebSocketOpeningHandshakeHasAlreadyBeenAcceptedForThisExchange" xml:space="preserve">
+  <data name="HandshakeAlreadyAccepted" xml:space="preserve">
     <value>The WebSocket opening handshake has already been accepted for this exchange.</value>
   </data>
 </root>

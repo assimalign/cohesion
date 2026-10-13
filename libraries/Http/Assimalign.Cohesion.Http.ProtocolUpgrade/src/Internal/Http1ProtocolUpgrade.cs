@@ -89,7 +89,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         if (Interlocked.Exchange(ref _accepted, 1) == 1)
         {
             throw new InvalidOperationException(
-                ErrorMessages.ProtocolUpgradeHasAlreadyBeenAcceptedForThisExchange);
+                ErrorMessages.ProtocolUpgradeAlreadyAccepted);
         }
 
         // Resolve the status line before claiming the connection so an impossible kind fails
@@ -98,7 +98,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         {
             HttpProtocolUpgradeKind.Upgrade => HttpStatusCode.SwitchingProtocols,
             HttpProtocolUpgradeKind.Connect => HttpStatusCode.Ok,
-            _ => throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CannotAcceptAProtocolUpgradeOfKind, Kind)),
+            _ => throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ProtocolUpgradeKindNotSupported, Kind)),
         };
 
         // Encode the head before claiming the connection (#1183): a field it cannot carry is refused
@@ -268,7 +268,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         {
             // Not quoted: whatever makes the name invalid may be CR, LF, or NUL.
             throw new HttpInvalidResponseFieldException(
-                ErrorMessages.ResponseFieldNameIsNotATokenTheTransitionResponseWasNot);
+                ErrorMessages.ResponseFieldNameInvalid);
         }
 
         int invalid = HttpFieldNormalization.IndexOfInvalidControlCharacter(value);
@@ -276,7 +276,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         if (invalid >= 0)
         {
             throw new HttpInvalidResponseFieldException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheResponseFieldHoldsTheControlCharacter0xAtIndex, name, (int)value[invalid], invalid));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResponseFieldValueInvalid, name, (int)value[invalid], invalid));
         }
     }
 }

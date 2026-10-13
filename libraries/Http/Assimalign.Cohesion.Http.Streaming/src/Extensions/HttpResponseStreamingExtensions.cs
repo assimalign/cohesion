@@ -39,7 +39,7 @@ public static class HttpResponseStreamingExtensions
                 ArgumentNullException.ThrowIfNull(response);
                 return response.HttpContext.Features.Get<IHttpResponseStreamingFeature>()
                     ?? throw new NotSupportedException(
-                        ErrorMessages.ResponseStreamingIsNotEnabledForThisExchangeRegisterHttpResponseStreamingInterceptorCreateOn);
+                        ErrorMessages.StreamingNotEnabled);
             }
         }
     }

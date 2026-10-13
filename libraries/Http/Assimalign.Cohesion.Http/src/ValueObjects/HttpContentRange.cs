@@ -90,7 +90,7 @@ public readonly struct HttpContentRange : IEquatable<HttpContentRange>
     {
         if (!TryParse(value, out HttpContentRange result))
         {
-            throw new HttpInvalidContentRangeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidContentRange, value.ToString()));
+            throw new HttpInvalidContentRangeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentRangeInvalid, value.ToString()));
         }
         return result;
     }

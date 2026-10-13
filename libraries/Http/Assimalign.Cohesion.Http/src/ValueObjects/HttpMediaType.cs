@@ -216,7 +216,7 @@ public readonly struct HttpMediaType : IEquatable<HttpMediaType>
     {
         if (!TryParse(value, out HttpMediaType result))
         {
-            throw new HttpInvalidMediaTypeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidMediaType, value.ToString()));
+            throw new HttpInvalidMediaTypeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MediaTypeInvalid, value.ToString()));
         }
         return result;
     }

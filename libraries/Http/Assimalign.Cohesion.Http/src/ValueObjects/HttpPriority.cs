@@ -57,7 +57,7 @@ public readonly struct HttpPriority : IEquatable<HttpPriority>
     {
         if (urgency < MinUrgency || urgency > MaxUrgency)
         {
-            throw new ArgumentOutOfRangeException(nameof(urgency), urgency, ErrorMessages.UrgencyMustBeWithinTheRfc9218RangeOf07);
+            throw new ArgumentOutOfRangeException(nameof(urgency), urgency, ErrorMessages.UrgencyOutOfRange);
         }
 
         Urgency = urgency;

@@ -117,16 +117,16 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="CannotAcceptAProtocolUpgradeOfKind" xml:space="preserve">
+  <data name="ProtocolUpgradeKindNotSupported" xml:space="preserve">
     <value>Cannot accept a protocol upgrade of kind &apos;{0}&apos;.</value>
   </data>
-  <data name="ProtocolUpgradeHasAlreadyBeenAcceptedForThisExchange" xml:space="preserve">
+  <data name="ProtocolUpgradeAlreadyAccepted" xml:space="preserve">
     <value>The protocol upgrade has already been accepted for this exchange.</value>
   </data>
-  <data name="ResponseFieldNameIsNotATokenTheTransitionResponseWasNot" xml:space="preserve">
+  <data name="ResponseFieldNameInvalid" xml:space="preserve">
     <value>RFC 9110 §5.1: a response field name is not a token. The transition response was not sent.</value>
   </data>
-  <data name="ValueOfTheResponseFieldHoldsTheControlCharacter0xAtIndex" xml:space="preserve">
+  <data name="ResponseFieldValueInvalid" xml:space="preserve">
     <value>RFC 9110 §5.5: the value of the response field &apos;{0}&apos; holds the control character 0x{1:X2} at index {2}; a field value holds no control character but HTAB. The transition response was not sent.</value>
   </data>
 </root>

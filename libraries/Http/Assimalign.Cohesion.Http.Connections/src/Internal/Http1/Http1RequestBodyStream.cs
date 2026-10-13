@@ -347,7 +347,7 @@ internal sealed class Http1RequestBodyStream : Stream
         {
             throw Reject(
                 HttpStatusCode.RequestEntityTooLarge,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueExceedsTheConfiguredMaximumRequestBodySizeOctets, _contentLength, cap));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthTooLarge, _contentLength, cap));
         }
 
         // RFC 9110 §10.1.1 — the peer declared Expect: 100-continue and is withholding the body
@@ -403,7 +403,7 @@ internal sealed class Http1RequestBodyStream : Stream
         {
             return ValueTask.FromException<int>(new Http1LimitExceededException(
                 rejectedStatus,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestBodyWasRejectedWithAndIsNotReadFurther, rejectedStatus)));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestBodyRejected, rejectedStatus)));
         }
 
         if (!IsMalformed)
@@ -431,7 +431,7 @@ internal sealed class Http1RequestBodyStream : Stream
         if (read == 0)
         {
             throw Truncated(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionClosedAfterOfExpectedRequestBodyOctets, _totalRead, _contentLength));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestBodyTruncated, _totalRead, _contentLength));
         }
 
         _remaining -= read;
@@ -451,7 +451,7 @@ internal sealed class Http1RequestBodyStream : Stream
         // read fails again, and the drain gives up so the connection closes (#1333).
         if (IsMalformed)
         {
-            throw new InvalidDataException(ErrorMessages.ChunkedRequestBodyIsMalformedAndIsNotReadFurther);
+            throw new InvalidDataException(ErrorMessages.ChunkedRequestBodyInvalid);
         }
 
         // A read that stopped inside a framing line cannot be resumed: the line's octets read so far are
@@ -460,7 +460,7 @@ internal sealed class Http1RequestBodyStream : Stream
         if (_framingInterrupted)
         {
             throw new IOException(
-                ErrorMessages.EarlierReadOfTheChunkedRequestBodyStoppedInsideItsFramingSo);
+                ErrorMessages.ChunkFramingReadInterrupted);
         }
 
         bool succeeded = false;
@@ -519,7 +519,7 @@ internal sealed class Http1RequestBodyStream : Stream
                     // offending chunk is delivered.
                     throw Reject(
                         HttpStatusCode.RequestEntityTooLarge,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkedBodyExceedsTheConfiguredMaximumRequestBodySizeOctetsAtChunk, cap, chunkSize, _totalRead));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkedRequestBodyTooLarge, cap, chunkSize, _totalRead));
                 }
 
                 _chunkRemaining = chunkSize;
@@ -531,7 +531,7 @@ internal sealed class Http1RequestBodyStream : Stream
             if (read == 0)
             {
                 throw Truncated(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionClosedMidChunkWithOctetsOutstanding, _chunkRemaining));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkDataTruncated, _chunkRemaining));
             }
 
             _chunkRemaining -= read;
@@ -579,7 +579,7 @@ internal sealed class Http1RequestBodyStream : Stream
         if (semicolon >= 0 && !Http1ChunkExtensions.IsWellFormed(sizeLine.AsSpan(semicolon)))
         {
             throw new InvalidDataException(
-                ErrorMessages.MalformedChunkExtensionsEachIsAndATokenOptionallyAndAToken);
+                ErrorMessages.ChunkExtensionsInvalid);
         }
 
         // chunk-size = 1*HEXDIG — ASCII hex only, no leading sign, no whitespace. Neither rejection
@@ -604,7 +604,7 @@ internal sealed class Http1RequestBodyStream : Stream
             else
             {
                 throw new InvalidDataException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeHoldsTheNonHexOctet0xAtOffset, (int)c, index));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeDigitInvalid, (int)c, index));
             }
 
             // A single chunk-size is bounded by Int32; the accumulated body is separately bounded by
@@ -612,7 +612,7 @@ internal sealed class Http1RequestBodyStream : Stream
             if (value > (int.MaxValue - digit) / 16)
             {
                 throw new InvalidDataException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeOverflowsInt32AtItsHexDigit, index + 1));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeOverflow, index + 1));
             }
             value = (value * 16) + digit;
         }
@@ -642,7 +642,7 @@ internal sealed class Http1RequestBodyStream : Stream
         if (_framingExcess > _maxFramingExcess)
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkedRequestBodyCarriesMoreThanOctetsOfChunkFramingChunkExtensions, _maxFramingExcess));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkFramingTooLarge, _maxFramingExcess));
         }
     }
 
@@ -677,7 +677,7 @@ internal sealed class Http1RequestBodyStream : Stream
             {
                 throw Reject(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionExceedsTheConfiguredMaximumSizeOctets, _maxTrailerSectionSize));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionTooLarge, _maxTrailerSectionSize));
             }
 
             sectionRemaining -= consumed;
@@ -686,7 +686,7 @@ internal sealed class Http1RequestBodyStream : Stream
             {
                 throw Reject(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionContainsMoreThanTheConfiguredMaximumOfFields, _maxTrailerFieldCount));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerFieldCountExceeded, _maxTrailerFieldCount));
             }
 
             // RFC 9112 §5.1 / §7.1.2 — a trailer field line has the header section's syntax: the name
@@ -694,7 +694,7 @@ internal sealed class Http1RequestBodyStream : Stream
             // holds no control character but HTAB (RFC 9110 §5.5, #1341).
             if (!Http1FieldLine.TryParse(line, out string name, out string value, out string? violation))
             {
-                throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http11TrailerSectionIsMalformed, violation));
+                throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1TrailerSectionInvalid, violation));
             }
 
             HttpHeaderKey key = new(name);
@@ -770,7 +770,7 @@ internal sealed class Http1RequestBodyStream : Stream
             int read = await ReadFromConnectionAsync(_oneByte, cancellationToken).ConfigureAwait(false);
             if (read == 0)
             {
-                throw Truncated(ErrorMessages.ConnectionClosedWhileAChunkFramingLineWasBeingRead);
+                throw Truncated(ErrorMessages.ChunkFramingTruncated);
             }
 
             byte b = _oneByte[0];
@@ -781,7 +781,7 @@ internal sealed class Http1RequestBodyStream : Stream
                     return builder.ToString();
                 }
 
-                throw new InvalidDataException(ErrorMessages.ChunkFramingLineHoldsABareCrALineEndsOnlyAt);
+                throw new InvalidDataException(ErrorMessages.ChunkFramingBareCarriageReturn);
             }
 
             if (b == (byte)'\r')
@@ -792,7 +792,7 @@ internal sealed class Http1RequestBodyStream : Stream
 
             if (b == (byte)'\n')
             {
-                throw new InvalidDataException(ErrorMessages.ChunkFramingLineHoldsABareLfALineEndsOnlyAt);
+                throw new InvalidDataException(ErrorMessages.ChunkFramingBareLineFeed);
             }
 
             AppendFramingOctet(builder, (char)b, maxLength, line);
@@ -817,15 +817,15 @@ internal sealed class Http1RequestBodyStream : Stream
     private Exception FramingLineTooLong(FramingLine line, int maxLength) => line switch
     {
         FramingLine.ChunkTerminator => new InvalidDataException(
-            ErrorMessages.ChunkTerminatorMustBeCrlfOnly),
+            ErrorMessages.ChunkTerminatorInvalid),
         FramingLine.ChunkSize => new InvalidDataException(
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeLineChunkExtensionsIncludedExceedsTheConfiguredMaximumOfOctets, maxLength)),
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChunkSizeLineTooLarge, maxLength)),
         FramingLine.TrailerField => Reject(
             HttpStatusCode.RequestHeaderFieldsTooLarge,
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerFieldLineExceedsTheConfiguredMaximumOfOctets, maxLength)),
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerFieldLineTooLarge, maxLength)),
         _ => Reject(
             HttpStatusCode.RequestHeaderFieldsTooLarge,
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionExceedsTheConfiguredMaximumSizeOctets, _maxTrailerSectionSize)),
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrailerSectionTooLarge, _maxTrailerSectionSize)),
     };
 
     private async ValueTask<int> ReadFromConnectionAsync(Memory<byte> buffer, CancellationToken cancellationToken)
@@ -917,7 +917,7 @@ internal sealed class Http1RequestBodyStream : Stream
         // with 408 Request Timeout semantics.
         return Reject(
             HttpStatusCode.RequestTimeout,
-            ErrorMessages.RequestBodyWasReceivedBelowTheConfiguredMinimumDataRate);
+            ErrorMessages.RequestBodyDataRateTooLow);
     }
 
     /// <summary>

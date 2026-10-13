@@ -40,7 +40,7 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
         catch (ArgumentException exception)
         {
             throw new ArgumentException(
-                ErrorMessages.HttpAntiforgeryOptionsCookieNameMustBeANonEmptyRfc6265TokenWithNo,
+                ErrorMessages.CookieNameInvalid,
                 nameof(options),
                 exception);
         }
@@ -56,7 +56,7 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
         {
             // The value is not echoed: it may hold the control character that made it invalid.
             throw new ArgumentException(
-                ErrorMessages.HttpAntiforgeryOptionsCookiePathIsNotAnRfc6265PathValueItMustBe,
+                ErrorMessages.CookiePathInvalid,
                 nameof(options),
                 exception);
         }
@@ -176,7 +176,7 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
         if (!await IsRequestValidAsync(httpContext).ConfigureAwait(false))
         {
             throw new AntiforgeryValidationException(
-                ErrorMessages.RequiredAntiforgeryTokenWasMissingOrInvalid);
+                ErrorMessages.AntiforgeryTokenMissingOrInvalid);
         }
     }
 

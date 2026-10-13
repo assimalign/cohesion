@@ -119,7 +119,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     {
         if (!IsValid(statusCode))
         {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ProvidedStatusCodeIsInvalid, statusCode));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.StatusCodeInvalid, statusCode));
         }
 
         Value = statusCode;

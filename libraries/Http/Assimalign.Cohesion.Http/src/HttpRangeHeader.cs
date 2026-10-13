@@ -59,7 +59,7 @@ public readonly struct HttpRangeHeader
     {
         if (!TryParse(value, out HttpRangeHeader result))
         {
-            throw new HttpInvalidRangeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidByteRangeHeader, value.ToString()));
+            throw new HttpInvalidRangeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ByteRangeHeaderInvalid, value.ToString()));
         }
         return result;
     }

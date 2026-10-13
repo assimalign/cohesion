@@ -140,14 +140,14 @@ internal sealed class Http3RequestStreamReader
             {
                 throw new Http3ConnectionException(
                     Http3ErrorCode.UnexpectedFrame,
-                    ErrorMessages.Http3RequestStreamCarriedADataFrameBeforeItsHeadersFrameRfc);
+                    ErrorMessages.Http3DataBeforeHeaders);
             }
 
             if (IsProhibitedOnRequestStream(frame.Type))
             {
                 throw new Http3ConnectionException(
                     Http3ErrorCode.UnexpectedFrame,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.FrameType0xIsNotPermittedOnAnHttp3RequestStreamRfc, frame.Type));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestFrameNotSupported, frame.Type));
             }
 
             await SkipPayloadAsync(frame.Length, cancellationToken).ConfigureAwait(false);
@@ -179,7 +179,7 @@ internal sealed class Http3RequestStreamReader
         {
             throw new Http3StreamException(
                 Http3ErrorCode.FrameError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3HeadersFrameOfOctetsExceedsTheOctetLimitMaxRequestHeadersFrameSize, frame.Length, maxHeadersFrameSize));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3HeadersFrameTooLarge, frame.Length, maxHeadersFrameSize));
         }
 
         return ReadPayloadAsync((int)frame.Length, cancellationToken);
@@ -436,6 +436,6 @@ internal sealed class Http3RequestStreamReader
         // truncated, this MUST be treated as a connection error of type H3_FRAME_ERROR."
         return new Http3ConnectionException(
             Http3ErrorCode.FrameError,
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestStreamEndedInsideATheFrameLengthExceedsTheOctets, what));
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestFrameTruncated, what));
     }
 }

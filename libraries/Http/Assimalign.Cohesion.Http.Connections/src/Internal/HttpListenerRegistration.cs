@@ -72,7 +72,7 @@ internal sealed class HttpListenerRegistration
     public IDuplexConnectionListener CreateStreamListener()
     {
         IDuplexConnectionListener listener = _streamListenerFactory!.Invoke()
-            ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionListenerFactoryRegisteredForReturnedNull, Protocol));
+            ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionListenerFactoryResultNull, Protocol));
 
         ValidateStreamCapabilities(listener.Capabilities, Protocol, paramName: null);
 
@@ -100,7 +100,7 @@ internal sealed class HttpListenerRegistration
     public IMultiplexedConnectionListener CreateMultiplexedListener()
     {
         return _multiplexedListenerFactory!.Invoke()
-            ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultiplexedConnectionListenerFactoryRegisteredForReturnedNull, Protocol));
+            ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultiplexedListenerFactoryResultNull, Protocol));
     }
 
     /// <summary>
@@ -147,7 +147,7 @@ internal sealed class HttpListenerRegistration
         if (protocol == (HttpProtocol.Http11 | HttpProtocol.Http20) && capabilities.Security != ConnectionSecurity.Tls)
         {
             throw CreateCapabilityException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CombinedProtocolListenerRequiresTls, protocolName, capabilities.Security),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CombinedProtocolListenerTlsRequired, protocolName, capabilities.Security),
                 paramName);
         }
     }

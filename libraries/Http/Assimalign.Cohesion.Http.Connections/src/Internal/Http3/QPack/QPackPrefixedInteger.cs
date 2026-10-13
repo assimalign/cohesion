@@ -29,7 +29,7 @@ internal static class QPackPrefixedInteger
     {
         if (index >= buffer.Length)
         {
-            throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerIsTruncated);
+            throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerTruncated);
         }
 
         int prefixMax = (1 << prefixBits) - 1;
@@ -46,7 +46,7 @@ internal static class QPackPrefixedInteger
         {
             if (index >= buffer.Length)
             {
-                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerIsTruncated);
+                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerTruncated);
             }
 
             byte continuation = buffer[index++];
@@ -56,7 +56,7 @@ internal static class QPackPrefixedInteger
             // cannot drive an unbounded shift / overflow.
             if (shift > 62 || value < 0)
             {
-                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflowed);
+                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflow);
             }
 
             if ((continuation & 0x80) == 0)
@@ -116,7 +116,7 @@ internal static class QPackPrefixedInteger
 
             if (result < 0)
             {
-                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflowed);
+                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflow);
             }
 
             if ((continuation & 0x80) == 0)
@@ -132,7 +132,7 @@ internal static class QPackPrefixedInteger
 
             if (shift > 62)
             {
-                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflowed);
+                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflow);
             }
         }
     }

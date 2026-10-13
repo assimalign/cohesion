@@ -253,16 +253,16 @@ internal sealed partial class Http2ConnectionContext
     {
         if (stream.IsReset)
         {
-            return new IOException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2StreamCarryingTheExtendedConnectTunnelWasReset, stream.StreamId));
+            return new IOException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2TunnelStreamReset, stream.StreamId));
         }
 
         if (stream.IsResponseCompleted)
         {
             return new ObjectDisposedException(
                 nameof(Http2ExtendedConnectStream),
-                ErrorMessages.ServerSSideOfTheExtendedConnectTunnelHasAlreadyEnded);
+                ErrorMessages.TunnelOutputAlreadyCompleted);
         }
 
-        return new IOException(ErrorMessages.Http2ConnectionCarryingTheExtendedConnectTunnelClosed);
+        return new IOException(ErrorMessages.Http2TunnelConnectionClosed);
     }
 }

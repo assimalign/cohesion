@@ -77,7 +77,7 @@ internal static class QuicVariableLengthInteger
 
             if (bytesRead == 0)
             {
-                throw new EndOfStreamException(ErrorMessages.QuicVariableLengthIntegerWasIncomplete);
+                throw new EndOfStreamException(ErrorMessages.QuicVariableIntegerTruncated);
             }
 
             value = (value << 8) | buffer[0];
@@ -102,7 +102,7 @@ internal static class QuicVariableLengthInteger
         {
             if (index >= buffer.Length)
             {
-                throw new InvalidDataException(ErrorMessages.QuicVariableLengthIntegerWasIncomplete);
+                throw new InvalidDataException(ErrorMessages.QuicVariableIntegerTruncated);
             }
 
             value = (value << 8) | buffer[index++];

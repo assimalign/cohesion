@@ -58,7 +58,7 @@ internal static class BufferExtensions
     {
         if (!MemoryMarshal.TryGetArray(memory, out var result))
         {
-            throw new InvalidOperationException(ErrorMessages.BufferBackedByArrayWasExpected);
+            throw new InvalidOperationException(ErrorMessages.ArrayBackedBufferRequired);
         }
         return result;
     }

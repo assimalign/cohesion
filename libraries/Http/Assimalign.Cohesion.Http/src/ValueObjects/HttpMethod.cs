@@ -45,12 +45,12 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
         ArgumentNullException.ThrowIfNullOrEmpty(value);
         if (value.Length > MaximumLength)
         {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MethodExceedsMaximumLength, MaximumLength));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MethodTooLong, MaximumLength));
         }
 
         if (value.AsSpan().ContainsAnyExcept(_allowedCharacters))
         {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ProvidedMethodIsInvalid, value));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MethodInvalid, value));
         }
 
         Value = value;

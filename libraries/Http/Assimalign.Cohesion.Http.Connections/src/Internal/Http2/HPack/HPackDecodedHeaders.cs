@@ -75,7 +75,7 @@ internal sealed class HPackDecodedHeaders
     {
         if (string.IsNullOrEmpty(name))
         {
-            throw new InvalidDataException(ErrorMessages.Http2FieldNameCannotBeEmpty);
+            throw new InvalidDataException(ErrorMessages.Http2FieldNameEmpty);
         }
 
         // RFC 9113 §8.2.1 — a value, a pseudo-header's included, holds no NUL, CR, or LF and no
@@ -135,7 +135,7 @@ internal sealed class HPackDecodedHeaders
         if (_sawRegularField)
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PseudoHeaderFieldAppearedAfterRegularFieldsPseudoHeadersMustComeFirst, HttpReceivedFieldRules.DescribeName(name)));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PseudoHeaderMisplaced, HttpReceivedFieldRules.DescribeName(name)));
         }
 
         // RFC 9113 §8.3 — each pseudo-header field appears at most once. A repeat is recorded for the
@@ -170,7 +170,7 @@ internal sealed class HPackDecodedHeaders
                 // RFC 9113 §8.3 — :status is a response pseudo-header.
                 // Receiving it in a request field section is malformed.
                 throw new InvalidDataException(
-                    ErrorMessages.PseudoHeaderFieldStatusIsResponseOnlyAndMustNotAppearIn);
+                    ErrorMessages.RequestStatusPseudoHeaderNotSupported);
 
             default:
                 // RFC 9113 §8.3 — pseudo-header names that are not
@@ -206,7 +206,7 @@ internal sealed class HPackDecodedHeaders
         if (HttpFieldNormalization.IsForbiddenInHttp2Or3(key))
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectionSpecificHeaderFieldIsForbiddenInHttp2Rfc911382, name));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2ConnectionHeaderNotSupported, name));
         }
 
         // RFC 9113 §8.2.2 — TE is the one exception: it MAY appear, but its
@@ -215,7 +215,7 @@ internal sealed class HPackDecodedHeaders
             && !HttpFieldNormalization.IsTeValueValidInHttp2Or3(value))
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FieldTeMustCarryOnlyTheValueTrailersGot, value));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2TeFieldInvalid, value));
         }
     }
 }

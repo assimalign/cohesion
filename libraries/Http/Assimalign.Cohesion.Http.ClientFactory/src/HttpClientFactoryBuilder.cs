@@ -23,7 +23,7 @@ public sealed class HttpClientFactoryBuilder
     {
         if (lifetime <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(lifetime), lifetime, ErrorMessages.HandlerLifetimeMustBePositive);
+            throw new ArgumentOutOfRangeException(nameof(lifetime), lifetime, ErrorMessages.HandlerLifetimeInvalid);
         }
         _options.DefaultHandlerLifetime = lifetime;
         return this;
@@ -50,12 +50,12 @@ public sealed class HttpClientFactoryBuilder
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new ArgumentException(ErrorMessages.ClientNameMustBeNonEmpty, nameof(name));
+            throw new ArgumentException(ErrorMessages.ClientNameEmpty, nameof(name));
         }
         if (_options.NamedClients.ContainsKey(name))
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientWithTheNameHasAlreadyBeenRegistered, name),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientAlreadyRegistered, name),
                 nameof(name));
         }
 
@@ -77,7 +77,7 @@ public sealed class HttpClientFactoryBuilder
         if (_options.NamedClients.Count == 0)
         {
             throw new InvalidOperationException(
-                ErrorMessages.AtLeastOneNamedClientMustBeRegisteredBeforeTheFactoryCan);
+                ErrorMessages.NamedClientRequired);
         }
         return new HttpClientFactory(_options);
     }

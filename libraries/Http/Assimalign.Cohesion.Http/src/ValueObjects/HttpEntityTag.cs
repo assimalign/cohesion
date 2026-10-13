@@ -79,7 +79,7 @@ public readonly struct HttpEntityTag : IEquatable<HttpEntityTag>
         ArgumentNullException.ThrowIfNull(tag);
         if (!IsValidOpaqueContent(tag.AsSpan()))
         {
-            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidEntityTag, tag));
+            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EntityTagInvalid, tag));
         }
         return new HttpEntityTag(tag, isWeak);
     }
@@ -94,7 +94,7 @@ public readonly struct HttpEntityTag : IEquatable<HttpEntityTag>
     {
         if (!TryParse(value, out HttpEntityTag result))
         {
-            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidEntityTag, value.ToString()));
+            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EntityTagInvalid, value.ToString()));
         }
         return result;
     }

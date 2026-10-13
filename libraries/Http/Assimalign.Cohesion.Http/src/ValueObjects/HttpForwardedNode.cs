@@ -134,7 +134,7 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
     {
         if (!TryParse(value, out HttpForwardedNode result))
         {
-            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidForwardedNode, value.ToString()));
+            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardedNodeInvalid, value.ToString()));
         }
         return result;
     }

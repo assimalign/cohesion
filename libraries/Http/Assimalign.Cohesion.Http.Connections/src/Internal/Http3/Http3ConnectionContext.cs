@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 {
     // These diagnostics also run during ordinary validation, cancellation or completion.
-    private static readonly string _requestDispatchStoppedMessage = ErrorMessages.ConnectionStoppedBeforeTheRequestWasDispatched;
-    private static readonly string _exchangeCancelledMessage = ErrorMessages.ExchangeWasCancelled;
+    private static readonly string _requestDispatchStoppedMessage = ErrorMessages.RequestDispatchStopped;
+    private static readonly string _exchangeCancelledMessage = ErrorMessages.ExchangeCancelled;
 
     // RFC 9114 §7.2.4 / RFC 9218 §7.2 — the peer's SETTINGS frame and its control-stream PRIORITY_UPDATE
     // frames are read whole before they are applied. Both carry a handful of varints, so a declared
@@ -513,7 +513,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                     new Http3RequestResetState(),
                     new Http3StreamException(
                         Http3ErrorCode.RequestRejected,
-                        ErrorMessages.RequestStreamWasOpenedAfterTheConnectionBeganToCloseRfc9114),
+                        ErrorMessages.Http3RequestAfterConnectionClose),
                     abandonsReading: true);
             }
             else
@@ -1152,7 +1152,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 {
                     return new Http3ConnectionException(
                         Http3ErrorCode.StreamCreationError,
-                        ErrorMessages.PeerOpenedASecondQpackEncoderStreamRfc920442);
+                        ErrorMessages.QpackEncoderStreamDuplicate);
                 }
 
                 // Connection-lived: a request body read after the enumeration ends may still wait on
@@ -1168,7 +1168,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 {
                     return new Http3ConnectionException(
                         Http3ErrorCode.StreamCreationError,
-                        ErrorMessages.PeerOpenedASecondQpackDecoderStreamRfc920442);
+                        ErrorMessages.QpackDecoderStreamDuplicate);
                 }
 
                 // The server's encoder never references the dynamic table, so the peer's decoder stream may
@@ -1182,7 +1182,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 // treat it as H3_STREAM_CREATION_ERROR.
                 return new Http3ConnectionException(
                     Http3ErrorCode.StreamCreationError,
-                    ErrorMessages.ClientOpenedAPushStreamRfc9114622);
+                    ErrorMessages.ClientPushStreamNotSupported);
 
             default:
                 // RFC 9114 §6.2 — an unknown or reserved stream type is not an
@@ -1239,7 +1239,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // RFC 9114 §6.2.1 — only one control stream per peer.
             return new Http3ConnectionException(
                 Http3ErrorCode.StreamCreationError,
-                ErrorMessages.PeerOpenedASecondControlStreamRfc9114621);
+                ErrorMessages.Http3ControlStreamDuplicate);
         }
 
         try
@@ -1256,14 +1256,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             {
                 return new Http3ConnectionException(
                     Http3ErrorCode.MissingSettings,
-                    ErrorMessages.PeerSControlStreamDidNotOpenWithASettingsFrameRfc);
+                    ErrorMessages.Http3InitialSettingsMissing);
             }
 
             if (frameLength.Value > maxControlFramePayloadSize)
             {
                 return new Http3ConnectionException(
                     Http3ErrorCode.FrameError,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.PeerSSettingsFrameDeclaresOctetsBeyondTheOctetBound, frameLength.Value, maxControlFramePayloadSize));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3SettingsTooLarge, frameLength.Value, maxControlFramePayloadSize));
             }
 
             byte[] payload = await ReadExactAsync(reader, (int)frameLength.Value, cancellationToken).ConfigureAwait(false);
@@ -1274,7 +1274,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // RFC 9114 §6.2.1 — the control stream is critical from its first octet.
             return new Http3ConnectionException(
                 Http3ErrorCode.ClosedCriticalStream,
-                ErrorMessages.PeerResetItsControlStreamBeforeItsSettingsFrameWasCompleteRfc,
+                ErrorMessages.Http3InitialSettingsReset,
                 ex);
         }
         catch (Exception ex) when (IsPerStreamFailure(ex))
@@ -1283,7 +1283,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // mandatory SETTINGS frame is a connection error (RFC 9114 §7.1).
             return new Http3ConnectionException(
                 Http3ErrorCode.FrameError,
-                ErrorMessages.PeerSSettingsFrameWasTruncatedOrMalformedRfc911471,
+                ErrorMessages.Http3SettingsInvalid,
                 ex);
         }
 
@@ -1351,7 +1351,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         {
             violation = new Http3ConnectionException(
                 Http3ErrorCode.FrameError,
-                ErrorMessages.PeerSControlStreamEndedInsideAFrameRfc911471,
+                ErrorMessages.Http3ControlFramePayloadTruncated,
                 exception);
         }
         catch (Exception exception) when (IsStreamReadFailure(exception))
@@ -1359,7 +1359,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             violation = IsCriticalStreamResetByPeer(exception)
                 ? new Http3ConnectionException(
                     Http3ErrorCode.ClosedCriticalStream,
-                    ErrorMessages.PeerResetItsControlStreamRfc9114621,
+                    ErrorMessages.Http3ControlStreamReset,
                     exception)
                 : null;
         }
@@ -1388,7 +1388,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             {
                 return new Http3ConnectionException(
                     Http3ErrorCode.ClosedCriticalStream,
-                    ErrorMessages.PeerClosedItsControlStreamRfc9114621);
+                    ErrorMessages.Http3ControlStreamClosed);
             }
 
             long? frameLength = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
@@ -1396,7 +1396,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             {
                 return new Http3ConnectionException(
                     Http3ErrorCode.FrameError,
-                    ErrorMessages.PeerSControlStreamEndedInsideAFrameHeaderRfc91147);
+                    ErrorMessages.Http3ControlFrameHeaderTruncated);
             }
 
             switch (frameType.Value)
@@ -1412,12 +1412,12 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 case (long)Http3FrameType.PriorityUpdatePush:
                     return new Http3ConnectionException(
                         Http3ErrorCode.IdError,
-                        ErrorMessages.PeerSentAPriorityUpdateForAPushAndTheServerPromises);
+                        ErrorMessages.Http3PushPriorityUnexpected);
 
                 case (long)Http3FrameType.CancelPush:
                     return new Http3ConnectionException(
                         Http3ErrorCode.IdError,
-                        ErrorMessages.PeerCancelledAPushTheServerNeverPromisedRfc911472);
+                        ErrorMessages.Http3PushCancellationUnexpected);
 
                 case (long)Http3FrameType.GoAway:
                 case (long)Http3FrameType.MaxPushId:
@@ -1425,7 +1425,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                     {
                         return new Http3ConnectionException(
                             Http3ErrorCode.FrameError,
-                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.PeerSFrameOfType0xDoesNotHoldExactlyOneVariable, frameType.Value));
+                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3ControlFrameIntegerInvalid, frameType.Value));
                     }
 
                     if (frameType.Value == (long)Http3FrameType.GoAway)
@@ -1435,7 +1435,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                         {
                             return new Http3ConnectionException(
                                 Http3ErrorCode.IdError,
-                                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PeerSGoawayRaisedItsIdentifierFromToRfc911452, lastGoAwayId, identifier));
+                                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3GoawayIdIncreased, lastGoAwayId, identifier));
                         }
 
                         lastGoAwayId = identifier;
@@ -1447,7 +1447,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                         {
                             return new Http3ConnectionException(
                                 Http3ErrorCode.IdError,
-                                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PeerSMaxPushIdLoweredTheMaximumPushIdFromTo, lastMaxPushId, identifier));
+                                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3MaxPushIdDecreased, lastMaxPushId, identifier));
                         }
 
                         lastMaxPushId = identifier;
@@ -1465,7 +1465,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 case (long)Http3FrameType.ReservedHttp2Continuation:
                     return new Http3ConnectionException(
                         Http3ErrorCode.UnexpectedFrame,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.PeerSentAFrameOfType0xOnItsControlStreamWhere, frameType.Value));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3ControlFrameNotSupported, frameType.Value));
 
                 default:
                     // Frames of unknown or reserved type (RFC 9114 §9).
@@ -1519,7 +1519,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         {
             return new Http3ConnectionException(
                 Http3ErrorCode.FrameError,
-                ErrorMessages.PeerSPriorityUpdateEndedInsideItsPrioritizedElementIdRfc9114);
+                ErrorMessages.Http3PriorityElementIdTruncated);
         }
 
         // RFC 9000 §2.1 — a client-initiated bidirectional stream ID is a multiple of 4.
@@ -1527,7 +1527,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         {
             return new Http3ConnectionException(
                 Http3ErrorCode.IdError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PeerSPriorityUpdateNamesStreamWhichIsNotARequestStream, prioritizedStreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3PrioritizedStreamIdInvalid, prioritizedStreamId));
         }
 
         // RFC 9218 §7.2 — IDs at or beyond four times the cumulative stream allowance are invalid.
@@ -1537,7 +1537,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         {
             return new Http3ConnectionException(
                 Http3ErrorCode.IdError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PeerSPriorityUpdateNamesStreamBeyondTheInboundStreamAllowanceRfc, prioritizedStreamId));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3PrioritizedStreamLimitExceeded, prioritizedStreamId));
         }
 
         if (oversized)
@@ -1591,7 +1591,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 {
                     violation = new Http3ConnectionException(
                         Http3ErrorCode.QPackEncoderStreamError,
-                        ErrorMessages.PeerSentAQpackEncoderInstructionIncompatibleWithAMaximumTableCapacity);
+                        ErrorMessages.QpackDisabledTableInstructionInvalid);
                     break;
                 }
 
@@ -1599,7 +1599,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 {
                     violation = new Http3ConnectionException(
                         Http3ErrorCode.ClosedCriticalStream,
-                        ErrorMessages.PeerClosedItsQpackEncoderStreamRfc920442);
+                        ErrorMessages.QpackEncoderStreamClosed);
                     break;
                 }
             }
@@ -1614,7 +1614,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             violation = IsCriticalStreamResetByPeer(exception)
                 ? new Http3ConnectionException(
                     Http3ErrorCode.ClosedCriticalStream,
-                    ErrorMessages.PeerResetItsQpackEncoderStreamRfc920442,
+                    ErrorMessages.QpackEncoderStreamReset,
                     exception)
                 : null;
         }
@@ -1667,7 +1667,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 {
                     violation = new Http3ConnectionException(
                         Http3ErrorCode.ClosedCriticalStream,
-                        ErrorMessages.PeerClosedItsQpackDecoderStreamRfc920442);
+                        ErrorMessages.QpackDecoderStreamClosed);
                     break;
                 }
             }
@@ -1682,7 +1682,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             violation = IsCriticalStreamResetByPeer(exception)
                 ? new Http3ConnectionException(
                     Http3ErrorCode.ClosedCriticalStream,
-                    ErrorMessages.PeerResetItsQpackDecoderStreamRfc920442,
+                    ErrorMessages.QpackDecoderStreamReset,
                     exception)
                 : null;
         }
@@ -1712,14 +1712,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             {
                 return new Http3ConnectionException(
                     Http3ErrorCode.QPackDecoderStreamError,
-                    ErrorMessages.PeerAcknowledgedAFieldSectionButTheServerSFieldSectionsReference);
+                    ErrorMessages.QpackSectionAcknowledgmentUnexpected);
             }
 
             if ((first & 0x40) == 0)
             {
                 return new Http3ConnectionException(
                     Http3ErrorCode.QPackDecoderStreamError,
-                    ErrorMessages.PeerSentAnInsertCountIncrementButTheServerSEncoderInserts);
+                    ErrorMessages.QpackInsertCountIncrementUnexpected);
             }
 
             int available = (int)Math.Min(buffer.Length, instruction.Length);
@@ -1737,7 +1737,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             {
                 return new Http3ConnectionException(
                     Http3ErrorCode.QPackDecoderStreamError,
-                    ErrorMessages.PeerSStreamCancellationCarriesAStreamIdThatOverflowsRfc9204,
+                    ErrorMessages.QpackCancellationStreamIdOverflow,
                     exception);
             }
 
@@ -1854,13 +1854,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                     {
                         throw new QPackException(
                             Http3ErrorCode.QPackEncoderStreamError,
-                            ErrorMessages.QpackEncoderStreamEndedInTheMiddleOfAnInstruction);
+                            ErrorMessages.QpackEncoderInstructionTruncated);
                     }
 
                     // RFC 9204 §4.2 — the encoder stream is critical: the peer must not close it.
                     AbortConnection(new Http3ConnectionException(
                         Http3ErrorCode.ClosedCriticalStream,
-                        ErrorMessages.PeerClosedItsQpackEncoderStreamRfc920442));
+                        ErrorMessages.QpackEncoderStreamClosed));
                     break;
                 }
             }
@@ -1884,14 +1884,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             {
                 AbortConnection(new Http3ConnectionException(
                     Http3ErrorCode.ClosedCriticalStream,
-                    ErrorMessages.PeerResetItsQpackEncoderStreamOrStoppedTheServerSDecoder,
+                    ErrorMessages.QpackCommunicationAborted,
                     ex));
             }
         }
         catch (Exception ex) when (IsPerStreamFailure(ex))
         {
             // A malformed instruction the parser did not report as a QPackException is still one.
-            AbortConnection(new Http3ConnectionException(Http3ErrorCode.QPackEncoderStreamError, ErrorMessages.QpackEncoderStreamCarriedAMalformedInstruction, ex));
+            AbortConnection(new Http3ConnectionException(Http3ErrorCode.QPackEncoderStreamError, ErrorMessages.QpackEncoderInstructionInvalid, ex));
         }
     }
 
@@ -1991,7 +1991,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
                 // Bytes remain but cannot form a complete integer.
                 reader.AdvanceTo(buffer.End);
-                throw new EndOfStreamException(ErrorMessages.QuicVariableLengthIntegerWasIncomplete);
+                throw new EndOfStreamException(ErrorMessages.QuicVariableIntegerTruncated);
             }
 
             // Not enough buffered yet; mark everything examined so the next
@@ -2028,7 +2028,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             if (result.IsCompleted)
             {
                 reader.AdvanceTo(buffer.End);
-                throw new EndOfStreamException(ErrorMessages.Http3ControlFrameWasTruncated);
+                throw new EndOfStreamException(ErrorMessages.Http3ControlFrameTruncated);
             }
 
             reader.AdvanceTo(buffer.Start, buffer.End);
@@ -2059,7 +2059,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             if (result.IsCompleted)
             {
                 reader.AdvanceTo(buffer.End);
-                throw new EndOfStreamException(ErrorMessages.Http3ControlFrameWasTruncated);
+                throw new EndOfStreamException(ErrorMessages.Http3ControlFrameTruncated);
             }
 
             remaining -= buffer.Length;
@@ -2138,7 +2138,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // longer be answered, so it is reset.
         catch (Exception exception)
         {
-            ResetStream(streamConnection, new Http3StreamException(Http3ErrorCode.InternalError, ErrorMessages.RequestStreamFailedUnexpectedly, exception), _connection.Id, requestStreamId, resetState);
+            ResetStream(streamConnection, new Http3StreamException(Http3ErrorCode.InternalError, ErrorMessages.RequestStreamFailure, exception), _connection.Id, requestStreamId, resetState);
             _readyContexts.Writer.TryComplete(exception);
         }
         finally
@@ -2192,7 +2192,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                     streamConnection,
                     requestStreamId,
                     resetState,
-                    new Http3StreamException(Http3ErrorCode.RequestIncomplete, ErrorMessages.Http3RequestStreamEndedBeforeItsHeadersFrame),
+                    new Http3StreamException(Http3ErrorCode.RequestIncomplete, ErrorMessages.Http3RequestHeadersMissing),
                     abandonsReading: false);
                 return null;
             }
@@ -2260,7 +2260,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 new Http3StreamException(
                     Http3ErrorCode.RequestRejected,
                     timedOut
-                        ? ErrorMessages.Http3RequestHeadDidNotArriveWithinTheRequestHeadersTimeout
+                        ? ErrorMessages.Http3RequestHeadersTimeout
                         : _requestDispatchStoppedMessage),
                 abandonsReading: !reader.IsCompleted);
             return null;
@@ -2273,7 +2273,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 streamConnection,
                 requestStreamId,
                 resetState,
-                new Http3StreamException(Http3ErrorCode.RequestIncomplete, ErrorMessages.Http3RequestStreamFailedBeforeItsRequestHeadWasComplete, exception),
+                new Http3StreamException(Http3ErrorCode.RequestIncomplete, ErrorMessages.Http3RequestHeadFailure, exception),
                 abandonsReading: !reader.IsCompleted);
             return null;
         }
@@ -2379,7 +2379,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 streamConnection,
                 requestStreamId,
                 resetState,
-                new Http3StreamException(Http3ErrorCode.RequestRejected, ErrorMessages.RequestInterceptorRejectedTheRequest),
+                new Http3StreamException(Http3ErrorCode.RequestRejected, ErrorMessages.RequestInterceptorRejection),
                 abandonsReading: !reader.IsCompleted);
             return null;
         }
@@ -2476,7 +2476,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             }
             catch (Exception exception) when (IsFieldSectionDecodeFailure(exception))
             {
-                throw new Http3StreamException(Http3ErrorCode.MessageError, ErrorMessages.Http3FieldSectionCouldNotBeDecoded, exception);
+                throw new Http3StreamException(Http3ErrorCode.MessageError, ErrorMessages.Http3FieldSectionInvalid, exception);
             }
         }
 
@@ -2490,7 +2490,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         }
         catch (Exception exception) when (IsFieldSectionDecodeFailure(exception))
         {
-            throw new Http3StreamException(Http3ErrorCode.MessageError, ErrorMessages.Http3FieldSectionPrefixCouldNotBeDecoded, exception);
+            throw new Http3StreamException(Http3ErrorCode.MessageError, ErrorMessages.Http3FieldSectionPrefixInvalid, exception);
         }
 
         bool referencedDynamicTable = prefix.RequiredInsertCount > 0;
@@ -2514,7 +2514,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             }
             catch (Exception exception) when (IsFieldSectionDecodeFailure(exception))
             {
-                throw new Http3StreamException(Http3ErrorCode.MessageError, ErrorMessages.Http3FieldSectionCouldNotBeDecoded, exception);
+                throw new Http3StreamException(Http3ErrorCode.MessageError, ErrorMessages.Http3FieldSectionInvalid, exception);
             }
 
             decodeCompleted = true;
@@ -2627,7 +2627,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     {
         if (context is not Http3Context http3Context)
         {
-            throw new InvalidOperationException(ErrorMessages.SuppliedContextDoesNotBelongToAnHttp3Connection);
+            throw new InvalidOperationException(ErrorMessages.Http3ContextMismatch);
         }
 
         bool headRefused = false;
@@ -2873,7 +2873,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 http3Context.StreamConnection,
                 http3Context.StreamId,
                 requestBody.ResetState,
-                new Http3StreamException(Http3ErrorCode.InternalError, ErrorMessages.ResponseSTrailerSectionCouldNotBeSent),
+                new Http3StreamException(Http3ErrorCode.InternalError, ErrorMessages.ResponseTrailerSendFailure),
                 abandonsReading);
 
             throw;
@@ -3323,7 +3323,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 context.StreamConnection,
                 context.StreamId,
                 requestBody.ResetState,
-                new Http3StreamException(Http3ErrorCode.RequestCancelled, ErrorMessages.PeerDidNotReadTheResponseAtTheConfiguredMinimumDataRate),
+                new Http3StreamException(Http3ErrorCode.RequestCancelled, ErrorMessages.ResponseDataRateTooLow),
                 abandonsReading);
         }
 

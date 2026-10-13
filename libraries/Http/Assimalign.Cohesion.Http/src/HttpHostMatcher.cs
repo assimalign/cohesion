@@ -121,7 +121,7 @@ public abstract class HttpHostMatcher
             if (string.IsNullOrWhiteSpace(pattern))
             {
                 throw new ArgumentException(
-                    ErrorMessages.HostAllowlistPatternMustNotBeNullEmptyOrWhitespace,
+                    ErrorMessages.HostAllowlistPatternEmpty,
                     nameof(patterns));
             }
 
@@ -142,14 +142,14 @@ public abstract class HttpHostMatcher
             if (!parsed.TryGetComponents(out ReadOnlySpan<char> host, out int? port) || host.IsEmpty)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPatternIsNotAWellFormedHost, pattern),
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistHostInvalid, pattern),
                     nameof(patterns));
             }
 
             if (port is not null)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPatternCarriesAPortHostFilteringMatchesTheHostComponent, pattern, port),
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPortNotAllowed, pattern, port),
                     nameof(patterns));
             }
 
@@ -161,7 +161,7 @@ public abstract class HttpHostMatcher
                 if (suffix.Length <= 1 || suffix[1..].IndexOf('*') >= 0)
                 {
                     throw new ArgumentException(
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPatternIsNotAValidWildcardExpectedSuffixWithA, pattern),
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistWildcardInvalid, pattern),
                         nameof(patterns));
                 }
 
@@ -170,7 +170,7 @@ public abstract class HttpHostMatcher
             else if (host.IndexOf('*') >= 0)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistPatternMisusesTheWildcardIsOnlyValidAsTheWhole, pattern),
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostAllowlistWildcardPositionInvalid, pattern),
                     nameof(patterns));
             }
             else
@@ -182,7 +182,7 @@ public abstract class HttpHostMatcher
         if (count == 0)
         {
             throw new ArgumentException(
-                ErrorMessages.AtLeastOneHostAllowlistPatternIsRequiredToAcceptEveryHost,
+                ErrorMessages.HostAllowlistPatternRequired,
                 nameof(patterns));
         }
 

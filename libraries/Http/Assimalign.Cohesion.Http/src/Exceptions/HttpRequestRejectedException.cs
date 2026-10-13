@@ -27,7 +27,7 @@ public sealed class HttpRequestRejectedException : HttpException
     /// Thrown when <paramref name="statusCode"/> is not an error status (4xx / 5xx).
     /// </exception>
     public HttpRequestRejectedException(HttpStatusCode statusCode)
-        : this(statusCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestWasRejectedWithStatus, statusCode))
+        : this(statusCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestRejected, statusCode))
     {
     }
 
@@ -47,7 +47,7 @@ public sealed class HttpRequestRejectedException : HttpException
             throw new ArgumentOutOfRangeException(
                 nameof(statusCode),
                 statusCode.Value,
-                ErrorMessages.RequestRejectionMustCarryAnErrorStatus4xxOr5xx);
+                ErrorMessages.RequestRejectionStatusInvalid);
         }
 
         StatusCode = statusCode;

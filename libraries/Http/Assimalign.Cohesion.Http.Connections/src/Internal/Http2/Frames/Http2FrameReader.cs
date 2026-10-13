@@ -36,7 +36,7 @@ internal static class Http2FrameReader
             // ReadFrameAsync performs the same check first).
             throw new Http2ConnectionException(
                 Http2ErrorCode.FrameSizeError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FramePayloadLengthExceededTheNegotiatedMaximum, payloadLength, maxFrameSize));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2NegotiatedFrameLimitExceeded, payloadLength, maxFrameSize));
         }
 
         long frameLength = HeaderLength + payloadLength;
@@ -81,7 +81,7 @@ internal static class Http2FrameReader
 
         if (data.Length % SettingSize != 0)
         {
-            throw new InvalidDataException(ErrorMessages.Http2SettingsPayloadLengthWasInvalid);
+            throw new InvalidDataException(ErrorMessages.Http2SettingsPayloadLengthInvalid);
         }
 
         Http2PeerSetting[] settings = new Http2PeerSetting[data.Length / SettingSize];
@@ -107,7 +107,7 @@ internal static class Http2FrameReader
             // the receive loop can emit GOAWAY before tearing down.
             throw new Http2ConnectionException(
                 Http2ErrorCode.FrameSizeError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FramePayloadLengthIsTooShortForItsRequiredFixedFields, frame.Type, frame.PayloadLength));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2FramePayloadTooShort, frame.Type, frame.PayloadLength));
         }
 
         ReadOnlySpan<byte> extendedHeaders = AsSpan(readableBuffer.Slice(HeaderLength, extendedHeaderLength));

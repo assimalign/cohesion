@@ -88,7 +88,7 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
             {
                 throw new ObjectDisposedException(
                     nameof(Http3ExtendedConnectStream),
-                    ErrorMessages.ServerSSideOfTheExtendedConnectTunnelHasAlreadyEnded);
+                    ErrorMessages.TunnelOutputAlreadyCompleted);
             }
 
             await WriteFrameAsync(Http3FrameType.Data, data, cancellationToken).ConfigureAwait(false);
@@ -130,12 +130,12 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
     {
         if (_context.RequestBody.IsReset)
         {
-            throw new IOException(ErrorMessages.Http3RequestStreamCarryingTheExtendedConnectTunnelWasReset);
+            throw new IOException(ErrorMessages.Http3TunnelStreamReset);
         }
 
         if (_connection.ConnectionClosed.IsCancellationRequested)
         {
-            throw new IOException(ErrorMessages.Http3ConnectionCarryingTheExtendedConnectTunnelClosed);
+            throw new IOException(ErrorMessages.Http3TunnelConnectionClosed);
         }
     }
 
@@ -153,7 +153,7 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
         {
             // Classify the original driver failure first: a coded peer reset may reach this writer
             // before its closure callback. Unclassified local pipe failures keep the tunnel contract.
-            throw new IOException(ErrorMessages.Http3RequestStreamCarryingTheExtendedConnectTunnelFailed, exception);
+            throw new IOException(ErrorMessages.Http3TunnelStreamFailure, exception);
         }
     }
 
@@ -173,7 +173,7 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
         if (result.IsCompleted)
         {
             // The peer stopped reading the stream (STOP_SENDING or a reset): the octets cannot reach it.
-            throw new IOException(ErrorMessages.PeerStoppedReadingTheHttp3RequestStreamCarryingTheExtendedConnectTunnel);
+            throw new IOException(ErrorMessages.Http3TunnelOutputStopped);
         }
     }
 }

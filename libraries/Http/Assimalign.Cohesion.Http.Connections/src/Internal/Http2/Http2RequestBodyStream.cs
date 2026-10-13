@@ -186,13 +186,13 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     public override bool CanWrite => false;
 
     /// <inheritdoc />
-    public override long Length => throw new NotSupportedException(ErrorMessages.Http2RequestBodyLengthIsNotKnownInAdvance);
+    public override long Length => throw new NotSupportedException(ErrorMessages.Http2RequestBodyLengthUnknown);
 
     /// <inheritdoc />
     public override long Position
     {
-        get => throw new NotSupportedException(ErrorMessages.Http2RequestBodyStreamIsNotSeekable);
-        set => throw new NotSupportedException(ErrorMessages.Http2RequestBodyStreamIsNotSeekable);
+        get => throw new NotSupportedException(ErrorMessages.Http2RequestBodySeekingNotSupported);
+        set => throw new NotSupportedException(ErrorMessages.Http2RequestBodySeekingNotSupported);
     }
 
     /// <inheritdoc />
@@ -288,13 +288,13 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.Http2RequestBodyStreamIsNotSeekable);
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.Http2RequestBodySeekingNotSupported);
 
     /// <inheritdoc />
-    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.Http2RequestBodyStreamIsReadOnly);
+    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.Http2RequestBodyWritingNotSupported);
 
     /// <inheritdoc />
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.Http2RequestBodyStreamIsReadOnly);
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.Http2RequestBodyWritingNotSupported);
 
     /// <summary>
     /// Sends <c>100 Continue</c> (RFC 9110 §10.1.1) on the exchange's interim-response path — a HEADERS
@@ -539,7 +539,7 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     {
         _rateFailure = _owner.LatchClientFault(
             HttpStatusCode.RequestTimeout,
-            new IOException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestBodyOnStreamWasReceivedBelowTheConfiguredMinimumData, _streamId, _rate!.BytesPerSecond)));
+            new IOException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestBodyDataRateTooLow, _streamId, _rate!.BytesPerSecond)));
 
         await dataRate.RejectTooSlowAsync(_streamId).ConfigureAwait(false);
         return _rateFailure;

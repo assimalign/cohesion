@@ -46,14 +46,14 @@ public sealed class HttpCookie
         if (!HttpCookieGrammar.IsValidName(name))
         {
             throw new ArgumentException(
-                ErrorMessages.CookieNameIsNotAValidRfc6265TokenItMustBe,
+                ErrorMessages.CookieNameInvalid,
                 nameof(name));
         }
 
         if (!HttpCookieGrammar.IsValidValue(value))
         {
             throw new ArgumentException(
-                ErrorMessages.CookieValueContainsCharactersOutsideTheRfc6265CookieOctetGrammarControl,
+                ErrorMessages.CookieValueInvalid,
                 nameof(value));
         }
 

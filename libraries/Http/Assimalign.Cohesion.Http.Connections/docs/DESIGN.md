@@ -6092,6 +6092,11 @@ absence is understood as intentional rather than an oversight.
 
 ## Exception message resources (#1467)
 
+Resource names describe the failure in a short PascalCase noun phrase of at most 40
+characters, such as `Http2RequestBodyTooLarge` or `Http3RequestHeadersTimeout` (#1471).
+The identifier cleanup preserves message text, placeholders, ordering and cached lifecycle
+diagnostics; it adds no public API or breaking behavior against 10.0.0-preview.1.
+
 Exception diagnostics live in `src/Properties/ErrorMessages.resx`. The shared build targets
 use MSBuild strongly typed resource generation to produce an internal `ErrorMessages` class
 in this assembly's `RootNamespace`, under the intermediate output directory. No designer source

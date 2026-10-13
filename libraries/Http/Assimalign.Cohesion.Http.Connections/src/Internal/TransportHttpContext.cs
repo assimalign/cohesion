@@ -19,9 +19,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal abstract class TransportHttpContext : HttpContext
 {
-    private static readonly string _clientStoppedAcceptingResponseMessage = ErrorMessages.ClientStoppedAcceptingTheResponse;
-    private static readonly string _responseDataRateMessage = ErrorMessages.PeerDidNotAcceptTheResponseAtTheConfiguredMinimumDataRate;
-    private static readonly string _clientAbandonedRequestMessage = ErrorMessages.ClientAbandonedTheRequestBeforeItsBodyWasReadToTheEnd;
+    private static readonly string _responseAbandonedMessage = ErrorMessages.ResponseAbandoned;
+    private static readonly string _responseDataRateMessage = ErrorMessages.ResponseAbortedByLowDataRate;
+    private static readonly string _requestBodyAbandonedMessage = ErrorMessages.RequestBodyAbandoned;
 
     // Backs RequestAborted. Linked to the transport-supplied token(s) so the
     // exchange is aborted when the connection/stream is torn down, and can also
@@ -60,7 +60,7 @@ internal abstract class TransportHttpContext : HttpContext
     {
         LatchResponseAbortedByClient();
         return new OperationCanceledException(
-            _clientStoppedAcceptingResponseMessage, reason, TripRequestCancelled());
+            _responseAbandonedMessage, reason, TripRequestCancelled());
     }
 
     /// <summary>
@@ -284,7 +284,7 @@ internal abstract class TransportHttpContext : HttpContext
     internal OperationCanceledException AbortRequestForPeer(Exception reason)
     {
         return new OperationCanceledException(
-            _clientAbandonedRequestMessage,
+            _requestBodyAbandonedMessage,
             reason,
             TripRequestCancelled());
     }

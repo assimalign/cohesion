@@ -85,7 +85,7 @@ internal sealed class HttpResponseStreamingFeature : IHttpResponseStreamingFeatu
         if (_completed)
         {
             throw new InvalidOperationException(
-                ErrorMessages.StreamingResponseHasAlreadyBeenCompletedNoFurtherBodyBytesCanBe);
+                ErrorMessages.StreamingResponseAlreadyCompleted);
         }
     }
 }

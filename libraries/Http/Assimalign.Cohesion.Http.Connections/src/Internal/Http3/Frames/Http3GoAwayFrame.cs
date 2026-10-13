@@ -36,7 +36,7 @@ internal static class Http3GoAwayFrame
     {
         if (streamId < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(streamId), streamId, ErrorMessages.Http3GoawayStreamIdentifierMustBeNonNegative);
+            throw new ArgumentOutOfRangeException(nameof(streamId), streamId, ErrorMessages.Http3GoawayStreamIdNegative);
         }
 
         // Encode the varint payload first so the frame's Length prefix reflects

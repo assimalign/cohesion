@@ -168,7 +168,7 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
 
             if (_streamListeners.Count == 0 && _multiplexedListeners.Count == 0)
             {
-                throw new InvalidOperationException(ErrorMessages.AtLeastOneConnectionListenerMustBeConfiguredBeforeBindingHttpConnections);
+                throw new InvalidOperationException(ErrorMessages.ConnectionListenerMissing);
             }
 
             try
@@ -242,7 +242,7 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
             if (!TryParseAuthority(authority, out string? host, out int port))
             {
                 throw new InvalidOperationException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConfiguredAltSvcAuthorityIsNotAValidHostPortOrPort, authority));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.AltSvcAuthorityInvalid, authority));
             }
 
             alternative = HttpAltService.Http3(host, port, maxAgeSeconds);
@@ -255,7 +255,7 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
         else
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AltSvcAdvertisementIsEnabledButTheHttp3ListenerEndpointDoesNot, nameof(HttpAltServiceAdvertisementOptions), nameof(HttpAltServiceAdvertisementOptions.Authority)));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AltSvcPortMissing, nameof(HttpAltServiceAdvertisementOptions), nameof(HttpAltServiceAdvertisementOptions.Authority)));
         }
 
         return alternative.Format();
@@ -452,7 +452,7 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
 
         if (disposalFailures is { Count: > 1 })
         {
-            throw new AggregateException(ErrorMessages.OneOrMoreHttpConnectionListenersFailedToDispose, disposalFailures);
+            throw new AggregateException(ErrorMessages.ListenerDisposalFailure, disposalFailures);
         }
     }
 

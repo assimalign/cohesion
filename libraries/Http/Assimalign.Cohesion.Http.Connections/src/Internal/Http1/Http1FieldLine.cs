@@ -67,7 +67,7 @@ internal static class Http1FieldLine
 
         if (colon <= 0 || !HttpFieldNormalization.IsValidFieldName(line.AsSpan(0, colon)))
         {
-            violation = ErrorMessages.FieldLineHasNoColonOrAFieldNameThatIsNot;
+            violation = ErrorMessages.HeaderFieldLineInvalid;
             return false;
         }
 
@@ -79,7 +79,7 @@ internal static class Http1FieldLine
         if (invalid >= 0)
         {
             // The name is a token, so it is safe to quote.
-            violation = string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheFieldHoldsTheControlCharacter0xOnlyHtabIs, line[..colon], (int)fieldValue[invalid]);
+            violation = string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestFieldValueControlCharacter, line[..colon], (int)fieldValue[invalid]);
             return false;
         }
 

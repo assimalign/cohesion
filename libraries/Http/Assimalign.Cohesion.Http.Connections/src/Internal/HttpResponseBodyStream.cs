@@ -152,7 +152,7 @@ internal abstract class HttpResponseBodyStream : Stream
         if (_owner.ExchangeDirective != HttpExchangeDirective.Continue)
         {
             throw new InvalidOperationException(
-                ErrorMessages.ResponseHeadCannotBeCommittedTheExchangeWasAbortedOrItsConnection);
+                ErrorMessages.ResponseHeadCommitUnavailable);
         }
 
         // The final response head is about to be committed by the streaming path — this is the
@@ -174,7 +174,7 @@ internal abstract class HttpResponseBodyStream : Stream
         if (_owner.ExchangeDirective != HttpExchangeDirective.Continue)
         {
             throw new InvalidOperationException(
-                ErrorMessages.ResponseHeadCannotBeCommittedTheExchangeWasAbortedOrItsConnection);
+                ErrorMessages.ResponseHeadCommitUnavailable);
         }
 
         _started = true;
@@ -199,7 +199,7 @@ internal abstract class HttpResponseBodyStream : Stream
         if (_completed)
         {
             throw new InvalidOperationException(
-                ErrorMessages.StreamingResponseHasAlreadyBeenCompletedNoFurtherBodyBytesCanBe);
+                ErrorMessages.StreamingResponseAlreadyCompleted);
         }
     }
 }

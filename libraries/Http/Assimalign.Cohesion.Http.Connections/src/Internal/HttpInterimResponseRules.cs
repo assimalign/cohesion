@@ -92,7 +92,7 @@ internal static class HttpInterimResponseRules
             throw new ArgumentOutOfRangeException(
                 nameof(statusCode),
                 statusCode.Value,
-                ErrorMessages.InterimResponseRequiresA1xxStatusCodeRfc9110152);
+                ErrorMessages.InterimResponseStatusInvalid);
         }
 
         if ((int)statusCode == SwitchingProtocolsStatus)
@@ -100,7 +100,7 @@ internal static class HttpInterimResponseRules
             throw new ArgumentOutOfRangeException(
                 nameof(statusCode),
                 statusCode.Value,
-                ErrorMessages.Invalid101SwitchingProtocolsIsAConnectionTransitionOwnedByAssimalignCohesionHttp);
+                ErrorMessages.InterimProtocolSwitchNotSupported);
         }
     }
 
@@ -120,7 +120,7 @@ internal static class HttpInterimResponseRules
         if (IsInformational(statusCode))
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Invalid1xxStatusCodeCannotBeUsedAsTheFinalResponseStatusEmit, statusCode));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.FinalResponseStatusInvalid, statusCode));
         }
     }
 }

@@ -83,7 +83,7 @@ public static class HttpContextSessionExtensions
                 ArgumentNullException.ThrowIfNull(context);
                 return context.Features.Get<IHttpSessionFeature>()?.Session
                     ?? throw new InvalidOperationException(
-                        ErrorMessages.NoIHttpSessionFeatureHasBeenAttachedToTheHttpContextAssignSessionBefore);
+                        ErrorMessages.SessionFeatureMissing);
             }
         }
     }

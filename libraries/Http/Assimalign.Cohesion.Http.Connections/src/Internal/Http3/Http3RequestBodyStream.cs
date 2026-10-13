@@ -104,8 +104,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 {
     // These diagnostics also run during ordinary validation, cancellation or completion.
-    private static readonly string _trailerReadCancelledMessage = ErrorMessages.ReadWasCancelledInsideTheRequestSTrailerSectionTheRequestBody;
-    private static readonly string _requestBodyResetMessage = ErrorMessages.Http3RequestStreamWasResetBeforeItsBodyWasRead;
+    private static readonly string _trailerReadCancelledMessage = ErrorMessages.TrailerReadCancelled;
+    private static readonly string _requestBodyResetMessage = ErrorMessages.Http3RequestBodyReset;
     private static readonly string _requestBodyStoppedMessage = ErrorMessages.RequestBodyStoppedAfterCompleteResponse;
 
     private readonly Http3ConnectionContext _connection;
@@ -283,13 +283,13 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     public override bool CanWrite => false;
 
     /// <inheritdoc />
-    public override long Length => throw new NotSupportedException(ErrorMessages.Http3RequestBodyLengthIsNotKnownInAdvance);
+    public override long Length => throw new NotSupportedException(ErrorMessages.Http3RequestBodyLengthUnknown);
 
     /// <inheritdoc />
     public override long Position
     {
-        get => throw new NotSupportedException(ErrorMessages.Http3RequestBodyStreamIsNotSeekable);
-        set => throw new NotSupportedException(ErrorMessages.Http3RequestBodyStreamIsNotSeekable);
+        get => throw new NotSupportedException(ErrorMessages.Http3RequestBodySeekingNotSupported);
+        set => throw new NotSupportedException(ErrorMessages.Http3RequestBodySeekingNotSupported);
     }
 
     /// <inheritdoc />
@@ -319,7 +319,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         {
             if (_reading)
             {
-                throw new InvalidOperationException(ErrorMessages.Http3RequestBodyDoesNotSupportConcurrentReads);
+                throw new InvalidOperationException(ErrorMessages.Http3ConcurrentBodyReadsNotSupported);
             }
 
             _reading = true;
@@ -359,13 +359,13 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.Http3RequestBodyStreamIsNotSeekable);
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.Http3RequestBodySeekingNotSupported);
 
     /// <inheritdoc />
-    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.Http3RequestBodyStreamIsReadOnly);
+    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.Http3RequestBodyWritingNotSupported);
 
     /// <inheritdoc />
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.Http3RequestBodyStreamIsReadOnly);
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.Http3RequestBodyWritingNotSupported);
 
     /// <summary>
     /// Refuses what remains of the request once the server no longer needs it — its response body is
@@ -532,7 +532,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         {
             // The send path refused the rest of the request, or stopped reading, once the response was
             // complete: the body's remainder was never delivered, so this is not an end of body.
-            throw new IOException(ErrorMessages.Http3RequestBodyIsNoLongerReadableTheServerStoppedReadingThe);
+            throw new IOException(ErrorMessages.Http3RequestBodyReadingStopped);
         }
 
         EnsureStarted();
@@ -696,7 +696,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             // The request stream itself failed — reset by the peer before the exchange existed, or torn down
             // with its connection.
             IOException failure = exception as IOException
-                ?? new IOException(ErrorMessages.Http3RequestStreamFailedWhileTheRequestBodyWasBeingRead, exception);
+                ?? new IOException(ErrorMessages.Http3RequestBodyReadFailure, exception);
             Fail(failure);
 
             if (ReferenceEquals(failure, exception))
@@ -736,7 +736,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
                 {
                     throw new Http3ConnectionException(
                         Http3ErrorCode.UnexpectedFrame,
-                        ErrorMessages.Http3RequestStreamCarriedADataFrameAfterItsTrailerSectionRfc);
+                        ErrorMessages.Http3DataAfterTrailers);
                 }
 
                 // The frame header is consumed, so its payload is next on the stream whether or not it is
@@ -751,13 +751,13 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
                     {
                         throw new Http3StreamException(
                             Http3ErrorCode.MessageError,
-                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestSDataFramesExceedItsContentLengthOfOctetsRfc9114, declared));
+                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3BodyExceedsContentLength, declared));
                     }
 
                     if (_cap is { } cap && total > cap)
                     {
                         // RFC 9110 §15.5.14 — reject before a single octet of the offending frame is delivered.
-                        throw Reject(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestBodyExceedsTheConfiguredMaximumRequestBodySizeOctetsAtA, cap, frame.Length, _received));
+                        throw Reject(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestBodyTooLarge, cap, frame.Length, _received));
                     }
                 }
 
@@ -770,7 +770,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
                     // only DATA after the request head.
                     throw new Http3ConnectionException(
                         Http3ErrorCode.UnexpectedFrame,
-                        ErrorMessages.Http3RequestStreamCarriedAHeadersFrameWhereNoneIsPermittedRfc);
+                        ErrorMessages.Http3HeadersFrameUnexpected);
                 }
 
                 await ReadTrailerSectionAsync(frame, cancellationToken).ConfigureAwait(false);
@@ -781,7 +781,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
                 {
                     throw new Http3ConnectionException(
                         Http3ErrorCode.UnexpectedFrame,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.FrameType0xIsNotPermittedOnAnHttp3RequestStreamRfc, frame.Type));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestFrameNotSupported, frame.Type));
                 }
 
                 // RFC 9114 §9 — frames of unknown or reserved type are ignored wherever they appear. The
@@ -873,7 +873,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
         if (_cap is { } cap && _declaredContentLength is { } declared && declared > cap)
         {
-            throw Reject(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueExceedsTheConfiguredMaximumRequestBodySizeOctets, declared, cap));
+            throw Reject(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthTooLarge, declared, cap));
         }
     }
 
@@ -919,7 +919,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         {
             throw new Http3StreamException(
                 Http3ErrorCode.MessageError,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestStreamEndedAfterOfTheOctetsItsContentLengthDeclaredRfc, _received, declared));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3BodyBelowContentLength, _received, declared));
         }
     }
 
@@ -933,7 +933,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         // RFC 9110 §15.5.9 — a body received below the minimum data rate is answered 408 Request Timeout.
         return Reject(new Http3LimitExceededException(
             HttpStatusCode.RequestTimeout,
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestBodyWasReceivedBelowTheConfiguredMinimumDataRateOfOctets, _rate!.BytesPerSecond)));
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestBodyDataRateTooLow, _rate!.BytesPerSecond)));
     }
 
     private Http3LimitExceededException Reject(Http3LimitExceededException rejection)

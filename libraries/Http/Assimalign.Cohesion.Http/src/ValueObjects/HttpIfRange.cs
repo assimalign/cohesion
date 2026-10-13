@@ -158,7 +158,7 @@ public readonly struct HttpIfRange : IEquatable<HttpIfRange>
     {
         if (!TryParse(value, out HttpIfRange result))
         {
-            throw new HttpInvalidConditionalException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidIfRangeHeader, value.ToString()));
+            throw new HttpInvalidConditionalException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.IfRangeHeaderInvalid, value.ToString()));
         }
         return result;
     }

@@ -54,7 +54,7 @@ internal sealed class HttpClientFactory : IHttpClientFactory, IDisposable, IAsyn
         if (options.DefaultHandlerLifetime <= TimeSpan.Zero)
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultHandlerLifetimeMustBePositive, nameof(HttpClientFactoryOptions), nameof(HttpClientFactoryOptions.DefaultHandlerLifetime)),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultHandlerLifetimeInvalid, nameof(HttpClientFactoryOptions), nameof(HttpClientFactoryOptions.DefaultHandlerLifetime)),
                 nameof(options));
         }
 
@@ -71,7 +71,7 @@ internal sealed class HttpClientFactory : IHttpClientFactory, IDisposable, IAsyn
         if (!_options.NamedClients.TryGetValue(name, out NamedHttpClientOptions? clientOptions))
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.NoHttpClientHasBeenRegisteredWithTheNameRegisterClientsVia, name));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientNotRegistered, name));
         }
 
         ActiveHandlerEntry entry = GetOrRotateActiveEntry(name, clientOptions);
@@ -188,7 +188,7 @@ internal sealed class HttpClientFactory : IHttpClientFactory, IDisposable, IAsyn
         {
             handler = factory.Invoke()
                 ?? throw new InvalidOperationException(
-                    ErrorMessages.NamedHttpClientOptionsHandlerFactoryReturnedNullReturnANonNullHttpMessageHandlerInstance);
+                    ErrorMessages.HandlerFactoryResultNull);
         }
         else
         {

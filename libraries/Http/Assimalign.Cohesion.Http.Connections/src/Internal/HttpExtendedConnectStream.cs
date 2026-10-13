@@ -30,8 +30,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal abstract class HttpExtendedConnectStream : Stream
 {
-    private static readonly string _tunnelClosedMessage = ErrorMessages.ExtendedConnectTunnelWasClosedWhileTheOperationWasPending;
-    private static readonly string _tunnelAbortedMessage = ErrorMessages.ExtendedConnectTunnelWasAbortedItsStreamWasResetItsConnectionClosed;
+    private static readonly string _tunnelClosedMessage = ErrorMessages.TunnelClosed;
+    private static readonly string _tunnelAbortedMessage = ErrorMessages.TunnelAborted;
 
     // Cancelled when the stream closes, so a read or write still waiting — for the peer's DATA, for
     // flow-control credit, for the write gate — ends instead of outliving the stream.
@@ -63,13 +63,13 @@ internal abstract class HttpExtendedConnectStream : Stream
     public override bool CanSeek => false;
 
     /// <inheritdoc />
-    public override long Length => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelHasNoLength);
+    public override long Length => throw new NotSupportedException(ErrorMessages.TunnelLengthNotSupported);
 
     /// <inheritdoc />
     public override long Position
     {
-        get => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelIsNotSeekable);
-        set => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelIsNotSeekable);
+        get => throw new NotSupportedException(ErrorMessages.TunnelSeekingNotSupported);
+        set => throw new NotSupportedException(ErrorMessages.TunnelSeekingNotSupported);
     }
 
     /// <summary>
@@ -164,10 +164,10 @@ internal abstract class HttpExtendedConnectStream : Stream
     }
 
     /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelIsNotSeekable);
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.TunnelSeekingNotSupported);
 
     /// <inheritdoc />
-    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.ExtendedConnectTunnelHasNoLength);
+    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.TunnelLengthNotSupported);
 
     /// <summary>
     /// Ends the server's side of the tunnel, once: wakes any read or write still waiting, then writes

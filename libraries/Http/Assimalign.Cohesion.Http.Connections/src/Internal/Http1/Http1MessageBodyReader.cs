@@ -54,7 +54,7 @@ internal static class Http1MessageBodyReader
         if (hasTransferEncoding && hasContentLength)
         {
             throw new InvalidDataException(
-                ErrorMessages.MessageMustNotContainBothContentLengthAndTransferEncodingHeaders);
+                ErrorMessages.RequestBodyFramingConflicting);
         }
 
         if (hasTransferEncoding)
@@ -104,7 +104,7 @@ internal static class Http1MessageBodyReader
         if (last is null || !string.Equals(last, "chunked", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransferEncodingMustEndWithChunkedForHttp11RequestsGot, te.Value));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransferEncodingFinalCodingInvalid, te.Value));
         }
     }
 
@@ -139,22 +139,22 @@ internal static class Http1MessageBodyReader
                 if (!IsAllAsciiDigits(segment))
                 {
                     throw new InvalidDataException(
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueIsNotANonNegativeAsciiDecimal, segment));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthInvalid, segment));
                 }
                 if (!long.TryParse(segment, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long parsed))
                 {
                     throw new InvalidDataException(
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueCouldNotBeParsedAsANonNegativeInteger, segment));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthOverflow, segment));
                 }
                 if (parsed < 0)
                 {
                     throw new InvalidDataException(
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthValueIsNegative, segment));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthNegative, segment));
                 }
                 if (agreed is { } existing && existing != parsed)
                 {
                     throw new InvalidDataException(
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConflictingContentLengthValuesAndWereDeclared, existing, parsed));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentLengthConflicting, existing, parsed));
                 }
                 agreed = parsed;
             }
@@ -164,7 +164,7 @@ internal static class Http1MessageBodyReader
         // Split's RemoveEmptyEntries → the value was empty / whitespace-only. RFC 9112 §6.3 — an
         // empty Content-Length is not a valid declaration.
         return agreed ?? throw new InvalidDataException(
-            ErrorMessages.ContentLengthHeaderWasPresentButContainedNoValue);
+            ErrorMessages.ContentLengthEmpty);
     }
 
     private static bool IsAllAsciiDigits(string value)

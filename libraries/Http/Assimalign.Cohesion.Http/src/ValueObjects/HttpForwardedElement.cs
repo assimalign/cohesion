@@ -113,7 +113,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
         {
             if (forNode.IsEmpty)
             {
-                throw new ArgumentException(ErrorMessages.ForNodeIsEmpty, nameof(@for));
+                throw new ArgumentException(ErrorMessages.ForNodeEmpty, nameof(@for));
             }
             forValue = forNode;
             list.Add(new HttpForwardedParameter(ForName, forNode.ToString()));
@@ -122,7 +122,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
         {
             if (byNode.IsEmpty)
             {
-                throw new ArgumentException(ErrorMessages.ByNodeIsEmpty, nameof(by));
+                throw new ArgumentException(ErrorMessages.ByNodeEmpty, nameof(by));
             }
             byValue = byNode;
             list.Add(new HttpForwardedParameter(ByName, byNode.ToString()));
@@ -131,7 +131,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
         {
             if (string.IsNullOrWhiteSpace(host))
             {
-                throw new ArgumentException(ErrorMessages.HostValueIsEmpty, nameof(host));
+                throw new ArgumentException(ErrorMessages.HostValueEmpty, nameof(host));
             }
             list.Add(new HttpForwardedParameter(HostName, host));
         }
@@ -139,7 +139,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
         {
             if (string.IsNullOrWhiteSpace(proto))
             {
-                throw new ArgumentException(ErrorMessages.ProtoValueIsEmpty, nameof(proto));
+                throw new ArgumentException(ErrorMessages.ProtoValueEmpty, nameof(proto));
             }
             list.Add(new HttpForwardedParameter(ProtoName, proto));
         }
@@ -150,7 +150,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
                 if (IsRegisteredName(extension.Name))
                 {
                     throw new ArgumentException(
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExtensionParameterReusesARegisteredParameterName, extension.Name), nameof(extensions));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExtensionParameterNameReserved, extension.Name), nameof(extensions));
                 }
                 list.Add(extension);
             }
@@ -192,7 +192,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
     {
         if (!TryParse(value, out HttpForwardedElement result))
         {
-            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidForwardedElement, value.ToString()));
+            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardedElementInvalid, value.ToString()));
         }
         return result;
     }

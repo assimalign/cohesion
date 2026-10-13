@@ -84,13 +84,13 @@ internal sealed class HttpDigestVerifyingStream : Stream
     public override bool CanWrite => false;
 
     /// <inheritdoc />
-    public override long Length => throw new NotSupportedException(ErrorMessages.DigestVerifiedRequestBodyLengthIsNotKnownInAdvance);
+    public override long Length => throw new NotSupportedException(ErrorMessages.RequestBodyLengthUnknown);
 
     /// <inheritdoc />
     public override long Position
     {
-        get => throw new NotSupportedException(ErrorMessages.DigestVerifiedRequestBodyStreamIsNotSeekable);
-        set => throw new NotSupportedException(ErrorMessages.DigestVerifiedRequestBodyStreamIsNotSeekable);
+        get => throw new NotSupportedException(ErrorMessages.RequestBodyStreamNotSeekable);
+        set => throw new NotSupportedException(ErrorMessages.RequestBodyStreamNotSeekable);
     }
 
     /// <inheritdoc />
@@ -159,13 +159,13 @@ internal sealed class HttpDigestVerifyingStream : Stream
     public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.DigestVerifiedRequestBodyStreamIsNotSeekable);
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.RequestBodyStreamNotSeekable);
 
     /// <inheritdoc />
-    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.DigestVerifiedRequestBodyStreamIsReadOnly);
+    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.RequestBodyStreamReadOnly);
 
     /// <inheritdoc />
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.DigestVerifiedRequestBodyStreamIsReadOnly);
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.RequestBodyStreamReadOnly);
 
     /// <summary>
     /// Feeds octets that flowed to the application into the running hashes, or — on the terminal

@@ -27,7 +27,9 @@ name equal to the embedded resource name. The existing `Resources.resx` conventi
 same treatment with class `Resources`, output `Resources.g.cs`, and manifest name
 `$(RootNamespace).Resources`, for strings that are not exception messages.
 
-Each distinct exception message has a PascalCase resource name describing the failure. Call
+Each distinct exception message has a short PascalCase noun phrase naming the failure, about
+five words and at most 40 characters. Names describe the failure rather than copying or truncating
+the message (#1471). Call
 sites use `ErrorMessages.Name`; formatted messages use
 `string.Format(CultureInfo.CurrentCulture, ErrorMessages.Name, args...)`. Numbered placeholders
 preserve the original interpolation's ordering, format specifiers, punctuation, and whitespace.
@@ -41,8 +43,9 @@ adopt the rule when next touched; #1470 covers Database.
 
 ## Existing resource projects
 
-The seven existing projects now use the shared build mechanism. Their prior resource names and
-values are preserved; call sites are updated when an accessor name changes.
+The seven existing projects now use the shared build mechanism. Message values are preserved;
+exception resource names follow the failure-naming rule, with call sites updated together.
+ObjectValidation and IdentityHub retain their non-exception resources and names.
 
 | Project | Resource treatment |
 | --- | --- |
@@ -100,10 +103,10 @@ complete cache inventory for these paths.
 | Connections.InMemory / `InMemoryConnection.AbortInput`, `AbortOutput`, and `ReadAborted` | `_peerReadingStoppedMessage`: `PeerReadingStopped`; `_streamResetByPeerMessage`: `StreamResetByPeer`; `_streamReadingAbortedMessage`: `StreamReadingAborted` |
 | Connections.NamedPipes / `NamedPipeConnectionListener` accept during disposal | `_listenerDisposedMessage`: `ListenerDisposed` |
 | Connections.Quic / `QuicStreamConnection.ReadAborted` | `_streamReadingAbortedMessage`: `StreamReadingAborted` |
-| Http.Connections / `Http2Stream.ReceiveReset`, `SendReset`, `AbortOnShutdown`, and `AbortOnCancellation` | `_exchangeAbandonedBeforeBodyEndedFormat`: `Http2ExchangeOnStreamWasAbandonedBeforeItsRequestBodyEnded`; `_connectionClosedBeforeBodyEndedFormat`: `Http2ConnectionClosedBeforeTheRequestBodyOnStreamEnded`; `_requestBodyResetFormat`: `Http2StreamWasResetBeforeItsRequestBodyEnded` |
-| Http.Connections / `Http3ConnectionContext.CancelRequestStream`, `RejectUndispatchedAsync`, and cancelled head parsing | `_requestDispatchStoppedMessage`: `ConnectionStoppedBeforeTheRequestWasDispatched`; `_exchangeCancelledMessage`: `ExchangeWasCancelled` |
-| Http.Connections / `Http3RequestBodyStream.MarkReset` and `CompleteInput` after response completion | `_requestBodyResetMessage`: `Http3RequestStreamWasResetBeforeItsBodyWasRead`; `_requestBodyStoppedMessage`: `RequestBodyStoppedAfterCompleteResponse` |
-| Http.Connections / `Http3RequestBodyStream.ReadTrailerSectionAsync` caller-only cancellation | `_trailerReadCancelledMessage`: `ReadWasCancelledInsideTheRequestSTrailerSectionTheRequestBody` |
+| Http.Connections / `Http2Stream.ReceiveReset`, `SendReset`, `AbortOnShutdown`, and `AbortOnCancellation` | `_requestBodyAbandonedFormat`: `Http2RequestBodyAbandoned`; `_requestBodyConnectionClosedFormat`: `Http2RequestBodyConnectionClosed`; `_requestBodyResetFormat`: `Http2RequestBodyReset` |
+| Http.Connections / `Http3ConnectionContext.CancelRequestStream`, `RejectUndispatchedAsync`, and cancelled head parsing | `_requestDispatchStoppedMessage`: `RequestDispatchStopped`; `_exchangeCancelledMessage`: `ExchangeCancelled` |
+| Http.Connections / `Http3RequestBodyStream.MarkReset` and `CompleteInput` after response completion | `_requestBodyResetMessage`: `Http3RequestBodyReset`; `_requestBodyStoppedMessage`: `RequestBodyStoppedAfterCompleteResponse` |
+| Http.Connections / `Http3RequestBodyStream.ReadTrailerSectionAsync` caller-only cancellation | `_trailerReadCancelledMessage`: `TrailerReadCancelled` |
 | Web.Authentication.Bearer / `JwtBearerHandler` authentication rejection | `_bearerCredentialHasNoTokenMessage`: `BearerCredentialHasNoToken`; `_bearerTokenAudienceRejectedMessage`: `BearerTokenAudienceRejected`; `_bearerTokenIssuerRejectedMessage`: `BearerTokenIssuerRejected`; `_bearerTokenMalformedMessage`: `BearerTokenMalformed`; `_bearerTokenNotCompactJwsMessage`: `BearerTokenNotCompactJws`; `_bearerTokenSignatureEncodingInvalidMessage`: `BearerTokenSignatureEncodingInvalid`; `_bearerTokenSignatureInvalidMessage`: `BearerTokenSignatureInvalid`; `_bearerTokenUsesUnsecuredAlgorithmMessage`: `BearerTokenUsesUnsecuredAlgorithm`; `_bearerTokenValidationFailedMessage`: `BearerTokenValidationFailed` |
 | Web.Authentication.Cookie / `CookieAuthenticationHandler` authentication rejection | `_authenticationCookieEncodingInvalidMessage`: `AuthenticationCookieEncodingInvalid`; `_authenticationCookiePayloadMalformedMessage`: `AuthenticationCookiePayloadMalformed`; `_authenticationCookieUnprotectFailedMessage`: `AuthenticationCookieUnprotectFailed`; `_authenticationTicketExpiredMessage`: `AuthenticationTicketExpired` |
 | Web.Authentication.Certificate / `CertificateAuthenticationHandler` authentication rejection | `_certificatePrincipalNotAuthenticatedMessage`: `CertificatePrincipalNotAuthenticated` |
@@ -121,7 +124,7 @@ internal extended-CONNECT refusal fields remain shared readonly fields backed by
 | `Http1MessageReader` request-line and header reads | `_requestHeaderSectionSubject`: `RequestHeaderSection`; `_requestLineSubject`: `RequestLine` |
 | `HttpListenerRegistration.ValidateStreamCapabilities` | `_http2ProtocolDescription`: `Http2ProtocolDescription`; `_combinedHttpProtocolDescription`: `CombinedHttpProtocolDescription`; `_http1ProtocolDescription`: `Http1ProtocolDescription` |
 | `Http3RequestStreamReader` truncated-frame diagnostics | `_headersFrameSubject`: `HeadersFrame`; `_dataFrameSubject`: `DataFrame`; `_framePayloadSubject`: `FramePayload`; `_frameHeaderSubject`: `FrameHeader` |
-| `HttpExtendedConnectRules` shared refusal messages | `NotExtendedConnectMessage`: `ExchangeIsNotExtendedConnect`; `AlreadyAcceptedMessage`: `ExtendedConnectAcceptHasAlreadyBeenAttemptedForThisExchange`; `CancelledMessage`: `ExtendedConnectTunnelCannotBeAcceptedTheExchangeWasCancelled`; `ResponseStartedMessage`: `ExtendedConnectTunnelCannotBeAcceptedAfterTheResponseHasStarted` |
+| `HttpExtendedConnectRules` shared refusal messages | `NotExtendedConnectMessage`: `ExtendedConnectRequired`; `AlreadyAcceptedMessage`: `ExtendedConnectAcceptAlreadyAttempted`; `CancelledMessage`: `ExtendedConnectExchangeCancelled`; `ResponseStartedMessage`: `ExtendedConnectResponseAlreadyStarted` |
 
 The `HttpMethod` and `HttpStatusCode` guards now evaluate their resource formatting only after
 the existing failure condition is true, preserving successful-path allocation behavior.

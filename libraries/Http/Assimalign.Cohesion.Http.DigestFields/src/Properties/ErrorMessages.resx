@@ -117,31 +117,31 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AtLeastOneAlgorithmIsRequired" xml:space="preserve">
+  <data name="DigestAlgorithmRequired" xml:space="preserve">
     <value>At least one algorithm is required.</value>
   </data>
-  <data name="AtLeastOnePreferenceIsRequired" xml:space="preserve">
+  <data name="DigestPreferenceRequired" xml:space="preserve">
     <value>At least one preference is required.</value>
   </data>
-  <data name="ContentDigestFieldIsMalformed" xml:space="preserve">
+  <data name="ContentDigestFieldMalformed" xml:space="preserve">
     <value>The Content-Digest field is malformed.</value>
   </data>
-  <data name="DigestAlgorithmCannotBeUsedToGenerateADigestRfc95305" xml:space="preserve">
+  <data name="DigestGenerationAlgorithmNotSupported" xml:space="preserve">
     <value>The digest algorithm &apos;{0}&apos; cannot be used to generate a digest (RFC 9530 §5).</value>
   </data>
-  <data name="DigestAlgorithmIsNotSupportedForComputationOrValidationRfc95305" xml:space="preserve">
+  <data name="DigestAlgorithmNotSupported" xml:space="preserve">
     <value>The digest algorithm &apos;{0}&apos; is not supported for computation or validation (RFC 9530 §5).</value>
   </data>
-  <data name="DigestFieldMemberMustBeAByteSequenceRfc953023" xml:space="preserve">
+  <data name="DigestFieldMemberTypeInvalid" xml:space="preserve">
     <value>The digest field member &apos;{0}&apos; must be a Byte Sequence (RFC 9530 §2/§3).</value>
   </data>
-  <data name="DigestVerifiedRequestBodyLengthIsNotKnownInAdvance" xml:space="preserve">
+  <data name="RequestBodyLengthUnknown" xml:space="preserve">
     <value>The digest-verified request body length is not known in advance.</value>
   </data>
-  <data name="DigestVerifiedRequestBodyStreamIsNotSeekable" xml:space="preserve">
+  <data name="RequestBodyStreamNotSeekable" xml:space="preserve">
     <value>The digest-verified request body stream is not seekable.</value>
   </data>
-  <data name="DigestVerifiedRequestBodyStreamIsReadOnly" xml:space="preserve">
+  <data name="RequestBodyStreamReadOnly" xml:space="preserve">
     <value>The digest-verified request body stream is read-only.</value>
   </data>
   <data name="MalformedDigestField" xml:space="preserve">
@@ -156,16 +156,16 @@
   <data name="ContentDigestMismatch" xml:space="preserve">
     <value>The request body does not match its Content-Digest.</value>
   </data>
-  <data name="WantDigestFieldMemberMustBeAnIntegerPreferenceRfc95304" xml:space="preserve">
+  <data name="WantDigestMemberTypeInvalid" xml:space="preserve">
     <value>The want-digest field member &apos;{0}&apos; must be an Integer preference (RFC 9530 §4).</value>
   </data>
-  <data name="WantDigestPreferenceMustReferenceARegisteredAlgorithm" xml:space="preserve">
+  <data name="WantDigestAlgorithmNotRegistered" xml:space="preserve">
     <value>A want-digest preference must reference a registered algorithm.</value>
   </data>
-  <data name="WantDigestFieldRequiresAlgorithmPreference" xml:space="preserve">
+  <data name="WantDigestPreferenceRequired" xml:space="preserve">
     <value>A want-digest field must carry at least one algorithm preference.</value>
   </data>
-  <data name="DigestFieldRequiresAlgorithmEntry" xml:space="preserve">
+  <data name="DigestFieldEntryRequired" xml:space="preserve">
     <value>A digest field must carry at least one algorithm entry.</value>
   </data>
   <data name="UnregisteredDigestAlgorithm" xml:space="preserve">

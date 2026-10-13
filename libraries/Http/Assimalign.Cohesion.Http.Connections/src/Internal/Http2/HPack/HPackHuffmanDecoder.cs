@@ -52,7 +52,7 @@ internal static class HPackHuffmanDecoder
                     if (_isLeaf[node, direction])
                     {
                         throw new InvalidOperationException(
-                            ErrorMessages.HpackHuffmanTableInternalConsistencyErrorPrefixFreeViolation);
+                            ErrorMessages.HpackHuffmanPrefixConflict);
                     }
 
                     if (_children[node, direction] == 0)
@@ -112,13 +112,13 @@ internal static class HPackHuffmanDecoder
                     if (symbol == HPackHuffmanCodes.EndOfString)
                     {
                         throw new HPackDecodingException(
-                            ErrorMessages.HpackHuffmanEncodedStringContainedAnEosSymbol);
+                            ErrorMessages.HpackHuffmanEosUnexpected);
                     }
 
                     if (written >= destination.Length)
                     {
                         throw new HPackDecodingException(
-                            ErrorMessages.HpackHuffmanEncodedStringLongerThanDestinationBuffer);
+                            ErrorMessages.HpackHuffmanBufferTooSmall);
                     }
 
                     destination[written++] = (byte)symbol;
@@ -142,13 +142,13 @@ internal static class HPackHuffmanDecoder
             if (bitsSinceLastSymbol > 7)
             {
                 throw new HPackDecodingException(
-                    ErrorMessages.HpackHuffmanEncodedStringHasTrailingPartialCodeLongerThan7Bits);
+                    ErrorMessages.HpackHuffmanPaddingTooLong);
             }
 
             if (!onlyOnesSinceLastSymbol)
             {
                 throw new HPackDecodingException(
-                    ErrorMessages.HpackHuffmanEncodedStringPaddingDoesNotMatchEosPrefix);
+                    ErrorMessages.HpackHuffmanPaddingInvalid);
             }
         }
 

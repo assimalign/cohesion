@@ -59,7 +59,7 @@ public readonly struct HttpEntityTagCondition
     {
         if (!TryParse(value, out HttpEntityTagCondition result))
         {
-            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueIsNotAValidIfMatchIfNoneMatchCondition, value.ToString()));
+            throw new HttpInvalidEntityTagException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EntityTagConditionInvalid, value.ToString()));
         }
         return result;
     }

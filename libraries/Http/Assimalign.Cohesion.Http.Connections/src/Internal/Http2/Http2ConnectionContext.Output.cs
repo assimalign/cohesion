@@ -14,9 +14,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 // rate is measured over.
 internal sealed partial class Http2ConnectionContext
 {
-    private static readonly string _peerClosedDuringResponseMessage = ErrorMessages.PeerClosedTheHttp2ConnectionDuringTheResponse;
-    private static readonly string _peerStoppedReadingMessage = ErrorMessages.PeerStoppedReadingTheConnectionBelowTheConfiguredMinimumResponseDataRate;
-    private static readonly string _outputStalledMessage = ErrorMessages.Http2ConnectionSOutputStoppedDrainingBelowTheConfiguredMinimumResponseData;
+    private static readonly string _responseConnectionClosedMessage = ErrorMessages.Http2ResponseConnectionClosed;
+    private static readonly string _responseDataRateTooLowMessage = ErrorMessages.Http2ResponseDataRateTooLow;
+    private static readonly string _outputStalledMessage = ErrorMessages.Http2OutputStalled;
 
     // #1384 — the allowance of the connection's output: the listener's MinResponseDataRate measured over
     // every octet any writer hands to the output and every wait any writer spends on it. Null when the
@@ -201,7 +201,7 @@ internal sealed partial class Http2ConnectionContext
             AbortResponsesOnPeerConnectionLoss();
             if (response is not null)
             {
-                throw new OperationCanceledException(_peerClosedDuringResponseMessage, exception, response.RequestCancelled);
+                throw new OperationCanceledException(_responseConnectionClosedMessage, exception, response.RequestCancelled);
             }
             throw;
         }
@@ -247,7 +247,7 @@ internal sealed partial class Http2ConnectionContext
         }
         response?.LatchResponseAbortedByClient();
         LatchResponsesAbortedByClient();
-        Connection.Abort(new IOException(_peerStoppedReadingMessage));
+        Connection.Abort(new IOException(_responseDataRateTooLowMessage));
         StopPumpOnStall();
         return CreateOutputStalledException(response);
     }

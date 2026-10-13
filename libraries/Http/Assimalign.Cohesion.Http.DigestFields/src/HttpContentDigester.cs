@@ -36,7 +36,7 @@ public sealed class HttpContentDigester : IDisposable
         ArgumentNullException.ThrowIfNull(algorithms);
         if (algorithms.Length == 0)
         {
-            throw new ArgumentException(ErrorMessages.AtLeastOneAlgorithmIsRequired, nameof(algorithms));
+            throw new ArgumentException(ErrorMessages.DigestAlgorithmRequired, nameof(algorithms));
         }
 
         _algorithms = new HttpDigestAlgorithm[algorithms.Length];
@@ -52,7 +52,7 @@ public sealed class HttpContentDigester : IDisposable
                     _hashes[j].Dispose();
                 }
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmCannotBeUsedToGenerateADigestRfc95305, algorithm), nameof(algorithms));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestGenerationAlgorithmNotSupported, algorithm), nameof(algorithms));
             }
             _algorithms[i] = algorithm;
             _hashes[i] = algorithm.CreateIncrementalHash();

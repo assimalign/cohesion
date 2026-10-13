@@ -98,7 +98,7 @@ internal static class Http1MessageReader
         if (invalidOctet >= 0)
         {
             throw new Http1BadRequestException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http11RequestLineHoldsTheOctet0xAtOffsetWhichIs, (int)requestLine[invalidOctet], invalidOctet));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestLineCharacterInvalid, (int)requestLine[invalidOctet], invalidOctet));
         }
 
         if (string.IsNullOrWhiteSpace(requestLine))
@@ -110,12 +110,12 @@ internal static class Http1MessageReader
 
         if (requestLineParts.Length != 3)
         {
-            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http11RequestLineIsInvalid, requestLine));
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestLineInvalid, requestLine));
         }
 
         if (!string.Equals(requestLineParts[2], "HTTP/1.1", StringComparison.Ordinal))
         {
-            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpVersionIsNotSupportedByTheHttp11Transport, requestLineParts[2]));
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1VersionNotSupported, requestLineParts[2]));
         }
 
         // RFC 9112 §3 / RFC 9110 §9.1 — the method is a token. A VCHAR such as '@', '(' or ',' passes the
@@ -126,7 +126,7 @@ internal static class Http1MessageReader
         string methodToken = requestLineParts[0];
         if (!HttpFieldNormalization.IsValidFieldName(methodToken))
         {
-            throw new Http1BadRequestException(ErrorMessages.RequestMethodIsNotATokenRfc911091);
+            throw new Http1BadRequestException(ErrorMessages.RequestMethodInvalid);
         }
 
         HttpMethod method;
@@ -141,7 +141,7 @@ internal static class Http1MessageReader
             // respond with 501 (Not Implemented).
             throw new Http1LimitExceededException(
                 HttpStatusCode.NotImplemented,
-                ErrorMessages.RequestMethodIsLongerThanAnyMethodThisServerImplements);
+                ErrorMessages.RequestMethodTooLong);
         }
 
         // RFC 9112 §3.2 — parse the request-target into one of the four canonical forms
@@ -149,7 +149,7 @@ internal static class Http1MessageReader
         if (!HttpRequestTarget.TryParse(requestLineParts[1], method, out HttpRequestTarget target, out string? targetError))
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http11RequestLineHasAMalformedRequestTarget, requestLine, targetError));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestTargetInvalid, requestLine, targetError));
         }
 
         // RFC 3986 §2.4 / RFC 9112 §3.2.1 — percent-decode the origin-form request-target path so this
@@ -180,7 +180,7 @@ internal static class Http1MessageReader
             catch (Exception ex) when (ex is HttpException or InvalidOperationException)
             {
                 throw new InvalidDataException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http11RequestLineHasAMalformedRequestTarget, requestLine, ex.Message));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestTargetInvalid, requestLine, ex.Message));
             }
         }
         else
@@ -236,7 +236,7 @@ internal static class Http1MessageReader
         if (target.Form == HttpRequestTargetForm.Absolute && target.Scheme == HttpScheme.Https && scheme != HttpScheme.Https)
         {
             throw new Http1MisdirectedRequestException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http11RequestTargetNamesAnHttpsResourceButTheConnectionIs, target.RawValue));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestSchemeMismatch, target.RawValue));
         }
 
         HttpScheme requestScheme = target.Form == HttpRequestTargetForm.Absolute
@@ -463,7 +463,7 @@ internal static class Http1MessageReader
 
             if (line is null)
             {
-                throw new EndOfStreamException(ErrorMessages.ConnectionClosedBeforeTheRequestHeadersWereFullyReceived);
+                throw new EndOfStreamException(ErrorMessages.RequestHeadersTruncated);
             }
 
             if (line.Length == 0)
@@ -477,7 +477,7 @@ internal static class Http1MessageReader
             {
                 throw new Http1LimitExceededException(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestHeaderSectionExceedsTheConfiguredMaximumSizeOctets, limits.MaxRequestHeadersTotalSize));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestHeaderSectionTooLarge, limits.MaxRequestHeadersTotalSize));
             }
             totalBytesRemaining -= consumed;
 
@@ -486,7 +486,7 @@ internal static class Http1MessageReader
             {
                 throw new Http1LimitExceededException(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestContainsMoreThanTheConfiguredMaximumOfHeaderFields, limits.MaxRequestHeaderCount));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestHeaderCountExceeded, limits.MaxRequestHeaderCount));
             }
 
             // RFC 9112 §5.1 — the field name is a token: no whitespace before its colon, never empty. A
@@ -496,7 +496,7 @@ internal static class Http1MessageReader
             // The connection then closes.
             if (!Http1FieldLine.TryParse(line, out string name, out string value, out string? violation))
             {
-                throw new Http1BadRequestException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http11HeaderSectionIsMalformed, violation));
+                throw new Http1BadRequestException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1HeaderSectionInvalid, violation));
             }
 
             HttpHeaderKey key = new(name);
@@ -532,7 +532,7 @@ internal static class Http1MessageReader
             {
                 // The value is not quoted: it may hold obs-text, and the octet in hex says enough.
                 throw new Http1BadRequestException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostFieldHoldsTheOctet0xAtOffsetWhichIsNotA, (int)entry![invalid], invalid));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostFieldCharacterInvalid, (int)entry![invalid], invalid));
             }
         }
     }
@@ -664,7 +664,7 @@ internal static class Http1MessageReader
                     return null;
                 }
 
-                throw new EndOfStreamException(ErrorMessages.ConnectionClosedWhileAnHttpLineWasBeingRead);
+                throw new EndOfStreamException(ErrorMessages.HttpLineTruncated);
             }
 
             if (!signaledFirstByte)
@@ -701,7 +701,7 @@ internal static class Http1MessageReader
         {
             throw new Http1LimitExceededException(
                 overflowStatus,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExceedsTheConfiguredMaximumSizeOctets, subject, maxLineSize));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpLineTooLarge, subject, maxLineSize));
         }
 
         buffer.WriteByte(value);

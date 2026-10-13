@@ -100,7 +100,7 @@ internal static class HttpResponseFieldRules
         {
             // The name passed EnsureValidName, so it is a token and safe to quote; the value is not.
             throw new HttpInvalidResponseFieldException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheResponseFieldHoldsTheControlCharacter0xAtIndex, key.Value, (int)value[invalid], invalid));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResponseFieldValueControlCharacter, key.Value, (int)value[invalid], invalid));
         }
     }
 
@@ -120,7 +120,7 @@ internal static class HttpResponseFieldRules
     {
         if (name.Length == 0)
         {
-            return ErrorMessages.ResponseFieldNameIsEmptyTheResponseHeadWasNotSent;
+            return ErrorMessages.ResponseFieldNameEmpty;
         }
 
         int index = 0;
@@ -131,6 +131,6 @@ internal static class HttpResponseFieldRules
         }
 
         // The name is not quoted: whatever made it invalid may be CR, LF, or NUL.
-        return string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResponseFieldNameHoldsTheCharacter0xAtIndexWhichAToken, (int)name[index], index);
+        return string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResponseFieldNameInvalid, (int)name[index], index);
     }
 }

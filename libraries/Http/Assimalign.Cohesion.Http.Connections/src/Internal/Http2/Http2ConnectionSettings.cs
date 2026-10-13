@@ -120,7 +120,7 @@ internal sealed class Http2ConnectionSettings
                 if (setting.Value > 1)
                 {
                     return (Http2ErrorCode.ProtocolError,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsEnablePushMustBe0Or1Got, setting.Value));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.PushSettingInvalid, setting.Value));
                 }
                 break;
 
@@ -128,7 +128,7 @@ internal sealed class Http2ConnectionSettings
                 if (setting.Value > MaxInitialWindowSize)
                 {
                     return (Http2ErrorCode.FlowControlError,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsInitialWindowSizeMustNotExceedGot, MaxInitialWindowSize, setting.Value));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2InitialWindowSizeTooLarge, MaxInitialWindowSize, setting.Value));
                 }
                 break;
 
@@ -136,7 +136,7 @@ internal sealed class Http2ConnectionSettings
                 if (setting.Value < MinMaxFrameSize || setting.Value > MaxMaxFrameSize)
                 {
                     return (Http2ErrorCode.ProtocolError,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsMaxFrameSizeMustBeInGot, MinMaxFrameSize, MaxMaxFrameSize, setting.Value));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2MaxFrameSizeInvalid, MinMaxFrameSize, MaxMaxFrameSize, setting.Value));
                 }
                 break;
 
@@ -144,7 +144,7 @@ internal sealed class Http2ConnectionSettings
                 if (setting.Value > 1)
                 {
                     return (Http2ErrorCode.ProtocolError,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsEnableConnectProtocolMustBe0Or1Got, setting.Value));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConnectProtocolSettingInvalid, setting.Value));
                 }
                 break;
 
@@ -153,7 +153,7 @@ internal sealed class Http2ConnectionSettings
                 if (setting.Value > 1)
                 {
                     return (Http2ErrorCode.ProtocolError,
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.SettingsNoRFC7540PrioritiesMustBe0Or1Got, setting.Value));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2PrioritySettingInvalid, setting.Value));
                 }
                 break;
         }

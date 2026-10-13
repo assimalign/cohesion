@@ -78,7 +78,7 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         if (!CanWriteInterimResponse)
         {
             throw new InvalidOperationException(
-                ErrorMessages.InterimResponseCannotBeSentAfterTheFinalHttp11ResponseHas);
+                ErrorMessages.Http1ResponseAlreadyStarted);
         }
 
         await Http1MessageWriter.WriteInterimResponseAsync(_stream, statusCode, headers, cancellationToken).ConfigureAwait(false);
@@ -97,13 +97,13 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         if (HasResponseStarted || _context.CancelRequested)
         {
             throw new InvalidOperationException(
-                ErrorMessages.ExchangeCanNoLongerBeTakenOverTheFinalResponseHasStarted);
+                ErrorMessages.ExchangeTakeoverUnavailable);
         }
 
         if (Interlocked.Exchange(ref _takenOver, 1) == 1)
         {
             throw new InvalidOperationException(
-                ErrorMessages.ConnectionHasAlreadyBeenTakenOverForThisExchange);
+                ErrorMessages.ConnectionAlreadyTakenOver);
         }
 
         _context.ResponseFinalized = true;
@@ -122,6 +122,6 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
     public ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
     {
         return ValueTask.FromException<Stream>(new InvalidOperationException(
-            ErrorMessages.Http11HasNoExtendedConnectStreamTunnelAConnectOrA));
+            ErrorMessages.Http1TunnelNotSupported));
     }
 }

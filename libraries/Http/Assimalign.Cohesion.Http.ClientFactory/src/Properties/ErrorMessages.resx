@@ -117,25 +117,25 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AtLeastOneNamedClientMustBeRegisteredBeforeTheFactoryCan" xml:space="preserve">
+  <data name="NamedClientRequired" xml:space="preserve">
     <value>At least one named client must be registered before the factory can be built.</value>
   </data>
-  <data name="ClientNameMustBeNonEmpty" xml:space="preserve">
+  <data name="ClientNameEmpty" xml:space="preserve">
     <value>Client name must be non-empty.</value>
   </data>
-  <data name="ClientWithTheNameHasAlreadyBeenRegistered" xml:space="preserve">
+  <data name="ClientAlreadyRegistered" xml:space="preserve">
     <value>A client with the name &apos;{0}&apos; has already been registered.</value>
   </data>
-  <data name="HandlerLifetimeMustBePositive" xml:space="preserve">
+  <data name="HandlerLifetimeInvalid" xml:space="preserve">
     <value>Handler lifetime must be positive.</value>
   </data>
-  <data name="DefaultHandlerLifetimeMustBePositive" xml:space="preserve">
+  <data name="DefaultHandlerLifetimeInvalid" xml:space="preserve">
     <value>{0}.{1} must be positive.</value>
   </data>
-  <data name="NamedHttpClientOptionsHandlerFactoryReturnedNullReturnANonNullHttpMessageHandlerInstance" xml:space="preserve">
+  <data name="HandlerFactoryResultNull" xml:space="preserve">
     <value>NamedHttpClientOptions.HandlerFactory returned null. Return a non-null HttpMessageHandler instance.</value>
   </data>
-  <data name="NoHttpClientHasBeenRegisteredWithTheNameRegisterClientsVia" xml:space="preserve">
+  <data name="ClientNotRegistered" xml:space="preserve">
     <value>No HTTP client has been registered with the name &apos;{0}&apos;. Register clients via HttpClientFactoryBuilder.AddClient before calling Create.</value>
   </data>
 </root>

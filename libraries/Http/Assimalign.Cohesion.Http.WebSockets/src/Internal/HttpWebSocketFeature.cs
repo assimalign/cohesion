@@ -97,7 +97,7 @@ internal sealed class HttpWebSocketFeature : IHttpWebSocketFeature
         if (HandshakeStatus != HttpWebSocketHandshakeStatus.Valid || _context is null || _bootstrap is null)
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestIsNotAValidWebSocketOpeningHandshakeStatusSoItCannot, HandshakeStatus));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.HandshakeInvalid, HandshakeStatus));
         }
 
         string? subProtocol = options?.SubProtocol;
@@ -107,13 +107,13 @@ internal sealed class HttpWebSocketFeature : IHttpWebSocketFeature
         if (subProtocol is not null && !IsRequested(subProtocol))
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.SubprotocolWasNotOfferedByTheClientSelectOneOfRequestedProtocolsOr, subProtocol),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.SubprotocolNotOffered, subProtocol),
                 nameof(options));
         }
 
         if (Interlocked.Exchange(ref _accepted, 1) == 1)
         {
-            throw new InvalidOperationException(ErrorMessages.WebSocketOpeningHandshakeHasAlreadyBeenAcceptedForThisExchange);
+            throw new InvalidOperationException(ErrorMessages.HandshakeAlreadyAccepted);
         }
 
         WebSocketDeflateOptions? deflateOptions = null;
@@ -156,7 +156,7 @@ internal sealed class HttpWebSocketFeature : IHttpWebSocketFeature
             || HandshakeStatus is not (HttpWebSocketHandshakeStatus.Invalid or HttpWebSocketHandshakeStatus.UnsupportedVersion))
         {
             throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.OnlyAnInvalidWebSocketOpeningHandshakeCanBeRefusedThisOneS, HandshakeStatus));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.HandshakeRejectionNotSupported, HandshakeStatus));
         }
 
         IHttpResponse response = _context.Response;

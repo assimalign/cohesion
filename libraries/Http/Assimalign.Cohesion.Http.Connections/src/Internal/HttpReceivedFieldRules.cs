@@ -59,7 +59,7 @@ internal static class HttpReceivedFieldRules
     {
         if (name.Length == 0)
         {
-            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FieldSectionContainsAZeroLengthFieldName, protocol));
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReceivedFieldNameEmpty, protocol));
         }
 
         if (!name.AsSpan().ContainsAnyExcept(_lowercaseTokenCharacters))
@@ -71,12 +71,12 @@ internal static class HttpReceivedFieldRules
         {
             int index = IndexOfNonTokenCharacter(name);
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.FieldNameHoldsTheCharacter0xAtIndexWhichATokenCannot, protocol, (int)name[index], index));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReceivedFieldNameInvalid, protocol, (int)name[index], index));
         }
 
         // A token that is not a lowercase token holds an uppercase letter, and is safe to quote.
         throw new InvalidDataException(
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.FieldNameMustBeLowercaseRfc9113821Rfc9114, protocol, name));
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReceivedFieldNameNotLowercase, protocol, name));
     }
 
     /// <summary>
@@ -94,7 +94,7 @@ internal static class HttpReceivedFieldRules
         if (invalid >= 0)
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheFieldHoldsTheControlCharacter0xAtIndexA, protocol, DescribeName(name), (int)value[invalid], invalid));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReceivedFieldValueControlCharacter, protocol, DescribeName(name), (int)value[invalid], invalid));
         }
 
         // The control characters include NUL, CR, and LF, so of IsValidFieldValue's rule only the ends are
@@ -102,7 +102,7 @@ internal static class HttpReceivedFieldRules
         if (value.Length > 0 && (IsOptionalWhitespace(value[0]) || IsOptionalWhitespace(value[^1])))
         {
             throw new InvalidDataException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueOfTheFieldStartsOrEndsWithWhitespaceRfc91138, protocol, DescribeName(name)));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReceivedFieldValueWhitespaceInvalid, protocol, DescribeName(name)));
         }
     }
 
@@ -116,7 +116,7 @@ internal static class HttpReceivedFieldRules
     {
         ReadOnlySpan<char> token = name.Length > 1 && name[0] == ':' ? name.AsSpan(1) : name;
 
-        return HttpFieldNormalization.IsValidFieldName(token) ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.QuotedFieldName, name) : ErrorMessages.WithANameThatIsNotAToken;
+        return HttpFieldNormalization.IsValidFieldName(token) ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.QuotedFieldName, name) : ErrorMessages.FieldNameTokenInvalid;
     }
 
     private static bool IsOptionalWhitespace(char character)
