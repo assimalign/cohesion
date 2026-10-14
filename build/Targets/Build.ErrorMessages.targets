@@ -1,5 +1,5 @@
 <Project>
-   <!-- The SDK's GenerateResource task (CoreResGen, under PrepareResources) emits and compiles the
+  <!-- The SDK's GenerateResource task (CoreResGen, under PrepareResources) emits and compiles the
        internal accessors below. A full build reaches PrepareResources through CoreBuild, but
        Visual Studio's design-time build runs CompileDesignTime -> Compile only, so without this
        the accessor is never generated and IntelliSense reports CS0103 on ErrorMessages while
