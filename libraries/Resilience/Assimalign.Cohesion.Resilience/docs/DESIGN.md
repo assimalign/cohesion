@@ -72,3 +72,12 @@ root namespace by MSBuild's GenerateResource task through
 `obj/`; no checked-in designer or Visual Studio custom tool is required. Ordinary
 `dotnet build`, CI and NativeAOT publication use the same embedded resources.
 Existing message text is preserved.
+
+## Generated string value-type compatibility (#1472)
+
+Regeneration removes `ToString(string?, IFormatProvider?)` from `OperationKey`. The overload
+shipped in `10.0.0-preview.1`, so its removal is a source and binary breaking change under the
+preview compatibility policy (HTTP/Web program decision 15). Replace
+`operationKey.ToString(format, provider)` with `operationKey.ToString()` and recompile consumers.
+The removed overload did not apply formatting or culture to initialized string values;
+`ToString()` preserves their text and now returns an empty string for `default`.
