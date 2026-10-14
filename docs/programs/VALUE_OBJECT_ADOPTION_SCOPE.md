@@ -1,6 +1,6 @@
 # Value Object Adoption: Scope
 
-**Date:** 2026-10-14. **Status:** proposed; decisions V1–V7 (§5) await the owner.
+**Date:** 2026-10-14. **Status:** approved 2026-10-14. The owner accepted V1–V7 (§5) as recommended (`HTTP_WEB_PROGRAM_PLAN.md` §7.4, decision 60). The Http/Web buckets landed in PR #1094. The rest continues on `feature/L03.01.01.49-value-object-adoption`.
 **Prompt:** the owner's cookie refactor (cb113e55a) and the request to find other places that should validate input through `<CohesionValueType>` value objects, and to improve the generator.
 **Program:** HTTP/Web PR #1094 cleanup (decision 59, feature #1463).
 **Tracking:**
