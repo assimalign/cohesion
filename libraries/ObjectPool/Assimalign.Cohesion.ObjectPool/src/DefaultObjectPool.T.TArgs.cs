@@ -17,11 +17,25 @@ public class DefaultObjectPool<T, TArgs> : ObjectPool<T, TArgs> where T : class
         : this(factory, ObjectPoolPolicy<T>.Default) { }
     public DefaultObjectPool(ObjectPoolFactory<T, TArgs> factory, ObjectPoolPolicy<T> policy)
         : this(factory, policy, Environment.ProcessorCount * 2) { }
+    /// <summary>Creates a pool with the default return policy and the specified retention limit.</summary>
+    /// <param name="factory">The factory used to create objects.</param>
+    /// <param name="maximumRetained">The nonnegative number of objects to retain. Zero retains nothing.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumRetained"/> is negative.</exception>
     public DefaultObjectPool(ObjectPoolFactory<T, TArgs> factory, int maximumRetained)
         : this(factory, ObjectPoolPolicy<T>.Default, maximumRetained) { }
+
+    /// <summary>Creates a pool with the specified factory, return policy, and retention limit.</summary>
+    /// <param name="factory">The factory used to create objects.</param>
+    /// <param name="policy">The policy that decides whether returned objects can be retained.</param>
+    /// <param name="maximumRetained">The nonnegative number of objects to retain. Zero retains nothing.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> or <paramref name="policy"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumRetained"/> is negative.</exception>
     public DefaultObjectPool(ObjectPoolFactory<T, TArgs> factory, ObjectPoolPolicy<T> policy, int maximumRetained)
         : base(factory, policy)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumRetained);
+
         _objects = new ConcurrentQueue<T>();
         _maxCapacity = maximumRetained - 1;
     }
@@ -54,7 +68,7 @@ public class DefaultObjectPool<T, TArgs> : ObjectPool<T, TArgs> where T : class
     /// <param name="instance">The object to add to the pool.</param>
     public override void Return(T instance)
     {
-        if (_policy.CanReturn(instance))
+        if (_policy.CanReturn(instance) && _maxCapacity >= 0)
         {
             if (_firstElement != null || Interlocked.CompareExchange(ref _firstElement, instance, null) != null)
             {
