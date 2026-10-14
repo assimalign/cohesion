@@ -348,7 +348,7 @@ internal sealed class InProcessContextFactory
             return new InProcessProbeConfiguration(configured, IsDefaultControlPlane: false);
         }
 
-        string prefix = manifest.ControlPlane.Path.TrimEnd('/');
+        string prefix = manifest.ControlPlane.Path.Value.TrimEnd('/');
         return new InProcessProbeConfiguration(
             new ProbeMapping(
                 role,

@@ -197,7 +197,7 @@ public static class GenericPlanner
         {
             shapeCount++;
             kind = ProbeKind.Http;
-            value = probe.Http;
+            value = probe.Http.Value.Value;
         }
 
         if (probe.Tcp is true)

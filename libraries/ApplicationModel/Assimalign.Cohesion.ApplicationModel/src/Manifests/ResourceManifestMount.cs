@@ -28,5 +28,5 @@ public sealed record ResourceManifestMount
     /// <summary>
     /// Gets the parameter, resource key, or literal source from which the mount is populated.
     /// </summary>
-    public string? Source { get; init; }
+    public ResourceMountSource? Source { get; init; }
 }

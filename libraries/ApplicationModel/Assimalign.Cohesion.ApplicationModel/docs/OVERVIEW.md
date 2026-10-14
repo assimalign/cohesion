@@ -44,6 +44,15 @@ below). An unflagged kind with no resolver is delivered as declared.
 See [DESIGN.md](DESIGN.md) for identity, validation, ownership, external references, lifecycle,
 and NativeAOT boundaries; see the [package README](../README.md) for model and set composition.
 
+Application identities, resource HTTP paths, mount-source expressions, and credential schemes
+and values are generated value objects. Existing valid string assignments remain supported.
+Use `TryCreate` for nonthrowing validation and `.Value` when passing their raw text to a
+transport. HTTP paths begin with `/` and contain no query or fragment. Mount expressions use
+`parameter:<name>`, `literal:<payload>`, or `<source>:<key>` without trimming or case changes;
+only literal payloads may be empty. Credential values redact their text in string/debugger
+displays. Invalid assignments, including credential `with` expressions, fail immediately.
+See [validated values](DESIGN.md#validated-resource-and-credential-values-1481) for grammar,
+default-value checks, legacy plan compatibility, and preview.1 breaking changes.
 ## Provider registrations
 
 This package also defines the seams a gateway uses to reach resource-area behaviour it must not

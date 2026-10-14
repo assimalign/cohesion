@@ -25,7 +25,15 @@ public abstract partial class ApplicationGateway
         MountBinding mount,
         CancellationToken cancellationToken)
     {
-        string source = mount.Source!;
+        string source = mount.Source?.Value ?? string.Empty;
+        if (!ResourceMountSource.TryCreate(source, out _))
+        {
+            return ResourceMountInput.Unresolved(
+                source,
+                $"Mount source for '{mount.Mount}' on resource '{plan.Resource}' must use " +
+                "parameter:<name>, literal:<value>, or <source>:<key>.");
+        }
+
         if (source.StartsWith(LiteralPrefix, StringComparison.Ordinal))
         {
             return mount.Kind == ResourceMountKind.Configuration
@@ -46,13 +54,6 @@ public abstract partial class ApplicationGateway
                     $"Volume mount '{mount.Mount}' on resource '{plan.Resource}' cannot declare a source.");
             }
 
-            if (string.IsNullOrWhiteSpace(parameter))
-            {
-                return ResourceMountInput.Unresolved(
-                    source,
-                    $"Parameter source for mount '{mount.Mount}' on resource '{plan.Resource}' has no name.");
-            }
-
             return GetParameters(context.Model.Name).TryGetValue(parameter, out string? value)
                 ? ResourceMountInput.Resolved(source, Encoding.UTF8.GetBytes(value))
                 : ResourceMountInput.Unresolved(
@@ -61,13 +62,9 @@ public abstract partial class ApplicationGateway
                     $"'{plan.Resource}' is not bound for gateway '{Name}'.");
         }
 
-        if (!TryParseSource(source, out string? sourceName, out string? key))
-        {
-            return ResourceMountInput.Unresolved(
-                source,
-                $"Mount source '{source}' on resource '{plan.Resource}' must use " +
-                "parameter:<name>, literal:<value>, or <source>:<key>.");
-        }
+        int separator = source.IndexOf(':');
+        string sourceName = source[..separator];
+        string key = source[(separator + 1)..];
 
         if (mount.Kind == ResourceMountKind.Volume)
         {
@@ -76,7 +73,7 @@ public abstract partial class ApplicationGateway
                 $"Volume mount '{mount.Mount}' on resource '{plan.Resource}' cannot declare a source.");
         }
 
-        return await ResolveProviderSourceAsync(context, plan, mount, source, sourceName!, key!, cancellationToken)
+        return await ResolveProviderSourceAsync(context, plan, mount, source, sourceName, key, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -179,7 +176,7 @@ public abstract partial class ApplicationGateway
         string sourceName,
         CancellationToken cancellationToken)
     {
-        string source = mount.Source!;
+        string source = mount.Source?.Value ?? string.Empty;
         ResourceCertificate certificate;
         try
         {
@@ -376,29 +373,6 @@ public abstract partial class ApplicationGateway
         $"resources and are never inherited by source name, and cross-application store sources are not " +
         $"supported yet, so source '{sourceName}' cannot be bound here. Run application " +
         $"'{consumer.Application}' through its own gateway, where its registrations apply.";
-
-    private static bool TryParseSource(string source, out string? sourceName, out string? key)
-    {
-        int separator = source.IndexOf(':');
-        if (separator <= 0 || separator == source.Length - 1 ||
-            source.IndexOf(':', separator + 1) >= 0)
-        {
-            sourceName = null;
-            key = null;
-            return false;
-        }
-
-        sourceName = source[..separator];
-        key = source[(separator + 1)..];
-        if (string.IsNullOrWhiteSpace(sourceName) || string.IsNullOrWhiteSpace(key))
-        {
-            sourceName = null;
-            key = null;
-            return false;
-        }
-
-        return true;
-    }
 
     // The exceptions the provider contracts document for a source, authority, or store that
     // cannot serve a request. Anything else is a defect and propagates.

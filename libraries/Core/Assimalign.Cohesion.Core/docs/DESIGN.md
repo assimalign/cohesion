@@ -30,6 +30,15 @@ behavior without runtime reflection. The conformance classes share a non-paralle
 because they temporarily change the current
 culture and count validation calls. Every culture change is restored in `finally`.
 
+`ObjectHasCustomToString="true"` lets a handwritten partial own its parameterless `ToString()`
+and `DebuggerDisplay`. `GeneratedRedactedString` supplies both, so compiling the fixture catches
+duplicate generated members or attributes without reflection. Runtime tests cover redaction for
+populated and default values while preserving validation, equality and source-generated JSON.
+Direct task tests cover struct/class and string/numeric generation, the unchanged omitted/false
+default, and `COHVT005` for invalid boolean metadata. The option changes diagnostic display only;
+explicit `Value` access and JSON still carry the underlying value. It is additive and opt-in
+relative to 10.0.0-preview.1, with no behavior change for existing metadata.
+
 The build task remains outside the shipped Core assembly. See the
 [generator contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types) for metadata,
 default-value semantics and preview compatibility changes. `GeneratedValueTypeJsonContext` is an

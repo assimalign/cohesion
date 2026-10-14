@@ -81,6 +81,55 @@ removed because their modifiers conflict with the generated public declaration (
 The separate `Internal.ResourceNameJsonConverter` and `Internal.ApplicationNameJsonConverter`
 types retain their existing roles and accessibility.
 
+## Validated resource and credential values (#1481)
+
+`ResourceHttpPath` owns the resource probe and control-plane path grammar: a nonblank
+absolute path beginning with `/`, without a query or fragment. Paths compare ordinally,
+as RFC 3986 section 6.2.2.1 does not make path components case-insensitive. Manifest probe
+`Http` and control-plane `Path` carry this generated type. Manifest validation refuses a
+present default value; plan validation uses the same `TryCreate` rule for HTTP probe values
+and control-plane paths before a gateway can reconcile. `ProbeMapping.Value` remains a
+string because it also carries gRPC service names. `ControlPlaneSpec.Path` remains a string
+because the empty string represents an omitted control-plane fact in legacy v1 plans;
+nonempty paths still pass the canonical grammar.
+
+`ResourceMountSource` owns the case-sensitive source expression grammar used by manifests,
+provider validation, and gateway resolution. `literal:` accepts an empty payload and embedded
+colons; `parameter:` requires a nonblank name; other expressions contain exactly one colon
+between nonblank source and key. Whitespace and case are preserved. The typed manifest and
+plan mount sources retain null for omission; a present default is invalid. Mount kind rules
+remain separate: Volume mounts cannot declare sources, and literal sources require
+Configuration mounts.
+
+`ApplicationName.IsValid` owns the existing application identity grammar: 1-63 lowercase
+ASCII letters, digits, or hyphens, beginning and ending with a letter or digit. Conversion,
+`Parse`, `TryCreate`, and JSON import now enforce it; `Build()` retains the required-value
+check for default names.
+
+`ApplicationCredentialScheme` follows RFC 9110 sections 5.6.2 and 11.1: a nonempty HTTP token,
+compared ordinally ignoring case. `ApplicationCredentialValue` is opaque, ordinal, nonblank,
+and contains neither CR nor LF. The generated custom-display opt-out lets its partial redact
+`ToString()` and debugger display as `<redacted>`; transport code explicitly reads
+`credential.Value.Value`. The credential value has no reverse implicit string conversion,
+so interpolation and concatenation also redact it.
+The credential record carries both types and checks default values through its init setters,
+so construction and `with` expressions cannot bypass validation. Dynamic issuer output is
+checked when issued, before it can enter the gateway's credential cache.
+
+**Compatibility with 10.0.0-preview.1.** Manifest HTTP/control-plane paths, manifest and plan
+mount sources, and credential scheme/value constructors, properties, and deconstruction now
+use generated value types; consumers must recompile, and code using string members reads the
+underlying `Value`. Valid string assignments continue through implicit conversions. Invalid
+strings and invalid `ApplicationName.Parse` calls now throw `ArgumentException`, and
+invalid JSON strings throw `JsonException`, before composition or
+reconciliation. Relative paths and paths containing query/fragment delimiters, whitespace-only
+parameter/source/key names, and invalid application identities are refused earlier. Credential
+schemes additionally reject every non-token character; values reject embedded CR/LF. Invalid
+credential `with` assignments and present defaults are now refused. Credential value interpolation
+and concatenation now redact the former raw string. Credential record equality now ignores scheme
+casing, following HTTP authentication scheme semantics. Valid manifest/plan JSON
+remains string-shaped, and optional source omission and legacy plan omission remain supported.
+
 ## Design intent and why-this-not-that
 
 - **`IApplication` does not extend a host abstraction.** A host runs inside one

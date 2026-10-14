@@ -46,6 +46,8 @@ public sealed class GeneratedValueTypeMetadataTests
     [InlineData("ObjectHasImplicitOperators", "1", "String", "COHVT005")]
     [InlineData("ObjectHasIsValidMethod", "yes", "String", "COHVT005")]
     [InlineData("ObjectHasIsValidMethod", "1", "String", "COHVT005")]
+    [InlineData("ObjectHasCustomToString", "yes", "String", "COHVT005")]
+    [InlineData("ObjectHasCustomToString", "1", "String", "COHVT005")]
     [InlineData("ObjectComparison", "CurrentCulture", "String", "COHVT006")]
     [InlineData("ObjectComparison", "1", "String", "COHVT006")]
     [InlineData("ObjectComparison", "Ordinal", "Int", "COHVT006")]
@@ -80,6 +82,72 @@ public sealed class GeneratedValueTypeMetadataTests
         }
         task.ValueTypesCreated.ShouldBeNull();
         Directory.Exists(outputPath).ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = displayPrefix + "custom display suppresses generated text and debugger members")]
+    [InlineData("String", "Struct")]
+    [InlineData("String", "Class")]
+    [InlineData("Int", "Struct")]
+    [InlineData("Int", "Class")]
+    public void Execute_CustomToString_ShouldLeaveDisplayToHandwrittenPartial(string runtimeType, string kind)
+    {
+        // Arrange
+        var item = CreateItem("ValueObjects/CustomDisplay.cs", runtimeType);
+        item.SetMetadata("ObjectKind", kind);
+        item.SetMetadata("ObjectHasCustomToString", "true");
+
+        // Act
+        string generated = GenerateSource(item);
+
+        // Assert
+        generated.ShouldNotContain("public override string ToString()", Case.Sensitive);
+        generated.ShouldNotContain("DebuggerDisplay", Case.Sensitive);
+        generated.ShouldContain("public override int GetHashCode()", Case.Sensitive);
+        generated.ShouldContain("JsonConverter", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = displayPrefix + "omitted or false custom display preserves generated text and debugger members")]
+    [InlineData("")]
+    [InlineData("false")]
+    public void Execute_DefaultToString_ShouldGenerateDisplayMembers(string customToString)
+    {
+        // Arrange
+        var item = CreateItem("ValueObjects/DefaultDisplay.cs", "String");
+        item.SetMetadata("ObjectHasCustomToString", customToString);
+
+        // Act
+        string generated = GenerateSource(item);
+
+        // Assert
+        generated.ShouldContain("public override string ToString()", Case.Sensitive);
+        generated.ShouldContain("DebuggerDisplay(\"{Value}\")", Case.Sensitive);
+    }
+
+    private static string GenerateSource(TaskItem item)
+    {
+        var engine = new RecordingBuildEngine();
+        string outputPath = Path.Combine(AppContext.BaseDirectory, "MetadataTests", Guid.NewGuid().ToString("N"));
+        var task = new CodeGenerationCreateValueTypeTask
+        {
+            BuildEngine = engine,
+            CodeGenOutputPath = outputPath,
+            ValueTypes = [item]
+        };
+
+        try
+        {
+            task.Execute().ShouldBeTrue();
+            engine.Errors.ShouldBeEmpty();
+            ITaskItem generated = task.ValueTypesCreated.ShouldNotBeNull().ShouldHaveSingleItem();
+            return File.ReadAllText(generated.GetMetadata("ObjectFilePath"));
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, recursive: true);
+            }
+        }
     }
 
     // The public signature makes the compiler check explicit Public metadata without reflection.

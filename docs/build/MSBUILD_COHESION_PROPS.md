@@ -93,6 +93,7 @@ Metadata:
 | `ObjectAccessModifier` | `public`, `internal`, `None` | No modifier, the same as `None`; another partial may specify accessibility |
 | `ObjectHasImplicitOperators` | `true`, `false` | `false` |
 | `ObjectHasIsValidMethod` | `true`, `false` | `false` |
+| `ObjectHasCustomToString` | `true`, `false` | `false` |
 | `ObjectComparison` | `Ordinal`, `OrdinalIgnoreCase`; only valid for `String` | `Ordinal` |
 
 Omitting `ObjectAccessModifier` or setting it to `None` emits no accessibility modifier. A
@@ -127,6 +128,25 @@ and `TryParse` overloads with or without a nullable provider. Parsing honors the
 formatting delegates to the runtime value. Numbers use `NumericFormat` syntax annotations, Guid
 uses `GuidFormat`, and Ulid has none. Guid and Ulid retain `New()` and `Empty`.
 
+**Custom display.** With `ObjectHasCustomToString="true"`, the generator emits neither the
+parameterless `ToString()` override nor the `DebuggerDisplay` attribute. The handwritten partial
+supplies both, for example a credential value can always display `[redacted]`, including for
+`default`. The opt-out applies to both struct and class kinds and all runtime types. It does not
+change validation, equality, conversions, the underlying `Value`, JSON serialization, or the
+non-string formatting overloads. It controls diagnostic display only; explicit access and wire
+serialization still return the underlying value. Omitted or false metadata preserves the default
+generated display. Core's `GeneratedRedactedString` fixture demonstrates the checked-in partial:
+
+```csharp
+[System.Diagnostics.DebuggerDisplay("[redacted]")]
+internal readonly partial struct GeneratedRedactedString
+{
+    /// <summary>Returns a redacted diagnostic representation.</summary>
+    /// <returns>The redaction marker.</returns>
+    public override string ToString() => "[redacted]";
+}
+```
+
 **Validation.** With `ObjectHasIsValidMethod="true"`, supply this public static partial method
 in the handwritten partial (substitute the runtime type for `T`):
 
@@ -148,7 +168,8 @@ with that message; `TryParse` returns false. Without this metadata, neither `IsV
 
 **Default is not validation.** `default(X)` bypasses constructors and `IsValid`. For string
 structs it holds a null `Value`, equals another default, hashes to zero, sorts before every
-non-null value, and `ToString()` returns `string.Empty`. Non-string structs retain the runtime
+non-null value, and the default generated `ToString()` returns `string.Empty`; a custom display
+partial owns that representation when selected. Non-string structs retain the runtime
 type's zero/default semantics. A boundary that requires a real value must still reject default,
 as `HttpAntiforgery.Create` does for cookie name and path. Validation at assignment cannot enforce
 this boundary on its own.
@@ -184,7 +205,7 @@ the item, metadata and allowed values; error text lives in the build task.
 | `COHVT002` | Missing `ObjectNamespace` |
 | `COHVT003` | Invalid `ObjectKind` |
 | `COHVT004` | Invalid `ObjectAccessModifier`; allowed: `Public`, `Internal`, `None`, or omitted (None and omitted emit no modifier) |
-| `COHVT005` | Invalid boolean metadata |
+| `COHVT005` | Invalid boolean metadata, including `ObjectHasCustomToString` |
 | `COHVT006` | Invalid `ObjectComparison`, or comparison metadata on a non-string type |
 
 **Compatibility with 10.0.0-preview.1.** Regeneration changes `IsValid` from instance to static,
@@ -208,6 +229,8 @@ reflection; the latter treats SYSLIB1220 and SYSLIB1030 as errors to guard conve
 and generated metadata.
 `ToString()` on a default string wrapper now returns empty instead of null. These are
 intentional source, binary or behavioral changes under the preview compatibility policy.
+`ObjectHasCustomToString` is an additive, opt-in metadata option; existing generated types retain
+their display behavior unless they select it.
 
 ---
 ## Related Docs

@@ -13,5 +13,5 @@ public sealed record ResourceManifestControlPlane
     /// <summary>
     /// Gets the path prefix under which the control plane is served.
     /// </summary>
-    public string Path { get; init; } = string.Empty;
+    public ResourceHttpPath Path { get; init; }
 }

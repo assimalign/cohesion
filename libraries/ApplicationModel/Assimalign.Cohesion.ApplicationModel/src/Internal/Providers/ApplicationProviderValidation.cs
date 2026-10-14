@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
@@ -124,20 +125,26 @@ internal static class ApplicationProviderValidation
 
             foreach (ResourceManifestMount mount in manifest.Mounts)
             {
-                string? source = mount.Source;
-                if (string.IsNullOrEmpty(source) ||
-                    source.StartsWith(parameterPrefix, StringComparison.Ordinal) ||
+                if (mount.Source is null)
+                {
+                    continue;
+                }
+
+                if (!ResourceMountSource.TryCreate(mount.Source.Value.Value, out ResourceMountSource expression))
+                {
+                    throw new InvalidOperationException(string.Format(
+                        CultureInfo.CurrentCulture, ErrorMessages.ProviderMountSourceInvalid,
+                        manifest.Name, mount.Name));
+                }
+
+                string source = expression.Value;
+                if (source.StartsWith(parameterPrefix, StringComparison.Ordinal) ||
                     source.StartsWith(literalPrefix, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
-                if (!TryParseSourceName(source, out string sourceName))
-                {
-                    throw new InvalidOperationException(
-                        $"Resource '{manifest.Name}' mount '{mount.Name}' source '{source}' must use " +
-                        "parameter:<name>, literal:<value>, or <source>:<key>.");
-                }
+                string sourceName = source[..source.IndexOf(':')];
 
                 if (TryFindOtherApplication(model, manifest, sourceName, out ApplicationName owner))
                 {
@@ -442,22 +449,5 @@ internal static class ApplicationProviderValidation
         }
 
         return false;
-    }
-
-    private static bool TryParseSourceName(string source, out string sourceName)
-    {
-        int separator = source.IndexOf(':');
-        if (separator <= 0 ||
-            separator == source.Length - 1 ||
-            source.IndexOf(':', separator + 1) >= 0 ||
-            string.IsNullOrWhiteSpace(source[..separator]) ||
-            string.IsNullOrWhiteSpace(source[(separator + 1)..]))
-        {
-            sourceName = string.Empty;
-            return false;
-        }
-
-        sourceName = source[..separator];
-        return true;
     }
 }

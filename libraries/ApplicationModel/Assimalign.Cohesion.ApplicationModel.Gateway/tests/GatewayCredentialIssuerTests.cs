@@ -125,7 +125,6 @@ public sealed class GatewayCredentialIssuerTests : IDisposable
 
     [Theory(DisplayName = displayPrefix + "A non-bearer credential for a bearer-only carrier is refused")]
     [InlineData(ApplicationCredentialPurpose.Developer, "DPoP", "idp-developer")]
-    [InlineData(ApplicationCredentialPurpose.Developer, "Bearer", "idp\r\nX-Injected: yes")]
     [InlineData(ApplicationCredentialPurpose.ResourceBootstrap, "Basic", "idp-bootstrap")]
     public async Task IssueCredential_UnpresentableCredential_ShouldBeRefused(
         ApplicationCredentialPurpose purpose,
@@ -159,6 +158,29 @@ public sealed class GatewayCredentialIssuerTests : IDisposable
         {
             await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
         }
+    }
+
+    [Theory(DisplayName = displayPrefix + "Malformed issuer output is rejected when constructed before caching")]
+    [InlineData(ApplicationCredentialPurpose.ResourceBootstrap, "Bad Scheme", "opaque-secret")]
+    [InlineData(ApplicationCredentialPurpose.ResourceBootstrap, "Bearer", "opaque\r\nX-Injected: yes")]
+    [InlineData(ApplicationCredentialPurpose.Telemetry, "Bad Scheme", "opaque-secret")]
+    [InlineData(ApplicationCredentialPurpose.Telemetry, "Bearer", "opaque\r\nX-Injected: yes")]
+    public async Task IssueCredential_MalformedComponents_ShouldFailAtConstruction(
+        ApplicationCredentialPurpose purpose,
+        string scheme,
+        string value)
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var issuer = new RecordingCredentialIssuer(request => request.Purpose == purpose
+            ? new ApplicationCredential(scheme, value, _now.AddHours(1))
+            : null);
+
+        // Act
+        Exception? failure = await Record.ExceptionAsync(() => RunScenarioAsync(issuer, cancellation.Token));
+
+        // Assert
+        failure.ShouldBeOfType<ArgumentException>().Message.ShouldNotContain(value, Case.Sensitive);
     }
 
     [Theory(DisplayName = displayPrefix + "An expired cached resource credential is reissued instead of presented")]

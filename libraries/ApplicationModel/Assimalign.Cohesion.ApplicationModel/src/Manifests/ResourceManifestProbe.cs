@@ -19,7 +19,7 @@ public sealed record ResourceManifestProbe
     /// <summary>
     /// Gets the HTTP request path for an HTTP probe.
     /// </summary>
-    public string? Http { get; init; }
+    public ResourceHttpPath? Http { get; init; }
 
     /// <summary>
     /// Gets whether the probe performs a TCP connection check.

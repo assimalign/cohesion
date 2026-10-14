@@ -30,12 +30,24 @@ unresolved input naming it, and a Local `--realize` closure's mounts are unresol
 cross-application limit named. Cross-application store sources are rejected until a peer-credential
 design lands.
 
+Mount-source syntax is shared with manifest and provider validation through `ResourceMountSource`:
+`literal:` may be empty or contain colons, `parameter:` needs a nonblank name, and other sources
+need exactly one colon between nonblank source and key. Probe and control-plane paths use
+`ResourceHttpPath`: they begin with `/` and contain no query or fragment. These syntax errors are
+refused before reconcile.
+
 Every credential the gateway mints — each resource's bootstrap credential, its own calls to resource
 control planes and stores, telemetry-emitter credentials, peer-gateway calls, and developer tokens —
 goes through the application's registered `IApplicationCredentialIssuer` first and falls back to the
 default ES256 application-key issuer, whose tokens are unchanged. Resources that must accept an
 identity provider's credentials register a matching verifier with
 `ResourceRuntime.RegisterCredentialVerifier`.
+
+Issuer results use `ApplicationCredentialScheme` and `ApplicationCredentialValue`. String inputs
+still convert when constructing a credential, but schemes must be HTTP tokens and values must be
+nonblank without CR or LF. Invalid replacements are also refused in `with` expressions. Credential
+value displays are redacted; custom transports read `credential.Value.Value` explicitly to obtain
+the secret. Bearer-only carriers continue to refuse another valid authentication scheme.
 
 See [DESIGN.md](DESIGN.md) for dependency boundaries, ownership, credential restrictions, the
 provider registrations, the identity seams, and the scope of commands-only model replacement.
