@@ -43,6 +43,12 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     private CookieAuthenticationHandler(CookieAuthenticationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        // Conversion validates every assigned string; default bypasses the value type's constructor.
+        if (options.CookieName.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.CookieNameInvalid, nameof(options));
+        }
+
         _options = options;
         _protector = options.TicketProtector
             ?? throw new InvalidOperationException(
@@ -55,6 +61,7 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     /// <param name="options">The configured cookie options. <see cref="CookieAuthenticationOptions.TicketProtector"/> must be set.</param>
     /// <returns>A cookie authentication handler.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><see cref="CookieAuthenticationOptions.CookieName"/> is <see langword="default"/>.</exception>
     /// <exception cref="InvalidOperationException"><see cref="CookieAuthenticationOptions.TicketProtector"/> is not set.</exception>
     public static CookieAuthenticationHandler Create(CookieAuthenticationOptions options)
     {
@@ -281,11 +288,11 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         return cookieOptions;
     }
 
-    private string? ReadRequestCookie(string name)
+    private string? ReadRequestCookie(HttpCookieName name)
     {
         foreach (HttpCookie cookie in _context.Request.Cookies)
         {
-            if (string.Equals(cookie.Name, name, StringComparison.Ordinal))
+            if (cookie.Name == name)
             {
                 return cookie.Value;
             }
@@ -303,7 +310,7 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         List<HttpCookie>? stale = null;
         foreach (HttpCookie existing in responseCookies)
         {
-            if (string.Equals(existing.Name, cookie.Name, StringComparison.Ordinal))
+            if (existing.Name == cookie.Name)
             {
                 (stale ??= new List<HttpCookie>()).Add(existing);
             }

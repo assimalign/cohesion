@@ -130,15 +130,33 @@ configuration (cookie name, path, `HttpOnly`, idle timeout) and does not bind
 this package to any store. The session-id **cookie establishment**, the
 **per-request middleware** (`UseSessions`), and the **id-regeneration** API live
 one layer up in `Assimalign.Cohesion.Web.Sessions`, which composes this store
-seam with the hardened `Http.Cookies` model — this package still takes no cookie
-dependency.
+seam with the hardened `Http.Cookies` model. This package references
+`Assimalign.Cohesion.Http.Cookies` for the option value types.
 
-`UseSessions` validates `CookieName` as a non-empty RFC 6265 §4.1.1 `token`
-and `CookiePath` as `path-value` at composition, through the cookie model.
-Those checks belong to Web.Sessions, where the options become cookie settings;
-the option properties here remain plain configuration values. Web.Sessions'
-DESIGN records the earlier failure for invalid names since 10.0.0-preview.1
-(#1416).
+`HttpSessionOptions.CookieName` is `HttpCookieName`, a non-empty RFC 6265
+§4.1.1 `token`, and `CookiePath` is `HttpCookiePath`, an RFC 6265 `path-value`.
+Their implicit string conversions throw `ArgumentException` at assignment for
+out-of-grammar input, before the setter runs. The value types cannot validate
+`default`, so both `UseSessions` overloads refuse it at composition with the
+existing option-specific message and parameter name `configure`. The empty
+path remains valid. Request cookie lookup and replacement compare typed names.
+
+This dependency follows the public option surface; cookie establishment and
+store behavior stay with their existing owners. The reference changes the
+Http.Sessions closure, which the App.Runtime framework-membership tests check.
+The diagram shows the direct references that carry the cookie types into session options.
+
+```mermaid
+flowchart LR
+    Sessions["Http.Sessions"] --> Http["Http"]
+    Sessions --> Cookies["Http.Cookies"]
+    Cookies --> Http
+```
+
+The two property types replace `string` from 10.0.0-preview.1 (#1473). This is
+a binary breaking change, and callers that depend on string-specific members
+must use `.Value`. Valid string assignments keep working through implicit
+conversion; invalid assignments now fail immediately, before composition.
 
 ## AOT posture
 
@@ -155,7 +173,7 @@ length-prefixed binary (`HttpSessionSerializer`). The clock is a
   follow-up adapter that implements `IHttpSessionStore` (honoring the
   last-commit-wins contract), not part of this package.
 - **Session-id cookie establishment.** No cookie is read or written *in this
-  package*; the Cookies dependency is intentionally not taken here. Cookie
+  package*; its Cookies dependency supplies the option value types. Cookie
   establishment lives in `Assimalign.Cohesion.Web.Sessions`.
 - **Per-request session middleware.** Resolving and committing a session
   around each request is a higher-layer concern (`UseSessions` in

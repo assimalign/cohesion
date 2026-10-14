@@ -63,6 +63,42 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
     private CookieAuthenticationOptions CreateOptions()
         => new() { TicketProtector = _protector, TimeProvider = _time };
 
+    [Theory(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - CookieName: Invalid assignment fails before handler creation or sign-in")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("bad name")]
+    [InlineData("bad;name")]
+    [InlineData("bad=name")]
+    [InlineData("bad\r\nname")]
+    [InlineData("café")]
+    public void CookieName_InvalidAssignment_ShouldThrowBeforeCreate(string? name)
+    {
+        // Arrange
+        CookieAuthenticationOptions options = CreateOptions();
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => options.CookieName = name!);
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Create: Default cookie name fails before sign-in")]
+    public void Create_DefaultCookieName_ShouldThrowAtComposition()
+    {
+        // Arrange
+        CookieAuthenticationOptions options = CreateOptions();
+        options.CookieName = default;
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => CookieAuthenticationHandler.Create(options));
+
+        // Assert
+        exception.ParamName.ShouldBe("options");
+        exception.Message.ShouldStartWith("CookieAuthenticationOptions.CookieName must be a non-empty RFC 6265 token.", Case.Sensitive);
+        exception.InnerException.ShouldBeNull();
+    }
+
     private static async Task<IAuthenticationSignInHandler> InitializeAsync(
         CookieAuthenticationOptions options, TestHttpContext context)
     {

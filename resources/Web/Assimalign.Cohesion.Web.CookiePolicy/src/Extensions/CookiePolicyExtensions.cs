@@ -27,8 +27,10 @@ public static class CookiePolicyExtensions
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
         /// An option is not a defined value, the maximum lifetime is not greater than zero or exceeds
-        /// 400 days, the time provider is <see langword="null"/>, or the consent cookie is malformed: an
-        /// invalid name, an empty or invalid value, a non-positive <c>Max-Age</c>, or an <c>Expires</c>.
+        /// 400 days, the time provider is <see langword="null"/>, or the consent cookie has a
+        /// <see langword="default"/> name or value, an empty value, a non-positive <c>Max-Age</c>, or
+        /// an <c>Expires</c>. Assigning an out-of-grammar name or value in <paramref name="configure"/>
+        /// throws from its value-type conversion before the setter runs.
         /// </exception>
         /// <remarks>
         /// <para>

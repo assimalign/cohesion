@@ -25,7 +25,13 @@ public sealed class CookieAuthenticationOptions
     /// <summary>
     /// Gets or sets the cookie name. Defaults to <c>.Cohesion.Cookies</c>.
     /// </summary>
-    public string CookieName { get; set; } = CookieAuthenticationDefaults.CookiePrefix + CookieAuthenticationDefaults.AuthenticationScheme;
+    /// <remarks>
+    /// The name is a non-empty RFC 6265 <c>token</c>. Assigning an out-of-grammar string
+    /// throws <see cref="ArgumentException"/> from the <see cref="HttpCookieName"/> conversion
+    /// (<c>ParamName</c> <c>value</c>). <see cref="CookieAuthenticationHandler.Create"/> and
+    /// <c>AddCookie</c> refuse <see langword="default"/> at composition.
+    /// </remarks>
+    public HttpCookieName CookieName { get; set; } = CookieAuthenticationDefaults.CookiePrefix + CookieAuthenticationDefaults.AuthenticationScheme;
 
     /// <summary>
     /// Gets the template attributes applied to the emitted <c>Set-Cookie</c> (Domain, Path,

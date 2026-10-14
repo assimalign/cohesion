@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 255 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 730 |
+| Declared project references | 731 |
 | Declared shared-source links | 18 |
 
 ## Ambiguous project names
@@ -450,7 +450,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Http.ProtocolUpgrade` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Http.RequestLimits` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Http.ServerSentEvents` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Streaming` | — | — | — |
-| `Assimalign.Cohesion.Http.Sessions` | `Assimalign.Cohesion.Http` | — | — | — |
+| `Assimalign.Cohesion.Http.Sessions` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies` | — | — | — |
 | `Assimalign.Cohesion.Http.Streaming` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Http.Tls` | `Assimalign.Cohesion.Connections.Tls`<br>`Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Http.WebSockets` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.ExtendedConnect`<br>`Assimalign.Cohesion.Http.ProtocolUpgrade` | — | — | — |

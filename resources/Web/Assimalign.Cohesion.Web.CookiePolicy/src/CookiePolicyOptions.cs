@@ -136,14 +136,25 @@ public sealed class CookiePolicyOptions
     /// Gets or sets the name of the cookie that records consent. Defaults to
     /// <see cref="DefaultConsentCookieName"/>. It must be a valid RFC 6265 cookie name.
     /// </summary>
-    public string ConsentCookieName { get; set; } = DefaultConsentCookieName;
+    /// <remarks>
+    /// Assigning an out-of-grammar <see cref="string"/> throws <see cref="ArgumentException"/>
+    /// from the <see cref="HttpCookieName"/> conversion, before the setter runs.
+    /// <c>UseCookiePolicy</c> refuses <see langword="default"/> at registration.
+    /// </remarks>
+    public HttpCookieName ConsentCookieName { get; set; } = DefaultConsentCookieName;
 
     /// <summary>
     /// Gets or sets the value the consent cookie carries; a request has consent when its consent cookie
     /// carries exactly this value. Defaults to <see cref="DefaultConsentCookieValue"/>. It must be a
     /// non-empty RFC 6265 cookie value.
     /// </summary>
-    public string ConsentCookieValue { get; set; } = DefaultConsentCookieValue;
+    /// <remarks>
+    /// Assigning an out-of-grammar <see cref="string"/> throws <see cref="ArgumentException"/>
+    /// from the <see cref="HttpCookieValue"/> conversion, before the setter runs.
+    /// <c>UseCookiePolicy</c> refuses <see langword="default"/> and an empty value at registration;
+    /// the cookie-value grammar permits an empty string, but a consent record must be non-empty.
+    /// </remarks>
+    public HttpCookieValue ConsentCookieValue { get; set; } = DefaultConsentCookieValue;
 
     /// <summary>
     /// Gets the attributes of the consent cookie that <see cref="ICookieConsentFeature.GrantConsent"/>

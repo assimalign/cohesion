@@ -28,6 +28,7 @@ public static class AuthenticationBuilderCookieExtensions
         /// <param name="configure">An optional callback to configure the cookie options.</param>
         /// <returns>The builder, for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">The callback assigns an out-of-grammar cookie name, or leaves it at <see langword="default"/>.</exception>
         /// <exception cref="InvalidOperationException">A scheme with the same name is already registered.</exception>
         public AuthenticationBuilder AddCookie(Action<CookieAuthenticationOptions>? configure = null)
             => builder.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, configure);
@@ -39,7 +40,8 @@ public static class AuthenticationBuilderCookieExtensions
         /// <param name="configure">An optional callback to configure the cookie options.</param>
         /// <returns>The builder, for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException"><paramref name="scheme"/> is <see langword="null"/> or whitespace.</exception>
+        /// <exception cref="ArgumentException"><paramref name="scheme"/> is <see langword="null"/> or whitespace,
+        /// or the callback assigns an out-of-grammar cookie name or leaves it at <see langword="default"/>.</exception>
         /// <exception cref="InvalidOperationException">A scheme with the same name is already registered.</exception>
         public AuthenticationBuilder AddCookie(string scheme, Action<CookieAuthenticationOptions>? configure = null)
         {
@@ -48,6 +50,12 @@ public static class AuthenticationBuilderCookieExtensions
 
             CookieAuthenticationOptions options = new();
             configure?.Invoke(options);
+
+            // Handlers are created per request, so refuse default before registering the scheme.
+            if (options.CookieName.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.CookieNameInvalid, nameof(options));
+            }
 
             // The ticket protector is the crypto seam: derive it from the builder's rotating key
             // ring, scoped per scheme so two cookie schemes cannot read each other's tickets.

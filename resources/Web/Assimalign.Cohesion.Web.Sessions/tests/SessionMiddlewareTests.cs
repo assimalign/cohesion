@@ -66,6 +66,28 @@ public class SessionMiddlewareTests
         (await ReadStoredStringAsync(store, cookie.Value, "user")).ShouldBe("alice");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: An empty session cookie establishes a new session and persists its state")]
+    public async Task Invoke_EmptySessionCookie_ShouldEstablishNewSessionAndPersistState()
+    {
+        // Arrange
+        SessionTestContext context = new(HttpScheme.Http, requestCookieHeader: ".Cohesion.Session=");
+        InMemoryHttpSessionStore store = new();
+
+        // Act
+        await RunAsync(context, store, async c =>
+        {
+            IHttpSession session = await c.LoadSessionAsync(c.RequestCancelled);
+            session.SetString("user", "alice");
+        });
+
+        // Assert
+        HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
+        cookie.Name.ShouldBe<HttpCookieName>(DefaultCookieName);
+        string id = cookie.Value;
+        id.ShouldNotBeNullOrEmpty();
+        (await ReadStoredStringAsync(store, id, "user")).ShouldBe("alice");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: An HTTPS request marks the session cookie Secure")]
     public async Task Invoke_HttpsRequest_ShouldMarkCookieSecure()
     {

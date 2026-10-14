@@ -49,7 +49,8 @@ using Assimalign.Cohesion.Web.Sessions;
 
 app.UseSessions(options =>
 {
-    options.CookieName = ".Cohesion.Session"; // default
+    options.CookieName = ".Cohesion.Session"; // HttpCookieName; default value
+    options.CookiePath = "/"; // HttpCookiePath; default value
     options.IdleTimeout = TimeSpan.FromMinutes(20);
 });
 
@@ -66,6 +67,12 @@ app.Use(async (context, next) =>
 // After authenticating a user, rotate the id to defeat session fixation:
 await context.RegenerateSessionIdAsync(context.RequestCancelled);
 ```
+
+`CookieName` and `CookiePath` use `HttpCookieName` and `HttpCookiePath`. Valid strings convert
+implicitly; an out-of-grammar string throws `ArgumentException` at assignment with parameter `value`.
+Both `UseSessions` overloads reject `default` with an option-specific message and parameter `configure`.
+The empty path is valid. These property types replace `string` from 10.0.0-preview.1 (#1473);
+use `.Value` when a caller needs a string-specific member.
 
 For an out-of-process deployment, pass a distributed store adapter — everything else is identical:
 

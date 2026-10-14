@@ -40,8 +40,8 @@ internal sealed class CookiePolicyRules
     private readonly TimeProvider _timeProvider;
     private readonly Func<IHttpContext, bool>? _checkConsentNeeded;
     private readonly Action<CookiePolicyRejectionContext>? _onRejected;
-    private readonly string _consentCookieName;
-    private readonly string _consentCookieValue;
+    private readonly HttpCookieName _consentCookieName;
+    private readonly HttpCookieValue _consentCookieValue;
     private readonly HttpCookieOptions _consentCookie;
 
     private CookiePolicyRules(CookiePolicyOptions options, HttpCookieOptions consentCookie)
@@ -112,7 +112,14 @@ internal sealed class CookiePolicyRules
             throw new ArgumentException(ErrorMessages.CookieTimeProviderRequired, paramName);
         }
 
-        if (string.IsNullOrEmpty(options.ConsentCookieValue))
+        // The value types reject malformed strings at assignment; default bypasses conversion.
+        if (options.ConsentCookieName.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.ConsentCookieNameOrValueInvalid, paramName);
+        }
+
+        // An empty cookie value is valid grammar, but cannot record consent.
+        if (string.IsNullOrEmpty(options.ConsentCookieValue.Value))
         {
             throw new ArgumentException(
                 ErrorMessages.ConsentCookieValueRequired,
@@ -139,27 +146,13 @@ internal sealed class CookiePolicyRules
             IsEssential = true,
         };
 
-        try
-        {
-            // HttpCookie validates the name and value against the RFC 6265 grammar; do it here, at
-            // registration, rather than the first time an application grants consent.
-            _ = new HttpCookie(options.ConsentCookieName, options.ConsentCookieValue, consentCookie);
-        }
-        catch (ArgumentException exception)
-        {
-            throw new ArgumentException(
-                ErrorMessages.ConsentCookieNameOrValueInvalid,
-                paramName,
-                exception);
-        }
-
         return new CookiePolicyRules(options, consentCookie);
     }
 
     /// <summary>
     /// Gets the name of the cookie that records consent.
     /// </summary>
-    public string ConsentCookieName => _consentCookieName;
+    public HttpCookieName ConsentCookieName => _consentCookieName;
 
     /// <summary>
     /// Evaluates the consent predicate for <paramref name="context"/>.
@@ -175,9 +168,9 @@ internal sealed class CookiePolicyRules
     {
         foreach (HttpCookie cookie in context.Request.Cookies)
         {
-            if (string.Equals(cookie.Name, _consentCookieName, StringComparison.Ordinal))
+            if (cookie.Name == _consentCookieName)
             {
-                return string.Equals(cookie.Value, _consentCookieValue, StringComparison.Ordinal);
+                return cookie.Value == _consentCookieValue;
             }
         }
 

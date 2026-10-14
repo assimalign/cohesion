@@ -129,6 +129,9 @@
   <data name="AuthenticationTicketExpired" xml:space="preserve">
     <value>The authentication ticket has expired.</value>
   </data>
+  <data name="CookieNameInvalid" xml:space="preserve">
+    <value>CookieAuthenticationOptions.CookieName must be a non-empty RFC 6265 token.</value>
+  </data>
   <data name="CookieTicketClaimCountNegative" xml:space="preserve">
     <value>The cookie ticket declares a negative claim count.</value>
   </data>

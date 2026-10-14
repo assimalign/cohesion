@@ -16,25 +16,29 @@ public sealed class HttpSessionOptions
     /// <c>.Cohesion.Session</c>.
     /// </summary>
     /// <remarks>
-    /// The value must be a non-empty RFC 6265 <c>token</c>, as the cookie model requires.
-    /// <c>UseSessions</c> in <c>Assimalign.Cohesion.Web.Sessions</c> refuses any other
-    /// value when it registers the middleware, before any session is established.
+    /// The value is a non-empty RFC 6265 <c>token</c>: assigning any other
+    /// <see cref="string"/> throws <see cref="ArgumentException"/> from the
+    /// <see cref="HttpCookieName"/> conversion, before the setter runs.
+    /// <c>UseSessions</c> in <c>Assimalign.Cohesion.Web.Sessions</c> refuses
+    /// <see langword="default"/> when it registers the middleware, before any
+    /// session is established.
     /// </remarks>
-    public string CookieName { get; set; } = ".Cohesion.Session";
+    public HttpCookieName CookieName { get; set; } = ".Cohesion.Session";
 
     /// <summary>
     /// Gets or sets the path scope for the session cookie. Defaults to
     /// <c>/</c>.
     /// </summary>
     /// <remarks>
-    /// The value must be an RFC 6265 <c>path-value</c>: US-ASCII with no
-    /// <c>;</c> and no control characters, since the session cookie is
-    /// written through the cookie model, which refuses any other path.
-    /// <c>UseSessions</c> in <c>Assimalign.Cohesion.Web.Sessions</c> refuses
-    /// such a value when it registers the middleware, not when a session is
-    /// established.
+    /// The value is an RFC 6265 <c>path-value</c>, US-ASCII with no <c>;</c> and
+    /// no control characters: assigning any other <see cref="string"/> throws
+    /// <see cref="ArgumentException"/> from the <see cref="HttpCookiePath"/>
+    /// conversion, before the setter runs. <c>UseSessions</c> in
+    /// <c>Assimalign.Cohesion.Web.Sessions</c> refuses <see langword="default"/>,
+    /// which holds no path, when it registers the middleware. The empty string
+    /// remains a valid path-value.
     /// </remarks>
-    public string CookiePath { get; set; } = "/";
+    public HttpCookiePath CookiePath { get; set; } = "/";
 
     /// <summary>
     /// Gets or sets whether the session cookie is marked <c>HttpOnly</c>.

@@ -99,6 +99,29 @@ reference (RFC 9110 §10.2.2).
 
 ## Cookie hardening defaults
 
+`CookieAuthenticationOptions.CookieName` is an `HttpCookieName`, the Cookies
+package's non-empty RFC 6265 `token` value type. An out-of-grammar string
+(including null, empty, whitespace, separators, controls or non-ASCII text)
+throws `ArgumentException` at assignment, before the setter runs (`ParamName`
+`value`). The handler retains that type for cookie lookup and emission, using
+typed ordinal equality.
+
+`default` bypasses the value type's constructor. Both
+`CookieAuthenticationHandler.Create(options)` and `AddCookie` refuse it with
+`ArgumentException` (`ParamName` `options`), with the message
+`CookieAuthenticationOptions.CookieName must be a non-empty RFC 6265 token.`
+The check in `AddCookie` runs before registering the lazy per-request handler
+factory, so `builder.Services.AddAuthentication(auth => auth.AddCookie(...))`
+registers nothing on failure. Neither error includes the supplied name.
+
+This changes the `CookieName` property from `string` in 10.0.0-preview.1 to
+`HttpCookieName`: it is binary-breaking and requires rebuilding consumers.
+String assignments still compile through implicit conversion, while reads
+return the value type (use `.Value` when a string is needed). Invalid names
+previously passed handler creation and threw during sign-in or sign-out;
+they now fail while configuring the options. Valid names and the default
+`.Cohesion.Cookies` name retain their behavior.
+
 The emitted cookie defaults to `HttpOnly=true`, `SameSite=Lax`, `Path=/`, and
 `IsEssential=true` (see "Under the cookie policy" below). A
 persistent sign-in (`IsPersistent=true`) emits `Expires`/`Max-Age`; a

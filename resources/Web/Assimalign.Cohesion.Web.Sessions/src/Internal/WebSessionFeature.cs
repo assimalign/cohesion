@@ -184,9 +184,9 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
     {
         foreach (HttpCookie cookie in _context.Request.Cookies)
         {
-            if (string.Equals(cookie.Name, _options.CookieName, StringComparison.Ordinal))
+            if (cookie.Name == _options.CookieName)
             {
-                return string.IsNullOrEmpty(cookie.Value) ? null : cookie.Value;
+                return cookie.HasValue ? cookie.Value.Value : null;
             }
         }
 
@@ -235,7 +235,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         List<HttpCookie>? stale = null;
         foreach (HttpCookie existing in cookies)
         {
-            if (string.Equals(existing.Name, _options.CookieName, StringComparison.Ordinal))
+            if (existing.Name == _options.CookieName)
             {
                 (stale ??= []).Add(existing);
             }

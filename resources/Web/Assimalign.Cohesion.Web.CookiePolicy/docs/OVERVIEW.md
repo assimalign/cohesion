@@ -20,7 +20,8 @@ and the 400-day lifetime cap. The cookie model it enforces against lives in
   - `MinimumSameSitePolicy`.
   - `SameSiteNoneWithoutSecure` and `PrefixViolation`: `Upgrade` or `Reject`.
   - `MaxLifetime` and `TimeProvider`: the lifetime cap and the clock it is applied against.
-  - `CheckConsentNeeded`, plus the consent cookie's name, value, and attributes.
+  - `CheckConsentNeeded`, plus `ConsentCookieName` (`HttpCookieName`), `ConsentCookieValue`
+    (`HttpCookieValue`), and the consent cookie's attributes. The default constants remain strings.
   - `OnRejected`: a hook that observes every dropped cookie.
 - **`ICookieConsentFeature`** — per-exchange consent state (`IsConsentNeeded`, `HasConsent`,
   `CanTrack`) and the `GrantConsent` / `WithdrawConsent` verbs. Resolve it with
@@ -72,6 +73,14 @@ context.Response.Cookies.Add(new HttpCookie("analytics", visitor)); // dropped u
 
 The Cookie authentication ticket is essential by default, so a consent requirement never prevents
 sign-in.
+
+The consent name and value accept string assignments through their value types' implicit conversions.
+An out-of-grammar string throws `ArgumentException` at assignment. `UseCookiePolicy` refuses a
+`default` name or value, and an empty consent value, with `ParamName = "configure"`; an empty string
+is valid cookie-value grammar but cannot record consent. The policy captures the typed values once
+at registration. These property types change the current PR's API; recompile consumers, retaining
+string literals for valid assignments or supplying the cookie value types. The consent properties
+did not exist in 10.0.0-preview.1, whose options type was a stub.
 
 ## Dependencies
 

@@ -10,9 +10,9 @@ namespace Assimalign.Cohesion.Web.Sessions.Tests;
 
 public class SessionCookieNameTests
 {
-    [Theory(DisplayName = "Cohesion Test [Web.Sessions] - UseSessions: An invalid CookieName fails before middleware registration")]
+    [Theory(DisplayName = "Cohesion Test [Web.Sessions] - UseSessions: An invalid CookieName fails in the configuration assignment")]
     [MemberData(nameof(InvalidCookieNames))]
-    public void UseSessions_CookieNameOutsideGrammar_ShouldThrowAtRegistration(string? cookieName, bool explicitStore)
+    public void UseSessions_CookieNameOutsideGrammar_ShouldThrowAtAssignment(string? cookieName, bool explicitStore)
     {
         // Arrange
         TestPipelineBuilder builder = new();
@@ -32,10 +32,8 @@ public class SessionCookieNameTests
         });
 
         // Assert
-        exception.ParamName.ShouldBe("configure");
-        exception.Message.ShouldContain("HttpSessionOptions.CookieName", Case.Sensitive);
-        // The inner exception comes from the HttpCookieName conversion; ParamName is its parameter.
-        exception.InnerException.ShouldBeAssignableTo<ArgumentException>().ShouldNotBeNull().ParamName.ShouldBe("value");
+        exception.ParamName.ShouldBe("value");
+        exception.InnerException.ShouldBeNull();
         if (!string.IsNullOrEmpty(cookieName))
         {
             exception.ToString().ShouldNotContain(cookieName, Case.Sensitive);
@@ -65,6 +63,37 @@ public class SessionCookieNameTests
         // Assert
         returned.ShouldBeSameAs(builder);
         builder.LastMiddleware.ShouldNotBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Sessions] - UseSessions: A default CookieName fails before middleware registration")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UseSessions_DefaultCookieName_ShouldThrowAtRegistration(bool explicitStore)
+    {
+        // Arrange
+        TestPipelineBuilder builder = new();
+        Action<HttpSessionOptions> configure = options => options.CookieName = default;
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() =>
+        {
+            if (explicitStore)
+            {
+                builder.UseSessions(new InMemoryHttpSessionStore(), configure);
+            }
+            else
+            {
+                builder.UseSessions(configure);
+            }
+        });
+
+        // Assert
+        exception.ParamName.ShouldBe("configure");
+        exception.Message.ShouldBe(new ArgumentException(
+            "HttpSessionOptions.CookieName must be a non-empty RFC 6265 token with no control characters, whitespace, or separators.",
+            "configure").Message);
+        exception.InnerException.ShouldBeNull();
+        builder.LastMiddleware.ShouldBeNull();
     }
 
     public static TheoryData<string?, bool> InvalidCookieNames

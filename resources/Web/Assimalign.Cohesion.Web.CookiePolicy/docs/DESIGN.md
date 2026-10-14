@@ -27,7 +27,7 @@ The split is documented on both sides (`Assimalign.Cohesion.Http.Cookies/docs/DE
 
 | RFC 6265 / 6265bis rule | Owner | Rationale |
 |---|---|---|
-| `cookie-name` token / `cookie-value` octet-grammar validation (anti header-splitting) | **`Http.Cookies`** | A malformed value corrupts the wire regardless of policy. Enforced at `HttpCookie` construction. |
+| `cookie-name` token / `cookie-value` octet-grammar validation (anti header-splitting) | **`Http.Cookies`** | A malformed value corrupts the wire regardless of policy. Enforced by `HttpCookieName` and `HttpCookieValue` construction and string conversion. |
 | `Path` `path-value` / `Domain` `domain-value` grammar (attribute injection, #1153) | **`Http.Cookies`** | Enforced in the `HttpCookieOptions` setters; the policy can rely on both values being well-formed. |
 | Per-cookie size limits (name+value ≤ 4096, attribute value ≤ 1024, bounded attribute count) | **`Http.Cookies`** | Parse robustness; oversized input is ignored while parsing (`HttpCookieLimits`). |
 | 400-day lifetime **cap math** (`HttpCookie.ClampLifetime`) | **`Http.Cookies`** | Pure and clock-free, so it is deterministic to test. |
@@ -305,11 +305,19 @@ any other cookie. The defaults of the two packages are chosen to compose safely:
 
 ## Error model
 
+- **Assignment:** `ConsentCookieName` is `HttpCookieName` and `ConsentCookieValue` is
+  `HttpCookieValue`. Assigning an out-of-grammar string throws `ArgumentException` from the
+  conversion before the setter runs, including inside the registration callback.
 - **Registration:** `ArgumentNullException` for a `null` builder. `ArgumentException` (`ParamName` =
   `configure`) for an undefined enum value, a lifetime cap outside (0, 400 days], a `null`
-  `TimeProvider`, or a malformed consent cookie: an invalid name or value, an empty value, a
-  non-positive `Max-Age`, or an `Expires`. An invalid consent cookie name or value is caught by
-  constructing an `HttpCookie` at registration, so the first grant cannot fail.
+  `TimeProvider`, a `default` consent cookie name or value, an empty consent value, a non-positive
+  `Max-Age`, or an `Expires`. `default` skips value-type construction, so `CookiePolicyRules.Create`
+  checks the underlying values directly. The name guard retains the message "The consent cookie
+  name or value is not a valid RFC 6265 cookie name or value." The default and empty value guard
+  retains "The consent cookie value must not be empty: an empty value cannot be told apart from a
+  deleted consent cookie." Empty values satisfy the cookie grammar but cannot record consent.
+  No cookie is constructed solely to validate options. The captured fields and members stay typed,
+  and consent matching uses the value types' ordinal equality.
 - **Request time:** policy decisions never throw; a dropped cookie is reported, not raised.
   `Add(null)`, `Remove(null)`, and `Contains(null)` throw `ArgumentNullException`, as the model does.
   An exception from `CheckConsentNeeded` or `OnRejected` propagates to the code that appended the cookie
@@ -325,8 +333,8 @@ layer, which is what lets the policy compose the model's mechanisms freely. No `
 
 ## AOT posture
 
-`<IsAotCompatible>true</IsAotCompatible>`. Enforcement is plain string comparison (ordinal and
-ordinal-ignore-case prefix checks), enum switches, and the model's `ClampLifetime`. Option validation uses
+`<IsAotCompatible>true</IsAotCompatible>`. Enforcement uses typed ordinal cookie equality,
+ordinal-ignore-case prefix checks, enum switches, and the model's `ClampLifetime`. Option validation uses
 the generic `Enum.IsDefined<TEnum>`. No reflection, no regex, and no runtime code generation.
 
 ## Non-goals
@@ -349,8 +357,9 @@ the generic `Enum.IsDefined<TEnum>`. No reflection, no regex, and no runtime cod
 asserts on the `Set-Cookie` fields an `HttpClient` receives. Those fields are parsed by a test-side
 parser (`TestObjects/SetCookieField.cs`), not by the model under test.
 
-- `CookiePolicyOptionsTests` covers the documented defaults and every registration-time validation
-  failure, and that options changed after registration have no effect.
+- `CookiePolicyOptionsTests` covers the documented defaults, assignment-time grammar rejection,
+  default and empty consent-value guards with their messages and parameter names, every other
+  registration-time validation failure, and that options changed after registration have no effect.
 - `CookiePolicyAttributeTests` covers the `Secure` modes, the `HttpOnly` modes, the minimum-`SameSite`
   matrix (raise, never lower), attribute preservation on a rewrite, and the no-cookie response.
 - `CookiePolicyRfc6265bisComplianceTests` covers `__Secure-` and `__Host-` (upgrade, and each violation
@@ -396,3 +405,19 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Typed consent options (#1473)
+
+`CookiePolicyOptions.ConsentCookieName` changes from `string` to `HttpCookieName`, and
+`CookiePolicyOptions.ConsentCookieValue` changes from `string` to `HttpCookieValue`. These are source
+and binary changes to the current PR's API. Recompile consumers; valid string assignments keep
+working through implicit conversion, and code that depends on the property signatures must use the
+cookie value types. `DefaultConsentCookieName` and `DefaultConsentCookieValue` remain `const string`.
+Against 10.0.0-preview.1, there is no additional property-type break: that tag shipped an empty
+`CookiePolicyOptions` stub, without either consent property or `CookiePolicyRules`.
+
+Malformed strings now fail at assignment, with the cookie value type's message and parameter name,
+instead of being wrapped at registration. Composition still refuses missing values and an empty
+consent value before a request can grant consent. The policy keeps its immutable snapshot and wire
+behavior. This change closes no remote-input vulnerability: consent options are application
+configuration, and registration already rejected malformed consent names and values.

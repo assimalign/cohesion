@@ -15,8 +15,8 @@ using Assimalign.Cohesion.Web.Testing;
 namespace Assimalign.Cohesion.Web.CookiePolicy.Tests;
 
 /// <summary>
-/// The options' documented defaults, and the validation <c>UseCookiePolicy</c> performs at registration:
-/// a misconfiguration throws when the verb is called, never on a request.
+/// The options' documented defaults, assignment-time grammar validation, and the remaining validation
+/// <c>UseCookiePolicy</c> performs at registration, before a request can grant consent.
 /// </summary>
 public class CookiePolicyOptionsTests
 {
@@ -36,8 +36,10 @@ public class CookiePolicyOptionsTests
         options.TimeProvider.ShouldBeSameAs(TimeProvider.System);
         options.CheckConsentNeeded.ShouldBeNull();
         options.OnRejected.ShouldBeNull();
-        options.ConsentCookieName.ShouldBe(CookiePolicyOptions.DefaultConsentCookieName);
-        options.ConsentCookieValue.ShouldBe(CookiePolicyOptions.DefaultConsentCookieValue);
+        HttpCookieName consentCookieName = options.ConsentCookieName;
+        HttpCookieValue consentCookieValue = options.ConsentCookieValue;
+        consentCookieName.ShouldBe<HttpCookieName>(CookiePolicyOptions.DefaultConsentCookieName);
+        consentCookieValue.ShouldBe<HttpCookieValue>(CookiePolicyOptions.DefaultConsentCookieValue);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.CookiePolicy] - Options: The consent cookie template should default to an essential, script-readable, year-long Lax cookie")]
@@ -116,24 +118,88 @@ public class CookiePolicyOptionsTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.CookiePolicy] - Registration: A consent cookie name or value outside the RFC 6265 grammar should throw at registration")]
-    [InlineData("bad name", "yes")]
-    [InlineData("", "yes")]
-    [InlineData("consent;", "yes")]
-    [InlineData("consent", "")]
-    [InlineData("consent", "a;b")]
-    [InlineData("consent", "white space")]
-    public async Task UseCookiePolicy_MalformedConsentCookie_ShouldThrowAtRegistration(string name, string value)
+    [Theory(DisplayName = "Cohesion Test [Web.CookiePolicy] - Options: A malformed consent cookie name should throw at assignment")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("bad name")]
+    [InlineData("consent;")]
+    [InlineData("consent\r\nInjected")]
+    [InlineData("café")]
+    public void ConsentCookieName_MalformedString_ShouldThrowAtAssignment(string? name)
+    {
+        // Arrange
+        CookiePolicyOptions options = new();
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => options.ConsentCookieName = name!);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.CookiePolicy] - Options: A malformed consent cookie value should throw at assignment")]
+    [InlineData(null)]
+    [InlineData("a;b")]
+    [InlineData("white space")]
+    [InlineData("yes\r\nInjected")]
+    [InlineData("café")]
+    public void ConsentCookieValue_MalformedString_ShouldThrowAtAssignment(string? value)
+    {
+        // Arrange
+        CookiePolicyOptions options = new();
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => options.ConsentCookieValue = value!);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.CookiePolicy] - Registration: A default consent cookie name should throw with the documented message")]
+    public async Task UseCookiePolicy_DefaultConsentCookieName_ShouldThrowAtRegistration()
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
 
-        // Act & Assert
-        Should.Throw<ArgumentException>(() => factory.Application.UseCookiePolicy(options =>
-        {
-            options.ConsentCookieName = name;
-            options.ConsentCookieValue = value;
-        })).ParamName.ShouldBe("configure");
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() =>
+            factory.Application.UseCookiePolicy(options => options.ConsentCookieName = default));
+
+        // Assert
+        exception.ParamName.ShouldBe("configure");
+        exception.Message.ShouldBe(new ArgumentException(
+            "The consent cookie name or value is not a valid RFC 6265 cookie name or value.",
+            "configure").Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.CookiePolicy] - Registration: A default consent cookie value should throw with the documented message")]
+    public async Task UseCookiePolicy_DefaultConsentCookieValue_ShouldThrowAtRegistration()
+    {
+        // Arrange
+        await using WebApplicationTestFactory factory = new();
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() =>
+            factory.Application.UseCookiePolicy(options => options.ConsentCookieValue = default));
+
+        // Assert
+        exception.ParamName.ShouldBe("configure");
+        exception.Message.ShouldBe(new ArgumentException(
+            "The consent cookie value must not be empty: an empty value cannot be told apart from a deleted consent cookie.",
+            "configure").Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.CookiePolicy] - Registration: An empty consent cookie value should be accepted at assignment and refused at registration")]
+    public async Task UseCookiePolicy_EmptyConsentCookieValue_ShouldThrowAtRegistration()
+    {
+        // Arrange
+        await using WebApplicationTestFactory factory = new();
+        CookiePolicyOptions configured = new();
+        Should.NotThrow(() => configured.ConsentCookieValue = string.Empty);
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() =>
+            factory.Application.UseCookiePolicy(options => options.ConsentCookieValue = configured.ConsentCookieValue));
+
+        // Assert
+        exception.ParamName.ShouldBe("configure");
+        exception.Message.ShouldBe(new ArgumentException(
+            "The consent cookie value must not be empty: an empty value cannot be told apart from a deleted consent cookie.",
+            "configure").Message);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.CookiePolicy] - Registration: A consent cookie template that would delete consent should throw at registration")]

@@ -44,9 +44,11 @@ public static class SessionPipelineExtensions
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
-        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive,
-        /// <see cref="HttpSessionOptions.CookieName"/> is not an RFC 6265 <c>token</c>, or
-        /// <see cref="HttpSessionOptions.CookiePath"/> is not an RFC 6265 <c>path-value</c>.
+        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive;
+        /// <paramref name="configure"/> assigns <see cref="HttpSessionOptions.CookieName"/> a
+        /// string outside RFC 6265 <c>token</c>, or <see cref="HttpSessionOptions.CookiePath"/>
+        /// one outside <c>path-value</c> (thrown by the conversion); or either cookie option is
+        /// <see langword="default"/> (with parameter name <c>configure</c>).
         /// </exception>
         public IWebApplicationPipelineBuilder UseSessions(Action<HttpSessionOptions>? configure = null)
             => builder.UseSessions(new InMemoryHttpSessionStore(), configure);
@@ -59,9 +61,11 @@ public static class SessionPipelineExtensions
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="store"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
-        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive,
-        /// <see cref="HttpSessionOptions.CookieName"/> is not an RFC 6265 <c>token</c>, or
-        /// <see cref="HttpSessionOptions.CookiePath"/> is not an RFC 6265 <c>path-value</c>.
+        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive;
+        /// <paramref name="configure"/> assigns <see cref="HttpSessionOptions.CookieName"/> a
+        /// string outside RFC 6265 <c>token</c>, or <see cref="HttpSessionOptions.CookiePath"/>
+        /// one outside <c>path-value</c> (thrown by the conversion); or either cookie option is
+        /// <see langword="default"/> (with parameter name <c>configure</c>).
         /// </exception>
         public IWebApplicationPipelineBuilder UseSessions(IHttpSessionStore store, Action<HttpSessionOptions>? configure = null)
         {
@@ -78,33 +82,16 @@ public static class SessionPipelineExtensions
                     nameof(configure));
             }
 
-            // Reuse the cookie constructor's token check at composition, before any middleware is registered.
-            try
+            // The value types reject out-of-grammar strings at assignment; default is the
+            // one value they cannot see. Refuse it before any middleware is registered.
+            if (options.CookieName.Value is null)
             {
-                _ = new HttpCookie(options.CookieName);
-            }
-            catch (ArgumentException exception)
-            {
-                throw new ArgumentException(
-                    ErrorMessages.SessionCookieNameInvalid,
-                    nameof(configure),
-                    exception);
+                throw new ArgumentException(ErrorMessages.SessionCookieNameInvalid, nameof(configure));
             }
 
-            // The session cookie is built each time a session is established, and HttpCookieOptions refuses
-            // a Path outside the RFC 6265 path-value grammar (#1153). Checking the path here fails the
-            // application at composition instead of failing every session establishment with a 500.
-            try
+            if (options.CookiePath.Value is null)
             {
-                _ = new HttpCookieOptions { Path = options.CookiePath };
-            }
-            catch (ArgumentException exception)
-            {
-                // The value is not echoed: it may hold the control character that made it invalid.
-                throw new ArgumentException(
-                    ErrorMessages.SessionCookiePathInvalid,
-                    nameof(configure),
-                    exception);
+                throw new ArgumentException(ErrorMessages.SessionCookiePathInvalid, nameof(configure));
             }
 
             return builder.Use(new SessionMiddleware(store, options));
