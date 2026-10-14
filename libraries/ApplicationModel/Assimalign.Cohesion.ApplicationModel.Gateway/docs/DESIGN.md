@@ -221,7 +221,10 @@ consume already-resolved inputs and never pull orchestration data themselves. Ea
 resolver. `literal:` permits an empty payload and embedded colons; `parameter:` requires a nonblank
 name and preserves any colons within it; another source requires exactly one colon between
 nonblank source and key. All comparisons are ordinal, and spelling and whitespace are preserved.
-Malformed sources now fail construction or manifest/plan validation before reconcile; a string
+Manifest source DTOs retain `string?` for the owner's Database freeze (#1168), with typed DTO
+adoption deferred to #1470. Their malformed text fails manifest validation with
+`InvalidDataException` through `ResourceMountSource.TryCreate`, before reconcile. Plan
+`MountBinding.Source` remains typed; invalid inputs fail conversion or plan validation. A string
 passed directly to the source-resolver seam uses `TryCreate` and returns an unresolved input.
 
 Missing parameters, malformed direct references, missing registrations, unavailable endpoints, provider
@@ -843,9 +846,11 @@ the served control plane's dispatcher, so the one `ResourceControlPlaneCommandCl
 identical URL for local and peer-served delivery: IPv6 hosts are bracketed the same way, and an
 unusable observation (no host, port 0) is skipped rather than turned into a malformed URI.
 `ResourceHttpPath` requires a leading slash and forbids query and fragment delimiters for control
-planes and HTTP probes. Relative paths and missing default values are refused by manifest and plan
-validation before reconcile. `GatewayControlPlaneTests` pins address handling with an IPv6 target
-whose manifest path is `/cohesion/v1/`. Compared with `10.0.0-preview.1`, a relative control-plane
+planes and HTTP probes. The manifest DTO paths retain their string types for the Database freeze;
+manifest validation checks them with `ResourceHttpPath.IsValid` and throws `InvalidDataException`
+for invalid text. Plan validation uses `TryCreate` before reconcile. `GatewayControlPlaneTests`
+pins address handling with an IPv6 target whose manifest path is `/cohesion/v1/`. Compared with
+`10.0.0-preview.1`, a relative control-plane
 path is refused instead of normalized, and a relative probe path fails validation before the local
 preparer calls `ProbeSpec.Http`.
 

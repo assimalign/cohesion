@@ -19,7 +19,8 @@ public sealed record ResourceManifestProbe
     /// <summary>
     /// Gets the HTTP request path for an HTTP probe.
     /// </summary>
-    public ResourceHttpPath? Http { get; init; }
+    // Deviates from the repo value-object rule per the owner's Database freeze (#1168): the manifest DTO keeps string; validation uses ResourceHttpPath.IsValid. Switch with #1470.
+    public string? Http { get; init; }
 
     /// <summary>
     /// Gets whether the probe performs a TCP connection check.

@@ -131,12 +131,15 @@ Composite's working directory merely because all hosts share a process.
 
 ## Validated resource paths (#1481)
 
-The invocation context reads the raw value of ApplicationModel's `ResourceHttpPath` before
-appending the default readiness/liveness suffix. Manifest and plan validation now require an
-absolute path without query or fragment delimiters, before in-process context preparation.
-Relative manifest paths accepted by 10.0.0-preview.1 now fail at composition; valid path text
-and the default probe routes remain unchanged. The generated value type is owned by the
-ApplicationModel contract package and introduces no new dependency here.
+The invocation context reads the manifest's control-plane path string before appending the default
+readiness/liveness suffix. The DTO keeps its string type for the owner's Database freeze (#1168),
+with typed DTO adoption deferred to #1470. Manifest validation uses `ResourceHttpPath.IsValid`
+and throws `InvalidDataException`
+for relative paths or query/fragment delimiters; plan validation applies the same grammar before
+in-process context preparation. Relative manifest paths accepted by 10.0.0-preview.1 now fail at
+composition; valid path text and default probe routes remain unchanged. The value type is owned by
+the ApplicationModel contract package and introduces no new dependency here.
+
 ## Readiness, liveness, and health
 
 Entry-point host surrender and child-host adoption must complete within the configured readiness

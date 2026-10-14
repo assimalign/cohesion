@@ -1,4 +1,6 @@
+using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 using Shouldly;
 using Xunit;
@@ -69,24 +71,50 @@ public class ResourceValueObjectTests
         source.Equals((ResourceMountSource)"store:key").ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Parse: Invalid manifest path and mount expressions fail JSON conversion")]
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Parse: Invalid manifest path and mount expressions fail manifest validation")]
     [InlineData("http", "ready")]
     [InlineData("path", "cohesion/v1")]
     [InlineData("source", "parameter:   ")]
-    public void Parse_InvalidManifestValue_ShouldRejectJson(string property, string text)
+    public void Parse_InvalidManifestValue_ShouldRejectDuringValidation(string property, string text)
     {
         // Arrange
-        string json = property switch
+        var manifest = new ResourceManifest
         {
-            "http" => "{\"probes\":{\"readiness\":{\"http\":\"" + text + "\"}}}",
-            "path" => "{\"controlPlane\":{\"path\":\"" + text + "\"}}",
-            _ => "{\"mounts\":[{\"source\":\"" + text + "\"}]}"
+            Name = "app-api",
+            Kind = "Web",
+            Application = "app",
+            ApplicationModel = "Assimalign.Cohesion.Web.ApplicationModel",
+            Artifact = new ResourceManifestArtifact { Assembly = "Example.Api" },
+            Endpoints = [new ResourceManifestEndpoint
+            {
+                Name = "http", Scheme = "http", Protocol = "tcp", ContainerPort = 8080
+            }],
+            Probes = new ResourceManifestProbes
+            {
+                Readiness = new ResourceManifestProbe { Endpoint = "http", Http = "/ready" }
+            },
+            ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = "/cohesion/v1" },
+            Mounts = [new ResourceManifestMount
+            {
+                Name = "config", Kind = ResourceMountKind.Configuration,
+                ContainerPath = "/config", Source = "parameter:config"
+            }],
+            Lifecycle = new ResourceManifestLifecycle { Workload = WorkloadKind.Deployment }
         };
-
-        json = json.Insert(1, "\"schema\":\"cohesion/resource/v1\",");
+        manifest.Validate();
+        JsonNode document = JsonNode.Parse(JsonSerializer.Serialize(
+            manifest, ResourceManifestJsonContext.Default.ResourceManifest)).ShouldNotBeNull();
+        JsonNode target = property switch
+        {
+            "http" => document["probes"]!["readiness"]!,
+            "path" => document["controlPlane"]!,
+            _ => document["mounts"]![0]!
+        };
+        target[property] = text;
+        string json = document.ToJsonString();
 
         // Act
-        JsonException error = Should.Throw<JsonException>(() => ResourceManifest.Parse(json));
+        InvalidDataException error = Should.Throw<InvalidDataException>(() => ResourceManifest.Parse(json));
 
         // Assert
         error.Message.ShouldContain(property == "source" ? "A mount source must use" : "A resource HTTP path", Case.Sensitive);
@@ -99,11 +127,11 @@ public class ResourceValueObjectTests
         string? text = null;
 
         // Act
-        var probe = new ResourceManifestProbe { Http = text };
-        var mount = new ResourceManifestMount { Source = text };
+        ResourceHttpPath? path = text;
+        ResourceMountSource? source = text;
 
         // Assert
-        probe.Http.ShouldBeNull();
-        mount.Source.ShouldBeNull();
+        path.ShouldBeNull();
+        source.ShouldBeNull();
     }
 }

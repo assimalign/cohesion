@@ -1,5 +1,5 @@
-using System;
 using System.Collections.Generic;
+using System.IO;
 
 using Shouldly;
 using Xunit;
@@ -17,14 +17,16 @@ public class ResourceValueBoundaryTests
         // Arrange
         ResourceManifest manifest = CreateManifest();
 
-        // Act and Assert
-        Should.Throw<ArgumentException>(() => (manifest with
+        ResourceManifest invalid = manifest with
         {
             Probes = new ResourceManifestProbes
             {
                 Readiness = new ResourceManifestProbe { Endpoint = "http", Http = path }
             }
-        }).Validate());
+        };
+
+        // Act and Assert
+        Should.Throw<InvalidDataException>(() => invalid.Validate());
     }
 
     [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject invalid control-plane paths at composition")]
@@ -36,11 +38,13 @@ public class ResourceValueBoundaryTests
         // Arrange
         ResourceManifest manifest = CreateManifest();
 
-        // Act and Assert
-        Should.Throw<ArgumentException>(() => (manifest with
+        ResourceManifest invalid = manifest with
         {
             ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = path }
-        }).Validate());
+        };
+
+        // Act and Assert
+        Should.Throw<InvalidDataException>(() => invalid.Validate());
     }
 
     [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject blank mount-source names and keys at composition")]
@@ -52,8 +56,7 @@ public class ResourceValueBoundaryTests
         // Arrange
         ResourceManifest manifest = CreateManifest();
 
-        // Act and Assert
-        Should.Throw<ArgumentException>(() => (manifest with
+        ResourceManifest invalid = manifest with
         {
             Mounts = [new ResourceManifestMount
             {
@@ -62,14 +65,17 @@ public class ResourceValueBoundaryTests
                 ContainerPath = "/config",
                 Source = source
             }]
-        }).Validate());
+        };
+
+        // Act and Assert
+        Should.Throw<InvalidDataException>(() => invalid.Validate());
     }
 
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Present default resource values cannot bypass validation")]
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Empty resource values cannot bypass validation")]
     [InlineData("http")]
     [InlineData("path")]
     [InlineData("source")]
-    public void Validate_PresentDefaultValue_ShouldReject(string member)
+    public void Validate_EmptyValue_ShouldReject(string member)
     {
         // Arrange
         ResourceManifest original = CreateManifest();
@@ -79,25 +85,25 @@ public class ResourceValueBoundaryTests
             {
                 Probes = new ResourceManifestProbes
                 {
-                    Readiness = new ResourceManifestProbe { Endpoint = "http", Http = default(ResourceHttpPath) }
+                    Readiness = new ResourceManifestProbe { Endpoint = "http", Http = string.Empty }
                 }
             },
             "path" => original with
             {
-                ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = default }
+                ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = string.Empty }
             },
             _ => original with
             {
                 Mounts = [new ResourceManifestMount
                 {
                     Name = "config", Kind = ResourceMountKind.Configuration,
-                    ContainerPath = "/config", Source = default(ResourceMountSource)
+                    ContainerPath = "/config", Source = string.Empty
                 }]
             }
         };
 
         // Act and Assert
-        Should.Throw<System.IO.InvalidDataException>(() => manifest.Validate());
+        Should.Throw<InvalidDataException>(() => manifest.Validate());
     }
 
     private static ResourceManifest CreateManifest() => new()

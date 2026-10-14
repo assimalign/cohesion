@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 using Shouldly;
 using Xunit;
@@ -90,10 +91,28 @@ public class ApplicationNameTests
     public void Parse_ManifestWithInvalidIdentity_ThrowsJsonException()
     {
         // Arrange
-        const string json = """{"schema":"cohesion/resource/v1","application":"Bad_Name"}""";
+        var manifest = new ResourceManifest
+        {
+            Name = "app-api",
+            Kind = "Web",
+            Application = "app",
+            ApplicationModel = "Assimalign.Cohesion.Web.ApplicationModel",
+            Artifact = new ResourceManifestArtifact { Assembly = "Example.Api" },
+            Endpoints = [new ResourceManifestEndpoint
+            {
+                Name = "http", Scheme = "http", Protocol = "tcp", ContainerPort = 8080
+            }],
+            ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = "/cohesion/v1" },
+            Lifecycle = new ResourceManifestLifecycle { Workload = WorkloadKind.Deployment }
+        };
+        string json = JsonSerializer.Serialize(manifest, ResourceManifestJsonContext.Default.ResourceManifest);
+        ResourceManifest.Parse(json);
+        JsonNode document = JsonNode.Parse(json).ShouldNotBeNull();
+        document["application"] = "Bad_Name";
+        string invalid = document.ToJsonString();
 
         // Act
-        Action parse = () => ResourceManifest.Parse(json);
+        Action parse = () => ResourceManifest.Parse(invalid);
 
         // Assert
         Should.Throw<JsonException>(parse).Message.ShouldContain("RFC1123");

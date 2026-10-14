@@ -32,9 +32,12 @@ design lands.
 
 Mount-source syntax is shared with manifest and provider validation through `ResourceMountSource`:
 `literal:` may be empty or contain colons, `parameter:` needs a nonblank name, and other sources
-need exactly one colon between nonblank source and key. Probe and control-plane paths use
-`ResourceHttpPath`: they begin with `/` and contain no query or fragment. These syntax errors are
-refused before reconcile.
+need exactly one colon between nonblank source and key. Probe and control-plane path validation
+uses `ResourceHttpPath`: paths begin with `/` and contain no query or fragment. These manifest DTO
+properties retain their string types for the owner's Database freeze (#1168), with typed DTO
+adoption deferred to #1470. Manifest validation checks those strings through the value objects'
+`IsValid`/`TryCreate` rules and rejects invalid text with `InvalidDataException` before reconcile;
+plan `MountBinding.Source` remains a value type.
 
 Every credential the gateway mints — each resource's bootstrap credential, its own calls to resource
 control planes and stores, telemetry-emitter credentials, peer-gateway calls, and developer tokens —

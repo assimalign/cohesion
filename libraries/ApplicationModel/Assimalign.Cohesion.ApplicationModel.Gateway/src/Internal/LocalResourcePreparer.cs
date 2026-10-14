@@ -143,9 +143,9 @@ internal sealed class LocalResourcePreparer
         string rolePath,
         ReadOnlyMemory<byte> bootstrapCredential)
     {
-        string path = controlPlane.Path.Value.EndsWith("/", StringComparison.Ordinal)
-            ? controlPlane.Path.Value + rolePath
-            : controlPlane.Path.Value + "/" + rolePath;
+        string path = controlPlane.Path.EndsWith("/", StringComparison.Ordinal)
+            ? controlPlane.Path + rolePath
+            : controlPlane.Path + "/" + rolePath;
         return new LocalControlPlaneProbe(
             ProbeSpec.Http(controlPlane.Endpoint, path),
             bootstrapCredential);
@@ -191,7 +191,7 @@ internal sealed class LocalResourcePreparer
 
         if (probe.Http is not null)
         {
-            return ProbeSpec.Http(probe.Endpoint!, probe.Http.Value.Value);
+            return ProbeSpec.Http(probe.Endpoint!, probe.Http);
         }
 
         if (probe.Tcp is true)

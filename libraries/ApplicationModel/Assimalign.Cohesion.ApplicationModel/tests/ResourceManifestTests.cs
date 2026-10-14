@@ -94,11 +94,11 @@ public class ResourceManifestTests
         manifest.Endpoints[0].Protocol.ShouldBe("tcp");
         manifest.Endpoints[0].Public.ShouldBeTrue();
         manifest.Probes.Startup!.Tcp.ShouldBe(true);
-        manifest.ControlPlane.Path.Value.ShouldBe("/cohesion/v1");
+        manifest.ControlPlane.Path.ShouldBe("/cohesion/v1");
         manifest.Mounts[0].Kind.ShouldBe(ResourceMountKind.Volume);
         manifest.Mounts[0].Size.ShouldBe("10Gi");
         manifest.Mounts[1].Kind.ShouldBe(ResourceMountKind.Secret);
-        manifest.Mounts[1].Source?.Value.ShouldBe("appa-secretstore:certs/appa-api");
+        manifest.Mounts[1].Source.ShouldBe("appa-secretstore:certs/appa-api");
         manifest.Settings[0].Type.ShouldBe("int");
         manifest.References[0].Endpoints.ShouldContain("db");
         manifest.Commands[0].Kind.ShouldBe("rezolvr.record");

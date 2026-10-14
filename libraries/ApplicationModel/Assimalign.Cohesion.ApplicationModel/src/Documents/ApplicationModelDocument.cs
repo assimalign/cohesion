@@ -181,6 +181,7 @@ public sealed class ApplicationModelDocument
     /// <param name="json">The JSON document.</param>
     /// <returns>The parsed application-model document.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="json"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An application name fails validation while reconstructing the model.</exception>
     /// <exception cref="JsonException">The JSON is malformed or JSON <see langword="null"/>.</exception>
     /// <exception cref="InvalidDataException">The document violates the application-model contract.</exception>
     /// <exception cref="InvalidOperationException">A resource plan violates its manifest contract.</exception>
@@ -202,6 +203,7 @@ public sealed class ApplicationModelDocument
     /// <param name="stream">The readable JSON stream.</param>
     /// <returns>The loaded application-model document.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="stream"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An application name fails validation while reconstructing the model.</exception>
     /// <exception cref="JsonException">The stream does not contain a valid JSON document.</exception>
     /// <exception cref="InvalidDataException">The document violates the application-model contract.</exception>
     /// <exception cref="InvalidOperationException">A resource plan violates its manifest contract.</exception>
@@ -221,7 +223,9 @@ public sealed class ApplicationModelDocument
     /// </summary>
     /// <param name="path">The document path.</param>
     /// <returns>The loaded application-model document.</returns>
-    /// <exception cref="ArgumentException"><paramref name="path"/> is empty.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is empty or whitespace, or an application name fails validation while reconstructing the model.
+    /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
     /// <exception cref="JsonException">The file does not contain a valid JSON document.</exception>
     /// <exception cref="InvalidDataException">The document violates the application-model contract.</exception>
@@ -240,6 +244,7 @@ public sealed class ApplicationModelDocument
     /// </summary>
     /// <param name="stream">The writable JSON stream.</param>
     /// <exception cref="ArgumentNullException"><paramref name="stream"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An application name fails validation while reconstructing the model.</exception>
     /// <exception cref="InvalidDataException">This document violates the application-model contract.</exception>
     /// <exception cref="InvalidOperationException">A resource plan violates its manifest contract.</exception>
     public void Save(Stream stream)
@@ -257,7 +262,9 @@ public sealed class ApplicationModelDocument
     /// Saves this application-model document to a file, replacing an existing file.
     /// </summary>
     /// <param name="path">The document path.</param>
-    /// <exception cref="ArgumentException"><paramref name="path"/> is empty.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is empty or whitespace, or an application name fails validation while reconstructing the model.
+    /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidDataException">This document violates the application-model contract.</exception>
     /// <exception cref="InvalidOperationException">A resource plan violates its manifest contract.</exception>
@@ -281,7 +288,7 @@ public sealed class ApplicationModelDocument
     /// <paramref name="runMode"/> is not a supported gateway run mode.
     /// </exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="gatewayIdentity"/> is empty.
+    /// <paramref name="gatewayIdentity"/> is empty, or an application name in the document is invalid.
     /// </exception>
     public IApplicationModel ToModel(
         GatewayRunMode? runMode = null,

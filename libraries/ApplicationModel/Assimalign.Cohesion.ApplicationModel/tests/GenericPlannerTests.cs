@@ -452,6 +452,23 @@ public class GenericPlannerTests
         new PortBinding("http", 8080, "tcp").Certificate.ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - CreatePlan: Should reject invalid mount sources before constructing bindings")]
+    [InlineData("parameter:   ")]
+    [InlineData("store:   ")]
+    [InlineData("   :key")]
+    public void CreatePlan_InvalidMountSource_ShouldRejectBeforeBinding(string source)
+    {
+        // Arrange
+        ResourceManifest original = CreateWebManifest();
+        ResourceManifest manifest = original with
+        {
+            Mounts = [original.Mounts[0] with { Source = source }]
+        };
+
+        // Act and Assert
+        Should.Throw<InvalidOperationException>(() => GenericPlanner.CreatePlan(CreateContext(manifest)));
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Legacy plan omission cannot conceal a default manifest control-plane path")]
     public void Validate_LegacyPlanWithDefaultManifestPath_ShouldThrow()
     {
@@ -461,22 +478,22 @@ public class GenericPlannerTests
         ResourcePlan legacy = CopyPlan(original, original.Workload, original.Container, new ControlPlaneSpec());
         ResourceManifest invalid = manifest with
         {
-            ControlPlane = manifest.ControlPlane with { Path = default }
+            ControlPlane = manifest.ControlPlane with { Path = null! }
         };
 
         // Act and Assert
         Should.Throw<InvalidOperationException>(() => ResourcePlanValidator.Validate(legacy, invalid));
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Default manifest HTTP probe paths cannot enter a plan")]
-    public void Validate_DefaultManifestHttpPath_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Empty manifest HTTP probe paths cannot enter a plan")]
+    public void Validate_EmptyManifestHttpPath_ShouldThrow()
     {
         // Arrange
         ResourceManifest manifest = CreateWebManifest() with
         {
             Probes = new ResourceManifestProbes
             {
-                Readiness = new ResourceManifestProbe { Endpoint = "http", Http = default(ResourceHttpPath) }
+                Readiness = new ResourceManifestProbe { Endpoint = "http", Http = string.Empty }
             }
         };
         ResourcePlan plan = GenericPlanner.CreatePlan(CreateContext(manifest));

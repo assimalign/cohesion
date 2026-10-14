@@ -17,7 +17,8 @@ public static class GenericPlanner
     /// <returns>The platform-neutral resource plan.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The manifest contains contradictory workload and mount facts, or an invalid probe shape.
+    /// The manifest contains contradictory workload and mount facts, an invalid mount source,
+    /// or an invalid probe shape.
     /// </exception>
     public static ResourcePlan CreatePlan(PlanContext context)
     {
@@ -78,12 +79,22 @@ public static class GenericPlanner
         for (int index = 0; index < manifest.Mounts.Count; index++)
         {
             ResourceManifestMount mount = manifest.Mounts[index];
+            ResourceMountSource? source = null;
+            if (mount.Source is not null)
+            {
+                if (!ResourceMountSource.TryCreate(mount.Source, out ResourceMountSource expression))
+                {
+                    throw new InvalidOperationException(ErrorMessages.ResourceMountSourceInvalid);
+                }
+
+                source = expression;
+            }
 
             mounts[index] = new MountBinding(
                 mount.Name,
                 mount.ContainerPath,
                 mount.Kind,
-                mount.Source);
+                source);
 
             if (mount.Kind is ResourceMountKind.Volume)
             {
@@ -197,7 +208,7 @@ public static class GenericPlanner
         {
             shapeCount++;
             kind = ProbeKind.Http;
-            value = probe.Http.Value.Value;
+            value = probe.Http;
         }
 
         if (probe.Tcp is true)

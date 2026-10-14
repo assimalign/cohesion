@@ -146,7 +146,7 @@ public static class ResourcePlanValidator
         ResourceManifestControlPlane manifestControlPlane)
     {
         Require(
-            ResourceHttpPath.TryCreate(manifestControlPlane.Path.Value, out _),
+            ResourceHttpPath.TryCreate(manifestControlPlane.Path, out _),
             ErrorMessages.ResourceHttpPathInvalid);
         string endpoint = RequireNotNull(
             controlPlane.Endpoint,
@@ -296,6 +296,9 @@ public static class ResourcePlanValidator
                 mountNames.Add(mount.Name),
                 $"Manifest mount '{mount.Name}' is declared more than once.");
 
+            Require(
+                mount.Source is null || ResourceMountSource.TryCreate(mount.Source, out _),
+                ErrorMessages.ResourceMountSourceInvalid);
             MountBinding binding = FindMount(plan.Container.Mounts, mount.Name, plan.Resource);
             Require(
                 string.Equals(binding.ContainerPath, mount.ContainerPath, StringComparison.Ordinal),
@@ -308,7 +311,7 @@ public static class ResourcePlanValidator
                 binding.Source is null || ResourceMountSource.TryCreate(binding.Source.Value.Value, out _),
                 ErrorMessages.ResourceMountSourceInvalid);
             Require(
-                Nullable.Equals(binding.Source, mount.Source),
+                string.Equals(binding.Source?.Value, mount.Source, StringComparison.Ordinal),
                 $"Mount '{mount.Name}' source does not match its manifest source.");
         }
     }
@@ -488,7 +491,10 @@ public static class ResourcePlanValidator
         if (manifestProbe.Http is not null)
         {
             expectedKind = ProbeKind.Http;
-            expectedValue = manifestProbe.Http.Value.Value;
+            expectedValue = manifestProbe.Http;
+            Require(
+                ResourceHttpPath.TryCreate(expectedValue, out _),
+                ErrorMessages.ResourceHttpPathInvalid);
             shapeCount++;
         }
         else
