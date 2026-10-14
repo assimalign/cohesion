@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Dns;
 
@@ -29,8 +30,8 @@ public readonly struct DnsName : IEquatable<DnsName>
     /// stored as-is; canonicalization happens at comparison time.
     /// </summary>
     /// <param name="value">A non-null presentation-form DNS name (e.g. <c>"example.com"</c>).</param>
-    /// <exception cref="ArgumentException">The name is empty or contains a label longer than
-    /// the RFC 1035 limit of 63 octets, or the total length exceeds 255 octets.</exception>
+    /// <exception cref="ArgumentException">The name is empty, contains an empty non-root label,
+    /// has a label longer than 63 characters, or exceeds 253 characters excluding its trailing dot.</exception>
     public DnsName(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
@@ -118,7 +119,12 @@ public readonly struct DnsName : IEquatable<DnsName>
     {
         if (value.Length == 0)
         {
-            throw new ArgumentException("A DNS name cannot be empty.", nameof(value));
+            throw new ArgumentException(ErrorMessages.DnsNameEmpty, nameof(value));
+        }
+
+        if (value == ".")
+        {
+            return;
         }
 
         // Strip trailing dot for length checks; the root label is implicit.
@@ -128,7 +134,7 @@ public readonly struct DnsName : IEquatable<DnsName>
         if (check.Length > 253)
         {
             throw new ArgumentException(
-                $"DNS name exceeds the RFC 1035 limit of 253 characters in presentation form: '{value}'.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DnsNameTooLong, value),
                 nameof(value));
         }
 
@@ -138,16 +144,16 @@ public readonly struct DnsName : IEquatable<DnsName>
             if (i == check.Length || check[i] == '.')
             {
                 int labelLength = i - labelStart;
-                if (labelLength == 0 && i != check.Length)
+                if (labelLength == 0)
                 {
                     throw new ArgumentException(
-                        $"DNS name contains an empty label (consecutive dots): '{value}'.",
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.DnsNameEmptyLabel, value),
                         nameof(value));
                 }
                 if (labelLength > 63)
                 {
                     throw new ArgumentException(
-                        $"DNS label '{check.Substring(labelStart, labelLength)}' exceeds the RFC 1035 limit of 63 octets.",
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.DnsLabelTooLong, check.Substring(labelStart, labelLength)),
                         nameof(value));
                 }
                 labelStart = i + 1;
