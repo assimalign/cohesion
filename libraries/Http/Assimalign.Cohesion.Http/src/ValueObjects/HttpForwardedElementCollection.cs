@@ -218,7 +218,7 @@ public readonly struct HttpForwardedElementCollection : IReadOnlyList<HttpForwar
     {
         if (_elements is null)
         {
-            return 0;
+            return new HashCode().ToHashCode();
         }
         var hash = new HashCode();
         foreach (HttpForwardedElement element in _elements)

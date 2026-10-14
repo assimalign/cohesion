@@ -6126,3 +6126,17 @@ Truncated HTTP/3 frame subjects are cached once as fixed diagnostics.
 Parser errors propagated through `out` values and exception factories use the same resources as
 direct throws. Field-value diagnostics retain their existing character/index reporting and do not
 start echoing rejected values; event payloads and their type-only boundaries are unchanged.
+
+## Default HPACK header fields (#1479)
+
+`default(HPackHeaderField)` has no name or value bytes. Its `Length` counts zero
+bytes for each and retains the RFC 7541 entry overhead of 32 bytes. Reading the
+length, comparing or hashing the field, using it as a dictionary or set key, and
+formatting it are safe without running a constructor. The existing `ToString()`
+representation remains `<empty>`; the type has no ordering contract.
+
+This changes the default field's `Length` from a `NullReferenceException` in
+10.0.0-preview.1 to 32, a behavior change recorded on decision 15's terms. The type
+is internal, and constructed entries retain their existing size calculation.
+The dynamic table still tracks populated entries by its count, so empty buffer
+slots do not contribute this overhead to the table's occupied size.

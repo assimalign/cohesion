@@ -2113,3 +2113,40 @@ later passed to their throwing `Parse` entry points. `HttpMethod` and `HttpStatu
 message formatting inside their existing failure conditions, keeping resource lookup and
 formatting allocations off successful construction. Neither their accepted values nor their
 exception text changes.
+
+## Value objects at `default` (#1479)
+
+`default(T)` bypasses constructors, so hand-written HTTP value objects must support
+hashing, equality, string formatting and their existing comparison operators with
+zero-initialized storage. A null string contributes zero to its existing comparer-based
+hash; a composite hash combines those contributions as before. Equality remains the
+authority: equal values must hash equally. In particular, the raw-string comparers
+on `HttpHost` and `HttpQuery` distinguish null from an explicitly constructed empty
+string; this change does not merge those values. Collection-backed values that already
+equate default with their empty collection must also share its hash. The forwarding
+element and list types now use the existing empty-accumulator hash at default,
+matching explicitly constructed empty collections without changing populated hashes.
+
+Where a type exposes `CompareTo`, its default sorts before other distinct values and
+compares equal to an equivalent default/empty value. Types without an ordering contract
+do not acquire one. `ToString()` and implicit string conversions never return null.
+Raw storage properties retain their existing representation and can still be null at
+default; optional properties such as a missing port or charset still return null.
+
+`HttpPath` treats default as an empty path for `Concat` and `StartsWith`: concatenating
+it returns the other operand, it is a prefix of every path, and only an empty prefix
+matches it. It remains unequal to the constructed root path. `HttpMediaType.Suffix`
+returns an empty string when the subtype is absent. `HttpRequestTarget.ToString()`
+returns an empty string when no raw target was stored. No constructor, validation,
+public signature, generator declaration or non-default comparison rule changes.
+Null guards introduce no allocation or validation on populated-value paths.
+
+**Breaking behavior from 10.0.0-preview.1** (decision 15): default values that previously
+threw during hashing, path operations or suffix access now produce the results above;
+string formatting and conversion that returned null now return an empty string.
+Default forwarding elements and lists now hash like their equal empty values, so
+dictionary and hash-set lookups work across both representations.
+Callers relying on those exceptions or null strings observe different behavior.
+`HttpDefaultValueTests` covers every repaired core type, existing ordering where
+available, equality/hash consistency and dictionary/hash-set round trips. Each per-type
+regression fails with the implementation restored to the session's base commit.

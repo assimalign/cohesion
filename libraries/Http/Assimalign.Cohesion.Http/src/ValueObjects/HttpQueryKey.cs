@@ -31,11 +31,11 @@ public readonly struct HttpQueryKey : IEquatable<HttpQueryKey>, IComparable<Http
     public int CompareTo(HttpQueryKey other) => StringComparer.OrdinalIgnoreCase.Compare(Value, other.Value);
 
     public override bool Equals(object? obj) => obj is HttpQueryKey key && Equals(key);
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-    public override string ToString() => Value;
+    public override int GetHashCode() => Value is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+    public override string ToString() => Value ?? string.Empty;
 
     public static implicit operator HttpQueryKey(string value) => new(value);
-    public static implicit operator string(HttpQueryKey key) => key.Value;
+    public static implicit operator string(HttpQueryKey key) => key.Value ?? string.Empty;
     public static bool operator ==(HttpQueryKey left, HttpQueryKey right) => left.Equals(right);
     public static bool operator !=(HttpQueryKey left, HttpQueryKey right) => !left.Equals(right);
 }

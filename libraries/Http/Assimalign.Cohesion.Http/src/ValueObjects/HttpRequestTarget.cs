@@ -427,7 +427,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
         => HashCode.Combine(Form, Scheme, Host, Path, Query.Value, RawValue);
 
     /// <inheritdoc />
-    public override string ToString() => RawValue;
+    public override string ToString() => RawValue ?? string.Empty;
 
     public static bool operator ==(HttpRequestTarget left, HttpRequestTarget right) => left.Equals(right);
     public static bool operator !=(HttpRequestTarget left, HttpRequestTarget right) => !left.Equals(right);

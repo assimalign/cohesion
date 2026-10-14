@@ -95,6 +95,11 @@ public readonly struct HttpMediaType : IEquatable<HttpMediaType>
     {
         get
         {
+            if (SubType is null)
+            {
+                return string.Empty;
+            }
+
             int plus = SubType.LastIndexOf('+');
             return plus > 0 && plus < SubType.Length - 1 ? SubType[(plus + 1)..] : string.Empty;
         }

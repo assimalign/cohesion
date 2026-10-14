@@ -121,6 +121,6 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
 
     public bool Equals(HttpQuery other) => string.Equals(Value, other.Value, StringComparison.Ordinal);
     public override bool Equals(object? obj) => obj is HttpQuery query && Equals(query);
-    public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(Value);
-    public override string ToString() => Value;
+    public override int GetHashCode() => Value is null ? 0 : StringComparer.Ordinal.GetHashCode(Value);
+    public override string ToString() => Value ?? string.Empty;
 }

@@ -57,7 +57,12 @@ public readonly struct HttpPath : IEquatable<HttpPath>
     /// <returns>The combined path.</returns>
     public HttpPath Concat(HttpPath path)
     {
-        if (path.Value == "/")
+        if (Value is null)
+        {
+            return path;
+        }
+
+        if (path.Value is null || path.Value == "/")
         {
             return this;
         }
@@ -79,7 +84,7 @@ public readonly struct HttpPath : IEquatable<HttpPath>
     /// </summary>
     /// <param name="other">The path to compare.</param>
     /// <returns><see langword="true"/> when the current path starts with the supplied path; otherwise <see langword="false"/>.</returns>
-    public bool StartsWith(HttpPath other) => Value.StartsWith(other.Value, StringComparison.Ordinal);
+    public bool StartsWith(HttpPath other) => other.Value is null || (Value?.StartsWith(other.Value, StringComparison.Ordinal) ?? false);
 
     /// <summary>
     /// Creates a path from a percent-encoded URI component.
@@ -125,9 +130,9 @@ public readonly struct HttpPath : IEquatable<HttpPath>
     /// <returns>The percent-encoded path; <see cref="Value"/> itself when nothing needs encoding.</returns>
     public string ToUriComponent() => UrlEncoder.EncodePath(Value ?? string.Empty);
 
-    public override string ToString() => Value;
-    public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(Value);
+    public override string ToString() => Value ?? string.Empty;
+    public override int GetHashCode() => Value is null ? 0 : StringComparer.Ordinal.GetHashCode(Value);
     public override bool Equals(object? obj) => obj is HttpPath path && Equals(path);
     public static implicit operator HttpPath(string value) => new(value);
-    public static implicit operator string(HttpPath path) => path.Value;
+    public static implicit operator string(HttpPath path) => path.Value ?? string.Empty;
 }

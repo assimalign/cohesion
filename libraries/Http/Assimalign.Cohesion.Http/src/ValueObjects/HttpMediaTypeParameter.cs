@@ -53,8 +53,8 @@ public readonly struct HttpMediaTypeParameter : IEquatable<HttpMediaTypeParamete
     /// <inheritdoc />
     public override int GetHashCode()
         => HashCode.Combine(
-            StringComparer.OrdinalIgnoreCase.GetHashCode(Name),
-            StringComparer.OrdinalIgnoreCase.GetHashCode(Value));
+            Name is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Name),
+            Value is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Value));
 
     /// <inheritdoc />
     public override string ToString() => $"{Name}={Value}";

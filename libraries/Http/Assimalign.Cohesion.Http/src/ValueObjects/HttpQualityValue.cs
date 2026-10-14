@@ -52,7 +52,7 @@ public readonly struct HttpQualityValue : IEquatable<HttpQualityValue>
 
     /// <inheritdoc />
     public override int GetHashCode()
-        => HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(Value), Quality);
+        => HashCode.Combine(Value is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Value), Quality);
 
     /// <inheritdoc />
     public override string ToString() => DebuggerDisplay;

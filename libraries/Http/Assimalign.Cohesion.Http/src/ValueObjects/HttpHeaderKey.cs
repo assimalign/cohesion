@@ -35,12 +35,12 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <inheritdoc />
     public int CompareTo(HttpHeaderKey other) => StringComparer.OrdinalIgnoreCase.Compare(Value, other.Value);
 
-    public override string ToString() => Value;
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+    public override string ToString() => Value ?? string.Empty;
+    public override int GetHashCode() => Value is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
     public override bool Equals(object? instance) => instance is HttpHeaderKey key && Equals(key);
 
     public static implicit operator HttpHeaderKey(string key) => new(key);
-    public static implicit operator string(HttpHeaderKey key) => key.Value;
+    public static implicit operator string(HttpHeaderKey key) => key.Value ?? string.Empty;
     public static bool operator ==(HttpHeaderKey left, HttpHeaderKey right) => left.Equals(right);
     public static bool operator !=(HttpHeaderKey left, HttpHeaderKey right) => !left.Equals(right);
 

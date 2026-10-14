@@ -246,10 +246,10 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     public bool Equals(HttpHost other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
 
     public override bool Equals(object? obj) => obj is HttpHost other && Equals(other);
-    public override string ToString() => Value;
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+    public override string ToString() => Value ?? string.Empty;
+    public override int GetHashCode() => Value is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
     public static implicit operator HttpHost(string value) => new(value);
-    public static implicit operator string(HttpHost host) => host.Value;
+    public static implicit operator string(HttpHost host) => host.Value ?? string.Empty;
 
     /// <summary>
     /// Parses a port component: a decimal integer in the range 1–65535, with no sign,

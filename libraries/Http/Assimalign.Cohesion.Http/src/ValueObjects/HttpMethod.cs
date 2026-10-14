@@ -203,13 +203,13 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     };
 
     /// <inheritdoc />
-    public override string ToString() => Value;
+    public override string ToString() => Value ?? string.Empty;
 
     /// <inheritdoc />
     public override bool Equals([NotNullWhen(true)] object? obj) => obj is HttpMethod method && Equals(method);
 
     /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(Value);
+    public override int GetHashCode() => Value is null ? 0 : StringComparer.Ordinal.GetHashCode(Value);
 
     /// <summary>
     /// Converts a token to a method, keeping its case: <c>(HttpMethod)"get"</c> does not equal <see cref="Get"/>.
@@ -221,7 +221,7 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     /// Returns the method's token.
     /// </summary>
     /// <param name="method">The method.</param>
-    public static implicit operator string(HttpMethod method) => method.Value;
+    public static implicit operator string(HttpMethod method) => method.Value ?? string.Empty;
 
     /// <summary>
     /// Compares two methods byte for byte.

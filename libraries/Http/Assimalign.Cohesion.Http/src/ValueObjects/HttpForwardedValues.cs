@@ -200,7 +200,7 @@ public readonly struct HttpForwardedValues : IReadOnlyList<string>, IEquatable<H
     {
         if (_entries is null)
         {
-            return 0;
+            return new HashCode().ToHashCode();
         }
         var hash = new HashCode();
         foreach (string entry in _entries)

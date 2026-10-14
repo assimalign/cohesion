@@ -403,7 +403,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
     {
         if (_parameters is null)
         {
-            return 0;
+            return new HashCode().ToHashCode();
         }
         var hash = new HashCode();
         foreach (HttpForwardedParameter parameter in _parameters)
