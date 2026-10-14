@@ -792,6 +792,28 @@ Any malformed token, out-of-range Integer/Date (±999,999,999,999,999), over-lon
 content fails the *entire* field. This is what lets a consumer treat a successful parse as
 a fully validated value.
 
+### Construction uses the serialized range (#1478)
+
+`FromDecimal` checks the result of rounding to three fractional digits with
+round-half-to-even, as [RFC 9651 §4.1.5](https://www.rfc-editor.org/rfc/rfc9651.html#section-4.1.5)
+requires during serialization. For example, `999999999999.9994` is accepted and
+serializes as `999999999999.999`, but `999999999999.9995` is refused because it
+rounds to a thirteen-digit integer component. Negative values follow the same
+rule. The original decimal remains available through `AsDecimal`; validation
+does not normalize stored values. Integer factories already enforce the
+inclusive range ±999,999,999,999,999 and retain that behavior.
+
+`FromDisplayString` checks UTF-16 surrogate pairing before retaining the string.
+This ensures it consists of the Unicode scalar values allowed by RFC 9651 §3.3.8;
+valid surrogate pairs, empty strings, and Unicode scalar boundaries still
+serialize and parse without replacement. Validation scans without allocating an
+encoded byte array, leaving encoding to serialization.
+
+**Breaking from 10.0.0-preview.1:** decimals that round out of range now throw
+`ArgumentOutOfRangeException` at `FromDecimal`, and unpaired surrogates now throw
+`ArgumentException` at `FromDisplayString`, rather than allowing an instance
+whose later serialization throws `HttpException`. Public signatures are unchanged.
+
 ### AOT posture
 
 No reflection, no runtime codegen, no dynamic serialization — a parser built from span
@@ -1800,6 +1822,22 @@ Interpreting an `X-Forwarded-For` entry as an address is left to the consumer vi
 `HttpForwardedNode.TryParse`, so the same list type serves all three
 `X-Forwarded-*` headers even though their entries mean different things (address
 vs. scheme vs. host).
+
+### Numeric port boundaries (#1478)
+
+`HttpForwardedNode.FromIPAddress` accepts an absent port or a number from 0
+through 65535; an out-of-range number throws `ArgumentOutOfRangeException`.
+Parsing applies both the [RFC 7239 §6](https://www.rfc-editor.org/rfc/rfc7239.html#section-6)
+`1*5DIGIT` grammar and the endpoint port range. It preserves valid leading
+zeros and obfuscated ports. Both IPv4 and bracketed IPv6 retain their round-trip
+behavior at 0 and 65535.
+
+**Breaking from 10.0.0-preview.1:** the factory previously accepted every
+nonnegative `int`, and the parser accepted numeric ports through 99999 based
+only on digit count. The factory now rejects numbers above 65535 immediately;
+`TryParse` returns false and `Parse` throws `HttpException` for numeric ports
+65536–99999 that previously parsed. Forwarded elements containing those nodes
+are consequently malformed too. Public signatures are unchanged.
 
 ### Deterministic rejection is a security property
 

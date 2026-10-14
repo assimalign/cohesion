@@ -5,6 +5,21 @@ Cohesion clients, transports, and Web features. The package depends on Core;
 feature-specific contracts live in the corresponding Http feature packages.
 See [DESIGN](DESIGN.md) for protocol semantics and compatibility decisions.
 
+## Structured fields and forwarding nodes
+
+`StructuredFieldBareItem` factories validate values before retaining them.
+Integers accept ±999,999,999,999,999. Decimals must remain within
+±999,999,999,999.999 after rounding to three fractional digits with
+round-half-to-even; `AsDecimal()` still returns the original input.
+`FromDisplayString` accepts Unicode scalar values, including valid UTF-16
+surrogate pairs, and rejects unpaired surrogates with `ArgumentException`.
+Numeric range failures throw `ArgumentOutOfRangeException`.
+
+`HttpForwardedNode.FromIPAddress(address, port)` accepts no port or a port
+from 0 through 65535. Its parser enforces that range too; obfuscated ports
+remain supported. See DESIGN for the earlier validation and stricter parsing
+changes from preview.1.
+
 ## Status codes
 
 Construct `new HttpStatusCode(299)` or assign `HttpStatusCode status = 299` for

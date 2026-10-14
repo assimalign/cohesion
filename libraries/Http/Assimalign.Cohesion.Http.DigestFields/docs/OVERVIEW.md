@@ -11,7 +11,10 @@ request verifier.
   (`Assimalign.Cohesion.Http.Connections`) never references this package.
 - **Value model:** `HttpDigestField` (a `Content-Digest` / `Repr-Digest` value — an ordered map of
   algorithm → digest bytes) and `HttpWantDigestField` (a `Want-*` value — algorithm → integer
-  preference). Both offer span-based `TryParse`/`Serialize` and are AOT-safe.
+  preference). Both offer span-based `TryParse`/`Serialize` and are AOT-safe. Constructing a
+  `HttpWantDigestPreference` requires a preference from -999,999,999,999,999 through
+  999,999,999,999,999 inclusive; values outside the RFC 9651 Integer range throw
+  `ArgumentOutOfRangeException` immediately.
 - **Algorithms:** `HttpDigestAlgorithm` — `sha-256` and `sha-512` are supported for compute and
   verify; the deprecated registry entries (`md5`, `sha`, `unixsum`, `unixcksum`) are recognized on
   parse but never used (RFC 9530 §5).

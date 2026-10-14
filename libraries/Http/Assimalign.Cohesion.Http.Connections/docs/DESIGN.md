@@ -5232,6 +5232,18 @@ otherwise-hard problems:
 
 ### Dynamic table (opt-in)
 
+`Http3QPackOptions.MaxTableCapacity` and `MaxBlockedStreams` accept 0 through
+2^62 - 1 and reject other values in their setters with `ArgumentOutOfRangeException`
+(#1478). Both settings must fit the QUIC variable-length integer in SETTINGS
+([RFC 9000 §16](https://www.rfc-editor.org/rfc/rfc9000.html#section-16)). The maximum
+capacity also fits the 62-bit prefixed integers every QPACK implementation must
+decode ([RFC 9204 §4.1.1](https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1)),
+including the five-bit-prefix Set Dynamic Table Capacity instruction. The numeric
+options stay `long`; validation happens before assignment so a failed update retains
+the previous setting. This is a behavioral break against 10.0.0-preview.1: values
+from 2^62 through `long.MaxValue` previously succeeded, then lost their high bits in
+SETTINGS while the decoder retained the configured value. Signatures are unchanged.
+
 Opting in is a per-listener, public configuration choice:
 `options.UseHttp3(listener, o => o.QPack.MaxTableCapacity = 4096)`. The public
 `Http3ConnectionListenerOptions.QPack` (an `Http3QPackOptions`) carries the advertised

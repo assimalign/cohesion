@@ -106,14 +106,14 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
     /// RFC 7239 spelling (an IPv6 address is bracketed).
     /// </summary>
     /// <param name="address">The node address.</param>
-    /// <param name="port">The optional numeric port.</param>
+    /// <param name="port">The optional numeric port, from 0 through 65535.</param>
     /// <returns>A node whose <see cref="Address"/> is <paramref name="address"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="address"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="port"/> is negative.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="port"/> is outside 0 through 65535.</exception>
     public static HttpForwardedNode FromIPAddress(IPAddress address, int? port = null)
     {
         ArgumentNullException.ThrowIfNull(address);
-        if (port is < 0)
+        if (port is < IPEndPoint.MinPort or > IPEndPoint.MaxPort)
         {
             throw new ArgumentOutOfRangeException(nameof(port));
         }
@@ -278,21 +278,23 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
         return true;
     }
 
-    // port = 1*5DIGIT (RFC 7239 §6.4).
+    // port = 1*5DIGIT (RFC 7239 §6), within the numeric endpoint port range.
     private static bool IsNumericPort(ReadOnlySpan<char> value)
     {
         if (value.IsEmpty || value.Length > 5)
         {
             return false;
         }
+        int port = 0;
         foreach (char c in value)
         {
             if (c is < '0' or > '9')
             {
                 return false;
             }
+            port = port * 10 + c - '0';
         }
-        return true;
+        return port <= IPEndPoint.MaxPort;
     }
 
     // obfnode / obfport = "_" 1*( ALPHA / DIGIT / "." / "_" / "-" ) (RFC 7239 §6.3, §6.4).
