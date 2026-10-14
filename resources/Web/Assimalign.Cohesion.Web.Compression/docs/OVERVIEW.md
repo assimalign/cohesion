@@ -46,6 +46,11 @@ verbs over the BCL codecs only — no external dependencies, AOT-safe.
 
 ## Usage
 
+Compression size thresholds and decompressed-body limits must be nonnegative; zero is supported.
+Assignments below zero throw `ArgumentOutOfRangeException`. `MimeTypes` entries must be
+`type/subtype`, `type/*`, or `*/*`; invalid patterns throw `ArgumentException` from
+`UseResponseCompression`. Use `*/*` instead of the formerly accepted bare `*` alias.
+
 ```csharp
 // Response compression — register early so it wraps the responses it should compress. With output
 // caching, register it after UseRouting and UseOutputCache instead (Web.Caching DESIGN, "Ordering").

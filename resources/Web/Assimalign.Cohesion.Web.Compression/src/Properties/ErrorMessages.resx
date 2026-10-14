@@ -126,4 +126,13 @@
   <data name="ResponseCompressionCodingRequired" xml:space="preserve">
     <value>Response compression requires at least one coding; both EnableGzip and EnableBrotli are disabled.</value>
   </data>
+  <data name="ResponseCompressionThresholdInvalid" xml:space="preserve">
+    <value>The minimum response size must not be negative.</value>
+  </data>
+  <data name="RequestDecompressionLimitInvalid" xml:space="preserve">
+    <value>The decompressed body limit must not be negative.</value>
+  </data>
+  <data name="CompressionMediaTypeInvalid" xml:space="preserve">
+    <value>The compression media-type pattern must be type/subtype, type/*, or */*: &apos;{0}&apos;.</value>
+  </data>
 </root>

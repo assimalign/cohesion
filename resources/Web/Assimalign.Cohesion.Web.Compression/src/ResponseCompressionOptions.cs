@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO.Compression;
 
@@ -26,6 +27,8 @@ namespace Assimalign.Cohesion.Web.Compression;
 /// </remarks>
 public sealed class ResponseCompressionOptions
 {
+    private int _minimumResponseSizeBytes = 1024;
+
     /// <summary>
     /// Gets or sets a value indicating whether responses to <c>https</c> requests may be
     /// compressed. Defaults to <see langword="false"/> as a BREACH (CVE-2013-3587) precaution:
@@ -75,7 +78,20 @@ public sealed class ResponseCompressionOptions
     /// no uncompressed fallback to fall back to), in which case an eligible response is always
     /// compressed.
     /// </remarks>
-    public int MinimumResponseSizeBytes { get; set; } = 1024;
+    /// <exception cref="ArgumentOutOfRangeException">The assigned threshold is negative.</exception>
+    public int MinimumResponseSizeBytes
+    {
+        get => _minimumResponseSizeBytes;
+        set
+        {
+            if (value < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.ResponseCompressionThresholdInvalid);
+            }
+
+            _minimumResponseSizeBytes = value;
+        }
+    }
 
     /// <summary>
     /// Gets the set of response media types eligible for compression. An entry is matched against

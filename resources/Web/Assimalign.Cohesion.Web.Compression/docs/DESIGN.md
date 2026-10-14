@@ -284,3 +284,26 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Composition-time option validation (#1477)
+
+`MinimumResponseSizeBytes` and `MaxDecompressedSizeBytes` retain their primitive types and refuse
+negative assignments with resource-backed `ArgumentOutOfRangeException` guards. Zero remains a
+valid response threshold or decompressed-body limit. Setter validation also prevents a retained
+options object from introducing an invalid limit after registration.
+
+`UseResponseCompression` compiles only media-type patterns with one slash and nonempty RFC 9110
+tokens on both sides, reusing `HttpFieldName.IsValid` for that token grammar. Concrete types and
+`type/*` remain supported, as does the already documented `*/*` full wildcard. A star within a
+token is matched literally; it does not introduce another wildcard syntax. Surrounding SP/HTAB
+are trimmed as before. Blank entries, the bare `*` alias, parameters, controls, and malformed
+patterns such as `application json` now throw a resource-backed `ArgumentException` during
+registration. Response field parsing and request-time matching are unchanged.
+
+**Breaking from 10.0.0-preview.1 (decision 15):** negative thresholds and limits now throw on
+assignment; invalid configured MIME patterns now throw instead of being silently skipped,
+never matching, or acting as the bare-star wildcard. All three gaps exist in the released tag.
+They require application-controlled configuration, which an unauthenticated remote client cannot
+set; requests can only encounter its compression or rejection consequences. These are low-severity
+configuration validation defects (CWE-20), with lost compression or incorrect request rejection,
+not an independently reachable security boundary bypass. No public type or member is added.

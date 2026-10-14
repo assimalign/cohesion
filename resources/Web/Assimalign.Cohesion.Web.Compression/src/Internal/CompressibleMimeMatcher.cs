@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+
+using Assimalign.Cohesion.Http;
 
 namespace Assimalign.Cohesion.Web.Compression.Internal;
 
@@ -39,13 +42,18 @@ internal sealed class CompressibleMimeMatcher
 
         foreach (string raw in patterns)
         {
-            if (string.IsNullOrWhiteSpace(raw))
+            string pattern = raw?.Trim(' ', '\t') ?? string.Empty;
+            int slash = pattern.IndexOf('/');
+            if (slash <= 0 || slash == pattern.Length - 1
+                || !HttpFieldName.IsValid(pattern[..slash], out _)
+                || !HttpFieldName.IsValid(pattern[(slash + 1)..], out _)
+                || (pattern[..slash] == "*" && pattern != "*/*"))
             {
-                continue;
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.CompressionMediaTypeInvalid, raw), nameof(patterns));
             }
 
-            string pattern = raw.Trim();
-            if (pattern == "*/*" || pattern == "*")
+            if (pattern == "*/*")
             {
                 matchAny = true;
             }
