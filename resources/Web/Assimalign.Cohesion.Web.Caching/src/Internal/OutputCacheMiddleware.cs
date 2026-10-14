@@ -431,7 +431,8 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
             HttpFieldValue?[] values = new HttpFieldValue?[value.Count];
             for (int i = 0; i < value.Count; i++)
             {
-                values[i] = value[i];
+                // Writers accept surrounding OWS without changing the response collection.
+                values[i] = value[i]?.Trim(' ', '\t');
             }
 
             captured.Add(new OutputCacheHeader(pair.Key.Value, values));

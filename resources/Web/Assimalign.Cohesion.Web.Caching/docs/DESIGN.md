@@ -500,11 +500,22 @@ replay. Generated conversions reject malformed stored names and values before a 
 replayed. Case and value order are preserved; raw `HttpHeaderKey`/`HttpHeaderValue` request parsing
 is unchanged.
 
+After successful response completion, capture removes only surrounding SP and HTAB from each
+non-null response value before converting it to `HttpFieldValue`. Response writers accept that
+optional whitespace without changing the response collection: HTTP/1 sends it as OWS, while
+HTTP/2 and HTTP/3 trim it. The cache stores the field content, retaining internal SP/HTAB and
+all obs-text, including C1 characters. Null entries stay absent, empty strings stay empty, and
+OWS-only strings become empty. The original response collection is unchanged. Completion tests
+cover the stored/replayed sequence and final starting-callback headers over HTTP/1 and HTTP/2.
+
 **Breaking from 10.0.0-preview.1:** the policy property and method, the header constructor, and
 `OutputCacheHeader.Name`/`Values` change their public types as described above. Empty names passed
-to `VaryByHeader` are refused rather than silently skipped. Header controls other than internal
+to `VaryByHeader` are refused rather than silently skipped. RFC CTLs other than internal
 HTAB, leading/trailing SP or HTAB, and malformed names are refused before replay. A caller's
 later mutation of a source value array no longer changes a cache header.
+Captured headers now store normalized field content instead of retaining surrounding OWS, a
+behavioral change under decision 15; custom stores must supply already-normalized field values.
+The C1 rejection and OWS capture exceptions were regressions introduced by #1476 after preview.1.
 
 Custom stores' `OutputCacheEntry.VaryBy` names also cross a configuration boundary before variant
 lookup. The constructor validates each through `HttpFieldName.TryCreate`, then retains an immutable

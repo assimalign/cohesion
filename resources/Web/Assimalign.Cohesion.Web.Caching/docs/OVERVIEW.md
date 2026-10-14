@@ -95,6 +95,11 @@ those types. Use `.Value` to read text. Null entries remain absent and empty str
 valid. Field grammar is checked before replay, and the constructor snapshots the value array.
 These are source and binary changes from 10.0.0-preview.1.
 
+Capture after successful completion trims only surrounding SP/HTAB from response values before
+storing them. Internal whitespace and obs-text (including C1 characters) are preserved, null and
+empty entries remain distinct, and OWS-only entries become empty. The response collection is
+unchanged. Custom stores supply field values without surrounding SP/HTAB.
+
 `OutputCacheEntry` still accepts `IReadOnlyList<string>` for `varyBy`. It validates each name
 through `HttpFieldName` and snapshots the list, so a custom store must provide valid names before
 lookup and cannot change an entry's vary dimensions by mutating the original list.
