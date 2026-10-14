@@ -53,6 +53,8 @@ Use `HttpFieldName name = "X-Trace"` and `HttpFieldValue value = "enabled"`
 for validated configuration; use `TryCreate` when invalid text is expected. Names
 compare without case sensitivity; values preserve case. Nullable string assignments
 keep null as absence. A required consumer still refuses `default`.
+Values retain all RFC obs-text (`U+0080-U+00FF`), including C1 controls; RFC CTLs
+other than internal HTAB and surrounding SP/HTAB are rejected.
 
 `HttpAltService` accepts null/empty same-host values and rejects hosts containing
 controls, spaces or tabs before an advertisement can be formatted.

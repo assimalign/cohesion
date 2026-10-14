@@ -41,14 +41,14 @@ public class HttpFieldConfigurationTests
         HttpFieldName.TryCreate("!#$%&'*+-.^_`|~09AZaz", out _).ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http] - FieldValue: Refuse every control except internal HTAB")]
-    public void TryCreate_ControlCharacters_ShouldRejectExceptInternalTab()
+    [Fact(DisplayName = "Cohesion Test [Http] - FieldValue: Refuse RFC CTLs except internal HTAB")]
+    public void TryCreate_RfcControlCharacters_ShouldRejectExceptInternalTab()
     {
         // Arrange
-        for (int code = char.MinValue; code <= char.MaxValue; code++)
+        for (int code = 0; code <= 0x7f; code++)
         {
             char character = (char)code;
-            if (!char.IsControl(character))
+            if (code > 0x1f && code != 0x7f)
             {
                 continue;
             }
@@ -58,6 +58,30 @@ public class HttpFieldConfigurationTests
 
             // Assert
             accepted.ShouldBe(character == '\t', $"control U+{code:X4}");
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - FieldValue: Preserve every C1 obs-text character in any position")]
+    [InlineData("", "")]
+    [InlineData("", "value")]
+    [InlineData("value", "")]
+    [InlineData("value", "value")]
+    public void Create_C1ObsText_ShouldPreserveContent(string prefix, string suffix)
+    {
+        // Arrange — RFC 9110 §5.5 includes %x80-9F in obs-text, even at a value's boundaries.
+        for (int code = 0x80; code <= 0x9f; code++)
+        {
+            string text = $"{prefix}{(char)code}{suffix}";
+
+            // Act
+            bool accepted = HttpFieldValue.TryCreate(text, out HttpFieldValue value);
+
+            // Assert
+            accepted.ShouldBeTrue($"obs-text U+{code:X4}");
+            value.Value.ShouldBe(text);
+            new HttpFieldValue(text).Value.ShouldBe(text);
+            HttpFieldValue.IsValid(text, out string? message).ShouldBeTrue();
+            message.ShouldBeNull();
         }
     }
 

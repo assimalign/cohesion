@@ -438,7 +438,9 @@ public readonly struct HttpAltService : IEquatable<HttpAltService>
 
     private static bool IsValidHost(string? host)
         => host is null
-            || (HttpFieldValue.TryCreate(host, out _) && host.AsSpan().IndexOfAny(' ', '\t') < 0);
+            || (HttpFieldValue.TryCreate(host, out _)
+                && host.AsSpan().IndexOfAny(' ', '\t') < 0
+                && !host.AsSpan().ContainsAnyInRange('\u0080', '\u009f'));
 
     private static bool TryReadQuotedString(ref ReadOnlySpan<char> input, out string value)
     {

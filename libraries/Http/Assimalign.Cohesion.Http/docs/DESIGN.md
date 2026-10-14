@@ -12,9 +12,10 @@ surface at once.
 They are base HTTP grammar (decision V2), with no feature-specific contract.
 The name is a non-empty RFC 9110 §5.1 token, refuses pseudo-headers, and uses
 `OrdinalIgnoreCase` identity while preserving spelling. Values use `Ordinal`
-identity, permit empty content and internal HTAB, and reject every other control
-character and boundary SP/HTAB. This configuration rule also rejects Unicode C1
-controls; existing wire normalization continues accepting RFC obs-text.
+identity, permit empty content and internal HTAB, and reject every other RFC CTL
+(`%x00-1F / %x7F`) and boundary SP/HTAB. All RFC 9110 §5.5 obs-text (`%x80-FF`),
+including Unicode C1 controls (`U+0080-U+009F`), is preserved as field content,
+matching the existing wire normalization rule.
 Their `IsValid` methods compose the existing span-based field syntax checks;
 `TryCreate` supports non-throwing composition. Nullable string conversions preserve
 absence, and consumers reject `default` wherever an actual value is required.
@@ -921,7 +922,9 @@ cache; honoring a received `Alt-Svc` is a client concern this library does not i
 ### Host validation (#1476)
 
 The constructor and `Http3` factory validate non-null hosts through `HttpFieldValue`
-and additionally refuse SP/HTAB. Null and empty hosts retain same-host meaning;
+and additionally refuse SP/HTAB and C1 controls (`U+0080-U+009F`). This host-specific
+restriction does not apply to generic field content, which permits all obs-text.
+Null and empty hosts retain same-host meaning;
 case-insensitive host equality and quoted-string escaping remain unchanged.
 `TryParse` checks the same rule before construction and returns false for an unsafe
 host. This is a behavioral break from 10.0.0-preview.1: control-bearing or spaced

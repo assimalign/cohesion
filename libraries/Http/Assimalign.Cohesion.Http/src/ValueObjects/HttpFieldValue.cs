@@ -8,8 +8,8 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// Empty text is valid; <see langword="default"/> represents no value. CTL means
-/// %x00-1F / %x7F (RFC 5234 §B.1); Unicode control characters are also refused.
-/// Printable obs-text is retained. Character encoding remains
+/// %x00-1F / %x7F (RFC 5234 §B.1). All obs-text (%x80-FF), including C1 control
+/// characters, is retained. Character encoding remains
 /// the transport's responsibility, as for <see cref="HttpFieldNormalization"/>.
 /// </remarks>
 public partial struct HttpFieldValue
@@ -26,15 +26,6 @@ public partial struct HttpFieldValue
         {
             message = ErrorMessages.FieldValueInvalid;
             return false;
-        }
-
-        foreach (char character in value)
-        {
-            if (char.IsControl(character) && character != '\t')
-            {
-                message = ErrorMessages.FieldValueInvalid;
-                return false;
-            }
         }
 
         message = null;

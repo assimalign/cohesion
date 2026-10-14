@@ -77,7 +77,9 @@ public sealed class HttpAltServiceAdvertisementOptions
         set
         {
             if (value is not null
-                && (!HttpFieldValue.TryCreate(value, out _) || value.AsSpan().IndexOfAny(' ', '\t') >= 0))
+                && (!HttpFieldValue.TryCreate(value, out _)
+                    || value.AsSpan().IndexOfAny(' ', '\t') >= 0
+                    || value.AsSpan().ContainsAnyInRange('\u0080', '\u009f')))
             {
                 throw new ArgumentException(ErrorMessages.AltSvcAuthorityFieldInvalid, nameof(value));
             }

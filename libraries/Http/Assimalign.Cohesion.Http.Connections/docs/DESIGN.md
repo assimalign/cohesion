@@ -5957,7 +5957,9 @@ where the listener is the only component that knows whether an HTTP/3
 ### Configured authority validation (#1476)
 
 `Authority` retains its nullable string signature and validates each non-null
-assignment through `HttpFieldValue.TryCreate`, additionally refusing SP/HTAB.
+assignment through `HttpFieldValue.TryCreate`, additionally refusing SP/HTAB and
+C1 controls (`U+0080-U+009F`). This authority-specific restriction is separate from
+generic field content, which permits every obs-text character.
 Null and empty retain endpoint-derived authority behavior. Validation applies even
 when advertisement is currently disabled, so enabling it later cannot activate an
 unsafe value. Compared with 10.0.0-preview.1, control-bearing or spaced authority

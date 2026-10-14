@@ -54,7 +54,6 @@ public class OutputCacheFieldTests
     [InlineData("bad\0value")]
     [InlineData("bad\r\nvalue")]
     [InlineData("bad\u007fvalue")]
-    [InlineData("bad\u0085value")]
     [InlineData(" value")]
     [InlineData("value\t")]
     public void Constructor_InvalidHeaderValue_ShouldThrowBeforeReplay(string value)
@@ -64,5 +63,19 @@ public class OutputCacheFieldTests
 
         // Act and assert
         construct.ShouldThrow<ArgumentException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - OutputCacheHeader: Preserve C1 obs-text before replay")]
+    public void Constructor_C1ObsText_ShouldPreserveValue()
+    {
+        // Arrange
+        const string value = "\u0080value\u0085\u009f";
+
+        // Act
+        OutputCacheHeader header = new("X-Test", [value]);
+
+        // Assert
+        header.Values.Count.ShouldBe(1);
+        header.Values[0].ShouldNotBeNull().Value.ShouldBe(value);
     }
 }
