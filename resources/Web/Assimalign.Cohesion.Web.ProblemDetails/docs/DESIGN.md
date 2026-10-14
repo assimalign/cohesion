@@ -83,7 +83,8 @@ empty default title.
 
 The mutable model preserves its `int? Status` and `string? Type` / `Instance` signatures. A non-null
 status outside 100–599 throws `ArgumentOutOfRangeException` from its setter, using the existing
-`HttpStatusCode.IsValid` rule. `FromStatus(default)` therefore fails while constructing the payload.
+`HttpStatusCode.IsValid` rule. `FromStatus(default)` therefore throws `ArgumentOutOfRangeException`
+while constructing the payload; its public XML documentation records this exception contract.
 The response helper cannot serialize an invalid status and then fail converting it for the response.
 
 `Type` and `Instance` reject malformed RFC 3986 URI references with `ArgumentException` in their

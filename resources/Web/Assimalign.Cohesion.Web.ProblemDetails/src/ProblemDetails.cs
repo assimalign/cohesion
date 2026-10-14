@@ -121,6 +121,7 @@ public sealed class ProblemDetails
     /// <param name="statusCode">The HTTP status code the problem represents.</param>
     /// <param name="detail">An optional occurrence-specific explanation.</param>
     /// <returns>A populated <see cref="ProblemDetails"/> instance.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="statusCode"/> is default or uninitialized.</exception>
     public static ProblemDetails FromStatus(HttpStatusCode statusCode, string? detail = null)
     {
         return new ProblemDetails
