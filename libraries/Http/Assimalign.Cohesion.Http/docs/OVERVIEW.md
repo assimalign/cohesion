@@ -16,9 +16,10 @@ surrogate pairs, and rejects unpaired surrogates with `ArgumentException`.
 Numeric range failures throw `ArgumentOutOfRangeException`.
 
 `HttpForwardedNode.FromIPAddress(address, port)` accepts no port or a port
-from 0 through 65535. Its parser enforces that range too; obfuscated ports
-remain supported. See DESIGN for the earlier validation and stricter parsing
-changes from preview.1.
+from 0 through 65535. Its parser enforces that range for IP nodes; `unknown`
+and obfuscated names preserve numeric ports of one through five digits, such
+as `unknown:99999`. Obfuscated ports remain supported. See DESIGN for the
+earlier validation and stricter IP-node parsing changes from preview.1.
 
 ## Status codes
 

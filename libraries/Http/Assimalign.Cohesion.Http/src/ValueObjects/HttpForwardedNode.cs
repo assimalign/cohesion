@@ -76,7 +76,8 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
 
     /// <summary>
     /// Gets the numeric port when <see cref="Port"/> is a decimal number, or <see langword="null"/>
-    /// when the node has no port or an obfuscated port.
+    /// when the node has no port or an obfuscated port. For an <c>unknown</c> or obfuscated
+    /// nodename this can exceed 65535; it is not an IP endpoint port.
     /// </summary>
     public int? PortNumber
         => _port is not null && IsNumericPort(_port.AsSpan()) ? int.Parse(_port) : null;
@@ -184,7 +185,7 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
             string? bracketPort = null;
             if (!rest.IsEmpty)
             {
-                if (rest[0] != ':' || !TryValidatePort(rest[1..], out bracketPort))
+                if (rest[0] != ':' || !TryValidatePort(rest[1..], isIpAddress: true, out bracketPort))
                 {
                     return false;
                 }
@@ -211,13 +212,14 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
         if (colon >= 0)
         {
             nameSpan = value[..colon];
-            if (!TryValidatePort(value[(colon + 1)..], out nodePort))
-            {
-                return false;
-            }
         }
 
         if (!TryClassifyName(nameSpan, out IPAddress? nameAddress))
+        {
+            return false;
+        }
+
+        if (colon >= 0 && !TryValidatePort(value[(colon + 1)..], nameAddress is not null, out nodePort))
         {
             return false;
         }
@@ -254,7 +256,7 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
         return false;
     }
 
-    private static bool TryValidatePort(ReadOnlySpan<char> portSpan, out string? port)
+    private static bool TryValidatePort(ReadOnlySpan<char> portSpan, bool isIpAddress, out string? port)
     {
         port = null;
         if (portSpan.IsEmpty)
@@ -269,7 +271,10 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
                 return false;
             }
         }
-        else if (!IsNumericPort(portSpan))
+        // RFC 7239 §6 leaves unknown-node port interpretation to the proxy.
+        // Only an actual IP address requires an endpoint port range check.
+        else if (!IsNumericPort(portSpan)
+            || (isIpAddress && int.Parse(portSpan, CultureInfo.InvariantCulture) > IPEndPoint.MaxPort))
         {
             return false;
         }
@@ -278,23 +283,21 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
         return true;
     }
 
-    // port = 1*5DIGIT (RFC 7239 §6), within the numeric endpoint port range.
+    // port = 1*5DIGIT (RFC 7239 §6); endpoint limits depend on the nodename.
     private static bool IsNumericPort(ReadOnlySpan<char> value)
     {
         if (value.IsEmpty || value.Length > 5)
         {
             return false;
         }
-        int port = 0;
         foreach (char c in value)
         {
             if (c is < '0' or > '9')
             {
                 return false;
             }
-            port = port * 10 + c - '0';
         }
-        return port <= IPEndPoint.MaxPort;
+        return true;
     }
 
     // obfnode / obfport = "_" 1*( ALPHA / DIGIT / "." / "_" / "-" ) (RFC 7239 §6.3, §6.4).

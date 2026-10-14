@@ -153,12 +153,10 @@ public class HttpForwardedNodeTests
         exception.ParamName.ShouldBe("port");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http] - ForwardedNode: Should reject parsed ports above 65535")]
+    [Theory(DisplayName = "Cohesion Test [Http] - ForwardedNode: Should reject parsed IP endpoint ports above 65535")]
     [InlineData("192.0.2.60:65536")]
     [InlineData("[2001:db8::1]:99999")]
-    [InlineData("unknown:65536")]
-    [InlineData("_hidden:99999")]
-    public void TryParse_PortAboveWireRange_ShouldFail(string value)
+    public void TryParse_IPPortAboveEndpointRange_ShouldFail(string value)
     {
         // Act
         bool parsed = HttpForwardedNode.TryParse(value, out var node);
@@ -167,6 +165,28 @@ public class HttpForwardedNodeTests
         parsed.ShouldBeFalse();
         node.IsEmpty.ShouldBeTrue();
         Should.Throw<HttpException>(() => HttpForwardedNode.Parse(value));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - ForwardedNode: Should round-trip five-digit ports on addressless nodes")]
+    [InlineData("unknown", "65536", 65536)]
+    [InlineData("Unknown", "99999", 99999)]
+    [InlineData("_hidden", "99999", 99999)]
+    public void TryParse_AddresslessNodeWithFiveDigitPort_ShouldRoundTrip(string name, string port, int portNumber)
+    {
+        // Arrange
+        string raw = $"{name}:{port}";
+
+        // Act
+        bool parsed = HttpForwardedNode.TryParse(raw, out var node);
+
+        // Assert
+        parsed.ShouldBeTrue();
+        node.Name.ShouldBe(name);
+        node.Port.ShouldBe(port);
+        node.PortNumber.ShouldBe(portNumber);
+        node.Address.ShouldBeNull();
+        node.ToString().ShouldBe(raw);
+        HttpForwardedNode.Parse(node.ToString()).ShouldBe(node);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http] - ForwardedNode: Should round-trip port boundaries")]

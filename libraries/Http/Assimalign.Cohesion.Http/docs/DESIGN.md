@@ -1828,16 +1828,27 @@ vs. scheme vs. host).
 `HttpForwardedNode.FromIPAddress` accepts an absent port or a number from 0
 through 65535; an out-of-range number throws `ArgumentOutOfRangeException`.
 Parsing applies both the [RFC 7239 §6](https://www.rfc-editor.org/rfc/rfc7239.html#section-6)
-`1*5DIGIT` grammar and the endpoint port range. It preserves valid leading
-zeros and obfuscated ports. Both IPv4 and bracketed IPv6 retain their round-trip
-behavior at 0 and 65535.
+`1*5DIGIT` grammar and, for IPv4 or IPv6 nodes, the endpoint port range. It
+preserves valid leading zeros and obfuscated ports. Both IPv4 and bracketed
+IPv6 retain their round-trip behavior at 0 and 65535.
+
+An `unknown` or obfuscated nodename has no IP endpoint, so its numeric port
+keeps the full `1*5DIGIT` grammar, through 99999. RFC 7239 §6 explicitly leaves
+interpretation of ports on `unknown` to the proxy. `Port` preserves the spelling
+and `PortNumber` exposes the number without claiming it is an endpoint port.
+Thus `for="unknown:99999";proto=https;host=example.com` round-trips as a whole
+header, and the forwarding middleware can apply a trusted hop's scheme and host
+while retaining the original remote endpoint. Node, whole-header (`for` and
+`by`) and resolver regressions cover this case.
 
 **Breaking from 10.0.0-preview.1:** the factory previously accepted every
 nonnegative `int`, and the parser accepted numeric ports through 99999 based
 only on digit count. The factory now rejects numbers above 65535 immediately;
-`TryParse` returns false and `Parse` throws `HttpException` for numeric ports
-65536–99999 that previously parsed. Forwarded elements containing those nodes
-are consequently malformed too. Public signatures are unchanged.
+`TryParse` returns false and `Parse` throws `HttpException` for IP-node numeric
+ports 65536–99999 that previously parsed. Forwarded elements containing those
+IP nodes are consequently malformed too. Addressless nodes retain preview.1's
+five-digit port behavior; this correction removes the overly broad rejection
+introduced during #1478. Public signatures are unchanged.
 
 ### Deterministic rejection is a security property
 
