@@ -108,10 +108,13 @@ Both expose a constructor, a get-only `Value`, `IEquatable<T>`, `IComparable<T>`
 `IEqualityOperators<T,T,bool>`, `IComparisonOperators<T,T,bool>`, equality and comparison operators,
 `Equals(object?)`, `GetHashCode()`, and a non-null `ToString()`. Debugger display and a nested
 JSON converter are attached through attributes. The one converter is declared as
-`internal sealed partial class XJsonConverter : JsonConverter<X>`; the value object's
-`JsonConverter` attribute references it directly. Same-assembly source-generated JSON contexts can
-construct it, and existing internal converter partial declarations remain compatible. Implicit
-conversions are emitted only when requested. A string class maps null to null in either conversion,
+`public sealed partial class XJsonConverter : JsonConverter<X>`; the value object's
+`JsonConverter` attribute references it directly. It has a public parameterless constructor and
+XML documentation on the type and its members. A source-generated `JsonSerializerContext` in
+another assembly can construct a public value object's converter without a custom converter or
+reflection-based serialization. The public constructor is required for System.Text.Json to
+instantiate the attributed converter. Implicit conversions are emitted only when requested. A
+string class maps null to null in either conversion,
 with `NotNullIfNotNull` annotations, but its constructor rejects null. Converting a null numeric/Guid/Ulid class to its
 runtime value throws `ArgumentNullException`. Class equality and comparison operators accept null;
 null sorts first and an instance's `Equals(null)` is false.
@@ -194,9 +197,15 @@ supported. Malformed and overflowing ULID JSON strings that preview.1 accepted n
 text directly too, with `FormatException` and false respectively; every string, character-span,
 UTF-8 and provider overload shares the rule. Valid bytes and canonical encoding are unchanged.
 Wrong-length `Ulid.Parse` input now throws `FormatException` instead of `ArgumentException`.
-The generated converter is internal and directly accessible to source-generated contexts in the
-same assembly. A context in another assembly needs its own accessible converter. The Core
-conformance suite uses a source-generated context without reflection.
+Each generated `X.XJsonConverter` is now public, an additive public surface change from
+preview.1's non-public nested converter. Public value objects work in source-generated contexts in
+other assemblies without consumer-supplied converters. Regeneration conflicts with handwritten
+nested converter partials that explicitly declare `internal` or `private` (CS0262); remove a
+redundant declaration, or omit its accessibility modifier when it supplies additional members.
+The public converter keeps the existing null, invalid-input and dictionary-key behavior. Core's
+conformance suite and Http.Cookies' separate test assembly use source-generated contexts without
+reflection; the latter treats SYSLIB1220 and SYSLIB1030 as errors to guard converter accessibility
+and generated metadata.
 `ToString()` on a default string wrapper now returns empty instead of null. These are
 intentional source, binary or behavioral changes under the preview compatibility policy.
 

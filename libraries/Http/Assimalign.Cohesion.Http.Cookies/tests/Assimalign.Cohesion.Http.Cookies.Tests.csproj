@@ -3,6 +3,8 @@
 		<RootNamespace>Assimalign.Cohesion.Http.Cookies.Tests</RootNamespace>
 		<IsPackable>false</IsPackable>
 		<ImplicitUsings>disable</ImplicitUsings>
+		<!-- Cross-assembly JSON contexts must resolve generated value-type converters and metadata. -->
+		<WarningsAsErrors>$(WarningsAsErrors);SYSLIB1220;SYSLIB1030</WarningsAsErrors>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />

@@ -359,8 +359,13 @@ The generated JSON converter writes a default value as JSON null and reads
 JSON null as default. Invalid cookie text throws `JsonException` with the
 validation reason. The types also work as dictionary keys through the
 converter's property-name methods; JSON property names cannot represent a
-default null string. Applications using source-generated
-`JsonSerializerContext` metadata keep serialization NativeAOT-safe.
+default null string. Each nested `XJsonConverter` is a public sealed partial class with a public
+parameterless constructor, so applications can use the attributed converter from a source-generated
+`JsonSerializerContext` in another assembly. The test assembly covers a model containing an
+`HttpCookieName` and verifies that its generated metadata round trips the value as a JSON string.
+Only that test project treats SYSLIB1220 and SYSLIB1030 as errors, so inaccessible converters or
+missing source-generated metadata fail the build. Serialization remains NativeAOT-safe, and the
+converter's null, invalid-input and dictionary-key behavior is unchanged.
 
 The generator changes are breaking changes to the generated surface:
 `IsValid` is static, string `ToString(format, provider)` is removed, ordering
@@ -368,7 +373,9 @@ is ordinal, domain equality and hashing ignore case, and invalid JSON now
 uses `JsonException`. Default operations are now safe, and default JSON
 round trips as null. These cookie value types were introduced after
 10.0.0-preview.1; the shared generator's other consumers shipped in that
-release. See the [value-type build contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md)
+release. The public nested converters add public surface; a handwritten converter partial with
+an explicit non-public modifier must omit that modifier or be removed when redundant, because
+regeneration otherwise reports CS0262. See the [value-type build contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md)
 for the complete metadata and generated surface.
 
 ## AOT posture

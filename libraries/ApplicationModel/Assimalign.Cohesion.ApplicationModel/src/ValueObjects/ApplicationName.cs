@@ -1,7 +1,5 @@
 using System;
 
-using Assimalign.Cohesion.ApplicationModel.Internal;
-
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
@@ -9,10 +7,6 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 public partial struct ApplicationName
 {
-    internal partial class ApplicationNameJsonConverter
-    {
-    }
-
     /// <summary>
     /// Creates an application name from its textual representation.
     /// </summary>

@@ -34,12 +34,19 @@ The build task remains outside the shipped Core assembly. See the
 [generator contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types) for metadata,
 default-value semantics and preview compatibility changes. `GeneratedValueTypeJsonContext` is an
 ordinary source-generated context outside the value-object partials. Each value object declares
-one nested `internal sealed partial class XJsonConverter : JsonConverter<X>` and its
-`JsonConverter` attribute references that converter directly. Same-assembly contexts can construct
-it without reflection-based serialization. A context in another assembly still needs its own
-accessible converter. Existing internal nested converter partials, including ApplicationModel's,
-remain compatible. JSON null handling, invalid-value exceptions and dictionary-key conversion use
-the same converter.
+one nested `public sealed partial class XJsonConverter : JsonConverter<X>` and its
+`JsonConverter` attribute references that converter directly. The converter and its members have
+XML documentation, and its public parameterless constructor lets System.Text.Json instantiate it.
+A context in another assembly can use a public value object's converter without supplying a
+custom converter or using reflection-based serialization. Http.Cookies' separate test assembly
+pins this boundary with a model containing `HttpCookieName`: its source-generated context round
+trips the value as a JSON string, and SYSLIB1220 and SYSLIB1030 are errors in that test project.
+JSON null handling, invalid-value exceptions and dictionary-key conversion are unchanged.
+
+The public nested converters add public surface compared with 10.0.0-preview.1's non-public
+converters. On regeneration, handwritten converter partials that declare `internal` or `private`
+conflict with the new public declaration (CS0262). Remove redundant partial declarations, as
+ApplicationModel does, or omit their accessibility modifier if they supply additional members.
 
 `System.Ulid` owns validation for every string, character-span and UTF-8 `Parse` and `TryParse`
 overload, including those with a nullable format provider. Input must have exactly 26 characters

@@ -475,10 +475,22 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         string write = context.IsString || context.RuntimeType == ObjectRuntimeType.Guid ? "WriteStringValue(value.Value)" : context.RuntimeType == ObjectRuntimeType.Ulid ? "WriteStringValue(value.Value.ToString())" : "WriteNumberValue(value.Value)";
         builder.AppendTabbedLine(1, $$"""
 
-            // Source-generated serializer contexts in this assembly can construct the converter.
-            internal sealed partial class {{context.Name}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.Name}}>
+            /// <summary>Converts <see cref="{{context.Name}}"/> values and dictionary keys to and from JSON.</summary>
+            /// <remarks>Public so source-generated serializer contexts in other assemblies can construct it.</remarks>
+            public sealed partial class {{context.Name}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.Name}}>
             {
-                /// <inheritdoc/>
+                // Deviates from the private-constructor rule: System.Text.Json requires a public parameterless constructor.
+                /// <summary>Initializes the converter for use by System.Text.Json serializer contexts.</summary>
+                public {{context.Name}}JsonConverter()
+                {
+                }
+
+                /// <summary>Reads a value from its JSON representation.</summary>
+                /// <param name="reader">The reader positioned at the value.</param>
+                /// <param name="typeToConvert">The type being converted.</param>
+                /// <param name="options">The serializer options.</param>
+                /// <returns>The converted value{{(context.IsClass ? "" : ", or default for JSON null")}}.</returns>
+                /// <exception cref="global::System.Text.Json.JsonException">The JSON value cannot be parsed or fails validation.</exception>
                 public override {{context.Name}} Read(ref global::System.Text.Json.Utf8JsonReader reader, Type typeToConvert, global::System.Text.Json.JsonSerializerOptions options)
                 {
             """);
@@ -500,10 +512,18 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         builder.AppendTabbedLine(2, $$"""
                 }
 
-                /// <inheritdoc/>
+                /// <summary>Writes the underlying runtime value as JSON.</summary>
+                /// <param name="writer">The writer receiving the value.</param>
+                /// <param name="value">The value to write.</param>
+                /// <param name="options">The serializer options.</param>
                 public override void Write(global::System.Text.Json.Utf8JsonWriter writer, {{context.Name}} value, global::System.Text.Json.JsonSerializerOptions options) => writer.{{write}};
 
-                /// <inheritdoc/>
+                /// <summary>Reads a dictionary key from a JSON property name.</summary>
+                /// <param name="reader">The reader positioned at the property name.</param>
+                /// <param name="typeToConvert">The type being converted.</param>
+                /// <param name="options">The serializer options.</param>
+                /// <returns>The converted dictionary key.</returns>
+                /// <exception cref="global::System.Text.Json.JsonException">The property name cannot be parsed or fails validation.</exception>
                 public override {{context.Name}} ReadAsPropertyName(ref global::System.Text.Json.Utf8JsonReader reader, Type typeToConvert, global::System.Text.Json.JsonSerializerOptions options)
                 {
                     try
@@ -527,7 +547,11 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         builder.AppendTabbedLine(2, $$"""
                 }
 
-                /// <inheritdoc/>
+                /// <summary>Writes a dictionary key as a JSON property name.</summary>
+                /// <param name="writer">The writer receiving the property name.</param>
+                /// <param name="value">The dictionary key to write.</param>
+                /// <param name="options">The serializer options.</param>
+                {{(context.IsString ? "/// <exception cref=\"global::System.Text.Json.JsonException\">The underlying string is null.</exception>" : "")}}
                 public override void WriteAsPropertyName(global::System.Text.Json.Utf8JsonWriter writer, {{context.Name}} value, global::System.Text.Json.JsonSerializerOptions options)
                 {
                 """);
@@ -544,6 +568,10 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         {
             builder.AppendTabbedLine(2, """
 
+                /// <summary>Parses the underlying ULID from JSON text.</summary>
+                /// <param name="text">The text to parse.</param>
+                /// <returns>The parsed ULID.</returns>
+                /// <exception cref="FormatException">The text is not a valid ULID.</exception>
                 private static global::System.Ulid ParseUlid(string? text)
                 {
                     if (!global::System.Ulid.TryParse(text, out var value))

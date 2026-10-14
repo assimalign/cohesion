@@ -71,6 +71,16 @@ decision 15). Replace calls such as `resourceName.ToString(format, provider)` wi
 or culture to initialized string values; `ToString()` preserves their text and now returns an
 empty string for `default`.
 
+The generated nested converters for `ResourceName`, `ResourceId`, `ApplicationName`, and
+`EnvironmentName` are now public sealed types with public parameterless constructors. A
+source-generated `JsonSerializerContext` in a consuming assembly can use these value objects
+without a custom converter. This adds public surface compared with preview.1's non-public nested
+converters; the conversion rules for null, invalid values and dictionary keys are unchanged.
+The redundant internal nested converter partials in `ResourceName` and `ApplicationName` are
+removed because their modifiers conflict with the generated public declaration (CS0262).
+The separate `Internal.ResourceNameJsonConverter` and `Internal.ApplicationNameJsonConverter`
+types retain their existing roles and accessibility.
+
 ## Design intent and why-this-not-that
 
 - **`IApplication` does not extend a host abstraction.** A host runs inside one
