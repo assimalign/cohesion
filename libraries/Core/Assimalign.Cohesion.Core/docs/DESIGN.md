@@ -72,6 +72,14 @@ Wrong-length `Ulid.Parse` input now throws `FormatException` instead of `Argumen
 This is an intentional behavioral breaking change: malformed spellings can no longer alias a
 valid identifier or overwrite a dictionary entry under that identifier.
 
+## Adaptive memory-pool retention
+
+`AdaptiveMemoryPoolPressurePolicy.PeakRetentionRatio` accepts only finite doubles in `[0, 1]`.
+The setter rejects invalid input with `ArgumentOutOfRangeException` before changing the policy,
+so NaN cannot reach the peak-count multiplication, ceiling, or integer conversion.
+Zero and one remain valid. Compared with 10.0.0-preview.1, rejecting NaN on assignment is an
+intentional behavioral breaking change (#1490); the public member signatures are unchanged.
+
 ## Frozen runtime contract
 
 `AppEnvironment.Variables` is the only .NET home of the version 1 gateway-to-resource contract

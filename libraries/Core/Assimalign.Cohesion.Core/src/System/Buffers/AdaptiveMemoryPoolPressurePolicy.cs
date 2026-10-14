@@ -52,12 +52,13 @@ public sealed class AdaptiveMemoryPoolPressurePolicy : IAdaptiveMemoryPoolPolicy
     /// <summary>
     /// Gets or sets the fraction of the observed peak in-use block count retained during the warm window.
     /// </summary>
+    /// <remarks>Must be finite and between zero and one, inclusive.</remarks>
     public double PeakRetentionRatio
     {
         get => _peakRetentionRatio;
         set
         {
-            if (value < 0 || value > 1)
+            if (!double.IsFinite(value) || value < 0 || value > 1)
             {
                 throw new ArgumentOutOfRangeException(nameof(value));
             }
