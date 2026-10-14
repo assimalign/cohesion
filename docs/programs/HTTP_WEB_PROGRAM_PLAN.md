@@ -1199,6 +1199,26 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
       - Each session ran its scope's tests: 5,854 tests in session 26, about 8,600 in session 27 and 7,550 in session 28.
       - Each session's Web NativeAOT guard showed only the 11 known IL warnings.
       - Docs site: `8166434`, `cfec2f9` and `d93ea2f`.
+  - **Value-object adoption (decision 59, continued), delivered 2026-10-14, in owner review.**
+    - **Origin.** The owner's refactor `cb113e55` moved cookie validation into `<CohesionValueType>` value objects, then asked for every other place that should do the same, and for generator improvements.
+    - **Scope.** Six read-only Codex surveys covered the repository outside Database. `docs/programs/VALUE_OBJECT_ADOPTION_SCOPE.md` (`9830d329`) holds the 178 candidates, the triage and decisions V1–V7, which await the owner.
+    - **Delivered.** Sessions 29–35 implemented the Http/Web items. No file under `resources/Database/` changed.
+    - #1472 `137f82f6` … `afa78be2`, `3f2ee8a3`, `07b5a16d`, the generator:
+      - equality, hashing and ordering are ordinal and safe at `default`;
+      - `IsValid` is static, and `TryCreate` validates once without throwing;
+      - an `ObjectComparison` setting;
+      - `ISpanParsable` and `ISpanFormattable`;
+      - JSON `null`, invalid input and dictionary keys, with public converters;
+      - `COHVT` metadata errors;
+      - a target that always runs and writes a file only when it changes;
+      - Core's `Ulid` parser rejects malformed and overflowing text.
+    - #1479 `07b3ad3a`, `f85fda74`: 16 hand-written Http value types are safe at `default`, and `HttpHeaderCollection` rejects a `default` key in every storage mode.
+    - #1473 `08b01d5d`: the Sessions, CookiePolicy and cookie-authentication options use the cookie value types, and three blocks that constructed an `HttpCookie` only to validate are gone.
+    - #1474 `aebcd256`, `9224acae`: `HttpCookieExtension` stops cookie attribute injection. The defect is in preview.1.
+    - #1475 `abdddcd1`, `59213ac7`: `ServerSentEventFieldValue` and `ServerSentEventId` stop SSE field and event injection. The defect is in preview.1.
+    - **Waiting:**
+      - #1476 waits on V2, and #1477–#1478 on V3.
+      - Buckets H–O are not filed yet; V1 decides whether they are.
 
   Behavior changes for the review (decision 15's terms):
   - **Client faults:**
