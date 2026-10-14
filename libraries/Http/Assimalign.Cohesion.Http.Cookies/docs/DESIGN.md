@@ -287,7 +287,9 @@ added under issue [L01.01.11.30], the fourth under [L01.01.11.30.01]
      the cookie. Attribute parsing trims only SP and HTAB at segment,
      name and value boundaries; boundary CR/LF or other Unicode whitespace
      is not sanitized into a valid extension. Valid unknown attributes
-     still round-trip, subject to the existing parse limits.
+     still round-trip, subject to the existing parse limits. All three
+     boundaries reuse one private static whitespace array, avoiding
+     per-attribute trim-parameter allocations without changing that rule.
    - This is a grammar rule, not a reserved-name policy. A single
      `Domain=example.com` is a representable extension, as is a single
      `Priority=High`; a string such as `x; Domain=example.com` cannot add a

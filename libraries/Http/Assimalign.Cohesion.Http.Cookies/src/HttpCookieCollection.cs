@@ -46,6 +46,8 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpCookieCollection : IHttpCookieCollection
 {
+    private static readonly char[] _attributeWhitespace = [' ', '\t'];
+
     private readonly IHttpHeaderCollection _headers;
     private readonly HttpHeaderKey _headerKey;
     private readonly HttpCookieLimits _limits;
@@ -344,7 +346,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
         for (int i = 1; i < segments.Length; i++)
         {
             // RFC 6265 trims WSP, not arbitrary Unicode whitespace or CR/LF.
-            string segment = segments[i].Trim(' ', '\t');
+            string segment = segments[i].Trim(_attributeWhitespace);
             if (segment.Length == 0)
             {
                 continue;
@@ -365,8 +367,8 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                string attrName = segment[..attrEq].Trim(' ', '\t');
-                string attrValue = segment[(attrEq + 1)..].Trim(' ', '\t');
+                string attrName = segment[..attrEq].Trim(_attributeWhitespace);
+                string attrValue = segment[(attrEq + 1)..].Trim(_attributeWhitespace);
 
                 // RFC 6265bis attribute-value size guard — an oversized
                 // attribute value is dropped while the rest of the cookie
