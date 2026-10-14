@@ -50,6 +50,23 @@ public class YamlBoundaryTests
         Should.Throw<ArgumentException>(assign);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Content.Yaml] - Tag: invalid global URIs are refused without replacing the existing tag")]
+    [InlineData("$:?")]
+    [InlineData("bare")]
+    public void Tag_NonUriGlobalTag_ThrowsWithoutChangingTag(string tag)
+    {
+        // Arrange
+        var node = YamlScalar.FromString("payload");
+        node.Tag = "!existing";
+
+        // Act
+        Action assign = () => node.Tag = tag;
+
+        // Assert
+        Should.Throw<ArgumentException>(assign);
+        (node.Tag?.ToString()).ShouldBe("!existing");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Content.Yaml] - CreateWriter: non-positive indentation is refused before writing")]
     [InlineData(0)]
     [InlineData(-1)]

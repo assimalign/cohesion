@@ -79,8 +79,15 @@ public class YamlValueObjectTests
     [Theory(DisplayName = "Cohesion Test [Content.Yaml] - TryCreate: resolved tags preserve URI characters and percent escapes")]
     [InlineData("!")]
     [InlineData("!local")]
+    [InlineData("!$:?")]
     [InlineData("tag:yaml.org,2002:str")]
-    [InlineData("tag:example.com,2026:a[]!b")]
+    [InlineData("tag:example.com,2026:a%5B%5D!b")]
+    [InlineData("URN:example:Tag")]
+    [InlineData("HTTP://EXAMPLE.COM:80/a/../b%2f?q=%6a#Tag")]
+    [InlineData("x:")]
+    [InlineData("x:tag")]
+    [InlineData("x:/tag")]
+    [InlineData("x://example.com/tag")]
     [InlineData("!%6a%2F")]
     [InlineData("tag:example.com,2026:%E2%82%AC")]
     public void TryCreate_ValidTag_PreservesSpelling(string candidate)
@@ -118,6 +125,45 @@ public class YamlValueObjectTests
         // Assert
         created.ShouldBeFalse();
         tag.Value.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Content.Yaml] - TryCreate: global tags require well-formed absolute URIs")]
+    [InlineData("$:?")]
+    [InlineData("bare")]
+    [InlineData("relative/tag")]
+    [InlineData("//example.com/tag")]
+    [InlineData("1tag:value")]
+    [InlineData("http://")]
+    [InlineData("http://[invalid]/tag")]
+    [InlineData("tag:example.com,2026:a[]!b")]
+    [InlineData("tag:example.com,2026:tag#one#two")]
+    [InlineData("x:tag#one#two")]
+    public void TryCreate_NonUriGlobalTag_ReturnsFalse(string candidate)
+    {
+        // Arrange
+        var input = candidate;
+
+        // Act
+        var created = YamlTag.TryCreate(input, out var tag);
+
+        // Assert
+        created.ShouldBeFalse();
+        tag.Value.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Content.Yaml] - Constructor: global tags refuse invalid URIs")]
+    [InlineData("$:?")]
+    [InlineData("bare")]
+    public void Constructor_NonUriGlobalTag_ThrowsArgumentException(string candidate)
+    {
+        // Arrange
+        var input = candidate;
+
+        // Act
+        Action construct = () => _ = new YamlTag(input);
+
+        // Assert
+        Should.Throw<ArgumentException>(construct).ParamName.ShouldBe("value");
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Yaml] - CompareTo: anchor equality and ordering are ordinal and case-sensitive")]

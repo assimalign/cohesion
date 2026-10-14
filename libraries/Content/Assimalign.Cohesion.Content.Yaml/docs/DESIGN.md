@@ -60,12 +60,15 @@ NBSP, U+2028 and U+2029 remain valid name characters. The value contains no lead
 The parser's existing colon-before-space/end limitation remains documented below.
 
 `YamlTag` holds a resolved tag spelling: YAML 1.2.2 §5.6's `ns-uri-char` sequence, including only
-complete `%HH` escapes, or the non-specific `!` tag from §6.9.1. It validates character grammar
-without imposing an absolute-URI scheme requirement or decoding percent escapes. Named tag handles
-are resolved by the parser before storage. Local and core tags retain the existing shorthand when
-its suffix is legal; valid resolved tags containing shorthand delimiters such as `,`, `[` or `!`
-use verbatim `!<...>` form. The existing omission and scalar-kind behavior of non-specific `!`
-is unchanged.
+complete `%HH` escapes. Under [§6.9.1](https://yaml.org/spec/1.2.2/#691-node-tags), local tags start
+with `!`, the non-specific `!` remains valid, and global tags must be well-formed absolute URIs.
+Bare names, invalid schemes such as `$:?`, and unescaped brackets in global URI paths are refused.
+URI validation does not normalize the stored spelling or decode percent escapes. Single-letter
+schemes are expanded only for validation to avoid `System.Uri`'s DOS-drive interpretation.
+Named tag handles are resolved by the parser before storage. Local and core tags retain the existing
+shorthand when its suffix is legal; valid resolved tags containing shorthand delimiters such as
+`,`, `[` or `!` use verbatim `!<...>` form. The existing omission and scalar-kind behavior of
+non-specific `!` is unchanged.
 
 YAML anchor and tag spelling is case-sensitive, so generated equality, hashing and ordering use
 `ObjectComparison="Ordinal"`; neither type normalizes its stored text. Nullable string conversions
@@ -120,6 +123,10 @@ callers use the value objects' `TryCreate`. Invalid writer indentation throws
 - Parsed anchors and tags containing characters outside their YAML grammar, including malformed
   percent escapes in tags, now throw `YamlException` where preview.1 could accept them.
   Empty anchor/alias names still throw `YamlException`, with the shared anchor-grammar diagnostic.
+- Global tags that are not well-formed absolute URIs (for example `$:?`, bare names or URI paths
+  with unescaped brackets) now throw `ArgumentException` during construction/conversion and
+  `YamlException` during parsing. Preview.1 accepted and emitted these invalid tags. Valid local
+  tags, the non-specific `!`, and the exact spelling of valid global URIs remain unchanged.
 - Zero and negative `IndentSize` values now throw `ArgumentOutOfRangeException` at writer creation
   or direct write entry. Previously creation succeeded, zero could produce ambiguous output, and
   negative values could fail later during indentation.

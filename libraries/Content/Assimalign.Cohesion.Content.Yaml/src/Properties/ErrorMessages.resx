@@ -8,7 +8,7 @@
     <value>A YAML anchor name must be nonempty and contain only YAML nonspace characters other than flow indicators.</value>
   </data>
   <data name="TagInvalid" xml:space="preserve">
-    <value>A resolved YAML tag must be nonempty and contain only YAML URI characters with complete hexadecimal percent escapes.</value>
+    <value>A resolved YAML tag must start with '!' or be an absolute URI, and contain only YAML URI characters with complete hexadecimal percent escapes.</value>
   </data>
   <data name="DocumentCountInvalid" xml:space="preserve">
     <value>Expected exactly one document but found {0}.</value>

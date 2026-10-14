@@ -56,6 +56,9 @@ if (YamlAnchorName.TryCreate(anchorText, out var anchor))
 `YamlEvent.Anchor` and `YamlEvent.Tag` expose the same `YamlAnchorName?` and `YamlTag?` types.
 Use `YamlTag.TryCreate` for non-throwing tag validation. Names omit `&`/`*`; tags contain the
 resolved spelling, such as `tag:yaml.org,2002:str` or `!service`, with percent escapes preserved.
+Local tags begin with `!`; the non-specific `!` is also valid. Global tags must be well-formed
+absolute URIs: bare names and `$:?` are rejected. Validation preserves URI spelling without
+normalizing case, paths or percent escapes.
 Both types compare case-sensitively. A present `default(YamlAnchorName)` or `default(YamlTag)` is
 invalid metadata; use `null` to clear a property.
 
