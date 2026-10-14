@@ -33,7 +33,8 @@ jobs:
   build:
     name: "Templates [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # The slowest successful job took 32m30s (run 38563045950); twice that, rounded up to 15 minutes.
+    timeout-minutes: 75
     env:
       COHESION_TEMPLATES_TEST_FEED: _out/packages
     strategy:

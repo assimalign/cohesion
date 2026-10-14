@@ -411,9 +411,17 @@ Per-area CI and the publish-less SDK consumer smoke prove the branch; **the rele
 Path-filtered on push, each a thin matrix over project names calling the shared composite action at `.github/actions/build/action.yml` across ubuntu/windows/macos. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.
 
 The shared test step uses a five-minute blame hang timeout and mini dumps. Recent healthy runs
-completed Http.Connections in at most 78 seconds, Web.Hosting in 41 seconds, and Templates in
-91 seconds (runs `38563034652`, `38558592445`, and `38567999644`). Non-Database per-area test jobs
-have `timeout-minutes: 30`, leaving room for restore, builds, dump collection and upload.
+completed the Http.Connections test step in at most 78 seconds and Web.Hosting's in 41 seconds
+(runs `38563034652` and `38558592445`).
+
+Job limits are sized from whole jobs, not from test steps, because restore and build dominate.
+Across the last six successful runs of each per-area workflow, the slowest job took 6.0 minutes
+(IdentityHub), so non-Database per-area test jobs have `timeout-minutes: 30`. That leaves room
+for restore, builds, dump collection and upload.
+
+Templates is the exception. Its job packs the local feed, and the slowest successful job took
+32m30s (run `38563045950`), so it has `timeout-minutes: 75` under the rule below. The first 30-minute
+limit cut off a healthy macOS job.
 Database workflow timeouts are deferred to #1470 while the owner rewrites that workflow.
 On failure, the action uploads `TestResults/<project>/**/Sequence_*.xml` and dumps as a
 project/OS/architecture/job/attempt-specific artifact retained for seven days. Ordinary failures
