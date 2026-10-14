@@ -27,10 +27,10 @@ public class HttpCookieOptionsValidationTests
         ArgumentException exception = Should.Throw<ArgumentException>(() => options.Path = "/x; SameSite=None");
 
         // Assert
-        exception.ParamName.ShouldBe(nameof(HttpCookieOptions.Path));
+        exception.ParamName.ShouldBe("value"); // the HttpCookiePath conversion's parameter
         exception.Message.ShouldContain("Path");
         exception.Message.ShouldNotContain("SameSite=None");
-        options.Path.ShouldBe("/");
+        options.Path.ShouldBe<HttpCookiePath?>("/");
     }
 
     // Addressed by code point so no raw control character appears in source.
@@ -53,8 +53,9 @@ public class HttpCookieOptionsValidationTests
         ArgumentException exception = Should.Throw<ArgumentException>(() => options.Path = path);
 
         // Assert
-        exception.ParamName.ShouldBe(nameof(HttpCookieOptions.Path));
-        options.Path.ShouldBe("/keep");
+        exception.ParamName.ShouldBe("value");
+        exception.Message.ShouldContain("Path", Case.Sensitive);
+        options.Path.ShouldBe<HttpCookiePath?>("/keep");
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Cookies] - Path: a path-value is accepted")]
@@ -74,7 +75,7 @@ public class HttpCookieOptionsValidationTests
         options.Path = path;
 
         // Assert
-        options.Path.ShouldBe(path);
+        options.Path.ShouldBe<HttpCookiePath?>(path);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Cookies] - Path: null clears the attribute")]
@@ -85,6 +86,21 @@ public class HttpCookieOptionsValidationTests
 
         // Act
         options.Path = null;
+
+        // Assert
+        options.Path.ShouldBeNull();
+        new HttpCookie("a", "1", options).ToString().ShouldBe("a=1");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Cookies] - Path: a null string clears the attribute too")]
+    public void Path_SetToNullString_ShouldOmitTheAttribute()
+    {
+        // Arrange — a null string variable, not the null literal, so the string conversion runs.
+        HttpCookieOptions options = new();
+        string? path = null;
+
+        // Act
+        options.Path = path;
 
         // Assert
         options.Path.ShouldBeNull();
@@ -116,9 +132,9 @@ public class HttpCookieOptionsValidationTests
         ArgumentException exception = Should.Throw<ArgumentException>(() => options.Domain = domain);
 
         // Assert
-        exception.ParamName.ShouldBe(nameof(HttpCookieOptions.Domain));
+        exception.ParamName.ShouldBe("value"); // the HttpCookieDomain conversion's parameter
         exception.Message.ShouldContain("Domain");
-        options.Domain.ShouldBe("keep.example");
+        options.Domain.ShouldBe<HttpCookieDomain?>("keep.example");
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Cookies] - Domain: a control character is refused")]
@@ -137,7 +153,7 @@ public class HttpCookieOptionsValidationTests
         ArgumentException exception = Should.Throw<ArgumentException>(() => options.Domain = domain);
 
         // Assert
-        exception.ParamName.ShouldBe(nameof(HttpCookieOptions.Domain));
+        exception.ParamName.ShouldBe("value");
         options.Domain.ShouldBeNull();
     }
 
@@ -159,7 +175,7 @@ public class HttpCookieOptionsValidationTests
         options.Domain = domain;
 
         // Assert
-        options.Domain.ShouldBe(domain);
+        options.Domain.ShouldBe<HttpCookieDomain?>(domain);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Cookies] - Domain: null and empty clear the attribute")]
@@ -174,7 +190,8 @@ public class HttpCookieOptionsValidationTests
         options.Domain = domain;
 
         // Assert
-        options.Domain.ShouldBe(domain);
+        // A null or empty string converts to no domain, not to a domain holding null or "".
+        options.Domain.ShouldBeNull();
         new HttpCookie("a", "1", options).ToString().ShouldBe("a=1; Path=/");
     }
 
@@ -198,7 +215,7 @@ public class HttpCookieOptionsValidationTests
         longestName.Length.ShouldBe(253);
         labelRefusal.ShouldBeOfType<ArgumentException>();
         nameRefusal.ShouldBeOfType<ArgumentException>();
-        options.Domain.ShouldBe("." + longestName);
+        options.Domain.ShouldBe<HttpCookieDomain?>("." + longestName);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Cookies] - Copy: the copy carries the checked Path and Domain")]
@@ -212,8 +229,8 @@ public class HttpCookieOptionsValidationTests
         HttpCookie cookie = new("a", "1", source);
 
         // Assert
-        copy.Path.ShouldBe("/app");
-        copy.Domain.ShouldBe(".example.com");
+        copy.Path.ShouldBe<HttpCookiePath?>("/app");
+        copy.Domain.ShouldBe<HttpCookieDomain?>(".example.com");
         cookie.ToString().ShouldBe("a=1; Domain=.example.com; Path=/app");
     }
 
@@ -246,9 +263,9 @@ public class HttpCookieOptionsValidationTests
 
         // Assert
         HttpCookie cookie = cookies.ShouldHaveSingleItem();
-        cookie.Name.ShouldBe("good");
-        cookie.Options.Domain.ShouldBe("example.com");
-        cookie.Options.Path.ShouldBe("/app");
+        cookie.Name.ShouldBe<HttpCookieName>("good");
+        cookie.Options.Domain.ShouldBe<HttpCookieDomain?>("example.com");
+        cookie.Options.Path.ShouldBe<HttpCookiePath?>("/app");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Cookies] - Response parse: an empty Domain is ignored, not a reason to drop the cookie")]
@@ -263,7 +280,7 @@ public class HttpCookieOptionsValidationTests
 
         // Assert
         HttpCookie cookie = cookies.ShouldHaveSingleItem();
-        cookie.Options.Domain.ShouldBeNullOrEmpty();
+        cookie.Options.Domain.ShouldBeNull();
         cookie.ToString().ShouldBe("a=1; Path=/");
     }
 }

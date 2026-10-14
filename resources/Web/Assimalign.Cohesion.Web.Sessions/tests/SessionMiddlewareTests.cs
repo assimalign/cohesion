@@ -53,11 +53,11 @@ public class SessionMiddlewareTests
 
         // Assert
         HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
-        cookie.Name.ShouldBe(DefaultCookieName);
+        cookie.Name.ShouldBe<HttpCookieName>(DefaultCookieName);
         cookie.Options.HttpOnly.ShouldBeTrue();
         cookie.Options.SameSite.ShouldBe(HttpCookieSameSiteMode.Lax);
         cookie.Options.Secure.ShouldBeFalse();        // plaintext request
-        cookie.Options.Path.ShouldBe("/");
+        cookie.Options.Path.ShouldBe<HttpCookiePath?>("/");
         cookie.Options.Expires.ShouldBeNull();         // session-scoped
         cookie.Options.MaxAge.ShouldBeNull();
         cookie.Options.IsEssential.ShouldBeFalse();    // a consent policy gates it by default
@@ -156,8 +156,8 @@ public class SessionMiddlewareTests
 
         // Assert
         HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
-        cookie.Name.ShouldBe("app.sid");
-        cookie.Options.Path.ShouldBe("/app");
+        cookie.Name.ShouldBe<HttpCookieName>("app.sid");
+        cookie.Options.Path.ShouldBe<HttpCookiePath?>("/app");
         cookie.Options.HttpOnly.ShouldBeFalse();
     }
 
@@ -185,7 +185,7 @@ public class SessionMiddlewareTests
         newId.ShouldNotBe("old-id");
 
         HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
-        cookie.Value.ShouldBe(newId);
+        cookie.Value.ShouldBe<HttpCookieValue>(newId);
 
         (await ReadStoredStringAsync(store, "old-id", "user")).ShouldBeNull();  // old id evicted
         (await ReadStoredStringAsync(store, newId!, "user")).ShouldBe("alice"); // state under new id

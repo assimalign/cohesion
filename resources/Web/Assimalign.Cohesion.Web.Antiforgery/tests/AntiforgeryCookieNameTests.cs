@@ -30,10 +30,9 @@ public class AntiforgeryCookieNameTests
                 }
             }));
 
-        // Assert
-        exception.ParamName.ShouldBe("options");
-        exception.Message.ShouldContain("HttpAntiforgeryOptions.CookieName", Case.Sensitive);
-        exception.InnerException.ShouldBeAssignableTo<ArgumentException>().ShouldNotBeNull().ParamName.ShouldBe("name");
+        // Assert — the HttpCookieName conversion refuses the string inside the callback, before Build.
+        exception.ParamName.ShouldBe("value");
+        exception.Message.ShouldContain("Cookie name", Case.Sensitive);
         if (!string.IsNullOrEmpty(cookieName))
         {
             exception.ToString().ShouldNotContain(cookieName, Case.Sensitive);
@@ -71,8 +70,8 @@ public class AntiforgeryCookieNameTests
 
         // Assert
         HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
-        cookie.Name.ShouldBe(cookieName);
-        cookie.Value.ShouldBe(tokens.CookieToken);
+        cookie.Name.ShouldBe<HttpCookieName>(cookieName);
+        cookie.Value.ShouldBe<HttpCookieValue>(tokens.CookieToken);
     }
 
     public static TheoryData<string?, bool> InvalidCookieNames

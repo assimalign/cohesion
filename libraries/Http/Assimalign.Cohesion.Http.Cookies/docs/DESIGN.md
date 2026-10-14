@@ -159,11 +159,13 @@ added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
 (#1153):
 
 1. **Octet-grammar validation at construction (anti header-splitting).**
-   `HttpCookie` validates its `Name` against the RFC 6265 §4.1.1
-   `token` grammar and its `Value` against `*cookie-octet` (optionally a
-   single surrounding DQUOTE pair) in the constructor, throwing
-   `ArgumentException` on a violation. Because `Name`/`Value` are
-   immutable, a constructed cookie can *never* hold a `;`, `,`,
+   `HttpCookie.Name` and `Value` are the `HttpCookieName` and
+   `HttpCookieValue` value objects, which validate the RFC 6265 §4.1.1
+   `token` grammar and `*cookie-octet` (optionally a single surrounding
+   DQUOTE pair) when they are constructed, throwing `ArgumentException` on
+   a violation. A `string` passed to the `HttpCookie` constructor is
+   converted, and so checked, before the constructor runs. Because
+   `Name`/`Value` are immutable, a constructed cookie can *never* hold a `;`, `,`,
    whitespace, control character, or CR/LF octet — so `ToString()` can
    never emit a value that splits or corrupts the `Set-Cookie` line, and
    the request-side fold (`name=value; …`) is equally safe. This is an
@@ -202,7 +204,7 @@ added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
    trigger is left to the emitter / `Web.CookiePolicy`. Keeping the clock
    out of the model is what makes the cap deterministically testable.
 
-4. **Attribute grammar in the `Path` and `Domain` setters (#1153).**
+4. **Attribute grammar in the `Path` and `Domain` value types (#1153).**
    `HttpCookie.ToString()` appends both values verbatim, so before #1153
    a path of `/x; SameSite=None` added an attribute to the line, and a
    control character corrupted it. Applications build these values from
@@ -223,18 +225,30 @@ added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
      its `xn--` A-label.
    - **`null` stays legal for both**, because `CookiePolicyRules` repairs
      a `__Host-` cookie with `Domain = null` and the collection parser
-     starts from `Path = null`. An empty `Domain` also means "no
-     attribute", as `ToString()` has always read it, and as RFC 6265
-     §5.2.3 tells a user agent to treat an empty `Domain=`.
-   - **The setters throw `ArgumentException`** whose `ParamName` and
-     message name the attribute. The message does not echo the value,
-     which may hold the control character that made it invalid. Like the
-     name and value checks, this is a server bug surfacing, not a request
-     rejection.
-   - **Validation is in the setter**, so every reader sees only valid
-     values: the copy constructor (which copies the checked fields
-     without checking them again), `HttpCookie`'s copy of its options,
-     and a later write to `cookie.Options`.
+     starts from `Path = null`. The properties are `HttpCookiePath?` and
+     `HttpCookieDomain?`, and each value type declares a hand-written
+     `string?` → `T?` conversion that keeps a `null` string `null`. Without
+     it, C# routes a `null` string through the generated `string` → `T`
+     conversion and wraps the result, which yields a non-null `T?` holding
+     a null `Value` (or, once the type refuses null, an exception). An
+     empty `Domain` also converts to `null`, meaning "no attribute", as
+     `ToString()` has always read it and as RFC 6265 §5.2.3 tells a user
+     agent to treat an empty `Domain=`; a constructed `HttpCookieDomain`
+     is never empty. An empty `Path` is a valid `path-value` and is kept.
+   - **The conversions throw `ArgumentException`** whose message names the
+     attribute; `ParamName` is `value`, the conversion's own parameter,
+     because the value type's constructor throws before the setter runs.
+     The message does not echo the value, which may hold the control
+     character that made it invalid. Like the name and value checks, this
+     is a server bug surfacing, not a request rejection.
+   - **Validation is in the type**, so every reader sees only valid
+     values: the copy constructor (which copies the checked values),
+     `HttpCookie`'s copy of its options, and a later write to
+     `cookie.Options`.
+   - **`default` is the one unchecked value.** `default(HttpCookieName)`
+     and the other three hold a null `Value`. `HttpCookie` refuses a
+     `default` name with `ArgumentNullException` and reads a `default`
+     value as empty; `ToString()` omits a `default` `Path` or `Domain`.
    - **The parser drops a cookie** whose `Path` or `Domain` attribute is
      outside the grammar, as it drops an out-of-grammar name or value,
      instead of throwing on wire input. It does not keep the cookie

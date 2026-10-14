@@ -413,19 +413,33 @@ public class HttpAntiforgeryTests
     [InlineData("/a\r\nb")] // CR LF
     public void Create_CookiePathOutsideGrammar_ShouldThrowAtCreation(string cookiePath)
     {
-        // Arrange
-        HttpAntiforgeryOptions options = new() { CookiePath = cookiePath };
-
-        // Act
-        ArgumentException fromOptions = Should.Throw<ArgumentException>(() => HttpAntiforgery.Create(options));
+        // Act — the HttpCookiePath conversion refuses the string when it is assigned, so an explicit
+        // options instance cannot even be initialized with it.
+        ArgumentException fromOptions = Should.Throw<ArgumentException>(
+            () => HttpAntiforgery.Create(new HttpAntiforgeryOptions { CookiePath = cookiePath }));
         ArgumentException fromConfigure = Should.Throw<ArgumentException>(
             () => HttpAntiforgery.Create(configure => configure.CookiePath = cookiePath));
 
         // Assert
+        fromOptions.ParamName.ShouldBe("value");
+        fromOptions.Message.ShouldContain("Path", Case.Sensitive);
+        fromOptions.Message.ShouldNotContain(cookiePath, Case.Sensitive);
+        fromConfigure.ParamName.ShouldBe("value");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Create: A default CookiePath, which holds no path, fails when the service is created")]
+    public void Create_DefaultCookiePath_ShouldThrowAtCreation()
+    {
+        // Act
+        ArgumentException fromOptions = Should.Throw<ArgumentException>(
+            () => HttpAntiforgery.Create(new HttpAntiforgeryOptions { CookiePath = default }));
+        ArgumentException fromConfigure = Should.Throw<ArgumentException>(
+            () => HttpAntiforgery.Create(configure => configure.CookiePath = default));
+
+        // Assert
         fromOptions.ParamName.ShouldBe("options");
-        fromOptions.Message.ShouldContain("HttpAntiforgeryOptions.CookiePath");
-        fromOptions.InnerException.ShouldBeOfType<ArgumentException>().ParamName.ShouldBe("Path");
-        fromConfigure.Message.ShouldContain("HttpAntiforgeryOptions.CookiePath");
+        fromOptions.Message.ShouldContain("HttpAntiforgeryOptions.CookiePath", Case.Sensitive);
+        fromConfigure.ParamName.ShouldBe("options");
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Antiforgery] - Create: A CookiePath in path-value is accepted and reaches the cookie token")]
@@ -443,7 +457,7 @@ public class HttpAntiforgeryTests
         antiforgery.GetAndStoreTokens(context);
 
         // Assert
-        StoredCookie(context, options.CookieName).Options.Path.ShouldBe(cookiePath);
+        StoredCookie(context, options.CookieName).Options.Path.ShouldBe<HttpCookiePath?>(cookiePath);
     }
 
     private static HttpCookie StoredCookie(TestHttpContext context, string name)

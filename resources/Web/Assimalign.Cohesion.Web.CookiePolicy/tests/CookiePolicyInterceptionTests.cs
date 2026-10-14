@@ -220,7 +220,7 @@ public class CookiePolicyInterceptionTests
         // Assert — the policy is in charge, and the earlier feature still received the issued cookie.
         observed.ShouldBe((false, 1));
         HttpCookie stored = recording.ShouldNotBeNull().Added.ShouldHaveSingleItem();
-        stored.Name.ShouldBe("a");
+        stored.Name.ShouldBe<HttpCookieName>("a");
         stored.Options.Secure.ShouldBeTrue();
         fields.ShouldHaveSingleItem().Has("Secure").ShouldBeTrue();
     }

@@ -140,21 +140,27 @@ The package reads the cookie token from `request.Cookies` and writes it to
 parsing.
 
 The cookie token's name and path are `HttpAntiforgeryOptions.CookieName`
-and `CookiePath`. The service constructor checks both before retaining
-options or creating the token engine: the name through `HttpCookie`
-against the RFC 6265 §4.1.1 non-empty `token` grammar (#1416), and the path
-through `HttpCookieOptions.Path` against `path-value` (#1153). Reusing the
-cookie model keeps composition and request-time emission on the same
+and `CookiePath`, typed as the Cookies package's `HttpCookieName` and
+`HttpCookiePath` value objects. The value types check the RFC 6265 §4.1.1
+non-empty `token` grammar (#1416) and the `path-value` grammar (#1153)
+when they are constructed, so assigning a string outside either grammar
+throws `ArgumentException` from its implicit conversion, before the setter
+runs (`ParamName` `value`, the conversion's own parameter). Using the cookie
+model's own types keeps composition and request-time emission on the same
 grammar. Token punctuation is valid in names; null, empty, whitespace,
-separators, control and non-ASCII characters are rejected.
+separators, control and non-ASCII characters are rejected. Neither message
+echoes the value.
 
-Both `HttpAntiforgery.Create` overloads reach this constructor, as does
-`builder.Services.AddAntiforgery` in `Web.Antiforgery`. A name such as `a b`
-or a path such as `/tenant;x` fails composition with `ArgumentException`
-(`ParamName` `options`), before a service or feature is returned. The
-exception names the full option and preserves the cookie constructor's or
-setter's exception as `InnerException`; neither message echoes the value.
-The Web verb registers nothing on failure.
+A name such as `a b` or a path such as `/tenant;x` therefore fails while the
+options are being configured: in an explicit options initializer, inside the
+`Create(configure)` callback, or inside the `builder.Services.AddAntiforgery`
+callback in `Web.Antiforgery`, which then registers nothing. `default` is the
+one value the types cannot see, so the service constructor, reached by both
+`Create` overloads and by the Web verb, refuses a `default` name or path with
+`ArgumentException` (`ParamName` `options`) whose message names the full
+option. Before the value types, the constructor made both grammar checks
+itself, by constructing an `HttpCookie` and an `HttpCookieOptions` and
+wrapping their exceptions.
 
 The cookie token is marked essential by default
 (`HttpAntiforgeryOptions.CookieIsEssential`), so a cookie-consent policy
@@ -223,6 +229,13 @@ token. Since #1416 both factory overloads reject it at composition.
 Applications must configure a non-empty RFC 6265 `token` name. Defaults
 and other valid names are unchanged; applications that supplied an invalid
 name now fail at composition instead of failing token-storing requests.
+
+`CookieName` and `CookiePath` changed from `string` to `HttpCookieName` and
+`HttpCookiePath`. Assigning a string still compiles through the implicit
+conversions, so most source is unaffected, but the change is binary-breaking,
+an invalid value now throws at assignment rather than from `Create`, and
+reading the property yields the value type (compare through `.Value` or a
+conversion to `string`).
 
 ## AOT posture
 

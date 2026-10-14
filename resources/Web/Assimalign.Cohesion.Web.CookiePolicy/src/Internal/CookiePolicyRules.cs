@@ -263,7 +263,7 @@ internal sealed class CookiePolicyRules
         // 3b. The name prefixes (RFC 6265bis 4.1.3), matched case-insensitively as the user agent does
         //     (5.4) because it ignores a cookie that breaks one (5.7, steps 20 and 21).
         current = rewritten ?? appended;
-        if (cookie.Name.StartsWith(hostPrefix, StringComparison.OrdinalIgnoreCase))
+        if (cookie.Name.Value.StartsWith(hostPrefix, StringComparison.OrdinalIgnoreCase))
         {
             if (!IsHostPrefixCompliant(current))
             {
@@ -278,7 +278,7 @@ internal sealed class CookiePolicyRules
                 repaired.Domain = null;
             }
         }
-        else if (cookie.Name.StartsWith(securePrefix, StringComparison.OrdinalIgnoreCase) && !current.Secure)
+        else if (cookie.Name.Value.StartsWith(securePrefix, StringComparison.OrdinalIgnoreCase) && !current.Secure)
         {
             if (_prefixViolation == CookieViolationAction.Reject)
             {

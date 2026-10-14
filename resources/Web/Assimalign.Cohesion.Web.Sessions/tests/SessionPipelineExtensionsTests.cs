@@ -30,7 +30,8 @@ public class SessionPipelineExtensionsTests
         // Assert
         exception.ParamName.ShouldBe("configure");
         exception.Message.ShouldContain("HttpSessionOptions.CookiePath");
-        exception.InnerException.ShouldBeOfType<ArgumentException>().ParamName.ShouldBe("Path");
+        // The inner exception comes from the HttpCookiePath conversion; ParamName is its parameter.
+        exception.InnerException.ShouldBeOfType<ArgumentException>().ParamName.ShouldBe("value");
         builder.LastMiddleware.ShouldBeNull();
     }
 

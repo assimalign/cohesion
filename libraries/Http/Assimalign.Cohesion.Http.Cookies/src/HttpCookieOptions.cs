@@ -1,26 +1,25 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Http.Internal;
-
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// Provides options used when serializing an HTTP cookie.
 /// </summary>
 /// <remarks>
-/// <see cref="Path"/> and <see cref="Domain"/> are checked against the
-/// RFC 6265 &#167; 4.1.1 attribute grammar when they are set, so an options
-/// instance never holds a value that would add attributes to, or corrupt, the
-/// <c>Set-Cookie</c> line <see cref="HttpCookie.ToString"/> writes. A value
-/// built from untrusted input, such as a tenant segment or a forwarded host, is
-/// therefore refused instead of emitted.
+/// <see cref="Path"/> and <see cref="Domain"/> are <see cref="HttpCookiePath"/>
+/// and <see cref="HttpCookieDomain"/> values, checked against the RFC 6265
+/// &#167; 4.1.1 attribute grammar when they are constructed &#8212; for a
+/// <see cref="string"/> assignment, by its implicit conversion before the setter
+/// runs &#8212; so an options instance never holds a value that would add
+/// attributes to, or corrupt, the <c>Set-Cookie</c> line
+/// <see cref="HttpCookie.ToString"/> writes. A value built from untrusted input,
+/// such as a tenant segment or a forwarded host, is therefore refused instead of
+/// emitted.
 /// </remarks>
 public sealed class HttpCookieOptions
 {
     private List<string>? _extensions;
-    private string? _domain;
-    private string? _path;
 
     /// <summary>
     /// Initializes a new set of cookie options.
@@ -38,9 +37,9 @@ public sealed class HttpCookieOptions
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // The source's setters already checked both values.
-        _domain = options._domain;
-        _path = options._path;
+        // Both are value types their own construction already checked.
+        Domain = options.Domain;
+        Path = options.Path;
         Expires = options.Expires;
         Secure = options.Secure;
         SameSite = options.SameSite;
@@ -64,28 +63,16 @@ public sealed class HttpCookieOptions
     /// letters, digits, and hyphens, optionally preceded by one dot, which a
     /// user agent ignores (RFC 6265 &#167; 5.2.3).
     /// </value>
-    /// <exception cref="ArgumentException">
-    /// The value is not a <c>domain-value</c>: it holds <c>;</c>, whitespace, a
-    /// control character, or another character outside the label grammar, has
-    /// an empty or over-long label, or is longer than 253 characters after the
-    /// optional leading dot.
-    /// </exception>
-    public string? Domain
-    {
-        get => _domain;
-        set
-        {
-            // The value is not echoed: it may hold the control character that made it invalid.
-            if (!string.IsNullOrEmpty(value) && !HttpCookieGrammar.IsValidDomain(value))
-            {
-                throw new ArgumentException(
-                    ErrorMessages.CookieDomainInvalid,
-                    nameof(Domain));
-            }
-
-            _domain = value;
-        }
-    }
+    /// <remarks>
+    /// Assigning a <see cref="string"/> converts it first: <see langword="null"/>
+    /// and empty become <see langword="null"/>, and anything else that is not a
+    /// <c>domain-value</c> &#8212; <c>;</c>, whitespace, a control character, or
+    /// another character outside the label grammar, an empty or over-long label,
+    /// or more than 253 characters after the optional leading dot &#8212; throws
+    /// <see cref="ArgumentException"/> before the setter runs, leaving the
+    /// current value in place.
+    /// </remarks>
+    public HttpCookieDomain? Domain { get; set; }
 
     /// <summary>
     /// Gets or sets the <c>Path</c> attribute: the request-path prefix the
@@ -97,28 +84,15 @@ public sealed class HttpCookieOptions
     /// An RFC 6265 &#167; 4.1.1 <c>path-value</c>: US-ASCII characters other
     /// than control characters and <c>;</c>.
     /// </value>
-    /// <exception cref="ArgumentException">
-    /// The value holds <c>;</c>, which would add an attribute of the value's own
-    /// to the <c>Set-Cookie</c> line, a control character
-    /// (<c>0x00</c>&#8211;<c>0x1F</c>, <c>0x7F</c>), or a character outside
-    /// US-ASCII.
-    /// </exception>
-    public string? Path
-    {
-        get => _path;
-        set
-        {
-            // The value is not echoed: it may hold the control character that made it invalid.
-            if (value is not null && !HttpCookieGrammar.IsValidPath(value))
-            {
-                throw new ArgumentException(
-                    ErrorMessages.CookiePathInvalid,
-                    nameof(Path));
-            }
-
-            _path = value;
-        }
-    }
+    /// <remarks>
+    /// Assigning a <see cref="string"/> converts it first: <see langword="null"/>
+    /// stays <see langword="null"/>, and a value holding <c>;</c> (which would
+    /// add an attribute of the value's own to the <c>Set-Cookie</c> line), a
+    /// control character (<c>0x00</c>&#8211;<c>0x1F</c>, <c>0x7F</c>), or a
+    /// character outside US-ASCII throws <see cref="ArgumentException"/> before
+    /// the setter runs, leaving the current value in place.
+    /// </remarks>
+    public HttpCookiePath? Path { get; set; }
 
     /// <summary>
     /// Gets or sets the <c>Expires</c> attribute: the instant the cookie expires.

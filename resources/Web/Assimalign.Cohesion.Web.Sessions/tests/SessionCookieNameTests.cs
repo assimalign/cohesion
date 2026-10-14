@@ -34,7 +34,8 @@ public class SessionCookieNameTests
         // Assert
         exception.ParamName.ShouldBe("configure");
         exception.Message.ShouldContain("HttpSessionOptions.CookieName", Case.Sensitive);
-        exception.InnerException.ShouldBeAssignableTo<ArgumentException>().ShouldNotBeNull().ParamName.ShouldBe("name");
+        // The inner exception comes from the HttpCookieName conversion; ParamName is its parameter.
+        exception.InnerException.ShouldBeAssignableTo<ArgumentException>().ShouldNotBeNull().ParamName.ShouldBe("value");
         if (!string.IsNullOrEmpty(cookieName))
         {
             exception.ToString().ShouldNotContain(cookieName, Case.Sensitive);

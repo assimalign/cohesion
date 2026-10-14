@@ -32,33 +32,16 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // Reuse the cookie constructor's token check before a service can issue tokens on requests.
-        try
+        // The value types refuse every out-of-grammar string at assignment; default is the one
+        // value they cannot see. Refusing it here keeps a token issue from failing with a 500.
+        if (options.CookieName.Value is null)
         {
-            _ = new HttpCookie(options.CookieName);
-        }
-        catch (ArgumentException exception)
-        {
-            throw new ArgumentException(
-                ErrorMessages.CookieNameInvalid,
-                nameof(options),
-                exception);
+            throw new ArgumentException(ErrorMessages.CookieNameInvalid, nameof(options));
         }
 
-        // The cookie token's options are built each time a token is stored, and HttpCookieOptions refuses
-        // a Path outside the RFC 6265 path-value grammar (#1153). Checking the path here fails the
-        // application at composition instead of failing every token issue with a 500.
-        try
+        if (options.CookiePath.Value is null)
         {
-            _ = new HttpCookieOptions { Path = options.CookiePath };
-        }
-        catch (ArgumentException exception)
-        {
-            // The value is not echoed: it may hold the control character that made it invalid.
-            throw new ArgumentException(
-                ErrorMessages.CookiePathInvalid,
-                nameof(options),
-                exception);
+            throw new ArgumentException(ErrorMessages.CookiePathInvalid, nameof(options));
         }
 
         _options = options;
@@ -78,9 +61,10 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
     /// <see cref="HttpAntiforgeryOptions"/> before the service is built.</param>
     /// <returns>A shareable <see cref="HttpAntiforgery"/> instance.</returns>
     /// <exception cref="ArgumentException">
-    /// The configured <see cref="HttpAntiforgeryOptions.CookieName"/> is not an RFC 6265
-    /// <c>token</c>, or <see cref="HttpAntiforgeryOptions.CookiePath"/> is not an
-    /// RFC 6265 <c>path-value</c>.
+    /// <paramref name="configure"/> assigns <see cref="HttpAntiforgeryOptions.CookieName"/> a
+    /// string that is not an RFC 6265 <c>token</c>, or <see cref="HttpAntiforgeryOptions.CookiePath"/>
+    /// one that is not a <c>path-value</c> (thrown by the conversion), or leaves either at
+    /// <see langword="default"/>.
     /// </exception>
     public static HttpAntiforgery Create(Action<HttpAntiforgeryOptions>? configure = null)
     {
@@ -96,9 +80,9 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
     /// <returns>A shareable <see cref="HttpAntiforgery"/> instance.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// <see cref="HttpAntiforgeryOptions.CookieName"/> is not an RFC 6265 <c>token</c>,
-    /// or <see cref="HttpAntiforgeryOptions.CookiePath"/> is not an RFC 6265
-    /// <c>path-value</c>.
+    /// <see cref="HttpAntiforgeryOptions.CookieName"/> or <see cref="HttpAntiforgeryOptions.CookiePath"/>
+    /// is <see langword="default"/>. An out-of-grammar string never reaches the options: its
+    /// conversion throws when it is assigned.
     /// </exception>
     public static HttpAntiforgery Create(HttpAntiforgeryOptions options)
     {

@@ -34,7 +34,11 @@ public class HttpCookieValidationTests
         string value = "a" + (char)octet + "b";
 
         ArgumentException ex = Should.Throw<ArgumentException>(() => new HttpCookie("sid", value));
+
+        // The HttpCookieValue conversion throws before the constructor runs, so ParamName is the
+        // conversion's own parameter and the message is what names the cookie value.
         ex.ParamName.ShouldBe("value");
+        ex.Message.ShouldContain("Cookie value", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - HttpCookie ctor: CR/LF value cannot inject a second Set-Cookie line")]
@@ -61,7 +65,36 @@ public class HttpCookieValidationTests
         string name = "a" + (char)octet + "b";
 
         ArgumentException ex = Should.Throw<ArgumentException>(() => new HttpCookie(name, "value"));
+
+        // Thrown by the HttpCookieName conversion: ParamName is its parameter, the message names the cookie name.
+        ex.ParamName.ShouldBe("value");
+        ex.Message.ShouldContain("Cookie name", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpCookie ctor: rejects the default name, which its type cannot validate")]
+    public void Ctor_DefaultName_ShouldThrowArgumentNullException()
+    {
+        ArgumentNullException ex = Should.Throw<ArgumentNullException>(() => new HttpCookie(default, "value"));
         ex.ParamName.ShouldBe("name");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpCookie ctor: a null name or value string is refused by its conversion")]
+    public void Ctor_NullNameOrValueString_ShouldThrowArgumentException()
+    {
+        Should.Throw<ArgumentException>(() => new HttpCookie((string)null!, "value"));
+        Should.Throw<ArgumentException>(() => new HttpCookie("sid", (string)null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpCookie ctor: an omitted or default value is the empty value")]
+    public void Ctor_OmittedOrDefaultValue_ShouldBeEmpty()
+    {
+        HttpCookie omitted = new("sid");
+        HttpCookie defaulted = new("sid", default);
+
+        omitted.Value.ShouldBe<HttpCookieValue>(string.Empty);
+        defaulted.Value.ShouldBe<HttpCookieValue>(string.Empty);
+        omitted.HasValue.ShouldBeFalse();
+        omitted.ToString().ShouldBe("sid=; Path=/");
     }
 
     [Theory(DisplayName = "Cohesion Test [Http] - HttpCookie ctor: accepts well-formed cookie values")]
@@ -73,14 +106,14 @@ public class HttpCookieValidationTests
     public void Ctor_WellFormedValue_ShouldNotThrow(string value)
     {
         HttpCookie cookie = new("sid", value);
-        cookie.Value.ShouldBe(value);
+        cookie.Value.ShouldBe<HttpCookieValue>(value);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - HttpCookie ctor: accepts a dense token name")]
     public void Ctor_DenseTokenName_ShouldNotThrow()
     {
         HttpCookie cookie = new("a!#$%&'*+-.^_`|~09AZaz", "v");
-        cookie.Name.ShouldBe("a!#$%&'*+-.^_`|~09AZaz");
+        cookie.Name.ShouldBe<HttpCookieName>("a!#$%&'*+-.^_`|~09AZaz");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - Request parse: drops a pair whose value carries a control octet")]
@@ -94,7 +127,7 @@ public class HttpCookieValidationTests
         HttpCookieCollection cookies = new(headers, HttpHeaderKey.Cookie);
 
         cookies.Count.ShouldBe(1);
-        cookies.Single().Name.ShouldBe("good");
+        cookies.Single().Name.ShouldBe<HttpCookieName>("good");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - Response parse: drops a malformed cookie without throwing")]
@@ -107,6 +140,6 @@ public class HttpCookieValidationTests
             () => new HttpCookieCollection(headers, HttpHeaderKey.SetCookie));
 
         cookies.Count.ShouldBe(1);
-        cookies.Single().Name.ShouldBe("id");
+        cookies.Single().Name.ShouldBe<HttpCookieName>("id");
     }
 }

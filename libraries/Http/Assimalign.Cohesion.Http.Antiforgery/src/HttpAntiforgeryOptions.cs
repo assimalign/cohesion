@@ -32,11 +32,14 @@ public sealed class HttpAntiforgeryOptions
     /// Defaults to <c>__cohesion-antiforgery</c>.
     /// </summary>
     /// <remarks>
-    /// The value must be a non-empty RFC 6265 <c>token</c>, as <see cref="HttpCookie"/>
-    /// requires. Both <see cref="HttpAntiforgery"/> <c>Create</c> overloads refuse any
-    /// other value when they create the service, before any token is stored.
+    /// The value is a non-empty RFC 6265 <c>token</c>: assigning any other
+    /// <see cref="string"/> throws <see cref="ArgumentException"/> from the
+    /// <see cref="HttpCookieName"/> conversion, before the setter runs. Both
+    /// <see cref="HttpAntiforgery"/> <c>Create</c> overloads refuse
+    /// <see langword="default"/>, the one name that conversion cannot catch, when
+    /// they create the service, before any token is stored.
     /// </remarks>
-    public string CookieName { get; set; } = "__cohesion-antiforgery";
+    public HttpCookieName CookieName { get; set; } = "__cohesion-antiforgery";
 
     /// <summary>
     /// Gets or sets the form field that carries the request token for
@@ -117,13 +120,14 @@ public sealed class HttpAntiforgeryOptions
     /// <c>/</c>.
     /// </summary>
     /// <remarks>
-    /// The value must be an RFC 6265 <c>path-value</c>: US-ASCII with no
-    /// <c>;</c> and no control characters, as
-    /// <see cref="HttpCookieOptions.Path"/> requires. Both
-    /// <see cref="HttpAntiforgery"/> <c>Create</c> overloads refuse any other
-    /// value when they create the service, not when a token is stored.
+    /// The value is an RFC 6265 <c>path-value</c>, US-ASCII with no <c>;</c> and
+    /// no control characters: assigning any other <see cref="string"/> throws
+    /// <see cref="ArgumentException"/> from the <see cref="HttpCookiePath"/>
+    /// conversion, before the setter runs. Both <see cref="HttpAntiforgery"/>
+    /// <c>Create</c> overloads refuse <see langword="default"/>, which holds no
+    /// path, when they create the service, not when a token is stored.
     /// </remarks>
-    public string CookiePath { get; set; } = "/";
+    public HttpCookiePath CookiePath { get; set; } = "/";
 
     /// <summary>
     /// Gets or sets whether the cookie token is essential to the application, so a cookie-consent

@@ -47,7 +47,7 @@ public class CookiePolicyOptionsTests
         HttpCookieOptions template = new CookiePolicyOptions().ConsentCookie;
 
         // Assert
-        template.Path.ShouldBe("/");
+        template.Path.ShouldBe<HttpCookiePath?>("/");
         template.SameSite.ShouldBe(HttpCookieSameSiteMode.Lax);
         template.MaxAge.ShouldBe(TimeSpan.FromDays(365));
         template.Expires.ShouldBeNull();

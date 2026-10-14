@@ -190,6 +190,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         builder.AppendLine($$"""
 		using System;
 
+		#nullable enable
 		#pragma warning disable CS8604, CS8625
 		
 		namespace {{context.ObjectNamespace}}
@@ -318,9 +319,9 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 
         if (info.ObjectHasIsValidMethod)
         {
-            builder.AppendLine("			if (!IsValid(value, out string message))");
+            builder.AppendLine("			if (!IsValid(value, out string? message))");
             builder.AppendLine("			{");
-            builder.AppendLine("				throw new ArgumentException(message);");
+            builder.AppendLine("				throw new ArgumentException(message, nameof(value));");
             builder.AppendLine("			}");
         }
 
@@ -386,7 +387,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         {
             builder.Append("		public partial bool IsValid(");
             builder.Append(GetNormalizedName(context.ObjectRuntimeType));
-            builder.AppendLine(" value, out string message);");
+            builder.AppendLine(" value, [global::System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? message);");
         }
 
         // Write CompareTo

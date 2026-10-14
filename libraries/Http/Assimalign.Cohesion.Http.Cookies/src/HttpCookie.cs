@@ -2,8 +2,6 @@ using System;
 using System.Diagnostics;
 using System.Text;
 
-using Assimalign.Cohesion.Http.Internal;
-
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
@@ -11,66 +9,50 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// The <see cref="Name"/> and <see cref="Value"/> are validated against the
-/// RFC 6265 &#167; 4.1.1 grammar at construction: the name must be a
+/// RFC 6265 &#167; 4.1.1 grammar by their value types: the name must be a
 /// <c>token</c> and the value must be <c>*cookie-octet</c> (optionally
-/// DQUOTE-wrapped). Because the two are immutable, a constructed
-/// <see cref="HttpCookie"/> can never carry an octet &#8212; <c>;</c>,
-/// <c>,</c>, whitespace, a control character, or CR/LF &#8212; that would
-/// split or corrupt the serialized <c>Set-Cookie</c> line.
+/// DQUOTE-wrapped). A <see cref="string"/> argument is checked by its implicit
+/// conversion before the constructor runs, which throws
+/// <see cref="ArgumentException"/> with <see cref="ArgumentException.ParamName"/>
+/// <c>value</c> (the conversion's own parameter). Because the two are immutable,
+/// a constructed <see cref="HttpCookie"/> can never carry an octet &#8212;
+/// <c>;</c>, <c>,</c>, whitespace, a control character, or CR/LF &#8212; that
+/// would split or corrupt the serialized <c>Set-Cookie</c> line.
 /// </remarks>
 [DebuggerDisplay("{ToString()}")]
 public sealed class HttpCookie
 {
+    private static readonly HttpCookieValue _emptyValue = new(string.Empty);
+
     /// <summary>
     /// Initializes a new cookie instance.
     /// </summary>
-    /// <param name="name">The cookie name. Must be a non-empty RFC 6265 &#167; 4.1.1 <c>token</c>.</param>
-    /// <param name="value">The cookie value. Must be RFC 6265 &#167; 4.1.1 <c>*cookie-octet</c>, optionally wrapped in a single pair of DQUOTEs.</param>
+    /// <param name="name">The cookie name, a non-empty RFC 6265 &#167; 4.1.1 <c>token</c>.</param>
+    /// <param name="value">
+    /// The cookie value, RFC 6265 &#167; 4.1.1 <c>*cookie-octet</c>, optionally
+    /// wrapped in a single pair of DQUOTEs. <see langword="default"/> is the empty value.
+    /// </param>
     /// <param name="options">The cookie options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/> or empty, or <paramref name="value"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">
-    /// <paramref name="name"/> is not a valid RFC 6265 token, or
-    /// <paramref name="value"/> contains an octet outside the RFC 6265
-    /// cookie-octet grammar (a control character including CR/LF, whitespace,
-    /// DQUOTE, comma, semicolon, or backslash). Such input is rejected so the
-    /// value cannot split or corrupt the emitted <c>Set-Cookie</c> header.
-    /// </exception>
-    public HttpCookie(string name, string value = "", HttpCookieOptions? options = null)
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="default"/>, which holds no name.</exception>
+    public HttpCookie(HttpCookieName name, HttpCookieValue value = default, HttpCookieOptions? options = null)
     {
-        ArgumentNullException.ThrowIfNullOrEmpty(name);
-        ArgumentNullException.ThrowIfNull(value);
-
-        // RFC 6265 §4.1.1 octet-grammar validation (anti header-splitting). The
-        // raw name/value is deliberately not echoed into the message so a
-        // hostile control character cannot leak into logs downstream.
-        if (!HttpCookieGrammar.IsValidName(name))
-        {
-            throw new ArgumentException(
-                ErrorMessages.CookieNameInvalid,
-                nameof(name));
-        }
-
-        if (!HttpCookieGrammar.IsValidValue(value))
-        {
-            throw new ArgumentException(
-                ErrorMessages.CookieValueInvalid,
-                nameof(value));
-        }
+        // default(HttpCookieName) is the one name its type does not validate.
+        ArgumentNullException.ThrowIfNull(name.Value, nameof(name));
 
         Name = name;
-        Value = value;
+        Value = value.Value is null ? _emptyValue : value;
         Options = options is null ? new HttpCookieOptions() : new HttpCookieOptions(options);
     }
 
     /// <summary>
     /// Gets the cookie name.
     /// </summary>
-    public string Name { get; }
+    public HttpCookieName Name { get; }
 
     /// <summary>
     /// Gets the cookie value.
     /// </summary>
-    public string Value { get; }
+    public HttpCookieValue Value { get; }
 
     /// <summary>
     /// Gets the cookie options.
@@ -161,18 +143,18 @@ public sealed class HttpCookie
     public override string ToString()
     {
         StringBuilder builder = new();
-        builder.Append(Name);
+        builder.Append(Name.Value);
         builder.Append('=');
-        builder.Append(Value);
+        builder.Append(Value.Value);
 
-        if (!string.IsNullOrWhiteSpace(Options.Domain))
+        if (Options.Domain is HttpCookieDomain domain && !string.IsNullOrWhiteSpace(domain.Value))
         {
-            builder.Append("; Domain=").Append(Options.Domain);
+            builder.Append("; Domain=").Append(domain.Value);
         }
 
-        if (!string.IsNullOrWhiteSpace(Options.Path))
+        if (Options.Path is HttpCookiePath path && !string.IsNullOrWhiteSpace(path.Value))
         {
-            builder.Append("; Path=").Append(Options.Path);
+            builder.Append("; Path=").Append(path.Value);
         }
 
         if (Options.Expires is DateTimeOffset expires)
