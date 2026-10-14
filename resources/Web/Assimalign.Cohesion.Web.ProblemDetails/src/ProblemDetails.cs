@@ -28,12 +28,29 @@ using Assimalign.Cohesion.Web.Internal;
 /// </remarks>
 public sealed class ProblemDetails
 {
+    private string? _type;
+    private int? _status;
+    private string? _instance;
+
     /// <summary>
     /// Gets or sets the problem type, a URI reference (RFC 9457 §3.1.1) identifying the problem
     /// category. When <see langword="null"/>, the writer emits the reserved default
     /// <c>"about:blank"</c>.
     /// </summary>
-    public string? Type { get; set; }
+    /// <exception cref="ArgumentException">The value is not a URI reference.</exception>
+    public string? Type
+    {
+        get => _type;
+        set
+        {
+            if (value is not null && !ProblemDetailsUriReference.IsValid(value))
+            {
+                throw new ArgumentException(ErrorMessages.ProblemTypeInvalid, nameof(value));
+            }
+
+            _type = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets a short, human-readable summary of the problem type (RFC 9457 §3.1.2). For the
@@ -45,7 +62,20 @@ public sealed class ProblemDetails
     /// Gets or sets the HTTP status code generated for this occurrence of the problem
     /// (RFC 9457 §3.1.3).
     /// </summary>
-    public int? Status { get; set; }
+    /// <exception cref="ArgumentOutOfRangeException">The value is outside 100 through 599.</exception>
+    public int? Status
+    {
+        get => _status;
+        set
+        {
+            if (value is int status && !HttpStatusCode.IsValid(status))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.ProblemStatusInvalid);
+            }
+
+            _status = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets a human-readable explanation specific to this occurrence of the problem
@@ -57,7 +87,20 @@ public sealed class ProblemDetails
     /// Gets or sets a URI reference that identifies the specific occurrence of the problem
     /// (RFC 9457 §3.1.5).
     /// </summary>
-    public string? Instance { get; set; }
+    /// <exception cref="ArgumentException">The value is not a URI reference.</exception>
+    public string? Instance
+    {
+        get => _instance;
+        set
+        {
+            if (value is not null && !ProblemDetailsUriReference.IsValid(value))
+            {
+                throw new ArgumentException(ErrorMessages.ProblemInstanceInvalid, nameof(value));
+            }
+
+            _instance = value;
+        }
+    }
 
     /// <summary>
     /// Gets the problem-type-specific extension members (RFC 9457 §3.2). Values are constrained to

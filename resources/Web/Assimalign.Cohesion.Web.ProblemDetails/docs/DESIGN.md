@@ -69,15 +69,36 @@ one.
 
 `ProblemDetails.FromStatus(new HttpStatusCode(499))` produces `status: 499` with title `Error`;
 599 produces `status: 599` with title `Internal Server Error`. `WriteProblemDetailsAsync` writes
-the same numeric response status and JSON status. It still rejects a supplied response status
-outside 100–599 through `HttpStatusCode` validation. The serializer alone remains a plain model
-writer; it does not validate or replace the caller's `Status` or `Title`.
+the same numeric response status and JSON status. `ProblemDetails.Status` checks the canonical
+`HttpStatusCode.IsValid` range when assigned, before any serializer can observe an invalid code.
+The serializer remains a plain model writer; it does not replace the caller's `Status` or `Title`.
 
 **Breaking behavior from 10.0.0-preview.1 (decision 15):** constructing an unregistered
 `HttpStatusCode`, or writing a problem with that integer status onto a response, used to throw.
 Those operations now succeed within 100–599. Registered titles and explicit application titles
 retain their behavior; the generic fallback prevents the newly accepted codes from acquiring an
 empty default title.
+
+### Composition validation (#1477)
+
+The mutable model preserves its `int? Status` and `string? Type` / `Instance` signatures. A non-null
+status outside 100–599 throws `ArgumentOutOfRangeException` from its setter, using the existing
+`HttpStatusCode.IsValid` rule. `FromStatus(default)` therefore fails while constructing the payload.
+The response helper cannot serialize an invalid status and then fail converting it for the response.
+
+`Type` and `Instance` reject malformed RFC 3986 URI references with `ArgumentException` in their
+setters. Absolute URIs, relative paths, query-only and fragment-only references, and the empty
+reference are accepted without changing their spelling. Bare non-ASCII IRI text, controls,
+whitespace, backslashes, malformed escapes and malformed authorities are refused. An internal
+span-based grammar check validates the original text without resolution or scheme-specific DNS and
+port restrictions. It accepts generic registered-name characters, IPv6 and IPvFuture literals, and
+ports consisting of arbitrary digits as RFC 3986 defines them. Error text comes from this
+package's generated `ErrorMessages` resources. No public type or member is added.
+
+**Breaking behavior from 10.0.0-preview.1 (decision 15):** assignments of invalid status codes or
+malformed type/instance references now throw immediately. The released model accepted all three
+unchecked; its response helper serialized an invalid status before conversion failed. Null values
+remain optional and all valid status codes and URI references retain their existing representation.
 
 ## AOT posture
 
