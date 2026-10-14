@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Web.Cors;
 public sealed class CorsPolicyBuilder
 {
     private readonly List<string> _origins = new();
-    private readonly List<string> _methods = new();
+    private readonly List<HttpMethod> _methods = new();
     private readonly List<HttpFieldName> _headers = new();
     private readonly List<HttpFieldName> _exposedHeaders = new();
     private Func<string, bool>? _originPredicate;
@@ -113,7 +113,8 @@ public sealed class CorsPolicyBuilder
     /// <returns>The same builder, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="methods"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// An entry is not a method token, or is <c>*</c> (call <see cref="AllowAnyMethod"/>).
+    /// An entry is not a method token of at most 32 characters, or is <c>*</c>
+    /// (call <see cref="AllowAnyMethod"/>).
     /// </exception>
     public CorsPolicyBuilder WithMethods(params string[] methods)
     {
@@ -121,8 +122,7 @@ public sealed class CorsPolicyBuilder
 
         foreach (string method in methods)
         {
-            ValidateToken(method, nameof(methods), "method", nameof(AllowAnyMethod));
-            _methods.Add(CorsSyntax.NormalizeMethod(method));
+            _methods.Add(CreateMethod(method));
         }
 
         return this;
@@ -272,7 +272,7 @@ public sealed class CorsPolicyBuilder
             Distinct(_origins, StringComparer.Ordinal),
             _originPredicate,
             _allowAnyMethod,
-            Distinct(_methods, StringComparer.Ordinal),
+            DistinctMethods(_methods),
             _allowAnyHeader,
             DistinctHeaders(_headers),
             DistinctHeaders(_exposedHeaders),
@@ -280,26 +280,36 @@ public sealed class CorsPolicyBuilder
             _preflightMaxAge);
     }
 
-    private static void ValidateToken(string value, string parameterName, string kind, string? wildcardAlternative)
+    private static HttpMethod CreateMethod(string value)
     {
         if (string.IsNullOrEmpty(value))
         {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenRequired, kind), parameterName);
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenRequired, "method"), "methods");
         }
 
         if (value == "*")
         {
             throw new ArgumentException(
-                wildcardAlternative is null
-                    ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardNotSupported, kind)
-                    : string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardOptionRequired, kind, wildcardAlternative),
-                parameterName);
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardOptionRequired, "method", nameof(AllowAnyMethod)),
+                "methods");
         }
 
-        if (!CorsSyntax.IsToken(value))
+        return new HttpMethod(CorsSyntax.NormalizeMethod(value));
+    }
+
+    private static string[] DistinctMethods(List<HttpMethod> values)
+    {
+        HashSet<HttpMethod> seen = new(values.Count);
+        List<string> distinct = new(values.Count);
+        foreach (HttpMethod value in values)
         {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenInvalid, value, kind), parameterName);
+            if (seen.Add(value))
+            {
+                distinct.Add(value.Value);
+            }
         }
+
+        return distinct.ToArray();
     }
 
     private static void ValidateHeader(HttpFieldName name, string parameterName, string? wildcardAlternative)

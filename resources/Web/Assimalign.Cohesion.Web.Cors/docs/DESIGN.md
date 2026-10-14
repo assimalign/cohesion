@@ -83,6 +83,14 @@ excludes both.
 
 ### Methods
 
+- **Configured methods use `HttpMethod` validation (#1477).** `WithMethods` retains the existing
+  string arguments and constructs the method values it stores in the builder, so an RFC 9110 token
+  longer than 32 characters fails at composition. `Build` projects those values into the existing
+  immutable string list. This matches routing and CORS preflight's existing length limit; a policy
+  cannot list a method that no preflight can request. Invalid-token messages come from core Http's
+  generated `ErrorMessages`, while CORS owns its empty-value and wildcard errors. No public API is
+  added or changed. The policy implementation was absent from 10.0.0-preview.1, so this is a
+  behavior change only from the development implementation, which silently accepted overlong methods.
 - **Byte-case-sensitive**, as Fetch compares them and as RFC 9110 §9.1 defines them. The requested method
   is read from the raw `Access-Control-Request-Method` header and compared ordinally everywhere: against the
   policy, and against the methods of a route that matched the `OPTIONS` request (#1301). `HttpMethod` is

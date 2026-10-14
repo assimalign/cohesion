@@ -10,7 +10,8 @@ and selected per endpoint from routing metadata.
 - **A policy model** (`CorsPolicy`, built with `CorsPolicyBuilder`): allowed origins (an exact list, a
   predicate, or any origin), methods, request headers, exposed response headers, credentials, and the
   preflight max age. Configured origins must be origins (`scheme://host[:port]`) and are normalized to the
-  form a browser sends; any origin cannot be combined with credentials.
+  form a browser sends; any origin cannot be combined with credentials. `WithMethods` requires RFC 9110
+  tokens of at most 32 characters, matching routing and the preflight parser; invalid values throw when added.
 - **The middleware** (`UseCors`): a preflight is answered `204` with the policy's grant (origin, credentials,
   methods, headers, max age) or with no CORS header at all when the policy denies it, and never reaches the
   endpoint. An actual request gets the allowed origin (echoed, or `*`), credentials and exposed headers, plus
