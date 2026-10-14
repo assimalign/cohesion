@@ -35,6 +35,7 @@ namespace Assimalign.Cohesion.Web.Caching;
 public sealed class OutputCachePolicy
 {
     private TimeSpan _duration = TimeSpan.FromSeconds(60);
+    private long? _maximumBodySize;
 
     /// <summary>
     /// Gets or sets whether the policy is active. A disabled policy caches nothing (equivalent to no
@@ -83,7 +84,20 @@ public sealed class OutputCachePolicy
     /// body abandons caching and streams through untouched. <see langword="null"/> (the default) uses the
     /// middleware-wide <see cref="OutputCacheOptions.MaximumBodySize"/>.
     /// </summary>
-    public long? MaximumBodySize { get; set; }
+    /// <exception cref="ArgumentOutOfRangeException">The assigned override is not positive.</exception>
+    public long? MaximumBodySize
+    {
+        get => _maximumBodySize;
+        set
+        {
+            if (value <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.CacheBodySizeInvalid);
+            }
+
+            _maximumBodySize = value;
+        }
+    }
 
     /// <summary>
     /// Gets the request-header names whose values partition the cache key.

@@ -522,3 +522,17 @@ lookup. The constructor validates each through `HttpFieldName.TryCreate`, then r
 snapshot. Its `IReadOnlyList<string>` signature is unchanged. Against 10.0.0-preview.1, malformed
 stored vary names now fail during entry construction, and later source-list mutations no longer
 change lookup dimensions or introduce names that fail during a request.
+
+## Per-policy byte-budget validation (#1477)
+
+`OutputCachePolicy.MaximumBodySize` keeps its nullable `long` signature. Assigning zero or a
+negative override now throws a resource-backed `ArgumentOutOfRangeException`, using the same
+positive-budget rule and error message as `OutputCacheOptions.MaximumBodySize`. Null continues
+to select the middleware-wide budget, and every positive value remains accepted. The setter
+covers base, named, and inline policies, including later mutations of a retained policy.
+
+**Breaking from 10.0.0-preview.1 (decision 15):** nonpositive overrides formerly passed composition
+and effectively suppressed body capture; they now fail on assignment. This defect exists in the
+released tag. It requires application-controlled configuration and is not directly settable by an
+unauthenticated client. Its impact is lost caching under misconfiguration (CWE-20, low severity),
+with no independently reachable confidentiality or integrity impact. No public API is added.

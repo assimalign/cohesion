@@ -39,6 +39,10 @@ It never references `Assimalign.Cohesion.Web.Hosting` (the resource hosting-isol
 
 ## Usage
 
+A policy's `MaximumBodySize` override must be positive or null. Zero and negative values throw
+`ArgumentOutOfRangeException` on assignment; null uses the middleware-wide limit. Use a disabled
+policy to turn caching off.
+
 ```csharp
 var routes = app.UseRouting();
 
