@@ -229,7 +229,8 @@ jobs:
     # App.Database's hand-curated member list must cover the shipped project closure of every
     # Database library. SDK Smoke runs the same static test, but only for the Database paths it
     # watches; this job runs it for a change to any Database project. It reads csprojs and the
-    # Runtime producers' Directory.Build.props, so it needs no build tasks and no packs.
+    # Runtime producers' Directory.Build.props and needs no packs, but its test project builds
+    # through the shared targets, whose code generation loads the build tasks.
     name: "App.Database framework closure"
     runs-on: ubuntu-latest
     steps:
@@ -239,6 +240,14 @@ jobs:
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
+
+      - name: Restore build tasks
+        shell: pwsh
+        run: dotnet restore "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj"
+
+      - name: Build build tasks
+        shell: pwsh
+        run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release --no-restore
 
       - name: Run framework manifest tests
         shell: pwsh

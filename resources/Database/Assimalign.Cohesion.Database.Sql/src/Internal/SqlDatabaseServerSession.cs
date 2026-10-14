@@ -41,6 +41,10 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
     private Task _completion = Task.CompletedTask;
     private string _closeReason = SqlDatabaseEventSource.CloseReason.Unknown;
 
+    // Set by Abort before it cancels the lifetime, so the pump can tell the server's own teardown
+    // from a transport that closed under it.
+    private bool _abortRequested;
+
     internal SqlDatabaseServerSession(
         SqlDatabaseServer server,
         IDuplexConnection connection,
@@ -91,6 +95,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
     {
         try
         {
+            Volatile.Write(ref _abortRequested, true);
             _lifetimeSource.Cancel();
             _connection.Abort(new ConnectionAbortedException("The server is shutting down."));
         }
@@ -134,9 +139,17 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             SqlDatabaseEventSource.Log.SessionProtocolViolation(this, exception.Message);
             await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, exception.Message).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (ClosedUnderPump(softStop, hardAbort))
+        {
+            // The transport closed under a blocked read or write: a peer that reset or hung up. The
+            // session's lifetime follows the connection's ConnectionClosed, which a duplex transport
+            // signals as soon as it sees the close (#1459), so the in-flight operation ends in a
+            // cancellation the server did not request. That is a transport outcome (plan D9).
+            _closeReason = SqlDatabaseEventSource.CloseReason.TransportFailed;
+        }
         catch (OperationCanceledException)
         {
-            // Aborted, connection closed, or stop signaled mid-frame.
+            // The server stopped or aborted the session mid-frame.
             _closeReason = SqlDatabaseEventSource.CloseReason.Cancelled;
         }
         catch (Exception exception) when (TransportCloseReason(exception) is { } reason)
@@ -550,6 +563,13 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
     /// </summary>
     /// <param name="exception">What reached the pump.</param>
     /// <returns><c>ConnectionAborted</c>, <c>TransportFailed</c>, or null.</returns>
+    // True when the transport's close, not the server's stop or abort, cancelled the pump.
+    private bool ClosedUnderPump(CancellationToken softStop, CancellationToken hardAbort)
+        => !softStop.IsCancellationRequested
+            && !hardAbort.IsCancellationRequested
+            && !Volatile.Read(ref _abortRequested)
+            && _connection.ConnectionClosed.IsCancellationRequested;
+
     private static string? TransportCloseReason(Exception exception) => exception switch
     {
         ConnectionAbortedException => SqlDatabaseEventSource.CloseReason.ConnectionAborted,

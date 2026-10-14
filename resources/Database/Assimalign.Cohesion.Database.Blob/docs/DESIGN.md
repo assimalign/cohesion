@@ -993,7 +993,7 @@ four servers.
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
-`ProtocolViolation`, `Cancelled` (aborted, its connection closed, or the stop arrived mid-frame),
+`ProtocolViolation`, `Cancelled` (the server stopped or aborted the session mid-frame),
 `ConnectionAborted`, `TransportFailed`, `Faulted`, `ExchangeRefused` (an exchange refused for the
 engine's or the database's state), `ExchangeFailed`, or `Unknown` (an out-of-memory failure,
 which the pump does not catch). The handshake refuses with `ProtocolViolation` a first frame that
@@ -1013,7 +1013,10 @@ plan D2), and close the session with `TransportFailed` or `ConnectionAborted`, w
 device's. The TCP driver reports a reset its receive sees as the end of the stream, so a session
 idle in its ready loop that the peer resets closes as `PeerClosed`; a reset that fails a send the
 pump is blocked in raises the raw `SocketException`, which was a `SessionFaulted` (Error) before
-this rule. **A session leaves the server once**: its cleanup releases its resources in a `try`
+this rule. Under the duplex contracts (#1459) a transport signals `ConnectionClosed` as soon as it sees
+the close, and the session's lifetime follows that token, so a reset can also end the blocked read
+or write as a cancellation the server did not request: the pump reports it as `TransportFailed`
+too, and keeps `Cancelled` for the server's own stop or abort. **A session leaves the server once**: its cleanup releases its resources in a `try`
 and completes the session with the server in the `finally`, so a disposal that throws, which
 still propagates, neither leaves `current-server-sessions` raised nor skips `SessionClosed`, and
 its `MaxSessions` slot is freed.
