@@ -62,6 +62,13 @@ entry, sorts the snapshot by priority (ascending) and then by `LastAccessed` (as
 walks the snapshot evicting entries with reason `Capacity` until the running size drops to
 `SizeLimit * (1 - CompactionPercentage)`.
 
+`MemoryCacheOptions.CompactionPercentage` accepts only finite doubles in `(0, 1]` and rejects
+invalid assignments with `ArgumentOutOfRangeException`, preserving the previous value. This
+prevents NaN from entering the compaction target arithmetic. Rejecting NaN is an intentional
+behavioral breaking change from 10.0.0-preview.1 (#1491); valid fractions and public signatures
+are unchanged. Option-validation exception messages come from the build-generated `ErrorMessages`
+accessor over `src/Properties/ErrorMessages.resx`.
+
 ## Concurrency Model
 
 - **Reads:** `ConcurrentDictionary.TryGetValue` is lock-free. The sliding-window touch is a

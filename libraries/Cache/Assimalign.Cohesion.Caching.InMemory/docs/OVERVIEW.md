@@ -44,7 +44,7 @@ AOT-friendly cache that honors every expiration, eviction, and invalidation rule
 | --- | --- | --- |
 | `ExpirationScanFrequency` | 1 minute | Upper bound on background expiration scan cadence. |
 | `SizeLimit` | `null` | When set, every committed entry must declare `Size`. |
-| `CompactionPercentage` | 0.05 | Fraction of `SizeLimit` released during a capacity compaction. |
+| `CompactionPercentage` | 0.05 | Finite fraction in `(0, 1]` of `SizeLimit` released during a capacity compaction. Invalid assignments, including NaN, throw `ArgumentOutOfRangeException`. |
 | `TimeProvider` | `TimeProvider.System` | Used for expiration and access tracking. Override for deterministic tests. |
 
 ## Source Layout
