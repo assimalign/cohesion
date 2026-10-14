@@ -40,7 +40,7 @@ public sealed class FileSystemKeyRepository : IKeyRepository
     {
         if (string.IsNullOrEmpty(directoryPath))
         {
-            throw new ArgumentException("A key repository directory path is required.", nameof(directoryPath));
+            throw new ArgumentException(ErrorMessages.KeyRepositoryPathRequired, nameof(directoryPath));
         }
 
         return new FileSystemKeyRepository(directoryPath);
@@ -57,6 +57,12 @@ public sealed class FileSystemKeyRepository : IKeyRepository
 
         foreach (string path in Directory.EnumerateFiles(_directory, "*" + Extension))
         {
+            if (!KeyDocumentName.TryCreate(Path.GetFileNameWithoutExtension(path), out KeyDocumentName name))
+            {
+                // A foreign file must not prevent valid key documents from loading.
+                continue;
+            }
+
             byte[] content;
             try
             {
@@ -72,7 +78,7 @@ public sealed class FileSystemKeyRepository : IKeyRepository
                 continue;
             }
 
-            documents.Add(new KeyDocument(Path.GetFileNameWithoutExtension(path), content));
+            documents.Add(new KeyDocument(name, content));
         }
 
         return documents;
@@ -80,27 +86,15 @@ public sealed class FileSystemKeyRepository : IKeyRepository
 
     /// <inheritdoc />
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
-    /// <exception cref="DataProtectionException">The key document name is not a valid file name.</exception>
     public void StoreKey(KeyDocument key)
     {
         ArgumentNullException.ThrowIfNull(key);
-        ValidateName(key.Name);
         Directory.CreateDirectory(_directory);
 
-        string finalPath = Path.Combine(_directory, key.Name + Extension);
+        string finalPath = Path.Combine(_directory, key.Name.Value + Extension);
         string tempPath = finalPath + TempExtension;
 
         File.WriteAllBytes(tempPath, key.Content.ToArray());
         File.Move(tempPath, finalPath, overwrite: true);
-    }
-
-    private static void ValidateName(string name)
-    {
-        if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
-            || name.Contains("..", StringComparison.Ordinal)
-            || Path.IsPathRooted(name))
-        {
-            throw new DataProtectionException($"'{name}' is not a valid key document name.");
-        }
     }
 }
