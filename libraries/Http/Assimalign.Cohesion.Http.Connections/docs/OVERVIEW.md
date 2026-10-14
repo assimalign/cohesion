@@ -73,3 +73,9 @@ with the Web host.
 HTTP connections implement `IConnection` and expose their single `Protocol` and the wrapped
 transport's `Features`. Await `listener.BindAsync(token)` before reading its `EndPoints`;
 `AcceptAsync(token)` yields a connection and adds it to `Connections` until it closes.
+
+## Alternative-service authority
+
+`AdvertiseAltService` accepts an optional `Authority`, for example `"alt.example:443"`.
+Null or empty derives the port from the HTTP/3 listener. An authority containing
+controls, spaces or tabs is rejected at assignment, before binding.

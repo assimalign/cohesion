@@ -46,3 +46,13 @@ These behaviors replace preview.1's last-value parsing; see the compatibility
 and caller audit in DESIGN before upgrading code that sends duplicate keys.
 
 Transport integrations distinguish the `IConnection` identity/lifetime root from `IDuplexConnection` byte pipes and `IMultiplexedConnectionStream` streams. Core HTTP request/response and connection-info contracts do not acquire a transport dependency.
+
+## Configured fields
+
+Use `HttpFieldName name = "X-Trace"` and `HttpFieldValue value = "enabled"`
+for validated configuration; use `TryCreate` when invalid text is expected. Names
+compare without case sensitivity; values preserve case. Nullable string assignments
+keep null as absence. A required consumer still refuses `default`.
+
+`HttpAltService` accepts null/empty same-host values and rejects hosts containing
+controls, spaces or tabs before an advertisement can be formatted.

@@ -79,3 +79,11 @@ replacement retains the final CORS decision without running the callback again.
 
 See [`DESIGN.md`](DESIGN.md) for the policy model and its validation, policy selection, the preflight's
 policy source, the `Vary: Origin` and cache rules, the fail-closed decision, ordering, and the non-goals.
+
+## Typed configured header names
+
+Individual string arguments still work: `policy.WithHeaders("Content-Type", "X-Tenant")` and
+`policy.WithExposedHeaders("ETag")` convert to `HttpFieldName`. To pass a prebuilt array, use
+`HttpFieldName[]` instead of `string[]`. The immutable policy's `Headers` and `ExposedHeaders`
+now contain `HttpFieldName`; use `.Value` for their text. Names compare ordinally without case,
+and CORS continues to reject `*` and invalid or uninitialized names.

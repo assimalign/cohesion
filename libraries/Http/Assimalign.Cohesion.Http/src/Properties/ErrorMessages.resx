@@ -516,4 +516,13 @@
   <data name="XForwardedListInvalid" xml:space="preserve">
     <value>The value is not a valid X-Forwarded-* list: &apos;{0}&apos;.</value>
   </data>
+  <data name="FieldNameInvalid" xml:space="preserve">
+    <value>An HTTP field name must be a non-empty ASCII token, without a pseudo-header prefix.</value>
+  </data>
+  <data name="FieldValueInvalid" xml:space="preserve">
+    <value>An HTTP field value must not contain controls other than internal HTAB, or leading or trailing SP or HTAB.</value>
+  </data>
+  <data name="AltServiceHostInvalid" xml:space="preserve">
+    <value>An alternative-service host must not contain control characters or spaces.</value>
+  </data>
 </root>

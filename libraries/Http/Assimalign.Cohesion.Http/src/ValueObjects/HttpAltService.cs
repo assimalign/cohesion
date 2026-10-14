@@ -67,7 +67,8 @@ public readonly struct HttpAltService : IEquatable<HttpAltService>
     /// parameter, RFC 7838 §3.1).
     /// </param>
     /// <exception cref="ArgumentException">
-    /// Thrown when <paramref name="protocolId"/> is empty or contains a non-token character.
+    /// Thrown when <paramref name="protocolId"/> is empty or contains a non-token character,
+    /// or <paramref name="host"/> contains a control character or space.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when <paramref name="port"/> is outside 0..65535, or <paramref name="maxAgeSeconds"/>
@@ -83,6 +84,11 @@ public readonly struct HttpAltService : IEquatable<HttpAltService>
         if (port < 0 || port > 65535)
         {
             throw new ArgumentOutOfRangeException(nameof(port), port, ErrorMessages.PortOutOfRange);
+        }
+
+        if (!IsValidHost(host))
+        {
+            throw new ArgumentException(ErrorMessages.AltServiceHostInvalid, nameof(host));
         }
 
         if (maxAgeSeconds is < 0)
@@ -427,8 +433,12 @@ public readonly struct HttpAltService : IEquatable<HttpAltService>
             host = altAuthority.Substring(0, colonIndex);
         }
 
-        return true;
+        return IsValidHost(host);
     }
+
+    private static bool IsValidHost(string? host)
+        => host is null
+            || (HttpFieldValue.TryCreate(host, out _) && host.AsSpan().IndexOfAny(' ', '\t') < 0);
 
     private static bool TryReadQuotedString(ref ReadOnlySpan<char> input, out string value)
     {

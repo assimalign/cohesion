@@ -148,7 +148,10 @@ internal static class OutputCacheKeyBuilder
         builder.Append(Separator).Append('h');
 
         string[] names = new string[policy.VaryByHeaders.Count];
-        policy.VaryByHeaders.CopyTo(names, 0);
+        for (int i = 0; i < names.Length; i++)
+        {
+            names[i] = policy.VaryByHeaders[i].Value;
+        }
         Array.Sort(names, StringComparer.OrdinalIgnoreCase);
 
         foreach (string name in names)

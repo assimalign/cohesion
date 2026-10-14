@@ -56,6 +56,11 @@ app.UseStaticFiles(contentRoot, options =>
 });
 ```
 
+`ContentTypeMappings` values and `FallbackContentType` must be non-empty HTTP field values.
+Registration rejects controls other than interior HTAB, plus leading or trailing SP/HTAB,
+using `HttpFieldValue`; case is preserved. The fallback is checked even when
+`ServeUnknownContentTypes` is disabled.
+
 A `ContentTypeMappings` key maps an extension, never a whole file name, so no key types a file
 without one, such as `apple-app-site-association`. Give such files a mount of their own whose
 fallback type is theirs, or send them from a handler with an explicit type:

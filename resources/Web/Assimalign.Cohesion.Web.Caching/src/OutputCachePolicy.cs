@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Caching.Internal;
+
 namespace Assimalign.Cohesion.Web.Caching;
 
 /// <summary>
@@ -85,7 +88,8 @@ public sealed class OutputCachePolicy
     /// <summary>
     /// Gets the request-header names whose values partition the cache key.
     /// </summary>
-    public IList<string> VaryByHeaders { get; } = new List<string>();
+    /// <remarks>Names are RFC 9110 field-name tokens. The collection refuses <see langword="default"/> on insertion and replacement.</remarks>
+    public IList<HttpFieldName> VaryByHeaders { get; } = new OutputCacheFieldNameCollection();
 
     /// <summary>
     /// Gets the query keys whose values partition the cache key. Empty (the default) folds the entire
@@ -110,15 +114,13 @@ public sealed class OutputCachePolicy
     /// <param name="headerNames">The request-header names to vary by.</param>
     /// <returns>The same policy, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="headerNames"/> is <see langword="null"/>.</exception>
-    public OutputCachePolicy VaryByHeader(params string[] headerNames)
+    /// <exception cref="ArgumentException">A name is <see langword="default"/>.</exception>
+    public OutputCachePolicy VaryByHeader(params HttpFieldName[] headerNames)
     {
         ArgumentNullException.ThrowIfNull(headerNames);
-        foreach (string name in headerNames)
+        foreach (HttpFieldName name in headerNames)
         {
-            if (!string.IsNullOrEmpty(name))
-            {
-                VaryByHeaders.Add(name);
-            }
+            VaryByHeaders.Add(name);
         }
 
         return this;

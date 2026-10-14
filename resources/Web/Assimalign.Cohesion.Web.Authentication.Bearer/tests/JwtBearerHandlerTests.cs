@@ -299,6 +299,55 @@ public class JwtBearerHandlerTests
         result.Principal!.Identity!.Name.ShouldBe("carol");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Realm: preserves quotes and backslashes with quoted-pair escaping")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Challenge_QuotedRealm_ShouldEscapeWithoutChangingItsValue(bool forbid)
+    {
+        // Arrange
+        JwtBearerOptions options = HmacOptions();
+        options.Realm = "api\"\\realm";
+        TestHttpContext context = TestHttpContext.Create();
+        IAuthenticationHandler handler = await InitializeAsync(options, context);
+
+        // Act
+        if (forbid)
+        {
+            await handler.ForbidAsync(null, CancellationToken.None);
+        }
+        else
+        {
+            await handler.ChallengeAsync(null, CancellationToken.None);
+        }
+
+        // Assert
+        string expected = "Bearer realm=\"api\\\"\\\\realm\"";
+        if (forbid)
+        {
+            expected += ", error=\"insufficient_scope\"";
+        }
+
+        context.Response.Headers.GetValue(HttpHeaderKey.WWWAuthenticate).ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Realm: optional null and empty values omit the parameter")]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Challenge_AbsentRealm_ShouldOmitParameter(string? realm)
+    {
+        // Arrange
+        JwtBearerOptions options = HmacOptions();
+        options.Realm = realm;
+        TestHttpContext context = TestHttpContext.Create();
+        IAuthenticationHandler handler = await InitializeAsync(options, context);
+
+        // Act
+        await handler.ChallengeAsync(null, CancellationToken.None);
+
+        // Assert
+        context.Response.Headers.GetValue(HttpHeaderKey.WWWAuthenticate).ShouldBe("Bearer");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Challenge emits a 401 Bearer WWW-Authenticate header")]
     public async Task Challenge_Emits401BearerHeader()
     {

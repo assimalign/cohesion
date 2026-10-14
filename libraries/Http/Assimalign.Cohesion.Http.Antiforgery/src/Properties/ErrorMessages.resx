@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     Microsoft ResX Schema
@@ -131,5 +131,8 @@
   </data>
   <data name="AntiforgeryTokenMissingOrInvalid" xml:space="preserve">
     <value>The required antiforgery token was missing or invalid.</value>
+  </data>
+  <data name="HeaderNameInvalid" xml:space="preserve">
+    <value>The antiforgery header name must be a non-empty RFC 9110 field-name token.</value>
   </data>
 </root>

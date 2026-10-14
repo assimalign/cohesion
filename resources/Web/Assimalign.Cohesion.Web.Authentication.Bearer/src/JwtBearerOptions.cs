@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Http;
+
 namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 
 /// <summary>
@@ -16,6 +18,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// </remarks>
 public sealed class JwtBearerOptions
 {
+    private HttpFieldValue? _realm;
+
     /// <summary>
     /// Gets or sets the scheme's human-readable display name.
     /// </summary>
@@ -104,7 +108,26 @@ public sealed class JwtBearerOptions
     /// Gets or sets the realm advertised in the <c>WWW-Authenticate: Bearer</c> challenge, or
     /// <see langword="null"/> to omit the realm parameter.
     /// </summary>
-    public string? Realm { get; set; }
+    /// <remarks>
+    /// Field-value conversion rejects controls other than HTAB and boundary whitespace. The
+    /// setter additionally rejects HTAB because a realm must contain no control characters.
+    /// Quotes and backslashes are escaped when the challenge is written. An absent or empty
+    /// realm omits the parameter.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The realm contains a control character.</exception>
+    public HttpFieldValue? Realm
+    {
+        get => _realm;
+        set
+        {
+            if (value is { } realm && realm.Value?.Contains('\t') == true)
+            {
+                throw new ArgumentException(ErrorMessages.BearerRealmInvalid, nameof(value));
+            }
+
+            _realm = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the issuer stamped on mapped claims when a source claim carries none. Defaults

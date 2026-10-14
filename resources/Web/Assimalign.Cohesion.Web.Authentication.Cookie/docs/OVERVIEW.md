@@ -33,6 +33,12 @@ must set `TicketProtector` themselves.
 The name defaults to `.Cohesion.Cookies`. The ticket is essential, HttpOnly,
 SameSite=Lax and scoped to `/`; effective HTTPS always adds Secure.
 
+`LoginPath` and `AccessDeniedPath` are `HttpFieldValue` properties. Assign a
+non-empty path with no control character or space; encode spaces as `%20`.
+String assignments continue to work and invalid strings, empty values and
+`default` fail immediately with `ArgumentException`. Read `.Value` when a string
+is needed. Both properties were strings in 10.0.0-preview.1, so rebuild callers.
+
 The property changed from `string` in 10.0.0-preview.1, requiring consumers to
 rebuild. Invalid names now fail at assignment instead of sign-in or sign-out.
 See [DESIGN.md](DESIGN.md) for validation, compatibility and ticket behavior.

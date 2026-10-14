@@ -31,7 +31,8 @@ public static class WebApplicationStaticFilesExtensions
         /// which hold <c>appsettings*.json</c> and the application's binaries. When the application
         /// has no web root, or the directory does not exist when the pipeline is built, the
         /// middleware serves nothing and passes every request to the next middleware. The options
-        /// are configured and validated once, when this method is called.
+        /// are configured once and validated when this method is called, then checked again before
+        /// the deferred middleware snapshot is created at pipeline build.
         /// </remarks>
         /// <param name="configure">A callback that configures the composition-time options.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
@@ -40,7 +41,7 @@ public static class WebApplicationStaticFilesExtensions
         /// Thrown when the configured options are invalid: a request path that does not begin
         /// with <c>/</c>, a default-document name that is empty or contains a path separator or
         /// dot segment, a <c>Cache-Control</c> value that does not parse per RFC 9111, or an
-        /// empty fallback content type while <see cref="StaticFilesOptions.ServeUnknownContentTypes"/> is enabled.
+        /// content-type mapping or fallback that is empty or is not a valid HTTP field value.
         /// </exception>
         public IWebApplicationPipelineBuilder UseStaticFiles(Action<StaticFilesOptions>? configure = null)
         {
@@ -85,7 +86,7 @@ public static class WebApplicationStaticFilesExtensions
         /// Thrown when the configured options are invalid: a request path that does not begin
         /// with <c>/</c>, a default-document name that is empty or contains a path separator or
         /// dot segment, a <c>Cache-Control</c> value that does not parse per RFC 9111, or an
-        /// empty fallback content type while <see cref="StaticFilesOptions.ServeUnknownContentTypes"/> is enabled.
+        /// content-type mapping or fallback that is empty or is not a valid HTTP field value.
         /// </exception>
         public IWebApplicationPipelineBuilder UseStaticFiles(IFileSystem fileSystem, Action<StaticFilesOptions>? configure)
         {
@@ -127,10 +128,20 @@ public static class WebApplicationStaticFilesExtensions
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.StaticFilesCacheControlInvalid, options.CacheControl));
         }
 
-        if (options.ServeUnknownContentTypes && string.IsNullOrWhiteSpace(options.FallbackContentType))
+        foreach (string contentType in options.ContentTypeMappings.Values)
+        {
+            ValidateContentType(contentType);
+        }
+
+        ValidateContentType(options.FallbackContentType);
+    }
+
+    private static void ValidateContentType(string contentType)
+    {
+        if (string.IsNullOrEmpty(contentType) || !HttpFieldValue.TryCreate(contentType, out _))
         {
             throw new ArgumentException(
-                ErrorMessages.FallbackContentTypeRequired);
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentTypeFieldInvalid, contentType));
         }
     }
 }

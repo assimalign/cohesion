@@ -3,6 +3,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Globalization;
 
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Cors.Internal;
 
 namespace Assimalign.Cohesion.Web.Cors;
@@ -44,8 +45,8 @@ public sealed class CorsPolicy
         bool allowsAnyMethod,
         string[] methods,
         bool allowsAnyHeader,
-        string[] headers,
-        string[] exposedHeaders,
+        HttpFieldName[] headers,
+        HttpFieldName[] exposedHeaders,
         bool supportsCredentials,
         TimeSpan? preflightMaxAge)
     {
@@ -60,7 +61,7 @@ public sealed class CorsPolicy
 
         AllowsAnyHeader = allowsAnyHeader;
         Headers = Array.AsReadOnly(headers);
-        _headers = headers.ToFrozenSet(StringComparer.OrdinalIgnoreCase).GetAlternateLookup<ReadOnlySpan<char>>();
+        _headers = Array.ConvertAll(headers, static name => name.Value).ToFrozenSet(StringComparer.OrdinalIgnoreCase).GetAlternateLookup<ReadOnlySpan<char>>();
 
         ExposedHeaders = Array.AsReadOnly(exposedHeaders);
         SupportsCredentials = supportsCredentials;
@@ -110,13 +111,13 @@ public sealed class CorsPolicy
     /// <summary>
     /// Gets the request headers a preflight may approve. Compared case-insensitively.
     /// </summary>
-    public IReadOnlyList<string> Headers { get; }
+    public IReadOnlyList<HttpFieldName> Headers { get; }
 
     /// <summary>
     /// Gets the response headers, beyond the CORS-safelisted response headers, that the browser exposes to
     /// the calling script (<c>Access-Control-Expose-Headers</c>).
     /// </summary>
-    public IReadOnlyList<string> ExposedHeaders { get; }
+    public IReadOnlyList<HttpFieldName> ExposedHeaders { get; }
 
     /// <summary>
     /// Gets whether responses may be shared with requests that carry credentials (cookies, HTTP

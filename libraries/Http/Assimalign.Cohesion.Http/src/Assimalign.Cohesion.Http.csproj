@@ -7,4 +7,14 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\HttpFieldName.cs"
+			ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Http"
+			ObjectAccessModifier="public" ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
+		<CohesionValueType Include="ValueObjects\HttpFieldValue.cs"
+			ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Http"
+			ObjectAccessModifier="public" ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+	</ItemGroup>
 </Project>

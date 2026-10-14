@@ -89,6 +89,21 @@ correct-by-construction. The client half of § 2.5 — a redirect-following clie
 QUERY with its original content and switches methods only on `303` — is
 `Assimalign.Cohesion.Http.ClientFactory`'s factory-owned redirect layer (see its `DESIGN.md`).
 
+Both redirect helpers take `HttpFieldValue` locations (#1476). Conversion applies
+the base field-content grammar, and a local composition check refuses empty and
+default locations, SP and HTAB. Every control character or space is therefore
+refused before the helper changes the status or Location header. Absolute and
+relative references keep their case and escaped spelling; encode spaces as `%20`.
+
+Compared with 10.0.0-preview.1, `RedirectQuery(string, bool)` becomes
+`RedirectQuery(HttpFieldValue, bool)` and `RedirectQueryToGet(string)` becomes
+`RedirectQueryToGet(HttpFieldValue)`. Callers must rebuild; existing string calls
+use implicit conversion. Invalid values now throw `ArgumentException` before
+response mutation instead of reaching response encoding. Null strings now fail
+the value conversion with `ArgumentException`; they previously produced
+`ArgumentNullException`. These are deliberate preview compatibility changes under
+decision 15. Method-preserving and 303 redirect semantics are unchanged.
+
 ## Conditional QUERY reuses the core evaluator (§ 2.6)
 
 § 2.6's rule is *"evaluate as the equivalent conditional GET"* — so the method classification

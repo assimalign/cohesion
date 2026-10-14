@@ -5954,6 +5954,17 @@ alt-authority with optional host + required port, `ma`, `persist`, and the speci
 where the listener is the only component that knows whether an HTTP/3
 `IMultiplexedConnectionListener` is registered alongside the stream listeners.
 
+### Configured authority validation (#1476)
+
+`Authority` retains its nullable string signature and validates each non-null
+assignment through `HttpFieldValue.TryCreate`, additionally refusing SP/HTAB.
+Null and empty retain endpoint-derived authority behavior. Validation applies even
+when advertisement is currently disabled, so enabling it later cannot activate an
+unsafe value. Compared with 10.0.0-preview.1, control-bearing or spaced authority
+text now throws `ArgumentException` at assignment, before listener construction
+or binding, instead of failing each advertised response during encoding.
+Port syntax still uses the existing binding check; no per-response work is added.
+
 ### Where the advertisement is decided and injected
 
 Advertisement is opt-in via `HttpConnectionListenerOptions.AltServiceAdvertisement`

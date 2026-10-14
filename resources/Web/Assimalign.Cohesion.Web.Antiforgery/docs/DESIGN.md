@@ -468,3 +468,11 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Configured header grammar (#1476)
+
+The builder's `HttpAntiforgeryOptions.HeaderName` now uses core Http's `HttpFieldName` grammar.
+Malformed names and `default` fail during configuration, before the feature is registered; the
+middleware unwraps the already checked name for its existing request lookup. The registration
+snapshot preserves the typed value. Against 10.0.0-preview.1 the underlying Http option changes
+from `string` to `HttpFieldName`, with no additional public Web signature change.

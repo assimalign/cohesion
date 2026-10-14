@@ -24,6 +24,7 @@ namespace Assimalign.Cohesion.Http.Connections;
 public sealed class HttpAltServiceAdvertisementOptions
 {
     private TimeSpan _maxAge = TimeSpan.FromDays(1);
+    private string? _authority;
 
     /// <summary>
     /// Gets or sets a value indicating whether HTTP/3 advertisement is enabled. Defaults to
@@ -69,5 +70,19 @@ public sealed class HttpAltServiceAdvertisementOptions
     /// application-set value.
     /// </para>
     /// </remarks>
-    public string? Authority { get; set; }
+    /// <exception cref="ArgumentException">The authority contains a control character or space.</exception>
+    public string? Authority
+    {
+        get => _authority;
+        set
+        {
+            if (value is not null
+                && (!HttpFieldValue.TryCreate(value, out _) || value.AsSpan().IndexOfAny(' ', '\t') >= 0))
+            {
+                throw new ArgumentException(ErrorMessages.AltSvcAuthorityFieldInvalid, nameof(value));
+            }
+
+            _authority = value;
+        }
+    }
 }

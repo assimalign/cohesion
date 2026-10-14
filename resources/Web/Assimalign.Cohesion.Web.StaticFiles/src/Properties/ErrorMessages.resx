@@ -129,8 +129,8 @@
   <data name="EntityTagRequired" xml:space="preserve">
     <value>The entity-tag must not be empty.</value>
   </data>
-  <data name="FallbackContentTypeRequired" xml:space="preserve">
-    <value>A fallback content type is required when unknown content types are served.</value>
+  <data name="ContentTypeFieldInvalid" xml:space="preserve">
+    <value>The content type must be a non-empty HTTP field value: &apos;{0}&apos;.</value>
   </data>
   <data name="FallbackFileOutsideRoot" xml:space="preserve">
     <value>The fallback file must be a path inside the web root: &apos;{0}&apos;.</value>

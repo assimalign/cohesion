@@ -204,7 +204,7 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
         }
 
         // Fall back to the header (AJAX/SPA clients).
-        if (httpContext.Request.Headers.TryGetValue(_options.HeaderName, out HttpHeaderValue headerValue)
+        if (httpContext.Request.Headers.TryGetValue(_options.HeaderName.Value, out HttpHeaderValue headerValue)
             && !string.IsNullOrEmpty(headerValue.Value))
         {
             return headerValue.Value;

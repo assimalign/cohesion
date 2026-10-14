@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Cors.Internal;
 
 namespace Assimalign.Cohesion.Web.Cors;
@@ -29,8 +30,8 @@ public sealed class CorsPolicyBuilder
 {
     private readonly List<string> _origins = new();
     private readonly List<string> _methods = new();
-    private readonly List<string> _headers = new();
-    private readonly List<string> _exposedHeaders = new();
+    private readonly List<HttpFieldName> _headers = new();
+    private readonly List<HttpFieldName> _exposedHeaders = new();
     private Func<string, bool>? _originPredicate;
     private bool _allowAnyOrigin;
     private bool _allowAnyMethod;
@@ -151,13 +152,13 @@ public sealed class CorsPolicyBuilder
     /// <exception cref="ArgumentException">
     /// An entry is not a header name, or is <c>*</c> (call <see cref="AllowAnyHeader"/>).
     /// </exception>
-    public CorsPolicyBuilder WithHeaders(params string[] headers)
+    public CorsPolicyBuilder WithHeaders(params HttpFieldName[] headers)
     {
         ArgumentNullException.ThrowIfNull(headers);
 
-        foreach (string header in headers)
+        foreach (HttpFieldName header in headers)
         {
-            ValidateToken(header, nameof(headers), "header name", nameof(AllowAnyHeader));
+            ValidateHeader(header, nameof(headers), nameof(AllowAnyHeader));
             _headers.Add(header);
         }
 
@@ -182,13 +183,13 @@ public sealed class CorsPolicyBuilder
     /// <returns>The same builder, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="headers"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">An entry is not a header name, or is <c>*</c>.</exception>
-    public CorsPolicyBuilder WithExposedHeaders(params string[] headers)
+    public CorsPolicyBuilder WithExposedHeaders(params HttpFieldName[] headers)
     {
         ArgumentNullException.ThrowIfNull(headers);
 
-        foreach (string header in headers)
+        foreach (HttpFieldName header in headers)
         {
-            ValidateToken(header, nameof(headers), "header name", wildcardAlternative: null);
+            ValidateHeader(header, nameof(headers), wildcardAlternative: null);
             _exposedHeaders.Add(header);
         }
 
@@ -273,8 +274,8 @@ public sealed class CorsPolicyBuilder
             _allowAnyMethod,
             Distinct(_methods, StringComparer.Ordinal),
             _allowAnyHeader,
-            Distinct(_headers, StringComparer.OrdinalIgnoreCase),
-            Distinct(_exposedHeaders, StringComparer.OrdinalIgnoreCase),
+            DistinctHeaders(_headers),
+            DistinctHeaders(_exposedHeaders),
             _supportsCredentials,
             _preflightMaxAge);
     }
@@ -299,6 +300,38 @@ public sealed class CorsPolicyBuilder
         {
             throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenInvalid, value, kind), parameterName);
         }
+    }
+
+    private static void ValidateHeader(HttpFieldName name, string parameterName, string? wildcardAlternative)
+    {
+        if (name.Value is null)
+        {
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsTokenRequired, "header name"), parameterName);
+        }
+
+        if (name.Value == "*")
+        {
+            throw new ArgumentException(
+                wildcardAlternative is null
+                    ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardNotSupported, "header name")
+                    : string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorsWildcardOptionRequired, "header name", wildcardAlternative),
+                parameterName);
+        }
+    }
+
+    private static HttpFieldName[] DistinctHeaders(List<HttpFieldName> values)
+    {
+        HashSet<HttpFieldName> seen = new(values.Count);
+        List<HttpFieldName> distinct = new(values.Count);
+        foreach (HttpFieldName value in values)
+        {
+            if (seen.Add(value))
+            {
+                distinct.Add(value);
+            }
+        }
+
+        return distinct.ToArray();
     }
 
     // First occurrence wins, so the rendered header lists keep the order the policy was written in.

@@ -6,6 +6,24 @@ the design decisions behind the parts of the core that are easy to get wrong;
 it grows as areas are touched rather than attempting to re-document the whole
 surface at once.
 
+## Configured field grammar (#1476)
+
+`HttpFieldName` and `HttpFieldValue` are generated value objects for composition.
+They are base HTTP grammar (decision V2), with no feature-specific contract.
+The name is a non-empty RFC 9110 §5.1 token, refuses pseudo-headers, and uses
+`OrdinalIgnoreCase` identity while preserving spelling. Values use `Ordinal`
+identity, permit empty content and internal HTAB, and reject every other control
+character and boundary SP/HTAB. This configuration rule also rejects Unicode C1
+controls; existing wire normalization continues accepting RFC obs-text.
+Their `IsValid` methods compose the existing span-based field syntax checks;
+`TryCreate` supports non-throwing composition. Nullable string conversions preserve
+absence, and consumers reject `default` wherever an actual value is required.
+
+Neither `HttpHeaderKey` nor `HttpHeaderValue` changes, so request parsing does not
+acquire configuration validation. Compared with 10.0.0-preview.1 these two types
+and their generated constructors, conversion, comparison and JSON surfaces are
+additions. Feature packages document the configuration signatures they adopt.
+
 ## Field sections, repeated fields, and trailers
 
 ### The model
@@ -899,6 +917,16 @@ owns the advertisement policy (opt-in, `ma`, explicit-authority override) and th
 This core type only formats and parses the value; see the Http.Connections `DESIGN.md` for the
 advertisement design. `ma`/`persist` are modeled as data for a future client-side alternative
 cache; honoring a received `Alt-Svc` is a client concern this library does not implement.
+
+### Host validation (#1476)
+
+The constructor and `Http3` factory validate non-null hosts through `HttpFieldValue`
+and additionally refuse SP/HTAB. Null and empty hosts retain same-host meaning;
+case-insensitive host equality and quoted-string escaping remain unchanged.
+`TryParse` checks the same rule before construction and returns false for an unsafe
+host. This is a behavioral break from 10.0.0-preview.1: control-bearing or spaced
+hosts now fail before formatting or advertising a response. Public signatures stay
+unchanged; the rule is a composition check on the shared grammar type.
 
 ### Tolerant parsing, strict port
 

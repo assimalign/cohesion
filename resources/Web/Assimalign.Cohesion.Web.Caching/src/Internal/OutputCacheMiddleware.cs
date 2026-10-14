@@ -194,7 +194,7 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         for (int i = 0; i < entry.Headers.Count; i++)
         {
             OutputCacheHeader header = entry.Headers[i];
-            response.Headers[new HttpHeaderKey(header.Name)] = ToHeaderValue(header.Values);
+            response.Headers[new HttpHeaderKey(header.Name.Value)] = ToHeaderValue(header.Values);
         }
 
         long ageSeconds = (long)Math.Floor((_timeProvider.GetUtcNow() - entry.CreatedAt).TotalSeconds);
@@ -428,7 +428,7 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
             }
 
             HttpHeaderValue value = pair.Value;
-            string?[] values = new string?[value.Count];
+            HttpFieldValue?[] values = new HttpFieldValue?[value.Count];
             for (int i = 0; i < value.Count; i++)
             {
                 values[i] = value[i];
@@ -440,17 +440,17 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         return captured;
     }
 
-    private static HttpHeaderValue ToHeaderValue(IReadOnlyList<string?> values)
+    private static HttpHeaderValue ToHeaderValue(IReadOnlyList<HttpFieldValue?> values)
     {
         if (values.Count == 1)
         {
-            return new HttpHeaderValue(values[0]);
+            return new HttpHeaderValue(values[0]?.Value);
         }
 
         string?[] array = new string?[values.Count];
         for (int i = 0; i < values.Count; i++)
         {
-            array[i] = values[i];
+            array[i] = values[i]?.Value;
         }
 
         return new HttpHeaderValue(array);

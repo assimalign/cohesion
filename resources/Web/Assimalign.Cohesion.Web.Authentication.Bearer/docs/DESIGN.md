@@ -110,9 +110,21 @@ scheme name; `NameClaimType`/`RoleClaimType` are configurable (default
 `ChallengeAsync` emits `401` with `WWW-Authenticate: Bearer` &mdash; adding
 `realm` when configured and, after a failed authenticate, `error="invalid_token"`
 with a sanitized `error_description`. `ForbidAsync` emits `403` with
-`Bearer error="insufficient_scope"`. Header values are sanitized of quotes
-and CR/LF so they cannot break the quoted-string grammar. The bearer scheme
-never redirects, so it needs no endpoint-metadata check.
+`Bearer error="insufficient_scope"`. A configured realm uses `HttpFieldValue?`:
+conversion refuses controls other than HTAB and boundary SP/HTAB, and its setter
+also refuses HTAB. Thus every control fails at configuration, before either
+challenge path runs. Quotes and backslashes are preserved through quoted-pair
+escaping. An absent (including a null string) or empty realm omits the parameter.
+Error descriptions keep their existing sanitization. The bearer scheme never
+redirects, so it needs no endpoint-metadata check.
+
+Compared with 10.0.0-preview.1, `JwtBearerOptions.Realm` changes from `string?`
+to `HttpFieldValue?`, a source/binary change requiring consumers to rebuild;
+string assignment remains supported and reads use `Realm?.Value`. Invalid
+realms now throw `ArgumentException` at assignment instead of failing response
+encoding on a 401/403. Quoted realms now retain their quote/backslash characters
+instead of silently losing them. These are intentional preview behavior changes
+under decision 15 (#1476).
 
 Both paths append their challenge, preserving challenges already added by other schemes
 (RFC 9110 §11.6.1, #1450). This is a behavior change from 10.0.0-preview.1, which

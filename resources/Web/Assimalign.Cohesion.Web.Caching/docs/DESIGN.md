@@ -484,3 +484,30 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Configured and stored field grammar (#1476)
+
+`OutputCachePolicy.VaryByHeaders` is an `IList<HttpFieldName>` and `VaryByHeader` takes
+`params HttpFieldName[]`. The generated type owns RFC 9110 field-name syntax. An internal
+collection refuses `default` on both insertion and replacement, including policy mutations after
+composition, so key construction cannot discover an empty configured name during a request.
+
+`OutputCacheHeader` takes `HttpFieldName` and `HttpFieldValue?[]`, exposing the same name and an
+`IReadOnlyList<HttpFieldValue?>`. The constructor refuses uninitialized names and present default
+values. Null values remain absent; empty values remain valid. It copies the caller's values and
+exposes a read-only wrapper, so a custom store cannot change a previously validated array before
+replay. Generated conversions reject malformed stored names and values before a carrier can be
+replayed. Case and value order are preserved; raw `HttpHeaderKey`/`HttpHeaderValue` request parsing
+is unchanged.
+
+**Breaking from 10.0.0-preview.1:** the policy property and method, the header constructor, and
+`OutputCacheHeader.Name`/`Values` change their public types as described above. Empty names passed
+to `VaryByHeader` are refused rather than silently skipped. Header controls other than internal
+HTAB, leading/trailing SP or HTAB, and malformed names are refused before replay. A caller's
+later mutation of a source value array no longer changes a cache header.
+
+Custom stores' `OutputCacheEntry.VaryBy` names also cross a configuration boundary before variant
+lookup. The constructor validates each through `HttpFieldName.TryCreate`, then retains an immutable
+snapshot. Its `IReadOnlyList<string>` signature is unchanged. Against 10.0.0-preview.1, malformed
+stored vary names now fail during entry construction, and later source-list mutations no longer
+change lookup dimensions or introduce names that fail during a request.

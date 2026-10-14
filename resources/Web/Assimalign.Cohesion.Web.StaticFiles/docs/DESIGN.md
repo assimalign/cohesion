@@ -37,9 +37,10 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   root by default, resolved by the hosting runtime — and passes every request through when the
   application has no web root. Until 2026-09 it mounted `ContentRootPath`, which Web.Hosting
   never set, so it fell back to the process working directory; `.json` is a served content type,
-  which exposed `appsettings*.json`. Its options are configured and validated once, when the
+  which exposed `appsettings*.json`. Its options are configured once and validated when the
   verb is called, exactly like the explicit `UseStaticFiles(IFileSystem, ...)` overloads (they
-  used to be rebuilt on every request).
+  used to be rebuilt on every request). Web-root options are validated again at pipeline build
+  before the deferred snapshot, so mutations made after registration cannot bypass validation.
 - **Middleware-first, no result types.** The 2026-07-10 direction withdrew `IResult`; this
   package writes status, headers, and body directly on `IHttpResponse`. The `#864` edge
   (serializer registry / `OnError`) was dropped from this item accordingly — errors here are
@@ -143,6 +144,19 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
 - **Unknown extensions blocked by default.** Serving unmapped types as `octet-stream` invites
   accidental exposure (config files, dotfiles); the default passes them through so the
   application decides. `ServeUnknownContentTypes` + `FallbackContentType` opt in explicitly.
+- **Configured content types are HTTP field values (#1476).** Every `ContentTypeMappings`
+  value and `FallbackContentType` is checked through `HttpFieldValue.TryCreate` at composition,
+  with a separate non-empty requirement for a content type. This refuses controls other than
+  interior HTAB and leading or trailing SP/HTAB before a value can reach `Content-Type`.
+  Case and valid interior whitespace are preserved. The fallback is checked even when unknown
+  types are disabled, so every supplied configuration value is safe. The dictionary and fallback
+  retain their string signatures; validation uses the shared core grammar without adding checks
+  to `HttpHeaderValue` or per-request response writing. This is a behavior break against
+  10.0.0-preview.1: malformed mappings and fallbacks formerly passed registration, and empty
+  mapping values were silently ignored. They now throw `ArgumentException` during composition.
+  Web-root registrations (`UseStaticFiles` and `MapFallbackToFile`) check again immediately
+  before their deferred snapshot at pipeline build, including when the web root is unavailable;
+  mutating a captured options object after registration cannot bypass the field-value check.
 - **A name with no extension has no type (#1186).** The gate asks
   `HttpContentTypes.TryGetFromFileName` for the logical file name, and a name with no dot
   (`html`, `json`) or a dotfile (`.json`) maps to nothing, so it is blocked like any unmapped
@@ -375,7 +389,7 @@ over the same engine and add nothing AOT-relevant. The package inherits `IsAotCo
 
 No package-specific exception types. `FileSystemException` from mount lookups is absorbed
 into not-found/pass-through semantics; `ArgumentException` from `UseStaticFiles` validation
-(bad prefix, bad default-document name, unparseable `Cache-Control`, missing fallback type)
+(bad prefix, bad default-document name, unparseable `Cache-Control`, invalid content-type field)
 surfaces at composition time. A file that shrinks mid-copy, whether a range or the full body, aborts
 the response with `EndOfStreamException` rather than silently serving wrong bytes (matching the h2
 truncated-body abort posture); one that grew is cut at its declared length.
