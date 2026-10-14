@@ -146,6 +146,14 @@ the registration under the same lock.
   under `OnFailure` (default), `Always`, or `Never`, with 1-second exponential backoff capped at
   30 seconds and five restart attempts. A restart observes
   `Degraded → Stopping → Starting → Running`; dependents are never re-gated.
+- **Supervision option invariants**: `LocalGatewayOptions.LivenessFailureThreshold` remains an
+  `int` greater than zero (default 3), and `MaximumRestartAttempts` remains a nonnegative `int`
+  (default 5; zero disables restarts). Each setter uses an `ArgumentOutOfRangeException` guard
+  before storing the value. The gateway retains the caller's options, so valid later assignments
+  remain supported, while an invalid assignment leaves the previous value intact and cannot
+  reach `LocalGatewayProcessSupervisor`. This follows numeric-range rule V3 without adding a
+  value type or changing the public property signatures. Remaining option-validation messages
+  use build-generated `ErrorMessages` resources with their existing text preserved.
 - **Mounts**: resources receive `COHESION_MOUNT_<M>_PATH` rooted at
   `.cohesion/<application>/<resource>/<mount>`. POSIX directories/files use exact 0700/0600
   modes. A Composite plan's flattened `<member>-<mount>` claim instead receives the outer carrier
@@ -190,6 +198,14 @@ the registration under the same lock.
   verified child and launches a fresh attempt. Concurrent stop and uninstall callers await one
   shared teardown task; persisted ports and mounts are not removed until process exit and PID
   cleanup complete.
+
+**Compatibility with 10.0.0-preview.1 (#1495).** Assigning a nonpositive liveness threshold or a
+negative restart limit now throws immediately, including in an object initializer and after
+gateway construction. Previously those assignments succeeded, initial invalid values failed at
+gateway construction, and later invalid values could reach supervision. This is a behavioral
+breaking change; source and binary signatures are unchanged. These two guards now use BCL
+exception messages and populate `ArgumentOutOfRangeException.ActualValue`; `ParamName` remains
+the property name.
 
 ## Item #968 — late-bound inputs, application trust, and opaque workloads
 

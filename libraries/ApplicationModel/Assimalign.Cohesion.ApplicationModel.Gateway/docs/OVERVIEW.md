@@ -4,6 +4,12 @@ The gateway realizes an immutable application graph in dependency order, waits f
 readiness gate, applies its resource commands, and then admits dependents. Runtime stop preserves
 owned declarations; teardown removes commands and realized resources in reverse order.
 
+Configure local supervision with `LocalGatewayOptions.LivenessFailureThreshold` (positive,
+default 3) and `MaximumRestartAttempts` (nonnegative, default 5; zero disables restarts). Both
+properties throw `ArgumentOutOfRangeException` on invalid assignment and preserve their previous
+value, including after gateway construction. Valid later assignments remain supported. This
+changes 10.0.0-preview.1 behavior, where only gateway construction checked these limits.
+
 Out-of-process command delivery uses `ApplicationGatewayOptions.CommandClients`, which by default
 holds one `ResourceControlPlaneCommandClient`. That client serves every resource kind
 (`IGatewayResourceCommandClient.AnyKind`) over the standard control-plane `commands` route.

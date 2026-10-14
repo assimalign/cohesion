@@ -178,6 +178,23 @@ restart transitions `Degraded -> Stopping -> Starting -> Running`, requests grac
 awaits completion within the member's stop grace, disposes the adopted host, and invokes the same
 registered entry point again under a fresh scope carrying the same context values and ports.
 
+`InProcessGatewayOptions.LivenessFailureThreshold` remains an `int` greater than zero (default
+3), and `MaximumRestartAttempts` remains a nonnegative `int` (default 5; zero disables restarts).
+Each setter uses an `ArgumentOutOfRangeException` guard before storing the value. The gateway
+retains the caller's options, so valid later assignments remain supported, while an invalid
+assignment leaves the previous value intact and cannot reach the supervisor. This follows
+numeric-range rule V3 without adding a value type or changing the public property signatures.
+Remaining option-validation messages use build-generated `ErrorMessages` resources with their
+existing text preserved.
+
+**Compatibility with 10.0.0-preview.1 (#1495).** Assigning a nonpositive liveness threshold or a
+negative restart limit now throws immediately, including in an object initializer and after
+gateway construction. Previously those assignments succeeded, initial invalid values failed at
+gateway construction, and later invalid values could reach supervision. This is a behavioral
+breaking change; source and binary signatures are unchanged. These two guards now use BCL
+exception messages and populate `ArgumentOutOfRangeException.ActualValue`; `ParamName` remains
+the property name.
+
 Restart never re-admits dependencies. A successful later liveness check may restore `Running`
 before the threshold is reached. In-process invocation preserves `cohesion/sysexits/v1` through
 `ResourceEntryExitException`: 64 and 70 are final even under `Always`; 69 and 75 restart under

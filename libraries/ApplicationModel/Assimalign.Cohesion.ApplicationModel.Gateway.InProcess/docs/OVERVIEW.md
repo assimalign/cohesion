@@ -19,6 +19,12 @@ per-resource `Add<Name>()` verb (owner decision of 2026-09-25). Each member rece
 resource-specific content root, persisted loopback endpoints, resolved mounts and credentials, and
 observed dependency addresses through its ambient `ResourceContext`.
 
+Configure supervision with `InProcessGatewayOptions.LivenessFailureThreshold` (positive,
+default 3) and `MaximumRestartAttempts` (nonnegative, default 5; zero disables restarts). Both
+properties throw `ArgumentOutOfRangeException` on invalid assignment and preserve their previous
+value, including after gateway construction. Valid later assignments remain supported. This
+changes 10.0.0-preview.1 behavior, where only gateway construction checked these limits.
+
 `--mode render` emits the same versioned local plan-set envelope as the Local gateway, with each
 resource compiled to an `inProcessHost` unit. It is offline: member entry points are not invoked,
 runtime inputs are not resolved, and the state directory is not created.

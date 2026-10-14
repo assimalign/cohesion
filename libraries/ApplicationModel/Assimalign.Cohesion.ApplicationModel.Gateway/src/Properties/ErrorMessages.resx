@@ -15,4 +15,19 @@
   <data name="CredentialSchemeNotBearer" xml:space="preserve">
     <value>The registered credential issuer returned a '{0}' credential for purpose '{1}', but that credential is presented as a bearer token. Return a Bearer credential, or null to use the default ES256 application-key issuer.</value>
   </data>
+  <data name="ProbeIntervalInvalid" xml:space="preserve">
+    <value>ProbeInterval must be greater than zero.</value>
+  </data>
+  <data name="ProbeTimeoutInvalid" xml:space="preserve">
+    <value>ProbeTimeout must be greater than zero.</value>
+  </data>
+  <data name="InitialRestartBackoffInvalid" xml:space="preserve">
+    <value>InitialRestartBackoff must be zero or greater.</value>
+  </data>
+  <data name="MaximumRestartBackoffInvalid" xml:space="preserve">
+    <value>MaximumRestartBackoff must be at least InitialRestartBackoff.</value>
+  </data>
+  <data name="StopGraceInvalid" xml:space="preserve">
+    <value>StopGrace must be greater than zero.</value>
+  </data>
 </root>
