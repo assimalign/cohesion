@@ -38,7 +38,8 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
                 Log.LogMessage("Beginning Value Type Generation: {0}", valueType.ItemSpec);
 
                 string name = Path.GetFileNameWithoutExtension(valueType.ItemSpec);
-                string fileName = Path.GetFileName(valueType.ItemSpec);
+                // Must match ObjectFilePath in Build.CodeGeneration.targets, which compiles and cleans this file
+                string fileName = $"{name}.generated.cs";
                 string fileDirectory = Path.GetDirectoryName(valueType.ItemSpec)!;
                 string filePath = string.IsNullOrEmpty(fileDirectory) ?
                          Path.Combine(CodeGenOutputPath!, fileName) :

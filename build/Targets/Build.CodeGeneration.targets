@@ -2,8 +2,8 @@
     <ItemGroup>
 		<CohesionValueType
 			Update="@(CohesionValueType)"
-			ObjectFilePath="$(_CohesionCodeGenPath)%(Identity)"
-			ObjectRelativePath="%(Identity)" />
+			ObjectFilePath="$(_CohesionCodeGenPath)%(RelativeDir)%(Filename).generated.cs"
+			ObjectRelativePath="%(RelativeDir)%(Filename).generated.cs" />
 	</ItemGroup>
 	<Target Name="CohesionCreateValueType"
 		BeforeTargets="CoreCompile"
