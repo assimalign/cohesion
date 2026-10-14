@@ -788,7 +788,7 @@ public sealed class GatewayTrustTests
                 },
             });
 
-            IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(
+            IJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(
                 publicKey,
                 publicJwk.GetProperty("kid").GetString());
             string algorithm = token.Algorithm.ShouldNotBeNull();

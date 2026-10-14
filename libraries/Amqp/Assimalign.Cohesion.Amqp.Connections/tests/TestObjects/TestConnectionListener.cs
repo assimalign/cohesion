@@ -8,12 +8,12 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
-/// A <see cref="ConnectionListener"/> double that yields pre-queued carrier connections and
+/// A <see cref="DuplexConnectionListener"/> double that yields pre-queued carrier connections and
 /// records when it is disposed.
 /// </summary>
-internal sealed class TestConnectionListener : ConnectionListener
+internal sealed class TestConnectionListener : DuplexConnectionListener
 {
-    private readonly Queue<Connection> _pending = new();
+    private readonly Queue<IDuplexConnection> _pending = new();
     private readonly ConnectionCapabilities _capabilities;
 
     public TestConnectionListener(ConnectionCapabilities? capabilities = null)
@@ -23,13 +23,15 @@ internal sealed class TestConnectionListener : ConnectionListener
 
     public bool IsDisposed { get; private set; }
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 5672);
 
     public override ConnectionCapabilities Capabilities => _capabilities;
 
-    public void Enqueue(Connection connection) => _pending.Enqueue(connection);
+    public void Enqueue(IDuplexConnection connection) => _pending.Enqueue(connection);
 
-    public override ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
         => ValueTask.FromResult(_pending.Dequeue());
 
     public override ValueTask DisposeAsync()

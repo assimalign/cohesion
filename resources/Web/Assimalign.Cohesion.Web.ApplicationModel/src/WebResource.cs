@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Internal;
@@ -42,7 +43,7 @@ public sealed class WebResource : PlannedResource
         if (!Manifest.Name.Equals(context.Manifest.Name))
         {
             throw new InvalidOperationException(
-                $"Planning context resource '{context.Manifest.Name}' does not match '{Manifest.Name}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PlanningContextResourceMismatch, context.Manifest.Name, Manifest.Name));
         }
 
         return WebPlanner.CreatePlan(context);

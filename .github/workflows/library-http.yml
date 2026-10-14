@@ -2,6 +2,9 @@ name: Http
 on:
   push:
     paths:
+      - 'build/Tasks/**'
+      - 'build/Targets/Build.CodeGeneration.*'
+      - 'build/TestSupport/**'
       - "libraries/Http/**"
       - "!libraries/Http/**/*.slnx"
       - "!libraries/Http/**/*.md"
@@ -13,6 +16,7 @@ jobs:
   build:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     continue-on-error: false
     strategy:
       matrix:
@@ -29,7 +33,12 @@ jobs:
             "Assimalign.Cohesion.Http.Cookies",
             "Assimalign.Cohesion.Http.Antiforgery",
             "Assimalign.Cohesion.Http.Forwarded",
-            "Assimalign.Cohesion.Http.Streaming"
+            "Assimalign.Cohesion.Http.Streaming",
+            "Assimalign.Cohesion.Http.DigestFields",
+            "Assimalign.Cohesion.Http.InterimResponses",
+            "Assimalign.Cohesion.Http.ServerSentEvents",
+            "Assimalign.Cohesion.Http.Tls",
+            "Assimalign.Cohesion.Http.WebSockets"
           ]
     steps:
       - uses: actions/checkout@v4

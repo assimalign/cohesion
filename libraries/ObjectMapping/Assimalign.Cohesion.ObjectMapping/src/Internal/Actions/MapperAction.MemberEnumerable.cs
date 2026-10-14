@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Linq.Expressions;
@@ -7,7 +8,6 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
-using Assimalign.Cohesion.ObjectMapping.Properties;
 
 /*
  * Maps an enumerable member by mapping each source element through the profiles registered for the
@@ -51,7 +51,7 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
         }
         if (member.Member.DeclaringType != typeof(TTarget))
         {
-            throw new ArgumentException(string.Format(Resources.MapperExceptionInvalidChaining, target, typeof(TTarget).Name));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TargetMappingChainInvalid, target, typeof(TTarget).Name));
         }
 
         _sourceGetter = source.Compile();

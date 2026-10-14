@@ -11,8 +11,10 @@ namespace Assimalign.Cohesion.Web.HttpsPolicy.Tests.TestObjects;
 /// <summary>
 /// A minimal in-memory <see cref="IHttpContext"/> for unit tests that drive the HTTPS-policy
 /// middleware directly with a specific request scheme, host, path, and query — cases the in-memory
-/// HTTP/1.1 test factory cannot express (an <c>https</c> request in particular). Only the members the
-/// middleware touches are functional; the rest are inert.
+/// HTTP/1.1 test factory cannot express (an <c>https</c> request in particular). The connection is
+/// settable so a test can model a request arriving from a specific peer, such as a trusted proxy that
+/// the forwarded-headers middleware evaluates. Only the members the middleware touches are functional;
+/// the rest are inert.
 /// </summary>
 internal sealed class TestHttpContext : IHttpContext
 {
@@ -37,7 +39,7 @@ internal sealed class TestHttpContext : IHttpContext
 
     IHttpResponse IHttpContext.Response => Response;
 
-    public IHttpConnectionInfo ConnectionInfo => null!;
+    public IHttpConnectionInfo ConnectionInfo { get; set; } = HttpConnectionInfo.Empty;
 
     public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
 

@@ -103,7 +103,8 @@ public class RuleNestedProfileTest
 
         var validation = validator.Validate(person);
 
+        // Cascade reports every failing member: both collection elements and the primary address.
         Assert.False(validation.IsValid);
-        Assert.Equal(2, validation.Errors.Count());
+        Assert.Equal(3, validation.Errors.Count());
     }
 }

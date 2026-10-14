@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
@@ -15,6 +17,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 public class Http3TransportTests
 {
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should parse a request stream and write response frames")]
     public async Task Http3_OnRequest_ShouldParseRequestStreamAndWriteResponseFrames()
     {
@@ -26,7 +30,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // Assert request
@@ -56,6 +60,32 @@ public class Http3TransportTests
         Encoding.UTF8.GetString(frames[1].Payload).ShouldBe("quic");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3: A standard :method in another case should be an unknown method (RFC 9110 §9.1)")]
+    [InlineData("get", "GET")]
+    [InlineData("head", "HEAD")]
+    [InlineData("connect", "CONNECT")]
+    public async Task Http3_OnMethodInAnotherCase_ShouldParseAnUnknownMethod(string method, string standard)
+    {
+        // Arrange — 'connect' carries :scheme and :path, as any method but CONNECT must, so it is not a tunnel.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(method, "/items", "https", "a");
+        TestConnection stream = new(payload);
+        TestMultiplexedConnection connection = new(stream);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
+
+        // Act
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Assert
+        httpContext.Request.Method.Value.ShouldBe(method);
+        httpContext.Request.Method.ShouldNotBe(HttpMethod.GetCanonicalizedValue(standard));
+        httpContext.Request.Path.Value.ShouldBe("/items");
+        httpContext.Request.Trailers.IsSupported.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should parse a QUERY :method and deliver its content body (RFC 10008)")]
     public async Task Http3_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
     {
@@ -70,7 +100,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Query);
@@ -91,7 +121,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
@@ -115,7 +145,7 @@ public class Http3TransportTests
         // is still surfaced.
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 0), (0x06, 8192)),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection request = new(
             HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/c", "https", "a"));
         TestMultiplexedConnection connection = new(control, request);
@@ -123,7 +153,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
@@ -135,7 +165,7 @@ public class Http3TransportTests
     {
         TestConnection qpack = new(
             HttpProtocolPayloadFactory.CreateHttp3UnidirectionalStream(0x02 /* QPACK encoder */),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection request = new(
             HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/q", "https", "a"));
         TestMultiplexedConnection connection = new(qpack, request);
@@ -143,7 +173,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
@@ -155,17 +185,20 @@ public class Http3TransportTests
     {
         // RFC 9114 §6.2.1 — only one control stream per peer; a second is
         // H3_STREAM_CREATION_ERROR, a connection error.
-        TestConnection first = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), ConnectionDirection.ReadOnly);
-        TestConnection second = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), ConnectionDirection.ReadOnly);
+        TestConnection first = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), ConnectionDirection.ReadOnly, completeInput: false);
+        TestConnection second = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), ConnectionDirection.ReadOnly, completeInput: false);
         TestMultiplexedConnection connection = new(first, second);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+
+        // Both control streams stay open, so the duplicate, not a closed critical stream, ends the connection.
+        connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode.ShouldBe(Http3ErrorCode.StreamCreationError);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should terminate when the control stream's first frame is not SETTINGS")]
@@ -182,7 +215,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
@@ -201,10 +234,38 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: A reserved unidirectional stream type should be stopped with H3_STREAM_CREATION_ERROR while requests are served")]
+    public async Task Http3_OnReservedUnidirectionalStreamType_ShouldStopReadingWithStreamCreationError()
+    {
+        // Arrange — RFC 9114 §6.2: 0x21 is a reserved stream type (0x1f × N + 0x21). Its recipient MUST abort
+        // reading it or discard its data, and SHOULD abort with H3_STREAM_CREATION_ERROR; the connection is
+        // unaffected. The client keeps the stream open, as a peer still sending would.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        Task<IHttpContext> dispatch = peer.NextContextAsync();
+
+        IDuplexConnection reserved = await peer.OpenUnidirectionalStreamAsync();
+        TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = reserved.ConnectionClosed.Register(() => stopped.TrySetResult());
+
+        // Act — the reserved stream, then a request on the same connection.
+        await reserved.Output.WriteAsync(new byte[] { 0x21, 0x00, 0x00 });
+
+        IDuplexConnection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/after", "https", "a"));
+        request.Output.Complete();
+
+        // Assert — the request is served, and the reserved stream is stopped with the code.
+        (await dispatch.WaitAsync(_timeout)).Request.Path.Value.ShouldBe("/after");
+
+        await stopped.Task.WaitAsync(_timeout);
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => reserved.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.StreamCreationError);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should open a control stream and emit SETTINGS with ENABLE_CONNECT_PROTOCOL = 1")]
@@ -221,7 +282,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Driving the receive loop opens and writes the control stream at start.
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -259,7 +320,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -287,14 +348,14 @@ public class Http3TransportTests
                 new (long, long)[] { (0x01, 0), (0x08, 1) },
                 (0x07 /* GOAWAY */, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(0)),
                 (0x0D /* MAX_PUSH_ID */, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(0))),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/g", "https", "a"));
         TestMultiplexedConnection connection = new(control, request);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
@@ -304,6 +365,7 @@ public class Http3TransportTests
 
         // ...and the connection then completes cleanly — draining did not error.
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+        connection.AbortReason.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should emit GOAWAY on the control stream before the connection is disposed")]
@@ -321,7 +383,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnection httpConnection = await listener.AcceptAsync();
         IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
 
         // Surface the request so the server opens its control stream (SETTINGS)
@@ -374,7 +436,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnection httpConnection = await listener.AcceptAsync();
         IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
 
         await using (IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator())
@@ -427,7 +489,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Get);
@@ -481,13 +543,12 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":authority", "a")));
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should surface a valid extended CONNECT via the :protocol item")]
-    public async Task Http3_OnExtendedConnect_ShouldSurfaceProtocolItem()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should install the extended CONNECT feature in the exchange's feature collection")]
+    public async Task Http3_OnExtendedConnect_ShouldInstallFeatureInFeatureCollection()
     {
         // RFC 9220 — CONNECT + :protocol with :scheme/:path/:authority is a
-        // valid extended CONNECT. The transport surfaces the :protocol
-        // pseudo-header verbatim through IHttpContext.Items so the
-        // ExtendedConnect package can model it without a transport dependency.
+        // valid extended CONNECT. The extended CONNECT interceptor (#1368) installs
+        // the feature on the exchange's feature collection, once.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),
@@ -499,22 +560,24 @@ public class Http3TransportTests
         TestMultiplexedConnection connection = new(stream);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
         httpContext.Request.Path.Value.ShouldBe("/chat");
-        httpContext.Items.ContainsKey(TransportItemKeys.Protocol).ShouldBeTrue();
-        httpContext.Items[TransportItemKeys.Protocol].ShouldBe("websocket");
+        IHttpExtendedConnectFeature? feature = httpContext.Features.Get<IHttpExtendedConnectFeature>();
+        feature.ShouldNotBeNull();
+        feature!.Protocol.ShouldBe("websocket");
+        httpContext.ExtendedConnect.ShouldBeSameAs(feature);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: A valid extended CONNECT exposes the ExtendedConnect feature")]
     public async Task Http3_OnExtendedConnect_ShouldExposeExtendedConnectFeature()
     {
-        // The transport surfaces :protocol via IHttpContext.Items; the
-        // Http.ExtendedConnect package models it as a typed feature.
+        // The interceptor installs the feature; the Http.ExtendedConnect accessors read it.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),
@@ -526,9 +589,10 @@ public class Http3TransportTests
         TestMultiplexedConnection connection = new(stream);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.IsExtendedConnect.ShouldBeTrue();
@@ -555,6 +619,38 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":authority", "api.test")));
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3: A request with an empty :protocol should reset its stream with H3_MESSAGE_ERROR while other streams are served")]
+    [InlineData("GET")]
+    [InlineData("CONNECT")]
+    public async Task Http3_OnEmptyProtocol_ShouldResetStreamWithMessageErrorAndServeOthers(string method)
+    {
+        // Arrange — RFC 9110 §5.6.2: a protocol name is a token (1*tchar), so an empty :protocol names
+        // no protocol and the request is malformed on any method (RFC 9220 §3, RFC 9114 §4.1.2, #1369).
+        TestConnection malformed = new(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", method),
+            (":protocol", string.Empty),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test")));
+        TestConnection sibling = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ok", "https", "a"));
+        TestMultiplexedConnection connection = new(malformed, sibling);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        // Act
+        bool dispatched = await enumerator.MoveNextAsync();
+
+        // Assert — the malformed stream never became an exchange; the sibling was the first dispatched.
+        dispatched.ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/ok");
+        malformed.AbortReason.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.MessageError);
+        connection.State.ShouldBe(ConnectionState.Open);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Enabling the dynamic table advertises QPACK capacity and blocked streams")]
     public async Task Http3_OnDynamicTableEnabled_ShouldAdvertiseCapacityAndBlockedStreams()
     {
@@ -570,7 +666,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
         httpContext.Request.Path.Value.ShouldBe("/s");
@@ -596,12 +692,12 @@ public class Http3TransportTests
         // it and emits Insert Count Increment on its decoder stream (§4.4.3).
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection encoder = new(
             HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
                 HttpProtocolPayloadFactory.QPackSetCapacity(4096),
                 HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-dyn", "hello")),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
 
         // Encoded RIC 2 → RIC 1; Delta Base 0 → Base 1; dynamic indexed rel 0 → absolute 0.
         TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
@@ -619,7 +715,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -650,12 +746,12 @@ public class Http3TransportTests
         // may appear for the first (static, nothing to acknowledge) stream 0.
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection encoder = new(
             HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
                 HttpProtocolPayloadFactory.QPackSetCapacity(4096),
                 HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-dyn", "hello")),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
 
         // First request stream (wire ID 0): static-only, owes no acknowledgment.
         TestConnection staticRequest = new(
@@ -679,7 +775,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -727,7 +823,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         // The static request is served; the dynamic one hits the decompression
@@ -763,7 +859,7 @@ public class Http3TransportTests
         });
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
@@ -779,7 +875,7 @@ public class Http3TransportTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();

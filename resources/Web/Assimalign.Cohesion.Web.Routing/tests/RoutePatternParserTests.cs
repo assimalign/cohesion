@@ -1,6 +1,11 @@
-using Assimalign.Cohesion.Web.Routing.Patterns;
+using System.Threading.Tasks;
+
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Web.Routing.Patterns;
+
+using HttpMethod = Assimalign.Cohesion.Http.HttpMethod;
 
 namespace Assimalign.Cohesion.Web.Routing.Tests;
 
@@ -90,5 +95,65 @@ public class RoutePatternParserTests
     {
         // Act & Assert
         Should.Throw<RoutePatternException>(() => RoutePatternParser.Parse("/files/{**path}/extra"));
+    }
+
+    // One row per class of invalid template (#1051): every error path names the template, the part of
+    // it that is wrong, and the fix, where they previously threw an empty message.
+    [Theory(DisplayName = "Cohesion Test [Web.Routing] - Parse: Should explain every class of invalid template")]
+    [InlineData("api//status", "contains an empty segment ('//')")]
+    [InlineData("api/{", "ends with an unmatched '{'")]
+    [InlineData("api{", "ends with an unmatched '{'")]
+    [InlineData("orders}", "ends with an unmatched '}'")]
+    [InlineData("ord}ers", "The literal text 'ord}' contains an unmatched '}'")]
+    [InlineData("orders/{id:regex(^\\d{3}$)}", "The parameter '{id:regex(^\\d{3' contains an unescaped '{'")]
+    [InlineData("orders/{id{", "The parameter '{id{' is not closed: the template ends after an unescaped '{'")]
+    [InlineData("orders/{id:int", "The parameter '{id:int' is not closed: the template ends before its closing '}'")]
+    [InlineData("orders/{}", "contains an empty parameter '{}'")]
+    [InlineData("files/{*}", "The parameter '{*}' has no name")]
+    [InlineData("orders/{a*b}", "The parameter name 'a*b' contains '*'")]
+    [InlineData("orders/{id}/items/{ID}", "The parameter name 'ID' is used more than once")]
+    [InlineData("files/{*path?}", "The catch-all parameter '{*path?}' cannot be optional")]
+    [InlineData("orders/{id=5?}", "The parameter '{id=5?}' is both optional ('?') and has a default value ('=')")]
+    [InlineData("files/{**path}/extra", "The catch-all parameter '{**path}' must be the last segment of the template")]
+    [InlineData("files/x{*path}", "The segment 'x{*path}' combines the catch-all parameter '{*path}' with other text")]
+    [InlineData("files/{name}{ext?}", "In the segment '{name}{ext?}', the optional parameter 'ext' directly follows '{name}'")]
+    [InlineData("files/{name}-{ext?}", "In the segment '{name}-{ext?}', the optional parameter 'ext' follows '-'")]
+    [InlineData("files/{name?}.{ext}", "In the segment '{name?}.{ext}', the optional parameter 'name' is followed by '.'")]
+    [InlineData("files/{name}{ext}", "places the parameters '{name}' and '{ext}' next to each other")]
+    [InlineData("orders?page=1", "The literal text 'orders?page=1' contains '?'")]
+    [InlineData("~orders", "starts with '~' but not '~/'")]
+    public void Parse_InvalidTemplate_ShouldThrowSpecificMessage(string template, string expected)
+    {
+        // Act
+        RoutePatternException exception = Should.Throw<RoutePatternException>(() => RoutePatternParser.Parse(template));
+
+        // Assert
+        exception.Pattern.ShouldBe(template);
+        exception.Message.ShouldStartWith($"The route template '{template}' is invalid. ", Case.Sensitive);
+        exception.Message.ShouldContain(expected, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Parse: Should suggest a separator for adjacent parameters")]
+    public void Parse_WithAdjacentParameters_ShouldSuggestSeparatedForm()
+    {
+        // Act
+        RoutePatternException exception = Should.Throw<RoutePatternException>(() => RoutePatternParser.Parse("/files/{name}{ext}"));
+
+        // Assert
+        exception.Message.ShouldEndWith("Separate them with literal text, for example '{name}-{ext}'.", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Parse: Should report a group prefix and child that repeat a parameter name")]
+    public void MapGroup_WithRepeatedParameterAcrossPrefixAndChild_ShouldExplain()
+    {
+        // Arrange
+        IRouterGroupBuilder group = new RouterBuilder().MapGroup("tenants/{id}");
+
+        // Act
+        RoutePatternException exception = Should.Throw<RoutePatternException>(
+            () => group.Map(HttpMethod.Get, "orders/{id:int}", new RouterRouteHandler(_ => Task.CompletedTask)));
+
+        // Assert
+        exception.Message.ShouldContain("The parameter name 'id' is used more than once", Case.Sensitive);
     }
 }

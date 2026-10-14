@@ -27,11 +27,11 @@ public class NamedPipeConnectionListenerTests
 
         // Act
         await listener.BindAsync(cancellation.Token);
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         NamedPipeConnectionFactory factory = new();
-        await using Connection client = await factory.ConnectAsync(endPoint, cancellation.Token);
-        await using Connection server = await acceptTask;
+        await using IDuplexConnection client = await factory.ConnectAsync(endPoint, cancellation.Token);
+        await using IDuplexConnection server = await acceptTask;
 
         // Assert
         server.ShouldNotBeNull();
@@ -128,7 +128,7 @@ public class NamedPipeConnectionListenerTests
         await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
             options => options.EndPoint = new NamedPipeEndPoint(NamedPipeTestName.Create()));
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(acceptCancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(acceptCancellation.Token);
 
         // Act
         acceptCancellation.Cancel();
@@ -148,7 +148,7 @@ public class NamedPipeConnectionListenerTests
         NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
             options => options.EndPoint = new NamedPipeEndPoint(NamedPipeTestName.Create()));
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         // Act
         await listener.DisposeAsync();
@@ -202,13 +202,13 @@ public class NamedPipeConnectionListenerTests
             options.PipeSecurity = security;
         });
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         NamedPipeConnectionFactory factory = new();
 
         // Act
-        await using Connection client = await factory.ConnectAsync(endPoint, cancellation.Token);
-        await using Connection server = await acceptTask;
+        await using IDuplexConnection client = await factory.ConnectAsync(endPoint, cancellation.Token);
+        await using IDuplexConnection server = await acceptTask;
 
         // Assert
         server.ShouldNotBeNull();

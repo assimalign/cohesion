@@ -20,6 +20,9 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
     private bool _built;
 
     /// <inheritdoc />
+    public bool HasForwarders => _options.Forwarders.Count != 0;
+
+    /// <inheritdoc />
     public ILoggerFactoryBuilder AddProvider(ILoggerProvider provider)
     {
         ArgumentNullException.ThrowIfNull(provider);

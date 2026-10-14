@@ -35,7 +35,7 @@ internal static class QPackStringCodec
     {
         if (index >= buffer.Length)
         {
-            throw new InvalidDataException("The QPACK string literal is truncated.");
+            throw new InvalidDataException(ErrorMessages.QpackStringLiteralTruncated);
         }
 
         bool huffman = (buffer[index] & (1 << prefixBits)) != 0;
@@ -43,7 +43,7 @@ internal static class QPackStringCodec
 
         if (length < 0 || index + length > buffer.Length)
         {
-            throw new InvalidDataException("The QPACK string literal length exceeds the field section.");
+            throw new InvalidDataException(ErrorMessages.QpackStringLiteralTooLarge);
         }
 
         ReadOnlySpan<byte> octets = buffer.Slice(index, (int)length);
@@ -63,7 +63,7 @@ internal static class QPackStringCodec
             // Surface as the per-stream parse failure the HTTP/3 receive
             // loop already isolates (RFC 9204 §2.2 — a Huffman error is a
             // QPACK decompression failure).
-            throw new InvalidDataException("The QPACK string literal has an invalid Huffman encoding.", ex);
+            throw new InvalidDataException(ErrorMessages.QpackStringHuffmanInvalid, ex);
         }
     }
 

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.CodeFixes.Web.Tests</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp"  />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.Analyzers" />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp.SourceGenerators.Testing"  />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.CodeFixes.Web" />
+	</ItemGroup>
+</Project>

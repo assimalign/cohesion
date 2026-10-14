@@ -132,4 +132,7 @@
   <data name="PathTooLong" xml:space="preserve">
     <value>The provided path is too long `{0}`.</value>
   </data>
+  <data name="PathOutsideRoot" xml:space="preserve">
+    <value>The path resolves outside the file system root: '{0}'.</value>
+  </data>
 </root>

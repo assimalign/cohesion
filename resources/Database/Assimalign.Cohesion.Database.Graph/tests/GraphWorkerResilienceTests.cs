@@ -545,7 +545,7 @@ public sealed class GraphWorkerResilienceTests
         var listener = new InMemoryConnectionListener();
         await using var server = GraphDatabaseServer.Create(engine, new() { Listener = listener });
         await server.StartAsync(token);
-        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using IDuplexConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(connection.AsStream(), GraphProtocol.Family, leaveOpen: true);
         await WriteFrameAsync(channel, ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, Healthy, "test").Encode(), token);
         (await ReadFrameAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Authenticate);

@@ -35,15 +35,23 @@ public sealed class ExceptionBoundaryOptions
     /// throws is swallowed: fault observation must never defeat the boundary's core job of rendering
     /// the error response.
     /// </summary>
+    /// <remarks>
+    /// The hook is not invoked for a client fault: an exchange whose <see cref="IWebClientFaultFeature"/>
+    /// reports a status, because reading a request body that broke its framing or a configured limit
+    /// failed. The transport answers such an exchange itself, and any client can cause one at will, so
+    /// it is not an application defect.
+    /// </remarks>
     public Func<IHttpContext, Exception, ValueTask>? OnException { get; set; }
 
     /// <summary>
     /// Gets or sets a predicate that marks a caught exception as <em>expected</em>. When it returns
     /// <see langword="true"/> the boundary skips <see cref="OnException"/> for that fault (the fault
-    /// is still handled and a response is still produced) — the Cohesion parity for the .NET 10
+    /// is still handled and a response is still produced). It also routes the event source's
+    /// <c>PipelineFault</c> Error event to <c>ExpectedPipelineFault</c> at Verbose; the fault counter
+    /// still increments. The predicate is evaluated once per fault. This is the Cohesion parity for the .NET 10
     /// <c>ExceptionHandlerOptions.SuppressDiagnosticsCallback</c> concept, adapted to the boundary's
     /// own diagnostic hook because the repo carries no <c>Microsoft.Extensions.Logging</c>. A
-    /// predicate that throws is treated as "do not suppress".
+    /// predicate that throws is treated as "do not suppress" and reports <c>DiagnosticsCallbackFailed</c>.
     /// </summary>
     public Func<IHttpContext, Exception, bool>? SuppressDiagnosticsCallback { get; set; }
 }

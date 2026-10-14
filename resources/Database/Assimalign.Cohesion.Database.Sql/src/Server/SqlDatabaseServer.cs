@@ -50,7 +50,7 @@ public sealed class SqlDatabaseServer : DatabaseServer
 {
     private readonly SqlDatabaseEngine _engine;
     private readonly SqlDatabaseServerOptions _options;
-    private readonly IConnectionListener _listener;
+    private readonly IDuplexConnectionListener _listener;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly ConcurrentDictionary<Guid, SqlDatabaseServerSession> _sessions = new();
 
@@ -216,7 +216,7 @@ public sealed class SqlDatabaseServer : DatabaseServer
     {
         while (!softStop.IsCancellationRequested)
         {
-            IConnection connection;
+            IDuplexConnection connection;
 
             try
             {
@@ -257,7 +257,7 @@ public sealed class SqlDatabaseServer : DatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private static async Task RejectAsync(IConnection connection, CancellationToken hardAbort)
+    private static async Task RejectAsync(IDuplexConnection connection, CancellationToken hardAbort)
     {
         try
         {

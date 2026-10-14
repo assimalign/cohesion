@@ -577,7 +577,7 @@ The wire family widened no engine type, and the builder verb references only the
 
 ## Server lifecycle and failure semantics
 
-`BlobDatabaseServer` owns one generic `IConnectionListener` and a concurrent session table.
+`BlobDatabaseServer` owns one generic `IDuplexConnectionListener` and a concurrent session table.
 It follows the SQL/Graph per-model server placement rather than depending on a shared server
 implementation, and since phase 4 of the concrete-types plan its lifecycle is the root
 `DatabaseServer` base's state machine, the one the SQL, KeyValuePair and Graph servers carried.
@@ -1057,3 +1057,25 @@ case, reset once the peer's unread pongs stop growing, accepts only `TransportFa
 `HostTransactionAbortFailed` and the guarded stream's `TransferFailed`, which need test doubles
 that fail a disposal, an abort or a stream's completion; they are covered by the allocation check
 and, for the payload and bounds, by a direct write.
+
+## Connection contracts
+
+The server accepts `IDuplexConnection` values through `IDuplexConnectionListener`:
+framed database traffic requires the byte-pipe contract. The transport listener's live
+`Connections` collection is observational; the server owns every connection it accepts,
+performs its I/O, and drains, aborts or disposes it during shutdown. Disposing the listener
+alone does not close accepted connections. `ConnectionClosed` signals local close, abort,
+peer close and, at the latest, completion of connection disposal.
+
+### Breaking changes from 10.0.0-preview.1 (#1459)
+
+`BlobDatabaseServerOptions.Listener` changes from `IConnectionListener?` to
+`IDuplexConnectionListener?`. Changing the property's getter and setter signatures breaks
+preview.1 binaries and source that supplies a listener typed only as `IConnectionListener`.
+This preview break is accepted under owner decisions 15 and 58. Rebuild consumers and use
+`IDuplexConnectionListener` for listener variables and custom implementations. Custom listeners
+can derive from `DuplexConnectionListener`, supply `Id`, and implement `AcceptCoreAsync`
+returning `ValueTask<IDuplexConnection>`; the base handles shared accept dispatch and live
+connection tracking. Custom byte-pipe connections derive from `DuplexConnection` or implement
+`IDuplexConnection`. Built-in duplex listeners already satisfy the new contract. Database wire
+framing, handshake and model messages are unchanged.

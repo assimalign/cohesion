@@ -85,8 +85,7 @@ and delivers the new identifier to the client.
 
 This contract is public because middleware and other HTTP hosts legitimately
 compose store-backed sessions without owning their framing or buffering logic.
-It replaces shipped-library friend access while keeping modification tracking
-and serialization implementation details internal. The interfaces and extension
+It replaces shipped-library friend access while keeping serialization implementation details internal. The interfaces and extension
 retain the existing `Assimalign.Cohesion.Http` family namespace, a scoped deviation
 from the namespace-matches-assembly rule. Instances are per exchange and are not
 thread-safe; store concurrency remains last-commit-wins.
@@ -131,8 +130,33 @@ configuration (cookie name, path, `HttpOnly`, idle timeout) and does not bind
 this package to any store. The session-id **cookie establishment**, the
 **per-request middleware** (`UseSessions`), and the **id-regeneration** API live
 one layer up in `Assimalign.Cohesion.Web.Sessions`, which composes this store
-seam with the hardened `Http.Cookies` model — this package still takes no cookie
-dependency.
+seam with the hardened `Http.Cookies` model. This package references
+`Assimalign.Cohesion.Http.Cookies` for the option value types.
+
+`HttpSessionOptions.CookieName` is `HttpCookieName`, a non-empty RFC 6265
+§4.1.1 `token`, and `CookiePath` is `HttpCookiePath`, an RFC 6265 `path-value`.
+Their implicit string conversions throw `ArgumentException` at assignment for
+out-of-grammar input, before the setter runs. The value types cannot validate
+`default`, so both `UseSessions` overloads refuse it at composition with the
+existing option-specific message and parameter name `configure`. The empty
+path remains valid. Request cookie lookup and replacement compare typed names.
+
+This dependency follows the public option surface; cookie establishment and
+store behavior stay with their existing owners. The reference changes the
+Http.Sessions closure, which the App.Runtime framework-membership tests check.
+The diagram shows the direct references that carry the cookie types into session options.
+
+```mermaid
+flowchart LR
+    Sessions["Http.Sessions"] --> Http["Http"]
+    Sessions --> Cookies["Http.Cookies"]
+    Cookies --> Http
+```
+
+The two property types replace `string` from 10.0.0-preview.1 (#1473). This is
+a binary breaking change, and callers that depend on string-specific members
+must use `.Value`. Valid string assignments keep working through implicit
+conversion; invalid assignments now fail immediately, before composition.
 
 ## AOT posture
 
@@ -149,7 +173,7 @@ length-prefixed binary (`HttpSessionSerializer`). The clock is a
   follow-up adapter that implements `IHttpSessionStore` (honoring the
   last-commit-wins contract), not part of this package.
 - **Session-id cookie establishment.** No cookie is read or written *in this
-  package*; the Cookies dependency is intentionally not taken here. Cookie
+  package*; its Cookies dependency supplies the option value types. Cookie
   establishment lives in `Assimalign.Cohesion.Web.Sessions`.
 - **Per-request session middleware.** Resolving and committing a session
   around each request is a higher-layer concern (`UseSessions` in
@@ -159,3 +183,48 @@ length-prefixed binary (`HttpSessionSerializer`). The clock is a
   offered at this seam.
 - **Rich typed accessors beyond int/string.** Other scalar types can layer on
   as additional extensions following the same encoding discipline.
+
+## Diagnostics
+
+The internal `HttpSessionEventSource` is named `Assimalign.Cohesion.Http.Sessions`.
+It observes the store-backed session's load and commit boundary, including idle refresh,
+and rethrows the original failure. Requested cancellation is not reported as a failure.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | StoreLoadFailed | Error | exceptionType, suppressedCount:int |
+| 2 | StoreCommitFailed | Error | exceptionType, suppressedCount:int |
+
+Both events are throttled independently to one per second. The lazy PollingCounters
+`store-load-failures` and `store-commit-failures` count every failure, even with no listener
+or when a report is suppressed. Exception messages are deliberately omitted: an arbitrary
+store can embed the bearer session id or session data in its message. This stricter payload
+choice follows #1436's no-session-data requirement. No session identifier, key, value, or
+serialized frame is written.
+
+Http.Sessions owns these reports so bare HTTP hosts receive them too. Web.Sessions does
+not report the same failures again. A custom replacement session that does not use
+`CreateSession` owns its own store operations and diagnostics.
+
+## Compatibility since 10.0.0-preview.1 (#1436)
+
+Owner decision 55 adds only `IHttpStoredSession.IsModified`, with a default implementation
+returning `true`. Existing custom implementations continue compiling and committing on
+every call. The built-in store-backed session overrides it with its existing mutation flag;
+an unchanged session skips payload persistence, retaining its existing idle refresh.
+This is additive, with no change to session lifetime or persistence semantics. Failure events
+and exact counters are newly observable; exceptions still propagate unchanged.
+
+## Exception message resources (#1467)
+
+Resource keys name the failure with a short PascalCase noun phrase, at most 40 characters
+(#1471). These internal names are independent of the preserved message text and placeholders.
+
+Exception diagnostics live in `src/Properties/ErrorMessages.resx`. The shared build targets
+use MSBuild strongly typed resource generation to produce an internal `ErrorMessages` class
+in this assembly's `RootNamespace`, under the intermediate output directory. No designer source
+is checked in, and a command-line or NativeAOT build uses the same embedded resources.
+Formatted diagnostics use `string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`.
+The invariant messages, exception types, error codes and existing input-redaction rules stay
+unchanged; this introduces no public API or breaking behavior against 10.0.0-preview.1.
+EventSource templates, log messages and HTTP response bodies keep their existing owners.

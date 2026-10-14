@@ -53,18 +53,20 @@ public sealed class QuicConnectionFactory : MultiplexedConnectionFactory
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="endPoint"/> is <see langword="null"/>.</exception>
     /// <exception cref="PlatformNotSupportedException">Thrown when QUIC is not supported on the current platform.</exception>
-    public override async ValueTask<MultiplexedConnection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override async ValueTask<IMultiplexedConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
 
         if (!QuicConnection.IsSupported)
         {
-            throw new PlatformNotSupportedException("QUIC is not supported on the current platform.");
+            throw new PlatformNotSupportedException(ErrorMessages.QuicUnsupported);
         }
 
         var connectionOptions = new QuicClientConnectionOptions
         {
             RemoteEndPoint = endPoint,
+            // One inbound direction keeps the native accept operation available to observe peer closure.
+            MaxInboundUnidirectionalStreams = 1,
             ClientAuthenticationOptions = _options.ClientAuthenticationOptions,
             DefaultStreamErrorCode = _options.DefaultStreamErrorCode,
             DefaultCloseErrorCode = _options.DefaultCloseErrorCode
@@ -82,7 +84,9 @@ public sealed class QuicConnectionFactory : MultiplexedConnectionFactory
                 default,
                 _options.DefaultStreamErrorCode,
                 _options.DefaultCloseErrorCode,
-                streamOptions);
+                _options.CloseDeliveryTimeout,
+                streamOptions,
+                connectionOptions.MaxInboundBidirectionalStreams);
         }
         catch
         {

@@ -56,3 +56,5 @@ var entry = await connection.GetAsync(key);
 var swap = await connection.PutAsync(key, updated, KeyValueWriteCondition.IfETagMatches(entry!.Value.ETag));
 var page = await connection.ScanAsync(new KeyValueScanRange { Prefix = prefix, Limit = 100 });
 ```
+
+Supply an `IDuplexConnectionFactory` through `KeyValueClientOptions.ConnectionFactory`; the shared pool owns the duplex connections it establishes.

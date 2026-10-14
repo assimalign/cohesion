@@ -101,6 +101,78 @@ public class HttpsRedirectionTests
         context.Response.Headers[HttpHeaderKey.Location].Value.ShouldBe("https://example.com/a/b/c");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should percent-encode each segment of the decoded path")]
+    [InlineData("/café", "https://example.com/caf%C3%A9")]
+    [InlineData("/docs/日本", "https://example.com/docs/%E6%97%A5%E6%9C%AC")]
+    [InlineData("/100%", "https://example.com/100%25")]
+    [InlineData("/a\\b", "https://example.com/a%5Cb")]
+    [InlineData("/a%2Fb", "https://example.com/a%2Fb")]
+    [InlineData("/caf%E9", "https://example.com/caf%E9")]
+    public async Task Redirection_PathNeedingEncoding_ShouldPercentEncodeEachSegment(string decodedPath, string expected)
+    {
+        // Arrange — the transports hand the middleware the percent-decoded path, so "/caf%C3%A9" on the
+        // wire arrives as "/café" and "/100%25" as "/100%". An encoded slash stays encoded ("/a%2Fb"), as
+        // does a Latin-1 escape that is not UTF-8 ("/caf%E9"), and neither may be encoded again into
+        // "%252F" or "%25E9".
+        IWebApplicationMiddleware middleware = BuildRedirection();
+        TestHttpContext context = new(HttpScheme.Http, "example.com", decodedPath);
+
+        // Act
+        await middleware.InvokeAsync(context, Terminal);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(307);
+        context.Response.Headers[HttpHeaderKey.Location].Value.ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should redirect an OPTIONS * request to the bare authority")]
+    [InlineData(443, "https://example.com")]
+    [InlineData(8443, "https://example.com:8443")]
+    public async Task Redirection_AsteriskFormRequest_ShouldRedirectToTheAuthority(int httpsPort, string expected)
+    {
+        // Arrange — RFC 9112 §3.2.4: "*" names the server as a whole, and its absolute-form is the
+        // authority with an empty path. Appended after the authority, it would become "example.com*".
+        IWebApplicationMiddleware middleware = BuildRedirection(options => options.HttpsPort = httpsPort);
+        TestHttpContext context = new(HttpScheme.Http, "example.com", "*");
+        context.Request.Method = HttpMethod.Options;
+
+        // Act
+        await middleware.InvokeAsync(context, Terminal);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(307);
+        context.Response.Headers[HttpHeaderKey.Location].Value.ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should answer 400 instead of redirecting to a host it cannot name")]
+    [InlineData("")]
+    [InlineData("example.com:")]
+    [InlineData("example.com:99999")]
+    [InlineData("[::1")]
+    [InlineData("[::1]junk")]
+    [InlineData("evil.example/path")]
+    [InlineData("user@evil.example")]
+    [InlineData("example.com\\evil")]
+    [InlineData("example.com?x")]
+    [InlineData("example.com#x")]
+    [InlineData("exa mple.com")]
+    public async Task Redirection_HostItCannotName_ShouldRespond400WithoutLocation(string host)
+    {
+        // Arrange — an empty host, one that is not host[:port], and one whose host would move part of
+        // the URL into or out of the authority.
+        IWebApplicationMiddleware middleware = BuildRedirection();
+        TestHttpContext context = new(HttpScheme.Http, host, "/page");
+        bool nextCalled = false;
+
+        // Act
+        await middleware.InvokeAsync(context, _ => { nextCalled = true; return Task.CompletedTask; });
+
+        // Assert — the request is neither redirected nor served over the insecure connection.
+        nextCalled.ShouldBeFalse();
+        context.Response.StatusCode.Value.ShouldBe(400);
+        context.Response.Headers.ContainsKey(HttpHeaderKey.Location).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should preserve and re-encode the query")]
     public async Task Redirection_RequestWithQuery_ShouldPreserveAndEncodeQuery()
     {

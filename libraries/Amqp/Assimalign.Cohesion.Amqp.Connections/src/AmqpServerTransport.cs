@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// <see cref="ConnectionCapabilities.IsReliable"/> and <see cref="ConnectionCapabilities.IsOrdered"/>).
 /// </para>
 /// <para>
-/// For a single-stream carrier each accepted <see cref="IConnection"/> backs one AMQP connection.
+/// For a single-stream carrier each accepted <see cref="IDuplexConnection"/> backs one AMQP connection.
 /// For a multiplexed carrier each accepted <see cref="IMultiplexedConnection"/> backs one AMQP
 /// connection whose carrier stream is accepted from the remote peer when the connection context
 /// is opened. The transport takes ownership of the listener and disposes it with the transport.
@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// </remarks>
 public sealed class AmqpServerTransport : IAsyncDisposable
 {
-    private readonly IConnectionListener? _listener;
+    private readonly IDuplexConnectionListener? _listener;
     private readonly IMultiplexedConnectionListener? _multiplexedListener;
     private readonly AmqpTransportOptions _options;
     private readonly List<AmqpConnection> _connections;
@@ -39,7 +39,7 @@ public sealed class AmqpServerTransport : IAsyncDisposable
     /// <param name="options">The AMQP transport options.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listener"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when the carrier does not deliver a reliable, ordered byte stream.</exception>
-    public AmqpServerTransport(IConnectionListener listener, AmqpTransportOptions? options = null)
+    public AmqpServerTransport(IDuplexConnectionListener listener, AmqpTransportOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(listener);
 
@@ -87,7 +87,7 @@ public sealed class AmqpServerTransport : IAsyncDisposable
 
         if (_listener is not null)
         {
-            IConnection carrier = await _listener.AcceptAsync(cancellationToken).ConfigureAwait(false);
+            IDuplexConnection carrier = await _listener.AcceptAsync(cancellationToken).ConfigureAwait(false);
 
             connection = new AmqpSingleStreamTransportConnection(carrier, _options);
         }

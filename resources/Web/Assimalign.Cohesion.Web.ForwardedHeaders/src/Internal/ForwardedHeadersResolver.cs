@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
 
 using Assimalign.Cohesion.Http;
@@ -71,8 +72,7 @@ internal sealed class ForwardedHeadersResolver
         if (options.Headers == ForwardedHeaderNames.None)
         {
             throw new ArgumentException(
-                $"{nameof(ForwardedHeadersOptions.Headers)} must select at least one forwarding header. " +
-                "Header selection is part of the trust model — enable exactly the headers your trusted proxy manages.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardingHeaderSelectionRequired, nameof(ForwardedHeadersOptions.Headers)),
                 nameof(options));
         }
         if (options.ForwardLimit is < 1)
@@ -80,7 +80,7 @@ internal sealed class ForwardedHeadersResolver
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ForwardLimit,
-                $"{nameof(ForwardedHeadersOptions.ForwardLimit)} must be at least 1, or null for no limit.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardLimitInvalid, nameof(ForwardedHeadersOptions.ForwardLimit)));
         }
 
         var proxies = new List<IPAddress>(options.KnownProxies.Count);
@@ -89,7 +89,7 @@ internal sealed class ForwardedHeadersResolver
             if (proxy is null)
             {
                 throw new ArgumentException(
-                    $"{nameof(ForwardedHeadersOptions.KnownProxies)} contains a null entry.", nameof(options));
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.KnownProxyNull, nameof(ForwardedHeadersOptions.KnownProxies)), nameof(options));
             }
             proxies.Add(Normalize(proxy));
         }
@@ -110,11 +110,12 @@ internal sealed class ForwardedHeadersResolver
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return Resolve(
+        return ResolveCore(
             context.ConnectionInfo.RemoteEndPoint,
             context.Request.Headers,
             context.Request.Scheme,
-            context.Request.Host);
+            context.Request.Host,
+            context);
     }
 
     /// <summary>
@@ -126,6 +127,14 @@ internal sealed class ForwardedHeadersResolver
     /// <param name="host">The wire-level request host.</param>
     /// <returns>The resolution outcome; never <see langword="null"/>.</returns>
     public HttpForwardedFeature Resolve(EndPoint? remoteEndPoint, IHttpHeaderCollection headers, HttpScheme scheme, HttpHost host)
+        => ResolveCore(remoteEndPoint, headers, scheme, host, null);
+
+    private HttpForwardedFeature ResolveCore(
+        EndPoint? remoteEndPoint,
+        IHttpHeaderCollection headers,
+        HttpScheme scheme,
+        HttpHost host,
+        IHttpContext? context)
     {
         ArgumentNullException.ThrowIfNull(headers);
 
@@ -137,8 +146,10 @@ internal sealed class ForwardedHeadersResolver
             Anchor = remoteEndPoint,
         };
 
-        if ((_headers & ForwardedHeaderNames.Forwarded) != 0
-            && headers.TryGetValue(HttpHeaderKey.Forwarded, out HttpHeaderValue forwarded))
+        HttpHeaderValue forwarded = default;
+        bool useForwarded = (_headers & ForwardedHeaderNames.Forwarded) != 0
+            && headers.TryGetValue(HttpHeaderKey.Forwarded, out forwarded);
+        if (useForwarded)
         {
             // RFC 7239 is present and honored — it is the exclusive source for this
             // exchange (families are never mixed; their entries cannot be correlated
@@ -148,10 +159,20 @@ internal sealed class ForwardedHeadersResolver
             {
                 WalkForwarded(elements, ref state);
             }
+            else
+            {
+                state.StopReason = ForwardingStopReason.UnusableForwardedHeader;
+            }
         }
         else
         {
             WalkXForwarded(headers, ref state);
+        }
+
+        if (state.StopReason != ForwardingStopReason.None)
+        {
+            ForwardedHeadersEventSource.Log.ForwardingStopped(
+                state.StopReason, useForwarded, state.Hops, remoteEndPoint, context);
         }
 
         return new HttpForwardedFeature(state.Scheme, state.Host, state.Remote, scheme, host, remoteEndPoint, state.Hops);
@@ -163,10 +184,12 @@ internal sealed class ForwardedHeadersResolver
         {
             if (_forwardLimit is int limit && state.Hops >= limit)
             {
+                state.StopReason = ForwardingStopReason.ForwardLimit;
                 return;
             }
             if (!IsTrustedPeer(state.Anchor))
             {
+                state.StopReason = ForwardingStopReason.UntrustedPeer;
                 return;
             }
 
@@ -177,11 +200,13 @@ internal sealed class ForwardedHeadersResolver
             string? proto = element.Proto;
             if (proto is not null && !TryMapScheme(proto, out entryScheme))
             {
+                state.StopReason = ForwardingStopReason.InvalidProto;
                 return;
             }
             string? hostValue = element.Host;
             if (hostValue is not null && !IsPlausibleHost(hostValue))
             {
+                state.StopReason = ForwardingStopReason.ImplausibleHost;
                 return;
             }
 
@@ -212,6 +237,7 @@ internal sealed class ForwardedHeadersResolver
                 // 'for' was absent, 'unknown', or obfuscated: the hop's values were
                 // vouched for and applied, but there is no address to check the next
                 // entry's issuer against — the walk cannot continue.
+                state.StopReason = ForwardingStopReason.AddresslessHop;
                 return;
             }
             state.Anchor = new IPEndPoint(entryAddress, 0);
@@ -243,10 +269,12 @@ internal sealed class ForwardedHeadersResolver
         {
             if (_forwardLimit is int limit && state.Hops >= limit)
             {
+                state.StopReason = ForwardingStopReason.ForwardLimit;
                 return;
             }
             if (!IsTrustedPeer(state.Anchor))
             {
+                state.StopReason = ForwardingStopReason.UntrustedPeer;
                 return;
             }
 
@@ -259,6 +287,7 @@ internal sealed class ForwardedHeadersResolver
             {
                 if (!HttpForwardedNode.TryParse(forValues[forValues.Count - 1 - depth], out HttpForwardedNode node))
                 {
+                    state.StopReason = ForwardingStopReason.MalformedFor;
                     return;
                 }
                 if (node.Address is { } address)
@@ -272,11 +301,13 @@ internal sealed class ForwardedHeadersResolver
             string? proto = EntryAt(protoValues, hasProto, depth);
             if (proto is not null && !TryMapScheme(proto, out entryScheme))
             {
+                state.StopReason = ForwardingStopReason.InvalidProto;
                 return;
             }
             string? hostValue = EntryAt(hostValues, hasHost, depth);
             if (hostValue is not null && !IsPlausibleHost(hostValue))
             {
+                state.StopReason = ForwardingStopReason.ImplausibleHost;
                 return;
             }
 
@@ -298,6 +329,7 @@ internal sealed class ForwardedHeadersResolver
             {
                 // No address chain ('unknown'/obfuscated node, or X-Forwarded-For not in
                 // play): nothing vouches for deeper entries.
+                state.StopReason = ForwardingStopReason.AddresslessHop;
                 return;
             }
             state.Anchor = new IPEndPoint(entryAddress, 0);
@@ -388,5 +420,6 @@ internal sealed class ForwardedHeadersResolver
         public EndPoint? Remote;
         public EndPoint? Anchor;
         public int Hops;
+        public ForwardingStopReason StopReason;
     }
 }

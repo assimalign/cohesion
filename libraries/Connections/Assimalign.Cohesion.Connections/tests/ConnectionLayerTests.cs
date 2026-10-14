@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Threading.Tasks;
 
@@ -23,8 +24,8 @@ public class ConnectionLayerTests
         RecordingConnectionLayer layer = new("tls", []);
 
         // Act
-        IConnectionListener layered = listener.Use(layer);
-        IConnection accepted = await layered.AcceptAsync();
+        IDuplexConnectionListener layered = listener.Use(layer);
+        IDuplexConnection accepted = await layered.AcceptAsync();
 
         // Assert
         LayerWrappedConnection wrapped = accepted.ShouldBeOfType<LayerWrappedConnection>();
@@ -44,7 +45,7 @@ public class ConnectionLayerTests
         RecordingConnectionLayer second = new("second", upgrades);
 
         // Act
-        IConnection accepted = await listener.Use(first).Use(second).AcceptAsync();
+        IDuplexConnection accepted = await listener.Use(first).Use(second).AcceptAsync();
 
         // Assert
         upgrades.ShouldBe(["first", "second"]);
@@ -68,7 +69,7 @@ public class ConnectionLayerTests
             describe: static capabilities => capabilities with { Security = ConnectionSecurity.Tls });
 
         // Act
-        IConnectionListener layered = listener.Use(layer);
+        IDuplexConnectionListener layered = listener.Use(layer);
 
         // Assert
         layered.Capabilities.ShouldBe(listener.Capabilities with { Security = ConnectionSecurity.Tls });
@@ -84,8 +85,8 @@ public class ConnectionLayerTests
         RecordingConnectionLayer layer = new("tls", []);
 
         // Act
-        IConnectionFactory layered = factory.Use(layer);
-        IConnection connected = await layered.ConnectAsync(_testEndPoint);
+        IDuplexConnectionFactory layered = factory.Use(layer);
+        IDuplexConnection connected = await layered.ConnectAsync(_testEndPoint);
 
         // Assert
         LayerWrappedConnection wrapped = connected.ShouldBeOfType<LayerWrappedConnection>();
@@ -105,7 +106,7 @@ public class ConnectionLayerTests
         RecordingConnectionLayer second = new("second", upgrades);
 
         // Act
-        IConnection connected = await factory.Use(first).Use(second).ConnectAsync(_testEndPoint);
+        IDuplexConnection connected = await factory.Use(first).Use(second).ConnectAsync(_testEndPoint);
 
         // Assert
         upgrades.ShouldBe(["first", "second"]);
@@ -114,6 +115,26 @@ public class ConnectionLayerTests
         LayerWrappedConnection innerWrapper = outer.Inner.ShouldBeOfType<LayerWrappedConnection>();
         innerWrapper.LayerName.ShouldBe("first");
         innerWrapper.Inner.ShouldBeSameAs(inner);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections] - ConnectAsync: A failed upgrade should dispose the dialed connection")]
+    public async Task ConnectAsync_WhenTheUpgradeFails_ShouldDisposeTheDialedConnectionAndRethrow()
+    {
+        // Arrange
+        TestConnection dialed = new();
+        TestConnectionFactory factory = new();
+        factory.Enqueue(dialed);
+        IOException failure = new("The server's certificate was refused.");
+        ControlledConnectionLayer layer = new();
+        layer.Fail(dialed, failure);
+        IDuplexConnectionFactory layered = factory.Use(layer);
+
+        // Act
+        Exception? exception = await Record.ExceptionAsync(async () => await layered.ConnectAsync(_testEndPoint));
+
+        // Assert
+        exception.ShouldBeSameAs(failure);
+        dialed.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
     }
 
     [Fact]
@@ -127,7 +148,7 @@ public class ConnectionLayerTests
             describe: static capabilities => capabilities with { Security = ConnectionSecurity.Tls });
 
         // Act
-        IConnectionFactory layered = factory.Use(layer);
+        IDuplexConnectionFactory layered = factory.Use(layer);
 
         // Assert
         layered.Capabilities.ShouldBe(factory.Capabilities with { Security = ConnectionSecurity.Tls });
@@ -143,7 +164,7 @@ public class ConnectionLayerTests
         RecordingConnectionLayer passThrough = new("noop", [], wrapConnection: false);
 
         // Act
-        IConnection accepted = await listener.Use(passThrough).AcceptAsync();
+        IDuplexConnection accepted = await listener.Use(passThrough).AcceptAsync();
 
         // Assert
         accepted.ShouldBeSameAs(inner);
@@ -155,7 +176,7 @@ public class ConnectionLayerTests
         // Arrange
         TestConnectionListener listener = new();
         RecordingConnectionLayer layer = new("noop", [], wrapConnection: false);
-        IConnectionListener layered = listener.Use(layer);
+        IDuplexConnectionListener layered = listener.Use(layer);
 
         // Act
         await layered.DisposeAsync();
@@ -171,7 +192,7 @@ public class ConnectionLayerTests
         // Arrange
         TestConnectionListener listener = new();
         RecordingConnectionLayer layer = new("noop", [], wrapConnection: false);
-        IConnectionListener layered = listener.Use(layer);
+        IDuplexConnectionListener layered = listener.Use(layer);
 
         // Act
         await layered.BindAsync();

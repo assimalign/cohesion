@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Client.Tests;
 /// A connection factory whose dial a test scripts: it either throws a given exception or, with
 /// none, signals that the dial started and waits for the caller's cancellation.
 /// </summary>
-internal sealed class ScriptedConnectionFactory : IConnectionFactory
+internal sealed class ScriptedConnectionFactory : DuplexConnectionFactory
 {
     private readonly Func<Exception>? _failure;
     private readonly TaskCompletionSource _dialing = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -28,7 +28,7 @@ internal sealed class ScriptedConnectionFactory : IConnectionFactory
     /// <summary>Creates a factory whose dial never completes until the caller cancels it.</summary>
     public static ScriptedConnectionFactory Stalled() => new(null);
 
-    public ConnectionCapabilities Capabilities { get; } = new(
+    public override ConnectionCapabilities Capabilities { get; } = new(
         ConnectionProtocol.Tcp,
         ConnectionDelivery.Stream,
         IsReliable: true,
@@ -42,7 +42,7 @@ internal sealed class ScriptedConnectionFactory : IConnectionFactory
     /// <summary>Gets the number of dials started.</summary>
     public int Dials => Volatile.Read(ref _dials);
 
-    public async ValueTask<IConnection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _dials);
         _dialing.TrySetResult();

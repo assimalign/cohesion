@@ -5,21 +5,25 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http.Connections.Internal;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// HTTP/1.1 raw response body sink. Commits the response head on first write/flush and frames
 /// incremental writes with chunked transfer coding (RFC 9112 §7.1) when the caller left
-/// <c>Content-Length</c> unset; otherwise the body streams with identity framing.
+/// <c>Content-Length</c> unset; otherwise the body streams with identity framing. A response without
+/// content (a response to <c>HEAD</c>, a <c>204</c>, or a <c>304</c>; <see cref="HttpResponseContentRules"/>)
+/// commits its head and discards every body write.
 /// </summary>
 /// <remarks>
 /// Chunked framing is self-delimiting, so the connection can stay keep-alive after a streamed
 /// response. The connection stream is owned by the connection, so this sink never disposes it — it
-/// only writes and flushes. When a minimum response data rate is configured, each body write and
-/// flush is bounded: a reader that fails to drain the response below that rate aborts the exchange
-/// (RFC 9110 §15.5.9 timeout semantics) instead of blocking the server indefinitely.
+/// only writes and flushes. When a minimum response data rate applies (the listener's, or the one the
+/// request set for itself, #1384), every write and flush of the head, the body and the terminator is
+/// bounded: a reader that fails to drain the response below that rate closes the connection, which is
+/// HTTP/1.1's only reset, and the exchange is cancelled (<see cref="Http1ConnectionContext.FailSlowResponse"/>)
+/// instead of blocking the server indefinitely.
 /// </remarks>
 internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 {
@@ -28,18 +32,34 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
     private static readonly byte[] _crlf = { (byte)'\r', (byte)'\n' };
 
     private readonly Stream _stream;
+    private readonly IConnection _connection;
     private readonly Http1Context _context;
-    private readonly MinDataRateGate? _gate;
+    private readonly HttpMinDataRate? _listenerRate;
+    private readonly TimeProvider _timeProvider;
     private readonly string? _altSvcHeaderValue;
+    // The gate the response is held to, resolved at the head commit: the request's own rate when a parse
+    // context carries one, else the listener's. Null when the response is held to no rate.
+    private MinDataRateGate? _gate;
     private bool _chunked;
     private bool _suppressBody;
 
-    public Http1ResponseBodyStream(Stream stream, Http1Context context, HttpMinDataRate? minResponseDataRate, TimeProvider timeProvider, string? altSvcHeaderValue)
+    /// <summary>
+    /// Initializes the sink over the connection stream.
+    /// </summary>
+    /// <param name="stream">The connection stream the response is written to.</param>
+    /// <param name="connection">The connection, aborted when the reader falls below the minimum data rate.</param>
+    /// <param name="context">The exchange whose response this is.</param>
+    /// <param name="minResponseDataRate">The listener's minimum response data rate, used unless the request changed its own.</param>
+    /// <param name="timeProvider">The clock the rate is measured on.</param>
+    /// <param name="altSvcHeaderValue">The Alt-Svc value advertised on the response, or <see langword="null"/>.</param>
+    public Http1ResponseBodyStream(Stream stream, IConnection connection, Http1Context context, HttpMinDataRate? minResponseDataRate, TimeProvider timeProvider, string? altSvcHeaderValue)
         : base(context)
     {
         _stream = stream;
+        _connection = connection;
         _context = context;
-        _gate = minResponseDataRate is not null ? new MinDataRateGate(minResponseDataRate, timeProvider) : null;
+        _listenerRate = minResponseDataRate;
+        _timeProvider = timeProvider;
         _altSvcHeaderValue = altSvcHeaderValue;
     }
 
@@ -52,17 +72,24 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
         HttpAltServiceInjector.Inject(headers, _altSvcHeaderValue);
 
         // RFC 9110 §9.3.2 — a HEAD response carries the same header section a GET would but never a
-        // body, so suppress every body write and the terminator.
-        _suppressBody = _context.Request.Method == HttpMethod.Head;
+        // body, so suppress every body write and the terminator. A 204 or 304 ends with its head as well
+        // (RFC 9112 §6.3, #1073): a chunk written after it would be read as the next response.
+        _suppressBody = !HttpResponseContentRules.CarriesContent(_context.Response.StatusCode, _context.Request.Method);
 
         // Chunked transfer coding is selected when the caller did not commit to a Content-Length,
-        // which is the streaming case (length not known up front).
-        if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
+        // which is the streaming case (length not known up front). A 204 or 304 has no body to code, and
+        // a 204 MUST NOT carry Transfer-Encoding (RFC 9112 §6.1); the head encoder also drops one the
+        // application set on a 204. HEAD keeps the coding a GET would get.
+        bool addedTransferEncoding = false;
+
+        if (!headers.ContainsKey(HttpHeaderKey.ContentLength)
+            && !HttpResponseContentRules.IsContentlessStatus(_context.Response.StatusCode))
         {
             _chunked = true;
             if (!headers.ContainsKey(HttpHeaderKey.TransferEncoding))
             {
                 headers[HttpHeaderKey.TransferEncoding] = "chunked";
+                addedTransferEncoding = true;
             }
         }
 
@@ -71,8 +98,33 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
             headers[HttpHeaderKey.Connection] = "close";
         }
 
-        await Http1MessageWriter.WriteHeadAsync(_stream, _context.Response.StatusCode, headers, cancellationToken).ConfigureAwait(false);
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        ReadOnlyMemory<byte> head;
+
+        try
+        {
+            head = Http1MessageWriter.EncodeHead(_context.Response.StatusCode, headers, _context.Response.GetDateHeader());
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            // A field the head cannot carry (#1183): nothing was written, and the base stream leaves the
+            // response unstarted. The chunked coding chosen for it is withdrawn, or a buffered response
+            // sent in its place would carry both Transfer-Encoding and the Content-Length it synthesizes.
+            _chunked = false;
+            if (addedTransferEncoding)
+            {
+                headers.Remove(HttpHeaderKey.TransferEncoding);
+            }
+
+            throw;
+        }
+
+        // The response starts here, so its rate is resolved, and the request's knob frozen, now (#1384).
+        // The head itself is held to it: a reader that never drains the connection can stall the head as
+        // well as the body.
+        _gate = _context.GetResponseDataRateGate(_listenerRate, _timeProvider);
+
+        await WriteToStreamAsync(head, cancellationToken).ConfigureAwait(false);
+        await FlushStreamAsync(cancellationToken).ConfigureAwait(false);
     }
 
     protected override async ValueTask WriteFramedAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
@@ -109,67 +161,58 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
         await FlushStreamAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask WriteToStreamAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    private ValueTask WriteToStreamAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+        => WriteOrFlushAsync(data, flush: false, cancellationToken);
+
+    private ValueTask FlushStreamAsync(CancellationToken cancellationToken)
+        => WriteOrFlushAsync(ReadOnlyMemory<byte>.Empty, flush: true, cancellationToken);
+
+    private async ValueTask WriteOrFlushAsync(ReadOnlyMemory<byte> data, bool flush, CancellationToken cancellationToken)
     {
-        if (_gate is null)
-        {
-            await _stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        if (!_gate.TryGetOperationTimeout(out TimeSpan timeout))
-        {
-            throw ResponseTooSlow();
-        }
-
-        using CancellationTokenSource timeoutSource = new(timeout, _gate.TimeProvider);
-        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
-
-        long start = _gate.TimeProvider.GetTimestamp();
+        (CancellationToken writeToken, CancellationTokenSource? linked) =
+            Http1ConnectionContext.LinkResponseCancellation(_context, cancellationToken);
         try
         {
-            await _stream.WriteAsync(data, linked.Token).ConfigureAwait(false);
-            _gate.Record(_gate.TimeProvider.GetTimestamp() - start, data.Length);
-        }
-        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-        {
-            throw ResponseTooSlow();
-        }
-    }
+            writeToken.ThrowIfCancellationRequested();
+            if (_gate is null)
+            {
+                if (flush)
+                {
+                    await _stream.FlushAsync(writeToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _stream.WriteAsync(data, writeToken).ConfigureAwait(false);
+                }
+                return;
+            }
 
-    private async ValueTask FlushStreamAsync(CancellationToken cancellationToken)
-    {
-        if (_gate is null)
-        {
-            await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            return;
+            // Credit only bounded pieces, so a reader of none of a large write cannot buy its whole allowance.
+            if (!await Http1MessageWriter.TryWriteWithinRateAsync(_stream, data, _gate, writeToken).ConfigureAwait(false))
+            {
+                throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
+            }
         }
-
-        if (!_gate.TryGetOperationTimeout(out TimeSpan timeout))
+        catch (Exception exception) when (Http1ConnectionContext.IsResponsePeerFailure(_connection, _context, exception))
         {
-            throw ResponseTooSlow();
+            _context.KeepAlive = false;
+            throw _context.AbortResponseForPeer(exception);
         }
-
-        using CancellationTokenSource timeoutSource = new(timeout, _gate.TimeProvider);
-        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
-
-        long start = _gate.TimeProvider.GetTimestamp();
-        try
+        catch (OperationCanceledException exception) when (_context.RequestCancelled.IsCancellationRequested
+            || cancellationToken.IsCancellationRequested)
         {
-            await _stream.FlushAsync(linked.Token).ConfigureAwait(false);
-            _gate.Record(_gate.TimeProvider.GetTimestamp() - start, 0);
+            CancellationToken cancelledToken = _context.ResponseAbortedByClient || !cancellationToken.IsCancellationRequested
+                ? _context.RequestCancelled
+                : cancellationToken;
+            if (exception.CancellationToken == cancelledToken)
+            {
+                throw;
+            }
+            throw new OperationCanceledException(exception.Message, exception, cancelledToken);
         }
-        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        finally
         {
-            throw ResponseTooSlow();
+            linked?.Dispose();
         }
-    }
-
-    private static IOException ResponseTooSlow()
-    {
-        // RFC 9110 §15.5.9 — a reader draining the response below the configured minimum data rate
-        // is abandoned. The response has already started, so the status cannot change; the exchange
-        // is aborted as a wire-level failure.
-        return new IOException("The response was written below the configured minimum data rate.");
     }
 }

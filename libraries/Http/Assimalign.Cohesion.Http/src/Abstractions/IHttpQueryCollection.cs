@@ -9,12 +9,12 @@ namespace Assimalign.Cohesion.Http;
 public interface IHttpQueryCollection : IEnumerable<KeyValuePair<HttpQueryKey, HttpQueryValue>>
 {
     /// <summary>
-    /// Gets the number of query entries.
+    /// Gets the number of distinct query keys.
     /// </summary>
     int Count { get; }
 
     /// <summary>
-    /// Gets the query value associated with the supplied key.
+    /// Gets all values for the key in arrival order; their scalar value is the first occurrence.
     /// </summary>
     /// <param name="key">The query key to resolve.</param>
     /// <returns>The parsed query value if present; otherwise <see cref="HttpQueryValue.Empty"/>.</returns>
@@ -28,7 +28,7 @@ public interface IHttpQueryCollection : IEnumerable<KeyValuePair<HttpQueryKey, H
     bool ContainsKey(HttpQueryKey key);
 
     /// <summary>
-    /// Attempts to retrieve a parsed query value.
+    /// Attempts to retrieve all values for a key; their scalar value is the first occurrence.
     /// </summary>
     /// <param name="key">The query key to resolve.</param>
     /// <param name="value">The resolved query value when found.</param>

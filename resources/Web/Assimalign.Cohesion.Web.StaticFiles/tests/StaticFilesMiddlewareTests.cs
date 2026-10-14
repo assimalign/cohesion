@@ -20,6 +20,33 @@ namespace Assimalign.Cohesion.Web.StaticFiles.Tests;
 /// </summary>
 public class StaticFilesMiddlewareTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: Evaluates modification conditions against the response Date")]
+    public async Task Invoke_ResponseDateBeforeModification_ShouldClampBeforeConditionalEvaluation()
+    {
+        // Arrange — the file is newer than the application's fixed response date, even though
+        // neither the source clock nor the time the test happens to run should decide the clamp.
+        using InMemoryFileSystem site = StaticSite.Create(("data.txt", "0123456789"));
+        const string responseDate = "Sun, 06 Nov 1994 08:49:37 GMT";
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            site,
+            "/data.txt",
+            HttpMethod.Get,
+            prepare: ctx =>
+            {
+                ctx.Response.Headers[HttpHeaderKey.Date] = responseDate;
+                ctx.Request.Headers[HttpHeaderKey.IfModifiedSince] = responseDate;
+            });
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.NotModified);
+        context.ReadResponseBody().ShouldBeEmpty();
+        Header(context, HttpHeaderKey.Date).ShouldBe(responseDate);
+        Header(context, HttpHeaderKey.LastModified).ShouldBe(responseDate);
+        Header(context, HttpHeaderKey.ETag).ShouldNotBeEmpty();
+    }
+
     private static async Task<TestHttpContext> RunAsync(
         IFileSystem fileSystem,
         string path,
@@ -239,6 +266,31 @@ public class StaticFilesMiddlewareTests
         context.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: an 8.3 short-name alias should be rejected with 404")]
+    [InlineData("/static/uploads/UPLOAD~1.HTM")]
+    [InlineData("/static/UPLOAD~1/page.html")]
+    public async Task Invoke_ShortNameAlias_ShouldRespond404(string path)
+    {
+        // Arrange — on a volume that generates short names, UPLOAD~1.HTM opens upload.htmlx, and
+        // the type would be read from the alias's ".HTM". The in-memory mount holds the alias as a
+        // real name, so the 404 here can only come from the gate, on any host.
+        using InMemoryFileSystem site = StaticSite.Create(
+            ("uploads/UPLOAD~1.HTM", "<script>alert(1)</script>"),
+            ("UPLOAD~1/page.html", "<script>alert(1)</script>"));
+        bool[] passedThrough = [false];
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            site, path, HttpMethod.Get,
+            options => options.RequestPath = new HttpPath("/static"),
+            passedThrough: passedThrough);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        context.ReadResponseBody().ShouldBeEmpty();
+        passedThrough[0].ShouldBeFalse();
+    }
+
     // ---------------------------------------------------------------- default documents
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the mount root should serve the first default document")]
@@ -299,6 +351,65 @@ public class StaticFilesMiddlewareTests
         // Assert
         context.Response.StatusCode.ShouldBe(HttpStatusCode.MovedPermanently);
         Header(context, HttpHeaderKey.Location).ShouldBe("/static/");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the add-a-slash redirect should percent-encode each segment of the decoded path")]
+    [InlineData("café", "/café", "/caf%C3%A9/")]
+    [InlineData("docs/日本", "/docs/日本", "/docs/%E6%97%A5%E6%9C%AC/")]
+    [InlineData("100%", "/100%", "/100%25/")]
+    [InlineData("a%2Fb", "/a%2Fb", "/a%2Fb/")]
+    public async Task Invoke_DirectoryPathNeedingEncoding_ShouldRedirectWithEncodedPath(string directory, string decodedPath, string expected)
+    {
+        // Arrange — the transports hand the middleware the percent-decoded path, so "/caf%C3%A9" on the
+        // wire arrives as "/café" and "/100%25" as "/100%". An encoded slash stays encoded ("/a%2Fb"), and
+        // must not be encoded again into "%252F".
+        using InMemoryFileSystem site = StaticSite.Create(($"{directory}/index.html", "home"));
+
+        // Act
+        TestHttpContext context = await RunAsync(site, decodedPath, HttpMethod.Get);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.MovedPermanently);
+        Header(context, HttpHeaderKey.Location).ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the add-a-slash redirect should rebuild the query as UseHttpsRedirection does")]
+    public async Task Invoke_DirectoryWithQuery_ShouldRedirectWithRebuiltQuery()
+    {
+        // Arrange — an empty value is written as the bare name, and every other character but the
+        // unreserved ones is percent-encoded (HttpQuery.Create).
+        using InMemoryFileSystem site = StaticSite.Create(("docs/index.html", "docs home"));
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            site, "/docs", HttpMethod.Get,
+            prepare: context => ((HttpQueryCollection)context.Request.Query)["flag"] = string.Empty);
+        TestHttpContext encoded = await RunAsync(
+            site, "/docs", HttpMethod.Get,
+            prepare: context => ((HttpQueryCollection)context.Request.Query)["q"] = "a b&c");
+
+        // Assert
+        Header(context, HttpHeaderKey.Location).ShouldBe("/docs/?flag");
+        Header(encoded, HttpHeaderKey.Location).ShouldBe("/docs/?q=a%20b%26c");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the add-a-slash redirect should stay on this origin when the path begins with two separators")]
+    [InlineData("//docs", "/docs/")]
+    [InlineData("///docs", "/docs/")]
+    [InlineData("/\\docs", "/%5Cdocs/")]
+    public async Task Invoke_DirectoryPathWithLeadingSeparators_ShouldRedirectToPathOnThisOrigin(string decodedPath, string expected)
+    {
+        // Arrange — the file lookup reads "//docs" and "/\docs" as the directory "docs". Written as is,
+        // "//docs/" is a network-path reference to the host "docs", and a browser reads "/\docs/" the
+        // same way.
+        using InMemoryFileSystem site = StaticSite.Create(("docs/index.html", "docs home"));
+
+        // Act
+        TestHttpContext context = await RunAsync(site, decodedPath, HttpMethod.Get);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.MovedPermanently);
+        Header(context, HttpHeaderKey.Location).ShouldBe(expected);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: a directory with no default document should pass through")]
@@ -363,6 +474,61 @@ public class StaticFilesMiddlewareTests
         context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
         Header(context, HttpHeaderKey.ContentType).ShouldBe("application/octet-stream");
         context.ReadResponseBody().ShouldBe("mystery");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: a file with no extension should pass through by default, whatever its name")]
+    [InlineData("html")]
+    [InlineData("js")]
+    [InlineData("json")]
+    [InlineData("css")]
+    [InlineData(".html")]
+    [InlineData(".json")]
+    public async Task Invoke_FileWithoutExtension_ShouldPassThroughByDefault(string name)
+    {
+        // Arrange — an upload named "html" is not an HTML file; serving it as text/html would turn
+        // a user-controlled name into stored XSS.
+        using InMemoryFileSystem site = StaticSite.Create(("uploads/" + name, "<script>alert(1)</script>"));
+        bool[] passedThrough = [false];
+
+        // Act
+        TestHttpContext context = await RunAsync(site, "/uploads/" + name, HttpMethod.Get, passedThrough: passedThrough);
+
+        // Assert
+        passedThrough[0].ShouldBeTrue();
+        context.Response.Headers.ContainsKey(HttpHeaderKey.ContentType).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: ServeUnknownContentTypes should serve a file with no extension as the fallback type")]
+    public async Task Invoke_FileWithoutExtensionWithFallback_ShouldServeFallbackType()
+    {
+        // Arrange
+        using InMemoryFileSystem site = StaticSite.Create(("uploads/html", "<script>alert(1)</script>"));
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            site, "/uploads/html", HttpMethod.Get,
+            options => options.ServeUnknownContentTypes = true);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        Header(context, HttpHeaderKey.ContentType).ShouldBe("application/octet-stream");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: a content-type key without its dot should not map a file of that bare name")]
+    public async Task Invoke_ContentTypeKeyWithoutDot_ShouldNotMapBareFileName()
+    {
+        // Arrange — the key "gltf" maps the extension ".gltf", not a file named "gltf".
+        using InMemoryFileSystem site = StaticSite.Create(("gltf", "{}"));
+        bool[] passedThrough = [false];
+
+        // Act
+        await RunAsync(
+            site, "/gltf", HttpMethod.Get,
+            options => options.ContentTypeMappings["gltf"] = "model/gltf+json",
+            passedThrough: passedThrough);
+
+        // Assert
+        passedThrough[0].ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: content-type overlays should override the default map")]

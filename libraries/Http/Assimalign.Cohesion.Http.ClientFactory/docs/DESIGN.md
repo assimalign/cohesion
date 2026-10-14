@@ -105,10 +105,27 @@ integration, so the declaration contributes the verb with zero added public surf
 source assembly continues to reference only its own HTTP family.
 
 When a consuming compilation references both libraries, `ComponentIntegrationGenerator` from
-`Assimalign.Cohesion.SourceGeneration.ComponentModel` recognizes the instance method as a builder
-template and projects `AddHttpClientFactory(Action<HttpClientFactoryBuilder>)` into that consumer.
-The generated adapter eagerly constructs the builder, invokes the configuration action, calls
+`Assimalign.Cohesion.SourceGeneration` recognizes the instance method as a builder
+template and projects `AddHttpClientFactory(Action<HttpClientFactoryBuilder>? configure = null)` into
+that consumer. The callback is optional for every builder template (owner decision 39, #1395), but a
+bare `AddHttpClientFactory()` still fails at registration: `Build()` rejects a factory with no named
+client with `InvalidOperationException`, so the requirement stays where it was, in the builder.
+The generated adapter eagerly constructs the builder, invokes the configuration action when one is given, calls
 `Build()` so its validation runs at registration time, and registers the result through a producer
 lambda so the container captures it for disposal. Without the dependency-injection assembly the
 generator emits no verb, preserving the library boundary while still providing an ergonomic
 composition path where both sides are intentionally present.
+
+## Exception message resources (#1467)
+
+Resource keys name the failure with a short PascalCase noun phrase, at most 40 characters
+(#1471). These internal names are independent of the preserved message text and placeholders.
+
+Exception diagnostics live in `src/Properties/ErrorMessages.resx`. The shared build targets
+use MSBuild strongly typed resource generation to produce an internal `ErrorMessages` class
+in this assembly's `RootNamespace`, under the intermediate output directory. No designer source
+is checked in, and a command-line or NativeAOT build uses the same embedded resources.
+Formatted diagnostics use `string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`.
+The invariant messages, exception types, error codes and existing input-redaction rules stay
+unchanged; this introduces no public API or breaking behavior against 10.0.0-preview.1.
+EventSource templates, log messages and HTTP response bodies keep their existing owners.

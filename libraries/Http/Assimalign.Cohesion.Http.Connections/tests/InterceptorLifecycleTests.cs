@@ -37,7 +37,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         recorder.Invocations.ShouldBe(["after-head", "before-body", "after-body"]);
@@ -61,7 +61,7 @@ public class InterceptorLifecycleTests
     public async Task Http2_RequestHooks_ShouldFireInLifecycleOrder()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "POST", "/upload", "https", "api.test", body: Encoding.ASCII.GetBytes("hello"));
+            1, "POST", "/upload", "http", "api.test", body: Encoding.ASCII.GetBytes("hello"));
         TestConnection connection = new(payload);
         RecordingRequestInterceptor recorder = new();
         HttpConnectionListenerOptions options = new();
@@ -69,7 +69,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         recorder.Invocations.ShouldBe(["after-head", "before-body", "after-body"]);
@@ -92,7 +92,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(new RejectingBeforeBodyInterceptor());
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeFalse("the rejected request never becomes an exchange");
@@ -119,7 +119,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Ok;
@@ -139,7 +139,7 @@ public class InterceptorLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http2: BeforeResponseHead mutates the final HEADERS block (buffered path)")]
     public async Task Http2_BeforeResponseHead_ShouldMutateFinalHead()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         RecordingResponseInterceptor recorder = new()
         {
@@ -150,7 +150,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Ok;
@@ -183,7 +183,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Ok;
@@ -213,11 +213,11 @@ public class InterceptorLifecycleTests
         };
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // The first streamed write commits the head — the hook fires here, before the head bytes.
@@ -247,7 +247,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // RFC 9110 §9.3.6 — a CONNECT's post-head octets are tunnel traffic, not a message body:
@@ -260,7 +260,7 @@ public class InterceptorLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http2: BeforeResponseHead fires exactly once when the streaming path commits the head")]
     public async Task Http2_BeforeResponseHead_OnStreamingCommit_ShouldFireOnce()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "http", "api.test");
         TestConnection connection = new(payload);
         RecordingResponseInterceptor recorder = new()
         {
@@ -268,11 +268,11 @@ public class InterceptorLifecycleTests
         };
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         await context.Response.Streaming.WriteAsync(Encoding.UTF8.GetBytes("chunk-1"));
@@ -308,7 +308,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Ok;
@@ -340,7 +340,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         IHttpExchangeControl control = recorder.CapturedControl!;
@@ -375,7 +375,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -404,7 +404,7 @@ public class InterceptorLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http2: An application cancel (IHttpContext.Cancel) resets the stream with RST_STREAM(CANCEL)")]
     public async Task Http2_ApplicationCancel_ShouldResetStreamWithCancel()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         RecordingResponseInterceptor recorder = new();
         HttpConnectionListenerOptions options = new();
@@ -412,7 +412,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Cancel();
@@ -443,7 +443,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Cancel();
@@ -458,7 +458,7 @@ public class InterceptorLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http2: An application cancel during BeforeResponseHead resets the stream instead of writing the head")]
     public async Task Http2_CancelDuringBeforeResponseHead_ShouldResetStream()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         RecordingResponseInterceptor recorder = new();
         HttpConnectionListenerOptions options = new();
@@ -466,7 +466,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // Models an application-layer cancel (e.g. a timeout middleware) landing at the last
@@ -498,7 +498,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(recorder);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // Same last-moment application cancel as the HTTP/2 variant, on the h1 buffered path.
@@ -529,7 +529,7 @@ public class InterceptorLifecycleTests
         options.Interceptors.Add(responseScoped);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Ok;
@@ -560,7 +560,7 @@ public class InterceptorLifecycleTests
             options.Interceptors.Add(recorder);
 
             await using HttpConnectionListener listener = new(options);
-            IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+            IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
             IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
             IHttpExchangeControl control = recorder.CapturedControl!;
@@ -579,7 +579,7 @@ public class InterceptorLifecycleTests
 
         // HTTP/2 — multiplexed streams over a shared connection: report false, throw on misuse.
         {
-            byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+            byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
             TestConnection connection = new(payload);
             RecordingResponseInterceptor recorder = new();
             HttpConnectionListenerOptions options = new();
@@ -587,7 +587,7 @@ public class InterceptorLifecycleTests
             options.Interceptors.Add(recorder);
 
             await using HttpConnectionListener listener = new(options);
-            IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+            IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
             IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
             recorder.CapturedControl!.CanTakeOver.ShouldBeFalse();
@@ -606,7 +606,7 @@ public class InterceptorLifecycleTests
             options.Interceptors.Add(recorder);
 
             await using HttpConnectionListener listener = new(options);
-            IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+            IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
             IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
             recorder.CapturedControl!.CanTakeOver.ShouldBeFalse();

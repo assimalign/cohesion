@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Client;
 /// Settings parse from a <c>key=value;</c> connection string
 /// (<see cref="Parse(string)"/>) or compose directly as a typed object. The
 /// transport driver itself is never named in the string — drivers are composed
-/// statically (an <c>IConnectionFactory</c> on <see cref="DatabaseClientOptions"/>)
+/// statically (an <c>IDuplexConnectionFactory</c> on <see cref="DatabaseClientOptions"/>)
 /// so no runtime plugin loading is needed; the string only carries endpoint
 /// <em>identity</em>. Non-network endpoints (the in-memory transport's named
 /// endpoints, socket files) are typed objects — set <see cref="EndPoint"/>

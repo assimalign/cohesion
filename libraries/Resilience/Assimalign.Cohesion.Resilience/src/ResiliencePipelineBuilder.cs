@@ -5,7 +5,6 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Resilience;
 
 using Internal;
-using Properties;
 
 public sealed class ResiliencePipelineBuilder : IResiliencePipelineBuilder
 {

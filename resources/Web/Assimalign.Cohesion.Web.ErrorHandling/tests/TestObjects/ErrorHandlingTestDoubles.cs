@@ -95,31 +95,6 @@ internal sealed class TestHttpResponse : IHttpResponse
 }
 
 /// <summary>
-/// An <see cref="IWebApplicationBuilder"/> double that records the features registered by
-/// builder-time composition verbs.
-/// </summary>
-internal sealed class TestWebApplicationBuilder : IWebApplicationBuilder
-{
-    public List<IHttpFeature> Features { get; } = [];
-
-    public IWebApplicationBuilder AddFeature(IHttpFeature feature)
-    {
-        Features.Add(feature);
-        return this;
-    }
-
-    public IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure) => this;
-
-    public IWebApplicationBuilder AddServer(IWebApplicationServer server) => this;
-
-    public IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server) => this;
-
-    public IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline) => this;
-
-    public IWebApplication Build() => throw new NotSupportedException("The test builder does not build applications.");
-}
-
-/// <summary>
 /// A chain-order probe: records that it was consulted and answers with a configured verdict.
 /// </summary>
 internal sealed class RecordingErrorHandler : IErrorHandler
@@ -151,6 +126,18 @@ internal sealed class FakeResponseStreamingFeature : IHttpResponseStreamingFeatu
     public ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public ValueTask FlushAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public ValueTask CompleteAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+}
+
+/// <summary>
+/// A fake client-fault report, as the default server publishes it when reading a request body failed on
+/// the client's side and the transport answers the exchange with the reported status.
+/// </summary>
+internal sealed class FakeClientFaultFeature : IWebClientFaultFeature
+{
+    public FakeClientFaultFeature(HttpStatusCode? statusCode) => StatusCode = statusCode;
+
+    public string Name => nameof(IWebClientFaultFeature);
+    public HttpStatusCode? StatusCode { get; }
 }
 
 /// <summary>

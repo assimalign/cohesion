@@ -592,7 +592,7 @@ public sealed partial class SqlDatabaseEventSourceTests
             await using var listener = new InMemoryConnectionListener();
             await using var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
             await server.StartAsync();
-            Connection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, TestTimeout.Token());
+            IDuplexConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, TestTimeout.Token());
             await using var client = new ProtocolTestClient(connection);
 
             // Act

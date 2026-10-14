@@ -76,9 +76,24 @@ concurrent reads but block in-flight deletions.
 - The provider stores `IgnoreCase` (default true) and `CultureInfo`
   (default invariant) and uses them through `FileSystemPath.Equals` so
   lookups behave the same on Linux and Windows.
-- Incoming paths are normalized via `RootDirectory.Path.Merge(path, culture, ignoreCase)`
-  before any tree-walking — relative paths are rooted at the file system's
-  root, absolute paths are checked for scope.
+- Every path-taking operation resolves its path before it walks the tree and
+  refuses it with `FileSystemException` (`PathOutsideRoot`) unless it is
+  the root or lies under it on a segment boundary — the family rule in the
+  root package's `docs/DESIGN.md`, "Root containment". A relative path is taken
+  from the root; `.` and `..` are resolved lexically, and `..` at the namespace
+  root stays there (`/..` is `/`), so with the default root of `/` a leading
+  `..` cannot leave it. The comparison is ordinal, ignoring case when
+  `IgnoreCase` is set; `CultureInfo` keeps governing entry lookups only, because
+  a culture-aware prefix match cannot decide a segment boundary. The resolved
+  path is rebuilt from the root's own text, so walks start from the stored root.
+- Until #1180 the provider resolved paths with `FileSystemPath.Merge`, which
+  confines nothing. Nothing outside an in-memory tree can leak, but with a root
+  such as `/data` the sibling-prefix path `/datax` aliased the entry `/data/x`
+  (`Exists("/datax")` was `true`), and moving through that alias deadlocked,
+  because the walk shared-locked the entry it then tried to lock exclusively,
+  while a leading `..` resolved to unrelated entries. A path no longer than the root is now the
+  root itself, which also fixes resolving the parent of a root-level entry
+  under any root other than `/`.
 
 ## Watch dispatcher
 
@@ -124,6 +139,7 @@ src/
       InMemoryFileStream.cs
 tests/
   FileSystemTests.cs            provider-specific behavior
+  InMemoryFileSystemContainmentTests.cs root containment
   InMemoryFileHandleTests.cs    positional I/O and durability contract
   Shared/FileSystemStandardTests.cs (linked from root package)
 ```

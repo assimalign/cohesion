@@ -22,13 +22,15 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// and same-urgency incremental streams are served round-robin by stream id.
 /// </para>
 /// <para>
-/// Because a response is buffered and written as one contiguous
-/// HEADERS+DATA unit while the gate is held (the streaming write path is a
-/// separate concern), the scheduler orders <em>which stream's queued response
-/// proceeds next</em> under write contention — the point at which HTTP/2's
-/// single connection write path is actually contended. The pure ordering policy
-/// lives in <see cref="SelectNextWaiterIndex"/> so it can be unit-tested in
-/// isolation.
+/// Because a buffered response is written as one contiguous HEADERS+DATA unit
+/// while the gate is held — for as long as the peer's flow-control windows cover
+/// it; a writer whose credit runs out releases the gate before it waits for a
+/// <c>WINDOW_UPDATE</c> and re-queues for the rest — the scheduler orders
+/// <em>which stream's queued response proceeds next</em> under write contention,
+/// the point at which HTTP/2's single connection write path is actually
+/// contended. (The streaming write path queues per DATA frame.) The pure ordering
+/// policy lives in <see cref="SelectNextWaiterIndex"/> so it can be unit-tested
+/// in isolation.
 /// </para>
 /// </remarks>
 internal sealed class Http2WriteScheduler : IDisposable
@@ -125,6 +127,9 @@ internal sealed class Http2WriteScheduler : IDisposable
     {
         lock (_sync)
         {
+            // Grant removes the waiter before completing it. A callback already in
+            // flight must leave that grant intact; its writer owns the gate and
+            // releases it in finally even when the subsequent write is cancelled.
             if (_waiters.Remove(waiter))
             {
                 waiter.Cancel();
@@ -275,13 +280,16 @@ internal sealed class Http2WriteScheduler : IDisposable
 
         public void Grant()
         {
-            _registration.Dispose();
+            // Called under _sync: Dispose could wait for CancelWaiter, which needs
+            // that same lock. Unregister never waits for an in-flight callback.
+            _registration.Unregister();
             _completion.TrySetResult();
         }
 
         public void Cancel()
         {
-            _registration.Dispose();
+            // Scheduler disposal also cancels queued waiters under _sync.
+            _registration.Unregister();
             _completion.TrySetCanceled();
         }
     }

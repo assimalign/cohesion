@@ -204,6 +204,7 @@ jobs:
     name: validate ${{ matrix.project }}
     needs: prepare
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
@@ -299,6 +300,7 @@ jobs:
     name: "validate packed SDK consumer [${{ matrix.os }}]"
     needs: [prepare, pack-packages]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

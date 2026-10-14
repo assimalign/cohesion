@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Web;
+using Assimalign.Cohesion.Web.Testing;
 
 using Shouldly;
 
@@ -78,6 +79,30 @@ public class WebApplicationServiceLifecycleTests
             () => builder.Build());
 
         exception.Message.ShouldContain("service factory returned null", Case.Insensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Startup: A pipeline composition failure fails the start before any service starts")]
+    public async Task StartAsync_WhenPipelineCompositionFails_ShouldFailBeforeAnyServiceStarts()
+    {
+        // Arrange — a middleware factory runs when the pipeline is built, which is how routing
+        // builds its route table (#1051); the in-memory default server resolves that pipeline.
+        List<string> events = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddService(new RecordingHostService("service", events));
+        WebApplication application = factory.Application;
+        ((IWebApplicationPipelineBuilder)application).Use(
+            (WebApplicationMiddleware next) => throw new InvalidOperationException("composition failed"));
+
+        // Act
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => ((IWebApplication)application).StartAsync());
+
+        // Assert — nothing started, the host is Failed rather than stuck in Starting, and a
+        // retry fails the same way instead of returning as though the host were running.
+        exception.Message.ShouldBe("composition failed");
+        events.ShouldBeEmpty();
+        application.Context.State.ShouldBe(HostState.Failed);
+        await Should.ThrowAsync<InvalidOperationException>(() => ((IWebApplication)application).StartAsync());
     }
 
     private sealed class RecordingHostService : IHostService

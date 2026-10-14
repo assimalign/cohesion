@@ -9,7 +9,12 @@ namespace Assimalign.Cohesion.Http;
 /// <c>application/x-www-form-urlencoded</c> or <c>multipart/form-data</c>
 /// request body. Every limit maps to a defence against unbounded memory or CPU
 /// use by a hostile or malformed body; exceeding one throws an
-/// <see cref="InvalidDataException"/> mid-parse.
+/// <see cref="InvalidDataException"/> mid-parse whose
+/// <see cref="System.Exception.InnerException"/> is an
+/// <see cref="HttpFormLimitExceededException"/>, so a caller can tell a body over a limit
+/// (<c>413 Content Too Large</c>) from a malformed one (<c>400 Bad Request</c>) by type.
+/// Its <see cref="HttpFormLimitExceededException.Limit"/> identifies the exceeded limit without
+/// interpreting message text or recording request input.
 /// </summary>
 public class HttpFormOptions
 {
@@ -43,8 +48,14 @@ public class HttpFormOptions
     public int MemoryBufferThreshold { get; set; } = DefaultMemoryBufferThreshold;
 
     /// <summary>
-    /// A limit for the number of form entries to allow.
+    /// A limit for the number of urlencoded values or multipart sections to allow.
+    /// Every multipart section counts, including file sections, repeated field names, and sections
+    /// without a field name that would otherwise be skipped. The section that exceeds this limit
+    /// is rejected before its body is consumed.
     /// Forms that exceed this limit will throw an <see cref="InvalidDataException"/> when parsed.
+    /// Its inner <see cref="HttpFormLimitExceededException"/> identifies
+    /// <see cref="HttpFormLimit.ValueCount"/> for urlencoded values or
+    /// <see cref="HttpFormLimit.MultipartSectionCount"/> for multipart sections.
     /// Defaults to 1024.
     /// </summary>
     public int ValueCountLimit { get; set; } = HttpFormReader.DefaultValueCountLimit;

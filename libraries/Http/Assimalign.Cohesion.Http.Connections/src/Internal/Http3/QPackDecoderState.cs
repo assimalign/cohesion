@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,6 +34,7 @@ internal sealed class QPackDecoderState
 {
     private readonly QPackDynamicTable _table;
     private readonly long _maxBlockedStreams;
+    private readonly long _maxFieldSectionSize;
     private readonly Lock _gate = new();
     private long _blockedStreams;
     private TaskCompletionSource _insertSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -40,11 +42,12 @@ internal sealed class QPackDecoderState
     /// <summary>
     /// Initializes decoder state for the supplied QPACK options.
     /// </summary>
-    /// <param name="options">The advertised capacity and blocked-stream limit.</param>
+    /// <param name="options">The advertised capacity, blocked-stream limit, and decoded field-section size.</param>
     public QPackDecoderState(Http3QPackOptions options)
     {
         _table = new QPackDynamicTable(options.MaxTableCapacity);
         _maxBlockedStreams = options.MaxBlockedStreams;
+        _maxFieldSectionSize = options.MaxFieldSectionSize;
     }
 
     /// <summary>
@@ -122,6 +125,9 @@ internal sealed class QPackDecoderState
     /// table (a Section Acknowledgment is owed for referencing sections).
     /// </returns>
     /// <exception cref="QPackException">Thrown on an unsatisfiable section or a blocked-stream overflow.</exception>
+    /// <exception cref="Http3LimitExceededException">
+    /// Thrown (<c>431</c>) when the decoded section exceeds the advertised <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c>.
+    /// </exception>
     public Task<QPackDecodeResult> DecodeRequestAsync(byte[] headerBlock, CancellationToken cancellationToken)
         => DecodeRequestAsync(headerBlock, ReadPrefix(headerBlock), cancellationToken);
 
@@ -139,6 +145,10 @@ internal sealed class QPackDecoderState
     /// table (a Section Acknowledgment is owed for referencing sections).
     /// </returns>
     /// <exception cref="QPackException">Thrown on an unsatisfiable section or a blocked-stream overflow.</exception>
+    /// <exception cref="Http3LimitExceededException">
+    /// Thrown (<c>431</c>) when the decoded section exceeds the advertised
+    /// <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c>; decoding only reads the table, so its state is intact.
+    /// </exception>
     public async Task<QPackDecodeResult> DecodeRequestAsync(byte[] headerBlock, QPackFieldSectionPrefix prefix, CancellationToken cancellationToken)
     {
         if (prefix.RequiredInsertCount > 0)
@@ -148,7 +158,7 @@ internal sealed class QPackDecoderState
 
         lock (_gate)
         {
-            List<(string Name, string Value)> fields = QPackFieldSectionDecoder.DecodeBody(headerBlock, _table, prefix);
+            List<(string Name, string Value)> fields = QPackFieldSectionDecoder.DecodeBody(headerBlock, _table, prefix, _maxFieldSectionSize);
             return new QPackDecodeResult(fields, prefix.RequiredInsertCount > 0);
         }
     }
@@ -178,7 +188,7 @@ internal sealed class QPackDecoderState
                             // to (RFC 9204 §2.1.2) — a connection error.
                             throw new QPackException(
                                 Http3ErrorCode.QPackDecompressionFailed,
-                                $"A QPACK field section would block more than the permitted {_maxBlockedStreams} stream(s).");
+                                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackBlockedStreamLimitExceeded, _maxBlockedStreams));
                         }
 
                         _blockedStreams++;

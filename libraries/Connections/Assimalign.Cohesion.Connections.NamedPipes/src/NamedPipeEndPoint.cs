@@ -36,12 +36,12 @@ public sealed class NamedPipeEndPoint : EndPoint, IEquatable<NamedPipeEndPoint>
     {
         if (string.IsNullOrEmpty(pipeName))
         {
-            throw new ArgumentException("The pipe name must be a non-empty string.", nameof(pipeName));
+            throw new ArgumentException(ErrorMessages.PipeNameEmpty, nameof(pipeName));
         }
 
         if (string.IsNullOrEmpty(serverName))
         {
-            throw new ArgumentException("The server name must be a non-empty string.", nameof(serverName));
+            throw new ArgumentException(ErrorMessages.ServerNameEmpty, nameof(serverName));
         }
 
         PipeName = pipeName;

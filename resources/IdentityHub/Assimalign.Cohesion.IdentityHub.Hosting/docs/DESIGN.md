@@ -8,7 +8,7 @@ Every built host registers one internal HTTP issuer after user services. The end
 
 The issuer exposes public OpenID Provider metadata, JWKS, and token endpoints. It accepts exactly the implemented `openid` scope or an empty scope and returns `invalid_scope` for every other client-controlled value. Client authentication accepts exactly one of HTTP Basic or form credentials, constrains the requested `audience`/`resource` to the registration, and issues ES256 bearer JWTs. Confidential clients authenticate at device authorization and polling as well as for client credentials.
 
-Device authorization and the built-in verification page are available only when the issuer itself binds to loopback in Local. High-entropy device codes, human-readable user codes, a ten-minute lifetime, pending polling, one-shot consumption, and an ID token when `openid` was requested remain supported there. The page has no client-selected subject: every local approval signs in the fixed `development-user` identity, checks a supplied browser origin when present, and emits restrictive cache, framing, referrer, and content-security headers. Discovery omits the device endpoint and grant outside that Local mode. Production account login, consent, recovery, federation, and subject selection require a separately authenticated user-flow implementation.
+Device authorization and the built-in verification page are available only when the issuer itself binds to loopback in Local. High-entropy device codes, human-readable user codes, a ten-minute lifetime, pending polling, one-shot consumption, and an ID token when `openid` was requested remain supported there. The page has no client-selected subject: every local approval signs in the fixed `development-user` identity, checks a supplied browser origin when present, and sets restrictive cache headers; its framing, referrer, and content-security headers are the ones every IdentityHub response carries (see below). Discovery omits the device endpoint and grant outside that Local mode. Production account login, consent, recovery, federation, and subject selection require a separately authenticated user-flow implementation.
 
 ## Keys and tokens
 
@@ -24,9 +24,21 @@ The builder captures `ResourceRuntime.Current`, resolves a registered area contr
 
 Every `/cohesion/v1/*` request is authenticated when a gateway is ambient. A credential verifier registered for the resource (`ResourceRuntime.TryGetCredentialVerifier`) is consulted first; `NoResult` falls through to the default application-key verifier, and the mapped `ResourceCaller` must be a `Gateway` of the ambient application whose `Subject` is the ambient gateway (the mapped form of the default issuer and subject rules). The default verifier configures the shared ES256 `JsonWebTokenValidator` with `ResourceCredentialProfile` constants: it parses the application trust JWK, verifies the ES256 signature, then validates issuer, gateway subject, resource audience, required claims, temporal bounds, token ID, and a maximum 24-hour lifetime. Missing or malformed credentials return 401 with `WWW-Authenticate: Bearer`; a valid token for another resource returns 403. The default control plane serves the declarative AddAudience and AddClient command kinds.
 
+Without a gateway identity, `/cohesion/v1` and every path below it, including namespaced probes,
+accept only transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. The check reads the
+exchange's connection `RemoteEndPoint`; forwarded headers never grant access, and a missing or
+non-IP peer fails closed. Other peers receive `403 Forbidden`, chosen to make the development-only
+access restriction clear. The same rule applies beneath an endpoint base path. Bare `/healthz`,
+`/readyz`, and `/livez` stay open for orchestrators and load balancers; the issuer's OAuth and
+discovery routes and gateway credential checks retain their existing behavior. This is a breaking
+security change from 10.0.0-preview.1, which admitted remote standalone management requests
+(#1431, owner decision 46; preview compatibility follows decision 15).
+
 ## AOT and dependency boundary
 
 Hosting privately composes Cohesion Web/HTTP/connection libraries and the shared IdentityModel JWT implementation. Routes use direct dispatch and `Utf8JsonWriter`; there is no reflection-based routing, serializer metadata discovery, or dynamic activation.
+
+Security headers come from `Web.SecurityHeaders`, registered first in the private pipeline: every response, JSON and the Local device-approval page alike, carries `Content-Security-Policy: default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff`. These are the values the approval page used to set by hand; the page now sets only its `Cache-Control: no-store` and `Pragma: no-cache`. `Web.SecurityHeaders` and the `Web.Routing` and `Http.Streaming` assemblies it closes over are private members of `App.IdentityHub`.
 
 ## Declarative commands (item 31c)
 
@@ -90,3 +102,13 @@ The concrete application and IHost route share it. Startup failures still roll b
 
 Each `AddAudience` and `AddClient` declaration is a registration. `IdentityHubRegistrations` resolves and validates them once, before any lifecycle service is created, so an undeclared client audience fails `Build` without running a service factory. Both verbs are explicit `IIdentityHubApplicationBuilder` shims over public concrete counterparts that return the builder for chaining. `IdentityEndpointService` is disposable; the application now disposes it through the provider.
 
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

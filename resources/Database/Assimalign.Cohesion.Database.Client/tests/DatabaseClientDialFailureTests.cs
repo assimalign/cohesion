@@ -174,7 +174,7 @@ public sealed class DatabaseClientDialFailureTests
         // Arrange: nothing accepts on the in-memory listener, so the TLS handshake never hears back
         // and the TLS layer cancels it at its own timeout while the caller's token stays live.
         await using var listener = new InMemoryConnectionListener();
-        IConnectionFactory factory = listener.CreateFactory().UseTls(new TlsClientOptions
+        IDuplexConnectionFactory factory = listener.CreateFactory().UseTls(new TlsClientOptions
         {
             AuthenticationOptions = { TargetHost = "localhost" },
             HandshakeTimeout = TimeSpan.FromMilliseconds(200),
@@ -196,7 +196,7 @@ public sealed class DatabaseClientDialFailureTests
     {
         // Arrange: the server end answers the client hello with a fatal handshake_failure alert.
         await using var listener = new InMemoryConnectionListener();
-        IConnectionFactory factory = listener.CreateFactory().UseTls(new TlsClientOptions
+        IDuplexConnectionFactory factory = listener.CreateFactory().UseTls(new TlsClientOptions
         {
             AuthenticationOptions = { TargetHost = "localhost" },
         });
@@ -204,7 +204,7 @@ public sealed class DatabaseClientDialFailureTests
         var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task server = Task.Run(async () =>
         {
-            await using Connection accepted = await listener.AcceptAsync(ClientTestHarness.Timeout());
+            await using IDuplexConnection accepted = await listener.AcceptAsync(ClientTestHarness.Timeout());
             Stream stream = accepted.AsStream();
             await stream.WriteAsync(new byte[] { 0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28 });
             await stream.FlushAsync();
@@ -242,7 +242,7 @@ public sealed class DatabaseClientDialFailureTests
         exception.ShouldBeSameAs(disposed);
     }
 
-    private static DatabaseClient CreateClient(IConnectionFactory factory, EndPoint endPoint)
+    private static DatabaseClient CreateClient(IDuplexConnectionFactory factory, EndPoint endPoint)
         => DatabaseClient.Create(new DatabaseClientOptions
         {
             Settings = new DatabaseConnectionSettings

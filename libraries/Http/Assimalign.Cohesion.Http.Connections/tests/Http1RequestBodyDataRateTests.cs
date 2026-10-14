@@ -34,7 +34,7 @@ public class Http1RequestBodyDataRateTests
             http1.Limits.MinRequestBodyDataRate = new HttpMinDataRate(bytesPerSecond: 1000, gracePeriod: TimeSpan.FromMilliseconds(100)));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(context);
 
         byte[] buffer = new byte[100];
@@ -55,7 +55,7 @@ public class Http1RequestBodyDataRateTests
             http1.Limits.MinRequestBodyDataRate = new HttpMinDataRate(bytesPerSecond: 1, gracePeriod: TimeSpan.FromSeconds(30)));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(context);
 
         using StreamReader reader = new(httpContext.Request.Body);
@@ -73,7 +73,7 @@ public class Http1RequestBodyDataRateTests
         options.UseHttp1(new TestConnectionListener(connection), http1 => http1.Limits.MinRequestBodyDataRate = null);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(context);
 
         using StreamReader reader = new(httpContext.Request.Body);
@@ -95,7 +95,7 @@ public class Http1RequestBodyDataRateTests
             http1.Limits.MinRequestBodyDataRate = new HttpMinDataRate(bytesPerSecond: 1000, gracePeriod: TimeSpan.FromMilliseconds(100)));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(context);
 
         using StreamReader reader = new(httpContext.Request.Body);

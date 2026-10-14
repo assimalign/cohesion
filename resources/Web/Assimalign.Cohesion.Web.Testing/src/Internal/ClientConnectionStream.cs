@@ -16,10 +16,10 @@ namespace Assimalign.Cohesion.Web.Testing.Internal;
 /// </summary>
 internal sealed class ClientConnectionStream : Stream
 {
-    private readonly Connection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly Stream _inner;
 
-    public ClientConnectionStream(Connection connection)
+    public ClientConnectionStream(IDuplexConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
 

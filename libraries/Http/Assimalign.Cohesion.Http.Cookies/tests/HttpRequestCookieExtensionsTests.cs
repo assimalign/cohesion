@@ -46,10 +46,10 @@ public class HttpRequestCookieExtensionsTests
 
         cookies.Count.ShouldBe(2);
         HttpCookie[] arr = ToArray(cookies);
-        arr[0].Name.ShouldBe("session");
-        arr[0].Value.ShouldBe("abc");
-        arr[1].Name.ShouldBe("theme");
-        arr[1].Value.ShouldBe("light");
+        arr[0].Name.ShouldBe<HttpCookieName>("session");
+        arr[0].Value.ShouldBe<HttpCookieValue>("abc");
+        arr[1].Name.ShouldBe<HttpCookieName>("theme");
+        arr[1].Value.ShouldBe<HttpCookieValue>("light");
     }
 
     [Fact]
@@ -78,10 +78,10 @@ public class HttpRequestCookieExtensionsTests
 
         cookies.Count.ShouldBe(2);
         HttpCookie[] arr = ToArray(cookies);
-        arr[0].Name.ShouldBe("name");
-        arr[0].Value.ShouldBe("value");
-        arr[1].Name.ShouldBe("flag");
-        arr[1].Value.ShouldBe(string.Empty);
+        arr[0].Name.ShouldBe<HttpCookieName>("name");
+        arr[0].Value.ShouldBe<HttpCookieValue>("value");
+        arr[1].Name.ShouldBe<HttpCookieName>("flag");
+        arr[1].Value.ShouldBe<HttpCookieValue>(string.Empty);
     }
 
     [Fact]

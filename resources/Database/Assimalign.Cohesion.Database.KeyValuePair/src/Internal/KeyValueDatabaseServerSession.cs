@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 {
     private readonly KeyValueDatabaseServer _server;
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly KeyValueDatabaseServerOptions _options;
     private readonly KeyValueDatabaseEngine _engine;
     private readonly DatabaseAuthenticator _authenticator;
@@ -45,7 +45,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 
     internal KeyValueDatabaseServerSession(
         KeyValueDatabaseServer server,
-        IConnection connection,
+        IDuplexConnection connection,
         KeyValueDatabaseServerOptions options,
         KeyValueDatabaseEngine engine,
         DatabaseAuthenticator authenticator)

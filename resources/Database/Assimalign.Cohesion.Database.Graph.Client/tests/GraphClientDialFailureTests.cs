@@ -59,7 +59,7 @@ public sealed class GraphClientDialFailureTests
         exception.CancellationToken.ShouldBe(cancellation.Token);
     }
 
-    private static GraphClient CreateClient(IConnectionFactory factory, EndPoint endPoint)
+    private static GraphClient CreateClient(IDuplexConnectionFactory factory, EndPoint endPoint)
         => GraphClient.Create(new GraphClientOptions
         {
             Settings = new DatabaseConnectionSettings

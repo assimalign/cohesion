@@ -21,7 +21,7 @@ public sealed class SqlClientOptions
     /// in-memory, …). Drivers are composed statically — they are never named in a
     /// connection string.
     /// </summary>
-    public IConnectionFactory? ConnectionFactory { get; set; }
+    public IDuplexConnectionFactory? ConnectionFactory { get; set; }
 
     /// <summary>
     /// Gets or sets an optional telemetry observer invoked around every command.

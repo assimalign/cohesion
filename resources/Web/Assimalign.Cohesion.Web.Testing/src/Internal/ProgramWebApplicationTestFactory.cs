@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -49,32 +50,31 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.StartupTimeout,
-                "The startup timeout must be greater than zero.");
+                ErrorMessages.StartupTimeoutInvalid);
         }
         if (options.ShutdownTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ShutdownTimeout,
-                "The shutdown timeout must be greater than zero.");
+                ErrorMessages.ShutdownTimeoutInvalid);
         }
         if (options.ProbeInterval <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ProbeInterval,
-                "The probe interval must be greater than zero.");
+                ErrorMessages.ProbeIntervalInvalid);
         }
 
         _assembly = programType.Assembly;
         MethodInfo entryPoint = _assembly.EntryPoint
             ?? throw new InvalidOperationException(
-                $"Assembly '{_assembly.GetName().Name}' has no executable entry point.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExecutableEntryPointMissing, _assembly.GetName().Name));
         if (!ReferenceEquals(entryPoint.DeclaringType, programType))
         {
             throw new InvalidOperationException(
-                $"Type '{programType.FullName}' is not the entry-point Program for assembly " +
-                $"'{_assembly.GetName().Name}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EntryPointProgramTypeMismatch, programType.FullName, _assembly.GetName().Name));
         }
 
         _arguments = (string[])options.Arguments.Clone();
@@ -86,19 +86,19 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
         if (!ResourceContext.Endpoints.TryGetValue(HttpEndpointName, out Uri? endpoint))
         {
             throw new ArgumentException(
-                $"The test resource context must provide the Web '{HttpEndpointName}' endpoint.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TestResourceEndpointRequired, HttpEndpointName),
                 nameof(options));
         }
         if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                $"The test resource context's '{HttpEndpointName}' endpoint must use http.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TestResourceEndpointSchemeInvalid, HttpEndpointName),
                 nameof(options));
         }
         if (ResourceContext.GatewayName is not null && ResourceContext.BootstrapCredential.IsEmpty)
         {
             throw new ArgumentException(
-                "A managed test resource context must provide a bootstrap credential so the factory can request graceful stop.",
+                ErrorMessages.TestResourceBootstrapCredentialRequired,
                 nameof(options));
         }
     }
@@ -113,7 +113,7 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
             {
                 ObjectDisposedException.ThrowIf(_isDisposed, this);
                 return _application ?? throw new InvalidOperationException(
-                    "The resource Program has not started. Call StartAsync or CreateClient first.");
+                    ErrorMessages.ResourceProgramNotStarted);
             }
         }
     }
@@ -160,7 +160,7 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
             _startupCancellation.Cancel();
             await TryAbortStartAsync().ConfigureAwait(false);
             throw new TimeoutException(
-                $"The Web resource did not report ready within {_startupTimeout}.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.WebResourceStartupTimedOut, _startupTimeout));
         }
     }
 
@@ -258,7 +258,7 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
         IHost host = await invocation.HostReady.WaitAsync(cancellationToken).ConfigureAwait(false);
         IWebApplication application = host as IWebApplication
             ?? throw new InvalidOperationException(
-                $"Resource entry point '{_assembly.GetName().Name}' built a non-Web host.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResourceEntryPointHostNotWeb, _assembly.GetName().Name));
 
         lock (_gate)
         {
@@ -287,7 +287,7 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
             {
                 await program.ConfigureAwait(false);
                 throw new InvalidOperationException(
-                    "The resource program exited before its Web control plane reported ready.");
+                    ErrorMessages.ResourceProgramPrematureExit);
             }
 
             try
@@ -384,7 +384,7 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
                 }
 
                 throw new HttpRequestException(
-                    $"The Web control plane rejected graceful stop with HTTP {(int)response.StatusCode}.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ControlPlaneGracefulStopRejected, (int)response.StatusCode));
             }
             catch (HttpRequestException)
             {

@@ -51,7 +51,7 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
 {
     private readonly KeyValueDatabaseEngine _engine;
     private readonly KeyValueDatabaseServerOptions _options;
-    private readonly IConnectionListener _listener;
+    private readonly IDuplexConnectionListener _listener;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly ConcurrentDictionary<Guid, KeyValueDatabaseServerSession> _sessions = new();
 
@@ -217,7 +217,7 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
     {
         while (!softStop.IsCancellationRequested)
         {
-            IConnection connection;
+            IDuplexConnection connection;
 
             try
             {
@@ -258,7 +258,7 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private static async Task RejectAsync(IConnection connection, CancellationToken hardAbort)
+    private static async Task RejectAsync(IDuplexConnection connection, CancellationToken hardAbort)
     {
         try
         {

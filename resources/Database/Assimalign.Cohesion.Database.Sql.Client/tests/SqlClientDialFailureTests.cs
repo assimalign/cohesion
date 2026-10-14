@@ -76,7 +76,7 @@ public sealed class SqlClientDialFailureTests
         await using var client = CreateClient(listener.CreateFactory(), listener.EndPoint);
         Task server = Task.Run(async () =>
         {
-            await using Connection connection = await listener.AcceptAsync(timeout.Token);
+            await using IDuplexConnection connection = await listener.AcceptAsync(timeout.Token);
             ReadResult startup = await connection.Input.ReadAsync(timeout.Token);
             connection.Input.AdvanceTo(startup.Buffer.End);
             connection.Abort(new SocketException((int)SocketError.ConnectionReset));
@@ -95,7 +95,7 @@ public sealed class SqlClientDialFailureTests
         core.InnerException.ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.ConnectionReset);
     }
 
-    private static SqlClient CreateClient(IConnectionFactory factory, EndPoint endPoint)
+    private static SqlClient CreateClient(IDuplexConnectionFactory factory, EndPoint endPoint)
         => SqlClient.Create(new SqlClientOptions
         {
             Settings = new DatabaseConnectionSettings

@@ -51,7 +51,7 @@ become customer projects.
 
 ### Target framework
 - Libraries target `net10.0` — but the target framework is centrally managed via `TargetFrameworkLatest` in `build/Targets/Build.TargetFramework.props`, so per-project overrides are normally not needed.
-- Sanctioned exception: `analyzers/` projects (Roslyn analyzers/codefixes/generators) target `netstandard2.0` with `IsAotCompatible=false` via `analyzers/Directory.Build.props`, because Roslyn components load inside the compiler.
+- Sanctioned exception: `analyzers/` projects (Roslyn analyzers/codefixes/generators) target `netstandard2.0` with `IsAotCompatible=false` via `analyzers/Directory.Build.props`, because Roslyn components load inside the compiler. Placement, naming and diagnostic tracking follow [analyzers.md](analyzers.md).
 
 ### Preview language features
 ```xml
@@ -68,9 +68,37 @@ These are also centrally managed. Don't duplicate per project unless the project
 - Exception: files whose names are fixed by external tooling keep their conventional casing (e.g., `.github/pull_request_template.md`, files under `.claude/**`).
 - API reference needs no exception: **folders** under `docs/Assembly/` mirror CLR namespace/type names, and each type's page is `docs/Assembly/<Namespace>/<Type>/OVERVIEW.md`.
 
-### Direct throws or .NET 10 extension type methods, not `ThrowHelper`
+### Direct throws or exception-type members, not `ThrowHelper`
 - Use direct `throw` statements or framework guard APIs (e.g., `ArgumentNullException.ThrowIfNull`) when the logic is local.
-- If reusable throw behavior is needed, implement as a .NET 10 extension type method in `Extensions/`.
+- Put reusable throw behavior on the exception type as a static member, with its message in
+  `Properties/ErrorMessages.resx`. An assembly owns the throw members of the exception types it owns.
+- Use .NET 10 extension members in `Extensions/` only for exception types the assembly does not own.
+
+### Exception messages are build-generated resources
+
+- Store exception message literals and format strings in `src/Properties/ErrorMessages.resx`.
+  Name each entry after the failure in PascalCase and reuse one entry for identical text.
+  A name is a short noun phrase for what went wrong, about five words and 40 characters at most:
+  `CookieNameInvalid`, `RequestBodyTooLarge`, `StreamingNotEnabled`. Never use the message text
+  itself, or a truncation of it, as the name.
+- `build/Targets/Build.ErrorMessages.targets`, imported by the shared build, configures MSBuild's
+  `GenerateResource` task with `StronglyTypedLanguage`, `StronglyTypedClassName`,
+  `StronglyTypedNamespace` and `StronglyTypedFileName`. It generates an **internal** `ErrorMessages`
+  class in the project's `RootNamespace` under `$(IntermediateOutputPath)`. A project only adds the
+  resource file; no checked-in `Designer.cs`, Visual Studio `Generator` or `LastGenOutput` metadata.
+- Read `ErrorMessages.<Name>`. For parameters use
+  `string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, args...)`, with numbered
+  placeholders and the existing text preserved. Keep messages that omit request input that way.
+- If exceptions are created on a normal path, including abort or cancellation reasons, cache the
+  message (or format string) in a `static readonly` field. Do not look up the resource on each creation.
+- Framework guards such as `ArgumentNullException.ThrowIfNull` and
+  `ArgumentOutOfRangeException.ThrowIf*` that supply no message remain unchanged.
+- EventSource templates, log messages and HTTP response bodies are outside this convention.
+  Non-exception resources remain in `Resources.resx`, with the shared build generating their
+  internal `Resources` accessor too.
+- Adoption covers Http, Web and Connections and the seven existing resource projects. Other areas
+  adopt it when next touched; [#1470](https://github.com/assimalign/cohesion/issues/1470) covers
+  Database. No file under `resources/Database/` changes while the owner's Database PR is active.
 
 ### `.NET 10 extension(...)` syntax for extension members
 ```csharp
@@ -137,7 +165,8 @@ public interface ICache { }
 
 ### `ThrowHelper` / `ThrowHelpers` types
 - Do not add helper classes whose primary purpose is throwing exceptions.
-- When touching existing usages, migrate toward direct throws or extension type methods.
+- When touching existing usages, migrate toward direct throws or static members on the exception type.
+  Extension members are only for exception types the assembly does not own.
 
 ### Legacy `this` extension syntax in new code
 ```csharp
@@ -210,7 +239,7 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/
 │   │   ├── EventSource/   # EventSource-derived types
 │   │   └── Exceptions/    # Internal exceptions
 │   ├── ValueObjects/      # Value objects, generated and hand-written — flat
-│   ├── Properties/        # AssemblyInfo.cs (and resx designers)
+│   ├── Properties/        # AssemblyInfo.cs and resource files (accessors generated under obj/)
 │   └── [Feature folders]  # Other public types, abstract classes included (or the src/ root)
 ├── shared/                # Source compiled into sibling assemblies — see "Shared source"
 ├── docs/
@@ -233,7 +262,7 @@ These folder rules apply to every shipped `src/` project (`libraries/`, `resourc
 | `Extensions/` | Public `static` classes that declare `extension(...)` members | Flat | `RootNamespace` |
 | `ValueObjects/` | Public value objects: structs / record structs with value equality (`IEquatable<Self>`), including every `CohesionValueType` (its `Include` path is `ValueObjects\<Name>.cs`) | Flat | `RootNamespace` |
 | `Internal/` | Every `internal` type, whatever its kind | Subfolders allowed: `Internal/EventSource/` for the assembly's one `EventSource` type (`event-source.md`), `Internal/Exceptions/` for internal exceptions, plus feature folders | `{RootNamespace}.Internal` |
-| `Properties/` | `AssemblyInfo.cs`; assembly-level attributes live here, not in the csproj | — | — |
+| `Properties/` | `AssemblyInfo.cs` and `.resx` files; assembly-level attributes live here, not in the csproj | — | — |
 | `System/` | BCL-namespace extensions (`namespace System.*`) | Mirrors the BCL namespace | `System.*` — **only** in `Assimalign.Cohesion.Core` |
 
 Precedence when a type matches more than one row: `internal` wins (an internal exception goes to
@@ -253,10 +282,9 @@ does not. An abstract exception root still goes to `Exceptions/`, and an interna
 `{Name}ErrorCode` enum in `Exceptions/` over a separate exception type per failure; consumers can
 still derive their own exception types from the root.
 
-Two narrow exceptions, each marked with a `// Deviates from ...` comment where it occurs:
-compiler polyfills such as `IsExternalInit` keep `System.Runtime.CompilerServices` because the
-compiler binds them by exact name, and `Properties/` resx designer classes keep the namespace their
-resource manifest name requires.
+Compiler polyfills such as `IsExternalInit` keep `System.Runtime.CompilerServices` because the
+compiler binds them by exact name, marked with a `// Deviates from ...` comment. Build-generated
+resource accessors live under `obj/` and use `RootNamespace`, matching their resource manifest names.
 
 ### File organization rules
 1. **One public type per file** (exceptions: nested types, related enums).
@@ -289,7 +317,10 @@ namespace Assimalign.Cohesion.Database;
 
 ## Access modifiers
 
-1. **Implementation classes:** `internal` by default.
+1. **Implementation classes:** `internal` by default. An implementation that consumers construct
+   directly is `public sealed`, with a private constructor and static `Create` methods. It is never
+   an internal type behind a static factory class (see "Creation-only facades become public
+   implementations" below; owner decision 59, #1465).
    ```csharp
    internal class DatabaseConnectionPool { }
    ```
@@ -303,6 +334,32 @@ namespace Assimalign.Cohesion.Database;
 3. **Extension containers:** always `public static`, with members inside `extension(...)`.
 4. **Nested types:** match outer type visibility unless explicitly different.
 5. **Before introducing a new abstraction, check whether one already exists** in the same service root or shared library. Placeholder folders and placeholder projects are not final architecture boundaries — add projects when needed to preserve modularity and clean dependency flow.
+
+### Creation-only facades become public implementations
+
+A static utility class must not exist only to construct a hidden implementation. Make that
+implementation `public sealed`, keep its constructor private (internal only when its own assembly
+constructs it elsewhere), and move the creation methods onto it. Keep their parameters and
+validation, return the concrete type, and delete the static class. Interfaces remain the contracts
+consumers can depend on; this is the approved exception to the default internal implementation rule
+(owner decision 59, #1464 and #1465).
+
+The implementation takes the static class's name when that name describes the object returned
+(`AuthenticationService`, `ResourceControlPlane`, `DataProtectionProvider`). Otherwise keep its
+descriptive name (`HttpProtocolUpgradeInterceptor`, `CookieAuthenticationHandler`) and use `Create`.
+When a facade creates different implementations, each implementation owns its creation method.
+Use `git mv` when promoting or renaming the implementation, and document every public member,
+including inherited contracts and their argument validation.
+
+A facade or builder DSL that composes operations is not this pattern: `RoutePatternFactory`,
+`ResourceControlPlaneMiddleware`, `ResourceRuntime` and `ResourceTelemetry` stay as they are.
+Component-integration factories whose required value arguments cannot be expressed by a builder
+remain governed by [component-integration.md](component-integration.md).
+
+Database adoption is tracked by [#1470](https://github.com/assimalign/cohesion/issues/1470).
+No `resources/Database/` file changes during the owner's active Database PR. The Web.Health
+`HealthChecks.CreateBuilder()` conversion is deferred because Database.Hosting calls it;
+`ResourceControlPlane.Create` and `JsonWebTokenWriter.CreateEs256` keep their existing spelling.
 
 ### `InternalsVisibleTo` is for tests
 
@@ -418,22 +475,20 @@ comment saying so (`deviations.md`). The `shared/` folder sits outside `src/`, s
 Public APIs stay interface-first — the interface is the contract consumers depend on. Where implementers benefit from guidance, also ship a **public `abstract` base class that explicitly implements the interface** and forwards each member to a strongly-typed `abstract`/`virtual` member:
 
 ```csharp
-public interface IConnectionListener
+public interface IMultiplexedConnection : IConnection
 {
-    ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default);
+    ValueTask<IMultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default);
 }
 
-public abstract class ConnectionListener : IConnectionListener
+public abstract class MultiplexedConnection : Connection, IMultiplexedConnection
 {
-    // Richer concrete-typed member guides the implementer; declared public so
-    // holders of the concrete type get the better signature without casting.
-    public abstract ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default);
+    public abstract ValueTask<MultiplexedConnectionStream> AcceptStreamAsync(CancellationToken cancellationToken = default);
 
-    async ValueTask<IConnection> IConnectionListener.AcceptAsync(CancellationToken cancellationToken)
-        => await AcceptAsync(cancellationToken).ConfigureAwait(false);
+    async ValueTask<IMultiplexedConnectionStream> IMultiplexedConnection.AcceptStreamAsync(CancellationToken cancellationToken)
+        => await AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
 }
 
-internal sealed class TcpConnectionListener : ConnectionListener { /* ... */ }
+internal sealed class QuicMultiplexedConnection : MultiplexedConnection { /* ... */ }
 ```
 
 The interface remains the canonical public surface; concrete types derive from the base and stay `internal` where possible. Use the explicit-implementation forwarding only where the base can offer a richer, concrete-typed member; members without a richer counterpart are declared `public`/`protected abstract` directly.
@@ -459,7 +514,8 @@ Nested host composition is intentional in this repo. Use the hosting abstraction
 1. **Catch specific exceptions, not bare `Exception`.**
 2. **Use custom exceptions for domain errors**, scoped to the owning area.
 3. **Preserve stack trace when rethrowing** — `throw;`, never `throw ex;`.
-4. **Avoid `ThrowHelper` patterns** — direct throws or extension type methods.
+4. **Avoid `ThrowHelper` patterns** — direct throws or static members on the exception type;
+   extension members only for exception types the assembly does not own.
 
 ## Performance
 

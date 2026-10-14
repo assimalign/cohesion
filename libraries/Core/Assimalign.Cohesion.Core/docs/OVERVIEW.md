@@ -29,8 +29,24 @@ endpoints, environment helpers, glob support, and low-level extensions shared ac
 - AppEnvironment
 - AppEnvironment.Variables
 - UriExtensions
+- Ulid
 - AsyncExtensions
 - CertificateManager
+
+## ULID parsing
+
+`System.Ulid.Parse` and `TryParse` accept exactly 26 characters from
+`0123456789ABCDEFGHJKMNPQRSTVWXYZ`, case-insensitively, with a first character from `0` through `7`.
+The rule applies to strings, character spans and UTF-8 spans, including the string and character-span
+overloads that take a format provider.
+Invalid text returns false from `TryParse` and throws `FormatException` from `Parse`. Generated
+ULID value objects use the same validation, including JSON values and dictionary keys. Valid
+lowercase input remains accepted and encoding remains canonical uppercase.
+
+This intentionally breaks compatibility with 10.0.0-preview.1 for malformed and overflowing text,
+which previously decoded silently. Wrong-length input now throws `FormatException` instead of
+`ArgumentException`. See [the design](DESIGN.md#generated-value-type-conformance)
+for the parsing and generated JSON contract.
 
 ## Source Layout
 

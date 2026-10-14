@@ -92,7 +92,6 @@ public static class HttpContextAuthenticationVerbExtensions
 
         return context.Features.Get<IAuthenticationService>()
             ?? throw new InvalidOperationException(
-                "Authentication has not been configured for this request. Call AddAuthentication at the " +
-                "composition root and UseAuthentication in the request pipeline.");
+                ErrorMessages.AuthenticationNotConfigured);
     }
 }

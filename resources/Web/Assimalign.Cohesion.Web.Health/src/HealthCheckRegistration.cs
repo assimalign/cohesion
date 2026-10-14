@@ -71,7 +71,7 @@ public sealed class HealthCheckRegistration
             throw new ArgumentOutOfRangeException(
                 nameof(timeout),
                 effectiveTimeout,
-                "The health-check timeout must be positive or HealthCheckRegistration.InfiniteTimeout.");
+                ErrorMessages.HealthCheckTimeoutInvalid);
         }
 
         Name = name;

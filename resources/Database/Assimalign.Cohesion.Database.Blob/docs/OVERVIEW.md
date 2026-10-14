@@ -65,7 +65,7 @@ Disposing a session aborts its pending work. Blob has no statement or query lang
 Creating and dropping logical databases remains the host-side engine API.
 
 The package also supplies `BlobDatabaseServer`, created with the engine and a
-`BlobDatabaseServerOptions.Listener` implementing `IConnectionListener`. Call
+`BlobDatabaseServerOptions.Listener` implementing `IDuplexConnectionListener`. Call
 `StartAsync` to bind and accept, then `StopAsync` to drain and terminally release the
 listener. The composition root retains engine ownership. Startup binds each authenticated
 session to one database; requests identify only containers and objects in that database.
@@ -113,3 +113,5 @@ first five are leaves of the area root's bases (`DatabaseEngine`, `DatabaseInsta
 `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`), which own the shared lifecycle, the
 explicit-transaction state machine and their checks, so the typed members need no casts
 (concrete-types plan, phase 4; DESIGN.md, "Concrete types").
+
+`BlobDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.

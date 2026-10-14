@@ -23,7 +23,7 @@ public sealed class BlobDatabaseServerOptions
     /// named pipe, in-memory, …), then transfers its lifecycle to the server.
     /// Stop terminally disposes the listener.
     /// </summary>
-    public IConnectionListener? Listener { get; set; }
+    public IDuplexConnectionListener? Listener { get; set; }
 
     /// <summary>
     /// Gets or sets the authenticator consulted during the session handshake.

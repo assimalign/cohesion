@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -564,7 +565,7 @@ public sealed class Route : IRouterRoute
             }
         }
 
-        throw new InvalidOperationException("Complex route segments must contain a literal or separator delimiter after parameter parts.");
+        throw new InvalidOperationException(ErrorMessages.ComplexRouteDelimiterRequired);
     }
 
     private static bool TryAssignParameter(
@@ -584,7 +585,10 @@ public sealed class Route : IRouterRoute
             return true;
         }
 
-        if (parameter.IsOptional)
+        // An omitted optional or catch-all parameter captures no value (Routing DESIGN, "Parameter
+        // policies"): '/files/{**path}' matches '/files' as the link generator's collapsed form
+        // produces it, and a fallback's '{**path:nonfile}' matches the site root.
+        if (parameter.IsOptional || parameter.IsCatchAll)
         {
             values.Remove(parameter.Name);
             return true;
@@ -664,7 +668,7 @@ public sealed class Route : IRouterRoute
                 if (!policyMap.TryResolve(reference, out RouteParameterPolicy? policy) || policy is null)
                 {
                     string policyText = reference.Content ?? reference.ParameterPolicy?.GetType().Name ?? "<unknown>";
-                    throw new InvalidOperationException($"Route parameter '{parameter.Name}' references an unknown route policy '{policyText}'.");
+                    throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteParameterPolicyUnknown, parameter.Name, policyText));
                 }
             }
         }

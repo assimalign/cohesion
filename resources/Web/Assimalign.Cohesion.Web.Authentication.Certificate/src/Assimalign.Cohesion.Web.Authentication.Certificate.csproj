@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Authentication.Certificate</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Tls" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
+	</ItemGroup>
+</Project>

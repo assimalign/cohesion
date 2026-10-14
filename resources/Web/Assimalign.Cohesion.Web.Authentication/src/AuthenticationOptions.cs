@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.Authentication;
 
@@ -9,8 +10,8 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This type is populated at composition time (a <c>*.Hosting</c> project): the root
-/// <c>AddAuthentication</c> call sets the default-scheme names, and each <c>AddCookie</c> /
+/// This type is populated at composition time (a <c>*.Hosting</c> project): the
+/// <c>builder.Services.AddAuthentication</c> callback sets the default-scheme names, and each <c>AddCookie</c> /
 /// <c>AddJwtBearer</c> call registers a <see cref="AuthenticationScheme"/>. The
 /// <see cref="IAuthenticationService"/> reads it live per request, so schemes registered after
 /// the options are first handed out are still visible.
@@ -77,7 +78,7 @@ public sealed class AuthenticationOptions
 
         if (!_schemes.TryAdd(scheme.Name, scheme))
         {
-            throw new InvalidOperationException($"Scheme '{scheme.Name}' has already been registered.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationSchemeAlreadyRegistered, scheme.Name));
         }
     }
 

@@ -8,7 +8,7 @@ stream (`Tcp`) driver. It produces reliable, ordered, single-stream connections 
 `NamedPipeServerStream` / `NamedPipeClientStream` for same-host IPC — the ApplicationModel
 LocalGateway addressing co-located service processes by pipe name instead of a loopback
 port. Because transports are selected by capability, a named-pipe listener composes into the
-same `UseHttp1/2(IConnectionListener)` seams a socket listener does, with no HTTP-layer
+same `UseHttp1/2(IDuplexConnectionListener)` seams a socket listener does, with no HTTP-layer
 change. This mirrors Kestrel's `ListenNamedPipe` surface.
 
 ## Scope
@@ -17,7 +17,7 @@ change. This mirrors Kestrel's `ListenNamedPipe` surface.
   creates a fresh `NamedPipeServerStream` instance per accepted client on a local pipe name, with
   builder-time access control.
 - `NamedPipeConnectionFactory` — the dial side: opens a `NamedPipeClientStream` to a
-  `NamedPipeEndPoint` (local or remote host) and returns a live `Connection`.
+  `NamedPipeEndPoint` (local or remote host) and returns a live `DuplexConnection`.
 - `NamedPipeEndPoint` — a name-addressed `EndPoint` (`ServerName` + `PipeName`), formatted as
   `\\server\pipe\name`.
 - `NamedPipeConnectionListenerOptions` / `NamedPipeConnectionFactoryOptions` — buffer sizing,
@@ -28,8 +28,8 @@ Protocol semantics belong to the layers above; this driver only moves an ordered
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Connections` — the contracts this driver implements (`Connection`,
-  `ConnectionListener`, `ConnectionFactory`) plus `ConnectionProtocol.NamedPipe`. Diagnostics are
+- `Assimalign.Cohesion.Connections` — the contracts this driver implements (`DuplexConnection`,
+  `DuplexConnectionListener`, `DuplexConnectionFactory`) plus `ConnectionProtocol.NamedPipe`. Diagnostics are
   the driver's own internal event source, `Assimalign.Cohesion.Connections.NamedPipes` (see
   DESIGN.md, "Diagnostics").
 - `Assimalign.Cohesion.Core`.
@@ -44,15 +44,20 @@ Protocol semantics belong to the layers above; this driver only moves an ordered
 await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
     options => options.EndPoint = new NamedPipeEndPoint("cohesion-gateway"));
 
-ValueTask<Connection> accept = listener.AcceptAsync(cancellationToken);
+ValueTask<DuplexConnection> accept = listener.AcceptAsync(cancellationToken);
 
 // Client: dial the same pipe.
 NamedPipeConnectionFactory factory = new();
-Connection dialed = await factory.ConnectAsync(new NamedPipeEndPoint("cohesion-gateway"), cancellationToken);
-Connection accepted = await accept;
+DuplexConnection dialed = await factory.ConnectAsync(new NamedPipeEndPoint("cohesion-gateway"), cancellationToken);
+DuplexConnection accepted = await accept;
 
 // Compose HTTP/1.1 over it, exactly like a socket listener:
 await using HttpConnectionListener http = HttpConnectionListener.Create(o => o.UseHttp1(listener));
 ```
 
 See [DESIGN.md](DESIGN.md) for the stream bridge, accept model, buffer sizing, and access-control design.
+
+The driver participates in the common `IConnection` identity, feature, and lifecycle hierarchy.
+Listeners expose a stable `Id` and live `Connections`. Entries disappear on closure; disposing
+the listener leaves accepted connections open for their owners to dispose. `ConnectionClosed`
+fires on abort, observed peer closure, and no later than local disposal.

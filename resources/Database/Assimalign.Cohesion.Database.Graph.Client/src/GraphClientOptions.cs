@@ -10,6 +10,6 @@ public sealed class GraphClientOptions
     public DatabaseConnectionSettings? Settings { get; set; }
 
     /// <summary>Gets or sets the statically composed transport factory.</summary>
-    public IConnectionFactory? ConnectionFactory { get; set; }
+    public IDuplexConnectionFactory? ConnectionFactory { get; set; }
 }
 

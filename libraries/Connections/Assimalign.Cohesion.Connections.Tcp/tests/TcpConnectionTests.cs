@@ -180,7 +180,7 @@ public class TcpConnectionTests
         }
     }
 
-    private static Task WhenConnectionClosedAsync(Connection connection, CancellationToken cancellationToken)
+    private static Task WhenConnectionClosedAsync(IDuplexConnection connection, CancellationToken cancellationToken)
     {
         TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -192,7 +192,7 @@ public class TcpConnectionTests
 
     private sealed class LoopbackPair : IAsyncDisposable
     {
-        private LoopbackPair(TcpConnectionListener listener, Connection client, Connection server)
+        private LoopbackPair(TcpConnectionListener listener, IDuplexConnection client, IDuplexConnection server)
         {
             Listener = listener;
             Client = client;
@@ -201,9 +201,9 @@ public class TcpConnectionTests
 
         public TcpConnectionListener Listener { get; }
 
-        public Connection Client { get; }
+        public IDuplexConnection Client { get; }
 
-        public Connection Server { get; }
+        public IDuplexConnection Server { get; }
 
         public static async Task<LoopbackPair> CreateAsync(CancellationToken cancellationToken)
         {
@@ -214,12 +214,12 @@ public class TcpConnectionTests
             {
                 // The listener binds lazily in the synchronous prefix of the first accept, so the
                 // ephemeral endpoint is concrete once the pending accept task is handed back.
-                ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellationToken);
+                ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellationToken);
 
                 TcpConnectionFactory factory = new();
 
-                Connection client = await factory.ConnectAsync(listener.EndPoint, cancellationToken);
-                Connection server = await acceptTask;
+                IDuplexConnection client = await factory.ConnectAsync(listener.EndPoint, cancellationToken);
+                IDuplexConnection server = await acceptTask;
 
                 return new LoopbackPair(listener, client, server);
             }

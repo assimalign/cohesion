@@ -64,5 +64,5 @@ public static class SessionContextExtensions
     private static WebSessionFeature ResolveWebSessionFeature(IHttpContext context)
         => context.Features.Get<IHttpSessionFeature>() as WebSessionFeature
             ?? throw new InvalidOperationException(
-                "Session support is not enabled for this request. Call UseSessions() in the application pipeline before accessing sessions.");
+                ErrorMessages.SessionsNotEnabled);
 }

@@ -338,7 +338,7 @@ public sealed class GatewayCredentialIssuerTests : IDisposable
         MaskTokenId(actualParts[1]).ShouldBe(MaskTokenId(expectedParts[1]));
         JsonWebToken token = JsonWebToken.Parse(compact);
         token.Id.ShouldNotBeNullOrWhiteSpace();
-        IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(_signingKey, _keyId);
+        IJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(_signingKey, _keyId);
         verifier.Verify(token.Algorithm!, Encoding.ASCII.GetBytes(token.SigningInput!), Base64Url.DecodeFromChars(token.Parts!.Signature))
             .ShouldBeTrue();
     }

@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web;
 /// (<c>Assimalign.Cohesion.SourceGeneration.Web</c>): the generator reads it while rewriting a
 /// typed <c>Map*</c> call site into an AOT-safe binding thunk. It is never reflected over at run
 /// time, in keeping with the repository's metadata-carrier discipline.
+/// A scalar binds the first value of a repeated key. Supported sequences of scalar values bind
+/// every occurrence in request order, including empty values; a missing sequence is empty.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
 public sealed class FromQueryAttribute : Attribute

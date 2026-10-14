@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -52,7 +53,7 @@ public static class HttpResponseSerializationExtensions
             {
                 writer = feature.GetWriter(declared)
                     ?? throw new HttpContentSerializationException(
-                        $"No content writer is registered for the response's declared Content-Type '{declared}'.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeclaredContentWriterNotRegistered, declared));
                 target = declared;
             }
             else if (feature.Writers.Count > 0)
@@ -63,8 +64,7 @@ public static class HttpResponseSerializationExtensions
             else
             {
                 throw new HttpContentSerializationException(
-                    "The content-serialization registry has no writers. Register a format at builder " +
-                    "time (e.g. AddJsonSerialization) before writing typed content.");
+                    ErrorMessages.ContentWriterRequired);
             }
 
             return writer.WriteAsync(response, value, typeof(T), target, cancellationToken);
@@ -90,14 +90,14 @@ public static class HttpResponseSerializationExtensions
 
             if (contentType.IsEmpty || contentType.HasWildcard)
             {
-                throw new ArgumentException("A concrete (wildcard-free) media type is required to write content.", nameof(contentType));
+                throw new ArgumentException(ErrorMessages.ResponseContentTypeInvalid, nameof(contentType));
             }
 
             IHttpContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(response.HttpContext);
 
             IHttpContentWriter writer = feature.GetWriter(contentType)
                 ?? throw new HttpContentSerializationException(
-                    $"No content writer is registered for the media type '{contentType}'.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentWriterNotRegistered, contentType));
 
             return writer.WriteAsync(response, value, typeof(T), contentType, cancellationToken);
         }

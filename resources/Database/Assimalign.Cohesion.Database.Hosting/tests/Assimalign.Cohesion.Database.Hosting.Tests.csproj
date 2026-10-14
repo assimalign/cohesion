@@ -26,5 +26,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 	</ItemGroup>
 </Project>

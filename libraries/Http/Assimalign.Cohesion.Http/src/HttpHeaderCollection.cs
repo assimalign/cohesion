@@ -1,228 +1,260 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.Http;
 
+/// <summary>
+/// Represents a mutable, case-insensitive collection of HTTP headers.
+/// </summary>
 public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
 {
-    private static readonly IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> _emptyIEnumeratorType = default(Enumerator);
-    private static readonly IEnumerator _emptyIEnumerator = default(Enumerator);
+    private static readonly IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> _emptyEnumerator = default(Enumerator);
 
-    private Dictionary<HttpHeaderKey, HttpHeaderValue> _store;
+    private readonly HttpHeaderCollection? _readOnlySource;
+    private readonly bool _usesInlineStorage;
+    private Dictionary<HttpHeaderKey, HttpHeaderValue>? _store;
+    private HttpHeaderKey _inlineKey;
+    private HttpHeaderValue _inlineValue;
+    private bool _hasInlineEntry;
+    private int _version;
 
-    #region Constructors
-
+    /// <summary>
+    /// Initializes an empty header collection.
+    /// </summary>
     public HttpHeaderCollection()
     {
-        _store = new Dictionary<HttpHeaderKey, HttpHeaderValue>();
+        _usesInlineStorage = true;
     }
+
+    /// <summary>
+    /// Initializes an empty header collection with the requested dictionary capacity.
+    /// </summary>
+    /// <param name="capacity">The initial number of headers the dictionary can hold.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="capacity"/> is negative.</exception>
     public HttpHeaderCollection(int capacity)
     {
         _store = new Dictionary<HttpHeaderKey, HttpHeaderValue>(capacity);
     }
+
+    /// <summary>
+    /// Initializes a live view over a dictionary, or an empty collection when it is null.
+    /// </summary>
+    /// <param name="store">The dictionary to share with the collection.</param>
     public HttpHeaderCollection(Dictionary<HttpHeaderKey, HttpHeaderValue>? store)
     {
-        _store = store ?? new Dictionary<HttpHeaderKey, HttpHeaderValue>();
-    }
-    private HttpHeaderCollection(Dictionary<HttpHeaderKey, HttpHeaderValue> store, bool isReadOnly)
-    {
         _store = store;
-        IsReadOnly = isReadOnly;
+        _usesInlineStorage = store is null;
     }
 
-    #endregion
+    private HttpHeaderCollection(HttpHeaderCollection source)
+    {
+        _readOnlySource = source;
+    }
 
-    #region Properties
-
+    /// <inheritdoc />
     public HttpHeaderValue this[HttpHeaderKey key]
     {
-        get
-        {
-            if (_store == null)
-            {
-                return HttpHeaderValue.Empty;
-            }
-            if (TryGetValue(key, out var value))
-            {
-                return value;
-            }
-            return HttpHeaderValue.Empty;
-        }
+        get => TryGetValue(key, out var value) ? value : HttpHeaderValue.Empty;
         set
         {
             ThrowIfReadOnly();
             if (value.Count == 0)
             {
-                _store?.Remove(key);
+                Remove(key);
                 return;
             }
-            EnsureStore(1);
-            _store![key] = value;
+            if (_hasInlineEntry && _inlineKey.Equals(key))
+            {
+                _inlineValue = value;
+                return;
+            }
+            if (_store is not null && _store.ContainsKey(key))
+            {
+                _store[key] = value;
+                return;
+            }
+            Add(key, value);
         }
     }
-    public int Count => _store.Count;
-    public bool IsReadOnly { get; }
 
-    #endregion
+    /// <inheritdoc />
+    public int Count
+    {
+        get
+        {
+            HttpHeaderCollection source = _readOnlySource ?? this;
+            return (source._hasInlineEntry ? 1 : 0) + (source._store?.Count ?? 0);
+        }
+    }
 
+    /// <inheritdoc />
+    public bool IsReadOnly => _readOnlySource is not null;
+
+    /// <inheritdoc />
     public void Add(HttpHeaderKey key, HttpHeaderValue value)
     {
         ThrowIfReadOnly();
-        EnsureStore(1);
-        _store!.Add(key, value);
+        ArgumentNullException.ThrowIfNull(key.Value);
+        if (_hasInlineEntry && _inlineKey.Equals(key))
+        {
+            throw new ArgumentException(ErrorMessages.DuplicateCollectionKey, nameof(key));
+        }
+        if (_usesInlineStorage && !_hasInlineEntry && (_store is null || !_store.ContainsKey(key)))
+        {
+            _inlineKey = key;
+            _inlineValue = value;
+            _hasInlineEntry = true;
+        }
+        else
+        {
+            (_store ??= new Dictionary<HttpHeaderKey, HttpHeaderValue>()).Add(key, value);
+        }
+        _version++;
     }
+
+    /// <inheritdoc />
     public void Remove(HttpHeaderKey key)
     {
         ThrowIfReadOnly();
-        //if (_store == null)
-        //{
-        //    return false;
-        //}
-        _store!.Remove(key);
+        if (_hasInlineEntry && _inlineKey.Equals(key))
+        {
+            _inlineKey = default;
+            _inlineValue = default;
+            _hasInlineEntry = false;
+        }
+        else
+        {
+            _store?.Remove(key);
+        }
     }
+
+    /// <inheritdoc />
     public void Clear()
     {
         ThrowIfReadOnly();
+        _inlineKey = default;
+        _inlineValue = default;
+        _hasInlineEntry = false;
         _store?.Clear();
     }
 
     /// <summary>
-    /// Returns a read-only view over the same underlying store. Reads (including enumeration)
+    /// Returns a read-only view over the same underlying collection. Reads (including enumeration)
     /// observe the live collection; every mutation attempt on the view throws
     /// <see cref="InvalidOperationException"/>. Returns the current instance when it is already
     /// read-only.
     /// </summary>
     /// <returns>A read-only view of this collection.</returns>
-    public HttpHeaderCollection AsReadOnly()
-    {
-        return IsReadOnly ? this : new HttpHeaderCollection(_store, isReadOnly: true);
-    }
-    public bool ContainsKey(HttpHeaderKey key)
-    {
-        if (_store == null)
-        {
-            return false;
-        }
-        return _store!.ContainsKey(key);
-    }
+    public HttpHeaderCollection AsReadOnly() => IsReadOnly ? this : new HttpHeaderCollection(this);
+
+    /// <inheritdoc />
+    public bool ContainsKey(HttpHeaderKey key) => TryGetValue(key, out _);
+
+    /// <inheritdoc />
     public bool TryGetValue(HttpHeaderKey key, [MaybeNullWhen(false)] out HttpHeaderValue value)
     {
-        if (_store == null)
+        HttpHeaderCollection source = _readOnlySource ?? this;
+        if (source._hasInlineEntry && source._inlineKey.Equals(key))
         {
-            value = default(HttpHeaderValue);
-            return false;
+            value = source._inlineValue;
+            return true;
         }
-        return _store!.TryGetValue(key, out value);
+        if (source._store is not null)
+        {
+            return source._store.TryGetValue(key, out value);
+        }
+        value = default;
+        return false;
     }
-    //public void Add(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
-    //{
-    //    ThrowIfReadOnly();
-    //    EnsureStore(1);
-    //    _store!.Add(item.Key, item.Value);
-    //}
-    //public bool Contains(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
-    //{
-    //    if (_store == null || !_store!.TryGetValue(item.Key, out var value) || !HttpHeaderValue.Equals(value, item.Value))
-    //    {
-    //        return false;
-    //    }
-    //    return true;
-    //}
-    //public void CopyTo(KeyValuePair<HttpHeaderKey, HttpHeaderValue>[] array, int arrayIndex)
-    //{
-    //    if (_store == null)
-    //    {
-    //        return;
-    //    }
-    //    foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> item in _store!)
-    //    {
-    //        var keyValuePair = (array[arrayIndex] = item);
-    //        arrayIndex++;
-    //    }
-    //}  
 
-    //public bool Remove(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
-    //{
-    //    ThrowIfReadOnly();
-    //    if (_store == null)
-    //    {
-    //        return false;
-    //    }
-    //    if (_store!.TryGetValue(item.Key, out var value) && HttpHeaderValue.Equals(item.Value, value))
-    //    {
-    //        return _store!.Remove(item.Key);
-    //    }
-    //    return false;
-    //}
-
+    /// <inheritdoc />
     public IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> GetEnumerator()
     {
-        if (_store == null || _store!.Count == 0)
-        {
-            return default(Enumerator);
-        }
-        return new Enumerator(_store!.GetEnumerator());
+        HttpHeaderCollection source = _readOnlySource ?? this;
+        return source.Count == 0 ? _emptyEnumerator : new Enumerator(source);
     }
+
     IEnumerator IEnumerable.GetEnumerator()
     {
-        if (_store == null || _store!.Count == 0)
-        {
-            return _emptyIEnumerator;
-        }
-        return _store!.GetEnumerator();
+        HttpHeaderCollection source = _readOnlySource ?? this;
+        return source.Count == 0 ? _emptyEnumerator : new Enumerator(source, nonGeneric: true);
     }
 
-
-    private void EnsureStore(int capacity)
-    {
-        if (_store == null)
-        {
-            _store = new Dictionary<HttpHeaderKey, HttpHeaderValue>(capacity);
-        }
-    }
     private void ThrowIfReadOnly()
     {
         if (IsReadOnly)
         {
-            throw new InvalidOperationException("The header collection is read-only and cannot be modified.");
+            throw new InvalidOperationException(ErrorMessages.HeaderCollectionReadOnly);
         }
     }
 
-    #region Partials
-    private struct Enumerator : IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>>, IEnumerator, IDisposable
+    private struct Enumerator : IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>>
     {
-        private Dictionary<HttpHeaderKey, HttpHeaderValue>.Enumerator _enumerator;
-        private readonly bool _isNotEmpty;
+        private readonly HttpHeaderCollection? _source;
+        private readonly int _version;
+        private readonly bool _nonGeneric;
+        private Dictionary<HttpHeaderKey, HttpHeaderValue>.Enumerator _dictionaryEnumerator;
+        private bool _inlineVisited;
+        private bool _hasCurrent;
 
-        public KeyValuePair<HttpHeaderKey, HttpHeaderValue> Current
+        internal Enumerator(HttpHeaderCollection source, bool nonGeneric = false)
         {
-            get
+            _source = source;
+            _version = source._version;
+            _nonGeneric = nonGeneric;
+            _dictionaryEnumerator = source._store?.GetEnumerator() ?? default;
+        }
+
+        public KeyValuePair<HttpHeaderKey, HttpHeaderValue> Current { get; private set; }
+
+        object IEnumerator.Current => _nonGeneric && !_hasCurrent
+            ? throw new InvalidOperationException(ErrorMessages.EnumerationPositionInvalid)
+            : Current;
+
+        public bool MoveNext()
+        {
+            if (_source is null)
             {
-                if (_isNotEmpty)
-                {
-                    return _enumerator.Current;
-                }
-                return default(KeyValuePair<HttpHeaderKey, HttpHeaderValue>);
+                return false;
             }
+            ThrowIfModified();
+            if (!_inlineVisited)
+            {
+                _inlineVisited = true;
+                if (_source._hasInlineEntry)
+                {
+                    Current = new(_source._inlineKey, _source._inlineValue);
+                    return _hasCurrent = true;
+                }
+            }
+            if (_source._store is not null && _dictionaryEnumerator.MoveNext())
+            {
+                Current = _dictionaryEnumerator.Current;
+                return _hasCurrent = true;
+            }
+            Current = default;
+            return _hasCurrent = false;
         }
 
-        object IEnumerator.Current => Current;
-        internal Enumerator(Dictionary<HttpHeaderKey, HttpHeaderValue>.Enumerator dictionaryEnumerator)
-        {
-            _enumerator = dictionaryEnumerator;
-            _isNotEmpty = true;
-        }
-        public bool MoveNext() => _isNotEmpty ? _enumerator.MoveNext() : false;
         public void Dispose() { }
+
         void IEnumerator.Reset()
         {
-            if (_isNotEmpty)
+            ThrowIfModified();
+            _dictionaryEnumerator = _source?._store?.GetEnumerator() ?? default;
+            _inlineVisited = false;
+            _hasCurrent = false;
+            Current = default;
+        }
+
+        private void ThrowIfModified()
+        {
+            if (_source is not null && _source._version != _version)
             {
-                ((IEnumerator)_enumerator).Reset();
+                throw new InvalidOperationException(ErrorMessages.CollectionModifiedDuringEnumeration);
             }
         }
     }
-    #endregion
 }

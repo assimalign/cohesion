@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
@@ -36,7 +37,7 @@ public readonly struct StructuredFieldParameters
         {
             if (pair.Key is null || !StructuredFieldGrammar.IsValidKey(pair.Key))
             {
-                throw new ArgumentException($"'{pair.Key}' is not a valid RFC 9651 key.", nameof(pairs));
+                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.InvalidStructuredFieldKey, pair.Key), nameof(pairs));
             }
             Upsert(list, pair.Key, pair.Value);
         }

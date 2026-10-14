@@ -35,12 +35,13 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] Every private field — instance or static — is `_camelCase`
 - [ ] Assembly attributes, `InternalsVisibleTo` included, live in `Properties/AssemblyInfo.cs`, not the csproj
 - [ ] One public type per file (with grouped root-first naming for variant families, e.g., `Http2Frame.Header.cs`)
-- [ ] New public APIs are interfaces, with internal implementations (unless a documented deviation applies — see the exception protocol in `deviations.md`); `resources/Database/**` is concrete-first and follows `database-area.md` instead
+- [ ] New public APIs are interfaces. Implementations are internal unless consumers construct them directly; then they are `public sealed` with a private constructor and static `Create` methods (`general-rules.md`, "Creation-only facades become public implementations"). Any other departure follows the exception protocol in `deviations.md`; `resources/Database/**` is concrete-first and follows `database-area.md` instead
+- [ ] No static class exists only to create an object: its creation methods live on the public implementation type
 - [ ] Public APIs have complete XML documentation (`<summary>`, `<param>`, `<returns>`, `<exception>`)
 - [ ] Internal types are `internal`, not `public`
 - [ ] No new `InternalsVisibleTo` between two shipped libraries — tests only (see `general-rules.md`)
 - [ ] Any source shared between assemblies lives in the owning project's `shared/` folder, is pulled in by a `CohesionSharedSource` item **in each consuming csproj**, and passes the link-safety test — stateless statics only, or types whose instances never cross an assembly boundary (no static mutable state, singletons, `EventSource`, locks, or id generators). See `general-rules.md`
-- [ ] Any new or changed `EventSource` follows `event-source.md`: `internal sealed`, one per assembly, named exactly for its assembly, no public forwarder or trace-code type, its name/manifest/lifecycle tests present, and a row in `docs/EVENT_SOURCES.md`
+- [ ] A library reports on itself only through its internal `EventSource`, never through `ILogger`. Any new or changed `EventSource` follows `event-source.md`: `internal sealed`, one per assembly, named exactly for its assembly, no public forwarder or trace-code type, its name/manifest/lifecycle tests present, and a row in `docs/EVENT_SOURCES.md`
 - [ ] No global usings or `<Using Include="..." />` items in csproj files
 - [ ] Using directives ordered: System, third-party, Cohesion, blank line before code
 - [ ] Code follows the existing patterns established in its category/area
@@ -54,7 +55,10 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 ## Exception handling
 
 - [ ] No new `ThrowHelper` / `ThrowHelpers` types introduced
-- [ ] Reusable throw logic, if any, is implemented as a .NET 10 extension type method in `Extensions/`
+- [ ] Reusable throw logic, if any, is a static member of the exception type it throws. Extension members only for exception types the assembly does not own (`general-rules.md`, "Direct throws or exception-type members")
+- [ ] Exception messages come from `src/Properties/ErrorMessages.resx` through the build-generated `ErrorMessages` class: no literal or interpolated message strings in a `throw` or an exception constructor (`general-rules.md`, "Exception messages are build-generated resources"; Database adopts this through #1470)
+- [ ] Each resource name is a short name for the failure (`CookieNameInvalid`), never the message text or a truncation of it
+- [ ] An exception created on a normal path, such as an abort or cancellation reason, reads its message from a cached `static readonly` field, not on each creation
 - [ ] Exception roots stay scoped to the owning library or area (no new framework-wide `CohesionException`-style ancestry)
 - [ ] No bare `catch (Exception)` without a justification
 - [ ] No `throw ex;` (always `throw;` to preserve stack trace)

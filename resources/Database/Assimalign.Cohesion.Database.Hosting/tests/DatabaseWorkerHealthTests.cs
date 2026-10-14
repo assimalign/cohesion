@@ -187,7 +187,7 @@ public sealed class DatabaseWorkerHealthTests
     private static async Task<(ProtocolMessageType Type, ProtocolErrorCode? Code, string? Message, long? Listed)> HandshakeAsync(
         InMemoryConnectionListener listener, string database, bool listContainer, CancellationToken token)
     {
-        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using IDuplexConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, database, "tester").Encode()), token);
         await channel.Writer.FlushAsync(token);

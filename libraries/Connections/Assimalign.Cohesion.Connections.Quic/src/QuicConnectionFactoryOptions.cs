@@ -4,12 +4,18 @@ using System.Net;
 using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Security.Authentication;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Connections.Quic;
 
 /// <summary>
 /// Defines options for creating outbound QUIC connections.
 /// </summary>
+/// <remarks>
+/// Outbound connections grant the peer one concurrent unidirectional stream and no bidirectional
+/// streams. The inbound allowance keeps a native accept pending so idle peer closure can signal
+/// <see cref="IConnection.ConnectionClosed"/> without application reads.
+/// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -17,10 +23,12 @@ public sealed class QuicConnectionFactoryOptions
 {
     // The options default to HTTP/3 (the sole default ApplicationProtocols entry), so the
     // default error codes are the matching RFC 9114 §8.1 codes: H3_REQUEST_CANCELLED (0x10c)
-    // for stream aborts and H3_NO_ERROR (0x100) for connection close. A client dialing a
-    // different ALPN protocol overrides both alongside ApplicationProtocols.
+    // for stream aborts and H3_NO_ERROR (0x100) for connection close, wherever the caller gives
+    // no code of its own. A client dialing a different ALPN protocol overrides both alongside
+    // ApplicationProtocols.
     private long _defaultStreamErrorCode = 0x10c;
     private long _defaultCloseErrorCode = 0x100;
+    private TimeSpan _closeDeliveryTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Creates a new set of QUIC client transport options.
@@ -69,12 +77,21 @@ public sealed class QuicConnectionFactoryOptions
     public long? MaxWriteBufferSize { get; set; } = 64 * 1024;
 
     /// <summary>
-    /// Gets or sets the error code used when closing the connection.
+    /// Gets or sets the error code a connection closes with when the caller supplies none.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The code goes on the wire when the connection closes through
+    /// <see cref="IMultiplexedConnection.Abort(Exception)"/> or
+    /// <see cref="IAsyncDisposable.DisposeAsync"/>.
+    /// <see cref="IMultiplexedConnection.Abort(long, Exception)"/> closes with the caller's code
+    /// instead; the first abort or disposal decides the close.
+    /// </para>
+    /// <para>
     /// Defaults to <c>0x100</c> — HTTP/3 <c>H3_NO_ERROR</c> (RFC 9114 §8.1) — matching the
     /// default HTTP/3 application protocol. Override this when dialing a different ALPN
     /// protocol.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when the value is outside the valid QUIC error-code range of 0 to 2^62 - 1.
@@ -90,12 +107,23 @@ public sealed class QuicConnectionFactoryOptions
     }
 
     /// <summary>
-    /// Gets or sets the error code used when a stream abort is triggered.
+    /// Gets or sets the error code a stream direction is ended with when the caller supplies none.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The code goes on the wire only where the driver ends a direction on its own:
+    /// <see cref="IConnection.Abort(Exception)"/> and <see cref="IAsyncDisposable.DisposeAsync"/> on a
+    /// stream; completing a stream's <see cref="System.IO.Pipelines.IDuplexPipe.Input"/>, which stops a
+    /// receiving direction still open; and completing its <see cref="System.IO.Pipelines.IDuplexPipe.Output"/>
+    /// with an error, which resets the sending direction (a clean completion sends the FIN). A direction
+    /// aborted through <see cref="IMultiplexedStreamAbort"/> carries the caller's code instead, and keeps
+    /// it when the stream is later aborted or disposed.
+    /// </para>
+    /// <para>
     /// Defaults to <c>0x10c</c> — HTTP/3 <c>H3_REQUEST_CANCELLED</c> (RFC 9114 §8.1) — matching
     /// the default HTTP/3 application protocol. Override this when dialing a different ALPN
     /// protocol.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when the value is outside the valid QUIC error-code range of 0 to 2^62 - 1.
@@ -107,6 +135,39 @@ public sealed class QuicConnectionFactoryOptions
         {
             QuicConnectionListenerOptions.ValidateErrorCode(value);
             _defaultStreamErrorCode = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the longest a connection's disposal waits for its bidirectional streams to deliver what
+    /// they sent before it closes the connection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Disposing a connection ends every bidirectional stream gracefully, then waits for the peer to
+    /// acknowledge each stream's data and FIN, so a request's tail is not lost to the
+    /// <c>CONNECTION_CLOSE</c> that follows. The waits run concurrently, and this bounds them all: a peer
+    /// that withholds stream credit, or stops acknowledging, could otherwise hold the disposal, and the
+    /// connection, open for as long as it keeps the connection alive. When the time runs out the connection
+    /// closes with <see cref="DefaultCloseErrorCode"/>, which ends every stream still delivering, so its tail
+    /// is lost.
+    /// </para>
+    /// <para>
+    /// Defaults to five seconds. <see cref="TimeSpan.Zero"/> closes without waiting for any stream, and
+    /// <see cref="Timeout.InfiniteTimeSpan"/> waits without a bound.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when the value is negative (other than <see cref="Timeout.InfiniteTimeSpan"/>) or
+    /// longer than <see cref="int.MaxValue"/> milliseconds.
+    /// </exception>
+    public TimeSpan CloseDeliveryTimeout
+    {
+        get => _closeDeliveryTimeout;
+        set
+        {
+            QuicConnectionListenerOptions.ValidateCloseDeliveryTimeout(value);
+            _closeDeliveryTimeout = value;
         }
     }
 

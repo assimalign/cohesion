@@ -18,6 +18,9 @@ The standalone resource names are `cohesion-web`, `cohesion-spa`, `cohesion-data
 Use `-n` to name a project. For gateway, composite and standalone templates the application
 defaults to the lowercased first name segment and can be supplied with `--applicationName`.
 
+`cohesion-spa` serves `wwwroot` and falls back to `index.html` for GET/HEAD client-side routes
+such as `/settings`. Missing assets whose last path segment names a file remain 404 responses.
+
 Applications and landing zones enable orchestration on each referenced resource. Standalone
 resources explicitly disable it and explain the one-line opt-in in their project files.
 Gateways inherit their always-enabled behavior from `Sdk.Gateway`. Gateway programs compose resources

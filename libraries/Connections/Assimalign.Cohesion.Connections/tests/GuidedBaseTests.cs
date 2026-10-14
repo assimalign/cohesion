@@ -19,7 +19,7 @@ public class GuidedBaseTests
     {
         // Arrange
         TestConnectionListener listener = new();
-        IConnectionListener viaInterface = listener;
+        IDuplexConnectionListener viaInterface = listener;
 
         // Act
         await listener.BindAsync();
@@ -40,7 +40,7 @@ public class GuidedBaseTests
         listener.Enqueue(second);
 
         // Act
-        Connection typed = await listener.AcceptAsync();
+        IDuplexConnection typed = await listener.AcceptAsync();
         IConnection viaInterface = await ((IConnectionListener)listener).AcceptAsync();
 
         // Assert
@@ -59,7 +59,7 @@ public class GuidedBaseTests
         factory.Enqueue(second);
 
         // Act
-        Connection typed = await factory.ConnectAsync(_testEndPoint);
+        IDuplexConnection typed = await factory.ConnectAsync(_testEndPoint);
         IConnection viaInterface = await ((IConnectionFactory)factory).ConnectAsync(_testEndPoint);
 
         // Assert
@@ -67,7 +67,7 @@ public class GuidedBaseTests
         viaInterface.ShouldBeSameAs(second);
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Connections] - OpenStreamAsync: Guided multiplexed base should default to bidirectional")]
     public async Task OpenStreamAsync_OnMultiplexedConnectionBase_ShouldDefaultToBidirectional()
     {
         // Arrange
@@ -76,14 +76,14 @@ public class GuidedBaseTests
         connection.Enqueue(stream);
 
         // Act
-        Connection opened = await connection.OpenStreamAsync();
+        MultiplexedConnectionStream opened = await connection.OpenStreamAsync();
 
         // Assert
         connection.LastOpenedDirection.ShouldBe(ConnectionDirection.Bidirectional);
         opened.ShouldBeSameAs(stream);
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Connections] - OpenStreamAsync: Guided multiplexed base should return the stream through its interface")]
     public async Task OpenStreamAsync_OnMultiplexedConnectionInterface_ShouldForwardToTypedImplementation()
     {
         // Arrange
@@ -93,14 +93,14 @@ public class GuidedBaseTests
         IMultiplexedConnection viaInterface = connection;
 
         // Act
-        IConnection opened = await viaInterface.OpenStreamAsync();
+        IMultiplexedConnectionStream opened = await viaInterface.OpenStreamAsync();
 
         // Assert
         connection.LastOpenedDirection.ShouldBe(ConnectionDirection.Bidirectional);
         opened.ShouldBeSameAs(stream);
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Connections] - AcceptStreamAsync: Guided multiplexed base should return the stream through its interface")]
     public async Task AcceptStreamAsync_OnMultiplexedConnectionInterface_ShouldForwardToTypedImplementation()
     {
         // Arrange
@@ -110,7 +110,7 @@ public class GuidedBaseTests
         IMultiplexedConnection viaInterface = connection;
 
         // Act
-        IConnection accepted = await viaInterface.AcceptStreamAsync();
+        IMultiplexedConnectionStream accepted = await viaInterface.AcceptStreamAsync();
 
         // Assert
         accepted.ShouldBeSameAs(stream);
@@ -129,11 +129,63 @@ public class GuidedBaseTests
         direction.ShouldBe(ConnectionDirection.Bidirectional);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections] - Abort: Guided multiplexed connection exposes its coded lifecycle through the interface")]
+    public async Task Abort_OnMultiplexedConnectionInterface_ShouldEndConnectionAndStreams()
+    {
+        // Arrange
+        await using TestConnection stream = new();
+        await using TestMultiplexedConnection connection = new();
+        connection.Enqueue(stream);
+        IMultiplexedConnection viaInterface = connection;
+
+        // Act
+        viaInterface.Abort(42);
+
+        // Assert
+        connection.LastAbortCode.ShouldBe(42);
+        stream.LastAbortCode.ShouldBe(42);
+        viaInterface.State.ShouldBe(ConnectionState.Aborted);
+        viaInterface.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        stream.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections] - Abort: Guided multiplexed stream exposes its coded lifecycle through the interface")]
+    public async Task Abort_OnMultiplexedStreamInterface_ShouldEndStream()
+    {
+        // Arrange
+        await using TestConnection stream = new();
+        IMultiplexedConnectionStream viaInterface = stream;
+
+        // Act
+        viaInterface.Abort(42);
+
+        // Assert
+        stream.LastAbortCode.ShouldBe(42);
+        viaInterface.State.ShouldBe(ConnectionState.Aborted);
+        viaInterface.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections] - IsInputCompleted: Guided multiplexed stream exposes conservative completion through the interface")]
+    public async Task IsInputCompleted_OnMultiplexedStreamInterface_ShouldReturnImplementationValue()
+    {
+        // Arrange
+        await using TestConnection stream = new();
+        IMultiplexedConnectionStream viaInterface = stream;
+
+        // Act
+        bool completed = viaInterface.IsInputCompleted;
+
+        // Assert
+        completed.ShouldBeFalse();
+        viaInterface.Direction.ShouldBe(ConnectionDirection.Bidirectional);
+        viaInterface.Features.ShouldBeSameAs(stream.Features);
+    }
+
     /// <summary>
-    /// A minimal <see cref="Connection"/> that does not override <see cref="Connection.Direction"/>,
+    /// A minimal <see cref="DuplexConnection"/> that does not override <see cref="DuplexConnection.Direction"/>,
     /// proving the guided base supplies the bidirectional default.
     /// </summary>
-    private sealed class MinimalConnection : Connection
+    private sealed class MinimalConnection : DuplexConnection
     {
         private readonly Pipe _pipe = new();
 

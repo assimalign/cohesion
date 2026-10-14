@@ -16,9 +16,20 @@ namespace Assimalign.Cohesion.Web.Caching.Internal;
 /// never receives it.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Keys are plain delimited strings using the ASCII unit separator (<c>0x1F</c>) — a byte that cannot
 /// appear in a header name, a path, or a query token — so component boundaries are unambiguous without
 /// hashing. A distributed store adapter that prefers fixed-length keys may hash the string itself.
+/// </para>
+/// <para>
+/// The scheme and host components are the <em>effective</em> values
+/// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/> /
+/// <see cref="HttpContextForwardedExtensions.EffectiveHost"/>): the scheme and host a trusted proxy
+/// forwarded when the forwarded-headers middleware ran first, otherwise the wire values. They are what
+/// the rest of the pipeline builds responses from (HTTPS redirection, absolute links, host-bound
+/// content), so keying on the wire values behind a proxy would let one client-facing scheme or host be
+/// served another's stored response.
+/// </para>
 /// </remarks>
 internal static class OutputCacheKeyBuilder
 {
@@ -35,8 +46,8 @@ internal static class OutputCacheKeyBuilder
         StringBuilder builder = new();
         builder.Append("oc").Append(Separator);
         builder.Append(request.Method.Value).Append(Separator);
-        builder.Append((int)request.Scheme).Append(Separator);
-        builder.Append(request.Host.Value).Append(Separator);
+        builder.Append((int)context.EffectiveScheme).Append(Separator);
+        builder.Append(context.EffectiveHost.Value).Append(Separator);
         builder.Append(request.Path.Value);
 
         AppendQuery(builder, request, policy);
@@ -78,22 +89,18 @@ internal static class OutputCacheKeyBuilder
 
         if (policy.VaryByQueryKeys.Count == 0)
         {
-            // Fold the whole query string, sorted so ordering differences do not fragment the cache.
-            List<KeyValuePair<string, string>> entries = new();
+            // Sort distinct names, but retain each name's value order: an endpoint can observe it.
+            List<KeyValuePair<string, HttpQueryValue>> entries = new();
             foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> pair in request.Query)
             {
-                entries.Add(new KeyValuePair<string, string>(pair.Key.ToString(), pair.Value.ToString()));
+                entries.Add(new KeyValuePair<string, HttpQueryValue>(pair.Key.ToString(), pair.Value));
             }
 
-            entries.Sort(static (a, b) =>
-            {
-                int byKey = string.CompareOrdinal(a.Key, b.Key);
-                return byKey != 0 ? byKey : string.CompareOrdinal(a.Value, b.Value);
-            });
+            entries.Sort(static (a, b) => string.CompareOrdinal(a.Key, b.Key));
 
-            foreach (KeyValuePair<string, string> entry in entries)
+            foreach (KeyValuePair<string, HttpQueryValue> entry in entries)
             {
-                builder.Append(Separator).Append(entry.Key).Append('=').Append(entry.Value);
+                AppendQueryValues(builder, entry.Key, entry.Value);
             }
 
             return;
@@ -106,11 +113,28 @@ internal static class OutputCacheKeyBuilder
 
         foreach (string key in keys)
         {
-            builder.Append(Separator).Append(key).Append('=');
             if (request.Query.TryGetValue(new HttpQueryKey(key), out HttpQueryValue value))
             {
-                builder.Append(value.ToString());
+                AppendQueryValues(builder, key, value);
             }
+        }
+    }
+
+    private static void AppendQueryValues(StringBuilder builder, string key, HttpQueryValue values)
+    {
+        // Escape decoded tokens so a value containing a separator cannot imitate another entry.
+        string encodedKey = Uri.EscapeDataString(key);
+        if (values.Count == 0)
+        {
+            // A projected key can be present without occurrences. '#' is escaped in query tokens,
+            // so this marker cannot alias an absent key or any key=value occurrence.
+            builder.Append(Separator).Append(encodedKey).Append("#0");
+            return;
+        }
+
+        for (int index = 0; index < values.Count; index++)
+        {
+            builder.Append(Separator).Append(encodedKey).Append('=').Append(Uri.EscapeDataString(values[index]));
         }
     }
 

@@ -35,7 +35,7 @@ internal abstract class AmqpTransportConnection : AmqpConnection
             return _context;
         }
 
-        IConnection carrier = await AcquireCarrierAsync(cancellationToken).ConfigureAwait(false);
+        IDuplexConnection carrier = await AcquireCarrierAsync(cancellationToken).ConfigureAwait(false);
         AmqpTransportConnectionContext context = new(carrier, _options);
 
         if (_options.AutoNegotiateProtocolHeader)
@@ -58,7 +58,7 @@ internal abstract class AmqpTransportConnection : AmqpConnection
     /// Acquires the carrier connection that backs the AMQP connection context. A single-stream
     /// carrier is already live; a multiplexed carrier opens or accepts its AMQP stream here.
     /// </summary>
-    protected abstract ValueTask<IConnection> AcquireCarrierAsync(CancellationToken cancellationToken);
+    protected abstract ValueTask<IDuplexConnection> AcquireCarrierAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Disposes the carrier resources owned by this AMQP connection.

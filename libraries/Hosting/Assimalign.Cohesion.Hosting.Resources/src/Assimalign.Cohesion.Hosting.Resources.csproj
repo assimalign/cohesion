@@ -9,4 +9,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" />
+	</ItemGroup>
 </Project>

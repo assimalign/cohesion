@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
@@ -58,7 +59,7 @@ public readonly struct HttpRangeHeader
     {
         if (!TryParse(value, out HttpRangeHeader result))
         {
-            throw new HttpInvalidRangeException($"The value is not a valid byte-range header: '{value.ToString()}'.");
+            throw new HttpInvalidRangeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ByteRangeHeaderInvalid, value.ToString()));
         }
         return result;
     }

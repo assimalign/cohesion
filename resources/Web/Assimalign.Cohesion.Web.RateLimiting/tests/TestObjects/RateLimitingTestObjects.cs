@@ -156,8 +156,9 @@ internal sealed class TestConnectionInfo : IHttpConnectionInfo
 }
 
 /// <summary>
-/// A stand-in for the router's route-match publication: installing it on the (decorated) feature
-/// collection is exactly what <c>UseRouting</c> does between matching and dispatching.
+/// A stand-in for the endpoint <c>UseRouting</c> publishes: installing it on the feature collection ahead
+/// of the rate-limiting middleware is what routing does before calling <c>next</c>. Set
+/// <see cref="IsPreflight"/> to model the candidate endpoint routing publishes for a CORS preflight.
 /// </summary>
 internal sealed class FakeRouteMatchFeature : IRouteMatchFeature
 {
@@ -167,6 +168,7 @@ internal sealed class FakeRouteMatchFeature : IRouteMatchFeature
         => _metadata = new Routing.Metadata.RouterRouteMetadataCollection(metadata);
 
     public string Name => nameof(IRouteMatchFeature);
+    public bool IsPreflight { get; init; }
     public IRouterRoute? Route => null;
     public RouteValueDictionary? Values => null;
     public IRouterRouteMetadataCollection Metadata => _metadata;
@@ -233,4 +235,18 @@ internal static class TestPolicies
         => RateLimitingPolicy.Create(_ => RateLimitPartition.GetConcurrencyLimiter(
             key,
             _ => new ConcurrencyLimiterOptions { PermitLimit = 1, QueueLimit = 0 }));
+
+    /// <summary>
+    /// Concurrency, one permit and a one-request queue, single partition — a second concurrent request
+    /// waits for the first to release its permit instead of being rejected.
+    /// </summary>
+    public static RateLimitingPolicy ConcurrencyQueued(string key = "test")
+        => RateLimitingPolicy.Create(_ => RateLimitPartition.GetConcurrencyLimiter(
+            key,
+            _ => new ConcurrencyLimiterOptions
+            {
+                PermitLimit = 1,
+                QueueLimit = 1,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            }));
 }

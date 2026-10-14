@@ -13,9 +13,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// bootstrap extended CONNECT. QPACK_MAX_TABLE_CAPACITY (RFC 9204 §5) is the
 /// server's decoder capacity: 0 (the default) states explicitly that the QPACK
 /// dynamic table is disabled, and a non-zero value opts in to the dynamic table
-/// and is advertised alongside QPACK_BLOCKED_STREAMS. All values are intentional
-/// statements of intent, so the server emits them rather than relying on the
-/// peer to assume the RFC defaults.
+/// and is advertised alongside QPACK_BLOCKED_STREAMS.
+/// SETTINGS_MAX_FIELD_SECTION_SIZE (RFC 9114 §7.2.4.1) is the decoded field-section
+/// size the QPACK decoder enforces on request heads and trailer sections. All values
+/// are intentional statements of intent, so the server emits them rather than
+/// relying on the peer to assume the RFC defaults.
 /// </remarks>
 internal static class Http3LocalSettings
 {
@@ -23,7 +25,9 @@ internal static class Http3LocalSettings
     /// Serializes the server's SETTINGS payload as a sequence of QUIC
     /// variable-length integer identifier/value pairs (RFC 9114 §7.2.4).
     /// </summary>
-    /// <param name="qpackOptions">The server's advertised QPACK capacity and blocked-stream limit.</param>
+    /// <param name="qpackOptions">
+    /// The server's advertised QPACK capacity, blocked-stream limit, and decoded field-section size.
+    /// </param>
     /// <returns>The encoded SETTINGS payload octets.</returns>
     public static byte[] EncodePayload(Http3QPackOptions qpackOptions)
     {
@@ -42,6 +46,12 @@ internal static class Http3LocalSettings
             QuicVariableLengthInteger.Write(payload, Http3SettingId.QPackBlockedStreams);
             QuicVariableLengthInteger.Write(payload, qpackOptions.MaxBlockedStreams);
         }
+
+        // RFC 9114 §7.2.4.1 / §4.2.2 — SETTINGS_MAX_FIELD_SECTION_SIZE, the decoded size (name + value +
+        // 32 octets per field) above which the server refuses a request head or trailer section. Without
+        // it the peer may assume the size is unlimited.
+        QuicVariableLengthInteger.Write(payload, Http3SettingId.MaxFieldSectionSize);
+        QuicVariableLengthInteger.Write(payload, qpackOptions.MaxFieldSectionSize);
 
         // RFC 9220 §3 — SETTINGS_ENABLE_CONNECT_PROTOCOL = 1, matching the
         // HTTP/2 transport's RFC 8441/9220 posture so peers may initiate

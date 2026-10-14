@@ -70,6 +70,47 @@ public class ProblemDetailsWriterTests
         root.GetProperty("status").GetInt32().ShouldBe(404);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.ProblemDetails] - ProblemDetails: FromStatus titles a problem with the RFC 9110 reason phrase")]
+    [InlineData(413, "Content Too Large")]
+    [InlineData(414, "URI Too Long")]
+    [InlineData(416, "Range Not Satisfiable")]
+    [InlineData(422, "Unprocessable Content")]
+    [InlineData(505, "HTTP Version Not Supported")]
+    public void FromStatus_RenamedPhrase_ShouldUseRfc9110Title(int status, string expectedTitle)
+    {
+        // Arrange — #1204: these titles read "Request Entity Too Large", "Un-Processable Entity" and
+        // so on, the phrases RFC 9110 replaced.
+        HttpStatusCode statusCode = status;
+
+        // Act
+        ProblemDetails problem = ProblemDetails.FromStatus(statusCode);
+
+        // Assert
+        problem.Title.ShouldBe(expectedTitle);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.ProblemDetails] - ProblemDetails: unregistered codes keep a nonempty default title")]
+    [InlineData(199, "Error")]
+    [InlineData(299, "Error")]
+    [InlineData(399, "Error")]
+    [InlineData(499, "Error")]
+    [InlineData(599, "Internal Server Error")]
+    public void FromStatus_UnregisteredCode_ShouldUseGenericTitle(int status, string expectedTitle)
+    {
+        // Arrange
+        HttpStatusCode statusCode = status;
+
+        // Act
+        ProblemDetails problem = ProblemDetails.FromStatus(statusCode);
+        using JsonDocument document = JsonDocument.Parse(_writer.WriteToString(problem));
+
+        // Assert
+        problem.Title.ShouldBe(expectedTitle);
+        document.RootElement.GetProperty("type").GetString().ShouldBe("about:blank");
+        document.RootElement.GetProperty("status").GetInt32().ShouldBe(status);
+        document.RootElement.GetProperty("title").GetString().ShouldBe(expectedTitle);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.ProblemDetails] - ProblemDetailsWriter: renders scalar, array and nested-object extensions")]
     public void Write_WithExtensions_RendersConstrainedValueShapes()
     {

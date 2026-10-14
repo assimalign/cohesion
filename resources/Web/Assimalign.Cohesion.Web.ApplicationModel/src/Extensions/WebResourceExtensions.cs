@@ -46,7 +46,7 @@ public static class WebResourceExtensions
             ArgumentNullException.ThrowIfNull(declaration);
             if (!string.Equals(declaration.Manifest?.Kind, "Web", StringComparison.Ordinal))
             {
-                throw new ArgumentException("A typed Web reference requires an Web manifest.", nameof(declaration));
+                throw new ArgumentException(ErrorMessages.WebManifestRequired, nameof(declaration));
             }
             return new WebResourceDescriptor(builder.RemoteReference(declaration, configure));
         }

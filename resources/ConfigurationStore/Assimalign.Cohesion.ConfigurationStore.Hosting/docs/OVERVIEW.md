@@ -20,6 +20,9 @@ concrete durable ConfigurationStore host, builder, and context.
 
 The protocol listener starts after user services and drains before them. Enabled resources bind the
 ambient `api` endpoint; plain applications use `--endpoint` or the loopback default.
+Without a gateway identity, `/cohesion/v1` accepts only transport peers at `127.0.0.1`, `::1`,
+or IPv4-mapped `127.0.0.1`; other peers receive 403, regardless of forwarded headers.
+Bare `/healthz`, `/readyz`, and `/livez` stay open. Gateway-managed authentication is unchanged.
 
 ## Public types
 

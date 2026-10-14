@@ -22,5 +22,35 @@ public static class HttpRequestLimitsExtensions
                 return context.Features.Get<IHttpMaxRequestBodySizeFeature>();
             }
         }
+
+        /// <summary>
+        /// Gets the minimum request-body data-rate feature for this exchange, or <see langword="null"/>
+        /// when the request-limits interceptor (<see cref="HttpRequestLimitsInterceptor.Create"/>) is not
+        /// registered on the server.
+        /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+        public IHttpMinRequestBodyDataRateFeature? MinRequestBodyDataRate
+        {
+            get
+            {
+                ArgumentNullException.ThrowIfNull(context);
+                return context.Features.Get<IHttpMinRequestBodyDataRateFeature>();
+            }
+        }
+
+        /// <summary>
+        /// Gets the minimum response data-rate feature for this exchange, or <see langword="null"/> when
+        /// the request-limits interceptor (<see cref="HttpRequestLimitsInterceptor.Create"/>) is not
+        /// registered on the server.
+        /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+        public IHttpMinResponseDataRateFeature? MinResponseDataRate
+        {
+            get
+            {
+                ArgumentNullException.ThrowIfNull(context);
+                return context.Features.Get<IHttpMinResponseDataRateFeature>();
+            }
+        }
     }
 }

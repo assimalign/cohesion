@@ -15,8 +15,8 @@ using Xunit;
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 /// <summary>
-/// Covers the TLS convenience surface (<c>UseHttp1s</c> / <c>UseHttp2s</c>) added to
-/// <see cref="HttpConnectionListenerOptions"/> for issue #763. These tests pin the deterministic
+/// Covers the TLS convenience surface (<c>UseHttp1s</c> / <c>UseHttp2s</c>, issue #763, and
+/// <c>UseHttps</c>, issue #1063) added to <see cref="HttpConnectionListenerOptions"/>. These tests pin the deterministic
 /// behaviour: argument validation, ALPN application-protocol defaulting (and preservation), and that
 /// the secured listener registers under the correct HTTP protocol with deferred construction. The
 /// end-to-end TLS handshake is exercised separately in <see cref="WebTlsHostingIntegrationTests"/>.
@@ -126,7 +126,8 @@ public class WebTlsHostingExtensionsTests
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp2s: Should preserve caller-supplied application protocols")]
     public void UseHttp2s_WithExplicitApplicationProtocols_ShouldPreserveThem()
     {
-        // Arrange — a caller offering both h2 and http/1.1 on one endpoint must not be overridden.
+        // Arrange — a caller-supplied list is kept as given. (UseHttp2s still serves every connection
+        // HTTP/2; serving both protocols on one endpoint is UseHttps.)
         HttpConnectionListenerOptions options = new();
         List<SslApplicationProtocol> explicitProtocols = new()
         {
@@ -242,5 +243,99 @@ public class WebTlsHostingExtensionsTests
 
         configured.ShouldBeTrue();
         listener.Protocols.ShouldBe(HttpProtocol.Http20);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttps: Should throw when the configure callback is null")]
+    public void UseHttps_WithNullConfigure_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new();
+
+        // Act / Assert
+        Should.Throw<ArgumentNullException>(() => options.UseHttps(null!, new TlsServerOptions()));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttps: Should throw when the TLS options are null")]
+    public void UseHttps_WithNullTlsOptions_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new();
+
+        // Act / Assert
+        Should.Throw<ArgumentNullException>(() => options.UseHttps(tcp => { }, null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttps: Should default ALPN to h2 then http/1.1 when application protocols are unset")]
+    public void UseHttps_WithUnsetApplicationProtocols_ShouldDefaultToH2ThenHttp11()
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new();
+        TlsServerOptions tlsOptions = new();
+
+        // Act
+        options.UseHttps(tcp => { }, tlsOptions);
+
+        // Assert — both identifiers, h2 first: the server's preference order (RFC 7301 §3.2).
+        tlsOptions.AuthenticationOptions.ApplicationProtocols.ShouldBe(new List<SslApplicationProtocol>
+        {
+            SslApplicationProtocol.Http2,
+            SslApplicationProtocol.Http11
+        });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttps: Should preserve caller-supplied application protocols")]
+    public void UseHttps_WithExplicitApplicationProtocols_ShouldPreserveThem()
+    {
+        // Arrange — a caller preferring http/1.1 keeps that order.
+        HttpConnectionListenerOptions options = new();
+        List<SslApplicationProtocol> explicitProtocols = new()
+        {
+            SslApplicationProtocol.Http11,
+            SslApplicationProtocol.Http2
+        };
+        TlsServerOptions tlsOptions = new()
+        {
+            AuthenticationOptions = new SslServerAuthenticationOptions
+            {
+                ApplicationProtocols = explicitProtocols
+            }
+        };
+
+        // Act
+        options.UseHttps(tcp => { }, tlsOptions);
+
+        // Assert
+        tlsOptions.AuthenticationOptions.ApplicationProtocols.ShouldBeSameAs(explicitProtocols);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttps: Should defer TCP listener creation and register HTTP/1.1 and HTTP/2")]
+    public async Task UseHttps_WithConfiguredOptions_ShouldDeferCreationAndRegisterHttp11AndHttp20()
+    {
+        // Arrange
+        bool configured = false;
+        HttpConnectionListenerOptions options = new();
+        using System.Security.Cryptography.X509Certificates.X509Certificate2 certificate =
+            TestObjects.SelfSignedCertificateFactory.Create("localhost");
+
+        // Act
+        HttpConnectionListenerOptions result = options.UseHttps(
+            tcp =>
+            {
+                configured = true;
+                tcp.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+            },
+            new TlsServerOptions
+            {
+                AuthenticationOptions = { ServerCertificate = certificate }
+            });
+
+        // Assert — one registration serving both protocols on the TLS-layered listener.
+        result.ShouldBeSameAs(options);
+        configured.ShouldBeFalse();
+
+        await using HttpConnectionListener listener = new(options);
+
+        configured.ShouldBeTrue();
+        listener.Protocols.ShouldBe(HttpProtocol.Http11 | HttpProtocol.Http20);
     }
 }

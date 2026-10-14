@@ -45,11 +45,11 @@ public class Http2ContentDigestVerificationTests
         // exist yet as far as the server can observe.
         TestConnection connection = new(opening, completeInput: false);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+        options.Interceptors.Add(HttpContentDigestInterceptor.Create());
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         // The dispatch itself is the deadlock regression guard: the eager verifier read the body
@@ -103,11 +103,11 @@ public class Http2ContentDigestVerificationTests
 
         TestConnection connection = new(opening, completeInput: false);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+        options.Interceptors.Add(HttpContentDigestInterceptor.Create());
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeTrue();
@@ -147,11 +147,11 @@ public class Http2ContentDigestVerificationTests
 
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+        options.Interceptors.Add(HttpContentDigestInterceptor.Create());
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         bool yielded;
         await using (IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator())
@@ -175,11 +175,11 @@ public class Http2ContentDigestVerificationTests
 
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+        options.Interceptors.Add(HttpContentDigestInterceptor.Create());
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -214,7 +214,7 @@ public class Http2ContentDigestVerificationTests
             streamId,
             0x4, // END_HEADERS only — the body follows in DATA frames
             (":method", "POST"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/upload"),
             (":authority", "api.test"),
             ("content-digest", contentDigest));

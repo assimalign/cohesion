@@ -6,13 +6,15 @@ namespace Assimalign.Cohesion.Web.Health.Tests;
 
 /// <summary>
 /// A configurable <see cref="IHealthCheck"/> test double: returns a fixed status, throws, or
-/// blocks until cancelled (to exercise the per-check timeout path).
+/// blocks until cancelled (to exercise the per-check timeout path), optionally reporting the
+/// cancellation with its own message, as a dependency client does when its connect times out.
 /// </summary>
 internal sealed class StubCheck : IHealthCheck
 {
     private readonly HealthStatus _status;
     private readonly Exception? _throws;
     private readonly bool _blockUntilCancelled;
+    private readonly string? _cancellationMessage;
 
     public StubCheck(HealthStatus status)
     {
@@ -24,16 +26,19 @@ internal sealed class StubCheck : IHealthCheck
         _throws = throws;
     }
 
-    private StubCheck(bool blockUntilCancelled)
+    private StubCheck(bool blockUntilCancelled, string? cancellationMessage)
     {
         _blockUntilCancelled = blockUntilCancelled;
+        _cancellationMessage = cancellationMessage;
     }
 
     public int Invocations { get; private set; }
 
     public static StubCheck Throwing(Exception exception) => new(exception);
 
-    public static StubCheck Blocking() => new(blockUntilCancelled: true);
+    public static StubCheck Blocking() => new(blockUntilCancelled: true, cancellationMessage: null);
+
+    public static StubCheck BlockingThenCancelledWith(string message) => new(blockUntilCancelled: true, message);
 
     public async ValueTask<HealthCheckResult> CheckAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
@@ -46,7 +51,14 @@ internal sealed class StubCheck : IHealthCheck
 
         if (_blockUntilCancelled)
         {
-            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException exception) when (_cancellationMessage is not null)
+            {
+                throw new OperationCanceledException(_cancellationMessage, exception, cancellationToken);
+            }
         }
 
         return new HealthCheckResult(_status);

@@ -21,12 +21,26 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <para>
 /// A timeout of <see cref="Timeout.InfiniteTimeSpan"/> disables that phase's deadline.
 /// </para>
+/// <para>
+/// A graceful close ends the idle wait early through <see cref="CancelIdleWait"/>. The phase is an
+/// interlocked latch, so that call and <see cref="OnRequestLineStarted"/> cannot both win: either the
+/// wait ends as an idle reclaim, or the request whose first octet arrived is read to completion under
+/// its request-headers deadline.
+/// </para>
 /// </remarks>
 internal sealed class Http1ReadTimeout : IDisposable
 {
+    // The _phase values: waiting for the next request to begin, reading its head, or an idle wait a
+    // graceful close ended.
+    private const int idlePhase = 0;
+    private const int headersPhase = 1;
+    private const int idleCancelledPhase = 2;
+
     private readonly CancellationToken _connectionToken;
     private readonly CancellationTokenSource _cts;
     private readonly TimeSpan _requestHeadersTimeout;
+
+    private int _phase;
 
     /// <summary>
     /// Initializes the controller and arms the keep-alive (idle-wait) deadline.
@@ -53,7 +67,7 @@ internal sealed class Http1ReadTimeout : IDisposable
     /// first request byte has been observed). Distinguishes a slow-header timeout from an idle
     /// keep-alive timeout so the connection loop can decide whether to emit a 408 response.
     /// </summary>
-    public bool IsHeadersPhase { get; private set; }
+    public bool IsHeadersPhase => Volatile.Read(ref _phase) == headersPhase;
 
     /// <summary>
     /// Gets a value indicating whether the timeout &#8212; rather than the ambient connection
@@ -68,13 +82,27 @@ internal sealed class Http1ReadTimeout : IDisposable
     /// </summary>
     public void OnRequestLineStarted()
     {
-        if (IsHeadersPhase)
+        // Only from the idle wait: a repeated call is a no-op, and a wait a graceful close already ended
+        // stays ended (the read observes the cancellation and the connection is reclaimed).
+        if (Interlocked.CompareExchange(ref _phase, headersPhase, idlePhase) == idlePhase)
         {
-            return;
+            Arm(_requestHeadersTimeout);
         }
+    }
 
-        IsHeadersPhase = true;
-        Arm(_requestHeadersTimeout);
+    /// <summary>
+    /// Ends the keep-alive idle wait now, because the connection is closing gracefully and will take
+    /// no further request. Does nothing once the next request's head has started to arrive: that
+    /// request is read and answered under the request-headers deadline. The cancelled read reports
+    /// <see cref="TimedOut"/> outside <see cref="IsHeadersPhase"/>, the idle-reclaim outcome, so no
+    /// response is written.
+    /// </summary>
+    public void CancelIdleWait()
+    {
+        if (Interlocked.CompareExchange(ref _phase, idleCancelledPhase, idlePhase) == idlePhase)
+        {
+            _cts.Cancel();
+        }
     }
 
     /// <summary>

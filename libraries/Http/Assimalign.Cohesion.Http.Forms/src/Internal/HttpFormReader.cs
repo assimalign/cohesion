@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -193,7 +194,7 @@ internal class HttpFormReader : IDisposable
     {
         if (_currentKey == null)
         {
-            if (!TryReadWord('=', KeyLengthLimit, out _currentKey))
+            if (!TryReadWord('=', KeyLengthLimit, HttpFormLimit.KeyLength, out _currentKey))
             {
                 return false;
             }
@@ -206,7 +207,7 @@ internal class HttpFormReader : IDisposable
 
         if (_currentValue == null)
         {
-            if (!TryReadWord('&', ValueLengthLimit, out _currentValue))
+            if (!TryReadWord('&', ValueLengthLimit, HttpFormLimit.ValueLength, out _currentValue))
             {
                 return false;
             }
@@ -214,11 +215,11 @@ internal class HttpFormReader : IDisposable
         return true;
     }
 
-    private bool TryReadWord(char separator, int limit, [NotNullWhen(true)] out string? value)
+    private bool TryReadWord(char separator, int limit, HttpFormLimit limitKind, [NotNullWhen(true)] out string? value)
     {
         do
         {
-            if (ReadChar(separator, limit, out value))
+            if (ReadChar(separator, limit, limitKind, out value))
             {
                 return true;
             }
@@ -226,7 +227,7 @@ internal class HttpFormReader : IDisposable
         return false;
     }
 
-    private bool ReadChar(char separator, int limit, [NotNullWhen(true)] out string? word)
+    private bool ReadChar(char separator, int limit, HttpFormLimit limitKind, [NotNullWhen(true)] out string? word)
     {
         // End
         if (_bufferCount == 0)
@@ -245,7 +246,8 @@ internal class HttpFormReader : IDisposable
         }
         if (_builder.Length >= limit)
         {
-            throw new InvalidDataException($"Form key or value length limit {limit} exceeded.");
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.FormKeyOrValueLengthLimitExceeded, limit);
+            throw new InvalidDataException(message, new HttpFormLimitExceededException(limitKind, message));
         }
         _builder.Append(c);
         word = null;
@@ -321,7 +323,8 @@ internal class HttpFormReader : IDisposable
             accumulator.Append(_currentKey, _currentValue);
             if (accumulator.ValueCount > ValueCountLimit)
             {
-                throw new InvalidDataException($"Form value count limit {ValueCountLimit} exceeded.");
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.FormValueCountLimitExceeded, ValueCountLimit);
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.ValueCount, message));
             }
         }
     }

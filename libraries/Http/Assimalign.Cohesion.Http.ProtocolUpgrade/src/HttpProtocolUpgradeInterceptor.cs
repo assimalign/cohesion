@@ -1,0 +1,179 @@
+using System;
+
+using Assimalign.Cohesion.Http.Internal;
+
+namespace Assimalign.Cohesion.Http;
+
+/// <summary>
+/// The exchange interceptor that makes HTTP/1.1 protocol upgrades and <c>CONNECT</c> tunnelling
+/// available on an exchange. One stateless instance takes part in the request phase of every
+/// exchange, and in the response phase of the exchanges that ask for a transition only:
+/// </summary>
+/// <remarks>
+/// <list type="number">
+///   <item><description><see cref="AfterRequestHead"/> detects the RFC 9110 §7.8 upgrade signal
+///   (<c>Connection: upgrade</c> token <b>and</b> a non-empty <c>Upgrade</c> header) or the
+///   §9.3.6 <c>CONNECT</c> shape on the parsed head, records it as an internal
+///   <see cref="HttpProtocolUpgradeCandidate"/> feature, and adds itself to that exchange's
+///   response phase
+///   (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).</description></item>
+///   <item><description><see cref="BeforeResponse"/> consumes the candidate and, when the
+///   transport's exchange control can surrender the connection
+///   (<see cref="HttpExchangeInterceptorResponseContext.Control"/> with
+///   <see cref="IHttpExchangeControl.CanTakeOver"/>), installs the public
+///   <see cref="IHttpProtocolUpgradeFeature"/> wrapping an <see cref="Http1ProtocolUpgrade"/> —
+///   the object <c>context.Upgrade</c> surfaces to the application.</description></item>
+/// </list>
+/// <para>
+/// The scope is <see cref="HttpInterceptorScopes.Request"/>, not
+/// <see cref="HttpInterceptorScopes.All"/>: a response-scoped interceptor makes the transport build a
+/// response sink and an exchange control for every exchange on every protocol, and an upgrade needs
+/// them only for the rare HTTP/1.1 request that asks for one. Every other exchange, including every
+/// HTTP/2 and HTTP/3 one, keeps the transport's fast path, which matters because the Web host
+/// registers this interceptor by default.
+/// </para>
+/// <para>
+/// Detection is HTTP/1.1-only by design: HTTP/2 and HTTP/3 removed the <c>Upgrade</c> mechanism
+/// (RFC 9113 §8.6, RFC 9114 §4.2), and their <c>CONNECT</c> shapes (including extended CONNECT)
+/// are per-stream semantics over a shared connection — there is no whole-connection transition
+/// to model, so ordinary and multiplexed exchanges alike surface <c>context.Upgrade == null</c>.
+/// </para>
+/// <para>
+/// Both hooks are CPU-only (token scanning over already-parsed headers) per the interceptor
+/// contract, and all per-request state lives in the exchange's feature collection, never in
+/// instance fields.
+/// </para>
+/// </remarks>
+public sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
+{
+    private HttpProtocolUpgradeInterceptor()
+    {
+    }
+
+    /// <summary>
+    /// Creates the exchange interceptor that detects HTTP/1.1 upgrade / <c>CONNECT</c> transition
+    /// signals and surfaces them as an <see cref="IHttpProtocolUpgradeFeature"/> over the
+    /// transport's exchange control (takeover). Add it to the transport's interceptor list.
+    /// </summary>
+    /// <returns>The interceptor to add to the transport's interceptor list.</returns>
+    public static HttpProtocolUpgradeInterceptor Create() => new HttpProtocolUpgradeInterceptor();
+
+    // RFC 9110 §5.6.1 / §5.6.3 — a list element loses its optional whitespace, SP and HTAB, and
+    // nothing else. HTTP/1.1 decodes field values as Latin-1, so a no-break space (0xA0) or a
+    // next-line octet (0x85) can end a token; a Unicode trim would strip it and read
+    // "websocket\xA0" as websocket, while a hop that compares the token exactly sees another
+    // protocol and does not expect the connection to switch (#1341).
+    private const string OptionalWhitespace = " \t";
+
+    /// <inheritdoc />
+    public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+    /// <inheritdoc />
+    public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
+    {
+        if (context.Version != HttpVersion.Http11)
+        {
+            return;
+        }
+
+        if (context.Method == HttpMethod.Connect)
+        {
+            // The transport enforces CONNECT ⇒ authority-form at parse time (HttpRequestTarget's
+            // method/form pairing), so the method alone identifies a tunnel request here.
+            // RFC 9110 §7.8 requires a server to ignore an Upgrade header on CONNECT, hence the
+            // return before upgrade detection.
+            Claim(context, new HttpProtocolUpgradeCandidate(HttpProtocolUpgradeKind.Connect, protocol: null));
+            return;
+        }
+
+        // RFC 9110 §7.8 — an upgrade is signalled by BOTH a "Connection: upgrade" token AND a
+        // non-empty Upgrade header naming the target protocol; a bare Upgrade header without the
+        // Connection token is not actionable.
+        if (HasConnectionUpgradeToken(context.Headers)
+            && context.Headers.TryGetValue(HttpHeaderKey.Upgrade, out HttpHeaderValue upgradeValue)
+            && FirstToken(upgradeValue.Value) is { } protocol)
+        {
+            Claim(context, new HttpProtocolUpgradeCandidate(HttpProtocolUpgradeKind.Upgrade, protocol));
+        }
+    }
+
+    /// <summary>
+    /// Records the detected transition and takes part in this exchange's response phase, whose
+    /// exchange control the upgrade needs; no other exchange pays for it.
+    /// </summary>
+    private void Claim(HttpExchangeInterceptorRequestContext context, HttpProtocolUpgradeCandidate candidate)
+    {
+        context.Features.Set(candidate);
+        context.AddResponseInterceptor(this);
+    }
+
+    /// <inheritdoc />
+    public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
+    {
+        HttpProtocolUpgradeCandidate? candidate = context.Features.Get<HttpProtocolUpgradeCandidate>();
+        if (candidate is null)
+        {
+            return;
+        }
+
+        // The marker's job ends here; remove it so only the public feature (if any) remains
+        // visible on the exchange.
+        context.Features.Remove(HttpProtocolUpgradeCandidate.FeatureName);
+
+        // Defensive: the HTTP/1.1 exchange control can always surrender its connection, but an
+        // exchange whose control cannot (HTTP/2 / HTTP/3 multiplexed streams, or a hand-built
+        // context with no control) degrades to "no upgrade available" rather than surfacing a
+        // feature whose accept could never work.
+        if (context.Control is not { CanTakeOver: true } control)
+        {
+            return;
+        }
+
+        Http1ProtocolUpgrade upgrade = new(control, context.Headers, candidate.Kind, candidate.Protocol);
+        context.Features.Set(new HttpProtocolUpgradeFeature(upgrade));
+    }
+
+    /// <summary>
+    /// Returns whether the <c>Connection</c> header lists the <c>upgrade</c> token
+    /// (case-insensitive, comma-list aware, across repeated field lines).
+    /// </summary>
+    private static bool HasConnectionUpgradeToken(HttpHeaderCollection headers)
+    {
+        if (!headers.TryGetValue(HttpHeaderKey.Connection, out HttpHeaderValue value))
+        {
+            return false;
+        }
+
+        foreach (string? entry in value)
+        {
+            if (entry is null)
+            {
+                continue;
+            }
+
+            ReadOnlySpan<char> list = entry.AsSpan();
+            foreach (Range range in list.Split(','))
+            {
+                if (list[range].Trim(OptionalWhitespace).Equals("upgrade", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns the first comma-delimited token of an <c>Upgrade</c> header value, trimmed of SP and
+    /// HTAB, or <see langword="null"/> when that element is empty. RFC 9110 §7.8 lists protocols in
+    /// preference order and a successful 101 names the single protocol the server switches to,
+    /// so the first (most-preferred) token is what the upgrade surfaces.
+    /// </summary>
+    private static string? FirstToken(string value)
+    {
+        int comma = value.IndexOf(',');
+        ReadOnlySpan<char> token = (comma < 0 ? value.AsSpan() : value.AsSpan(0, comma)).Trim(OptionalWhitespace);
+        return token.IsEmpty ? null : token.ToString();
+    }
+}

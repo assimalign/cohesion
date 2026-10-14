@@ -116,6 +116,11 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         // with orphaned entries until the idle timeout reaps them.
         if (_orphanedNewSession)
         {
+            WebSessionEventSource.Log.SessionOrphaned(_context);
+            if (_storeSession is { IsModified: true })
+            {
+                WebSessionEventSource.Log.SessionStateLost(_context);
+            }
             return;
         }
 
@@ -137,13 +142,13 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         if (_storeSession is null)
         {
             throw new InvalidOperationException(
-                "No managed session is current on this request; establish the session and do not replace it before regenerating its id.");
+                ErrorMessages.ManagedSessionRequired);
         }
 
         if (ResponseHeadStarted())
         {
             throw new InvalidOperationException(
-                "The session id cannot be regenerated after the response has started; regenerate it before writing the response.");
+                ErrorMessages.SessionRegenerationAfterResponseStarted);
         }
 
         string oldId = _storeSession.Id;
@@ -179,9 +184,9 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
     {
         foreach (HttpCookie cookie in _context.Request.Cookies)
         {
-            if (string.Equals(cookie.Name, _options.CookieName, StringComparison.Ordinal))
+            if (cookie.Name == _options.CookieName)
             {
-                return string.IsNullOrEmpty(cookie.Value) ? null : cookie.Value;
+                return cookie.HasValue ? cookie.Value.Value : null;
             }
         }
 
@@ -211,8 +216,13 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
             Path = _options.CookiePath,
             HttpOnly = _options.CookieHttpOnly,
             SameSite = HttpCookieSameSiteMode.Lax,
-            // Secure is bound to the transport-derived scheme: emitted only over HTTPS.
-            Secure = _context.Request.Scheme == HttpScheme.Https,
+            // Secure is bound to the effective scheme: emitted whenever the client reached the
+            // application over HTTPS — directly, or through a trusted TLS-terminating proxy the
+            // forwarded-headers middleware vouched for. Without that middleware the effective
+            // scheme is the transport-derived one.
+            Secure = _context.EffectiveScheme == HttpScheme.Https,
+            // A cookie-consent policy drops a non-essential cookie until the user consents.
+            IsEssential = _options.CookieIsEssential,
             // Session-scoped: no Expires / Max-Age, so the cookie clears when the
             // browser session ends. Server-side idle timeout governs expiry.
         };
@@ -225,7 +235,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         List<HttpCookie>? stale = null;
         foreach (HttpCookie existing in cookies)
         {
-            if (string.Equals(existing.Name, _options.CookieName, StringComparison.Ordinal))
+            if (existing.Name == _options.CookieName)
             {
                 (stale ??= []).Add(existing);
             }

@@ -10,33 +10,102 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal static partial class HPackEncoder
 {
-    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, int bodyLength)
+    /// <summary>
+    /// Encodes the response field section for a <em>buffered</em> response: the section
+    /// <see cref="EncodeResponseHeaders(HttpStatusCode, IHttpHeaderCollection, HttpResponseDateHeader?)"/> encodes, with a
+    /// <c>content-length</c> synthesized from <paramref name="bodyLength"/> when the application set none.
+    /// The synthesized field is added to <paramref name="headers"/>.
+    /// </summary>
+    /// <param name="statusCode">The response status code.</param>
+    /// <param name="headers">The response headers to emit.</param>
+    /// <param name="bodyLength">The length of the buffered body.</param>
+    /// <param name="dateHeader">The cached automatic Date field, or <see langword="null"/> when disabled.</param>
+    /// <returns>The HPACK-encoded field section.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">
+    /// A field name is not a token, or a value holds a control character other than HTAB. The synthesized
+    /// <c>content-length</c> is removed again first, so a response sent in this one's place is framed by its
+    /// own body.
+    /// </exception>
+    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, int bodyLength, HttpResponseDateHeader? dateHeader = null)
     {
-        if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
+        if (headers.ContainsKey(HttpHeaderKey.ContentLength))
         {
-            headers[HttpHeaderKey.ContentLength] = bodyLength.ToString(CultureInfo.InvariantCulture);
+            return EncodeResponseHeaders(statusCode, headers, dateHeader);
         }
 
-        return EncodeResponseHeaders(statusCode, headers);
+        headers[HttpHeaderKey.ContentLength] = bodyLength.ToString(CultureInfo.InvariantCulture);
+
+        try
+        {
+            return EncodeResponseHeaders(statusCode, headers, dateHeader);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            // A refused head leaves the response replaceable (#1183); a stale length would make the
+            // replacement malformed (RFC 9113 §8.1.1) whenever its body differs.
+            headers.Remove(HttpHeaderKey.ContentLength);
+            throw;
+        }
     }
 
     /// <summary>
     /// Encodes the response field section for an <em>incrementally streamed</em>
-    /// response: the <c>:status</c> pseudo-header followed by the supplied headers
-    /// verbatim, with <b>no</b> <c>Content-Length</c> synthesized. A streaming
+    /// response: the <c>:status</c> pseudo-header followed by the supplied headers,
+    /// with <b>no</b> <c>Content-Length</c> synthesized. A streaming
     /// response has no known body length up front — HTTP/2 delimits the body with
-    /// <c>END_STREAM</c> — so injecting a length here would be wrong.
+    /// <c>END_STREAM</c> — so injecting a length here would be wrong. A
+    /// connection-specific field is skipped (<see cref="HttpResponseFieldRules"/>), and so is a
+    /// <c>content-length</c> on a <c>204</c> (<see cref="HttpResponseContentRules"/>).
     /// </summary>
+    /// <remarks>
+    /// Every field is checked against the field syntax before the section is returned
+    /// (<see cref="HttpResponseFieldRules.EnsureValidName"/>, <see cref="HttpResponseFieldRules.EnsureValidValue"/>),
+    /// the connection-specific ones included, so a field that would split an HTTP/1.1 head is refused
+    /// on every version alike. The section is built in memory and the encoder never indexes, so a refusal
+    /// leaves nothing on the wire and no HPACK state behind. A value goes out without the SP or HTAB at its
+    /// ends, which RFC 9113 §8.2.1 forbids (<see cref="HttpResponseFieldRules.TrimEdgeWhitespace"/>); every
+    /// section this encoder writes does the same.
+    /// </remarks>
     /// <param name="statusCode">The response status code.</param>
-    /// <param name="headers">The response headers to emit as-is.</param>
+    /// <param name="headers">The response headers to emit.</param>
+    /// <param name="dateHeader">The cached automatic Date field, or <see langword="null"/> when disabled.</param>
     /// <returns>The HPACK-encoded field section.</returns>
-    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers)
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
+    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, HttpResponseDateHeader? dateHeader = null)
     {
         using MemoryStream buffer = new();
         WriteStatusHeader(buffer, (int)statusCode);
+        bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(statusCode);
+        bool permitsDate = !HttpInterimResponseRules.IsInformational(statusCode);
+        if (permitsDate && dateHeader is not null && dateHeader.IsOnlyHeader(headers))
+        {
+            buffer.Write(dateHeader.Http2Field.Span);
+            return buffer.ToArray();
+        }
+
+        bool hasDate = false;
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
+            HttpResponseFieldRules.EnsureValidName(header.Key);
+
+            if (header.Key == HttpHeaderKey.Date)
+            {
+                hasDate = true;
+                if (!permitsDate)
+                {
+                    HttpResponseFieldRules.EnsureValidValue(header.Key, header.Value.Value);
+                    continue;
+                }
+
+                if (dateHeader is not null && header.Value.Count == 1
+                    && string.Equals(header.Value.Value, dateHeader.Value, StringComparison.Ordinal))
+                {
+                    buffer.Write(dateHeader.Http2Field.Span);
+                    continue;
+                }
+            }
+
             // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
             // value; combining cookies into a single comma-folded value is
             // forbidden.
@@ -46,14 +115,54 @@ internal static partial class HPackEncoder
                 {
                     if (!string.IsNullOrEmpty(value))
                     {
+                        HttpResponseFieldRules.EnsureValidValue(header.Key, value);
                         WriteHeader(buffer, "set-cookie", value);
                     }
                 }
+
+                continue;
             }
-            else
+
+            string fieldValue = header.Value.Value;
+            HttpResponseFieldRules.EnsureValidValue(header.Key, fieldValue);
+
+            // RFC 9113 §8.2.2 — a connection-specific field would make the response malformed. RFC 9110
+            // §8.6 — a 204 carries no content-length, not even one the application set (#1073).
+            if (HttpResponseFieldRules.IsSendable(header.Key, header.Value)
+                && (permitsContentLength || header.Key != HttpHeaderKey.ContentLength))
             {
-                WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
+                WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), fieldValue);
             }
+        }
+
+        if (!hasDate && permitsDate && dateHeader is not null)
+        {
+            buffer.Write(dateHeader.Http2Field.Span);
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Encodes a response's trailer section (RFC 9113 §8.1): the staged fields, lowercased, with no
+    /// pseudo-header field — a trailer section carries none.
+    /// </summary>
+    /// <param name="trailers">
+    /// The staged trailer fields, already checked when they were added. Each is checked again against the
+    /// field syntax here, because a value built over an array can change after it was staged.
+    /// </param>
+    /// <returns>The HPACK-encoded field block.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
+    public static byte[] EncodeTrailers(IHttpHeaderCollection trailers)
+    {
+        using MemoryStream buffer = new();
+
+        foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> field in trailers)
+        {
+            string fieldValue = field.Value.Value;
+            HttpResponseFieldRules.EnsureValidName(field.Key);
+            HttpResponseFieldRules.EnsureValidValue(field.Key, fieldValue);
+            WriteHeader(buffer, field.Key.Value.ToLowerInvariant(), fieldValue);
         }
 
         return buffer.ToArray();
@@ -61,7 +170,8 @@ internal static partial class HPackEncoder
 
     /// <summary>
     /// Encodes the field section for an <em>interim</em> (<c>1xx</c>) response: the <c>:status</c>
-    /// pseudo-header set to the interim code followed by the supplied fields verbatim, with <b>no</b>
+    /// pseudo-header set to the interim code followed by the supplied fields, less any
+    /// connection-specific field (<see cref="HttpResponseFieldRules"/>), with <b>no</b>
     /// <c>Content-Length</c> (an interim response carries no body — RFC 9110 §15.2). The resulting
     /// HEADERS frame is written without <c>END_STREAM</c> so the final response can follow on the same
     /// stream (RFC 9113 §8.1).
@@ -69,6 +179,7 @@ internal static partial class HPackEncoder
     /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
     /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
     /// <returns>The HPACK-encoded field section.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeInterimResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection? headers)
     {
         using MemoryStream buffer = new();
@@ -78,11 +189,21 @@ internal static partial class HPackEncoder
         {
             foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
             {
+                HttpResponseFieldRules.EnsureValidName(header.Key);
+
+                // RFC 9113 §8.2.2 — an interim response is a field section like any other.
+                bool sendable = header.Key != HttpHeaderKey.Date && HttpResponseFieldRules.IsSendable(header.Key, header.Value);
+
                 foreach (string? value in header.Value)
                 {
                     if (!string.IsNullOrEmpty(value))
                     {
-                        WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), value);
+                        HttpResponseFieldRules.EnsureValidValue(header.Key, value);
+
+                        if (sendable)
+                        {
+                            WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), value);
+                        }
                     }
                 }
             }
@@ -256,7 +377,7 @@ internal static partial class HPackEncoder
                 // guard; Latin1 accepts the full 0-255 octet range.
                 if (valueEncoding is null && (character & 0xFF80) != 0)
                 {
-                    throw new InvalidOperationException("Only ASCII HPACK literals are currently supported.");
+                    throw new InvalidOperationException(ErrorMessages.HpackNonAsciiLiteralNotSupported);
                 }
 
                 octets[index] = (byte)character;
@@ -358,6 +479,11 @@ internal static partial class HPackEncoder
 
     private static void WriteHeader(Stream stream, string name, string value)
     {
+        // RFC 9113 §8.2.1 — a value with SP or HTAB at either end makes the response malformed. Every field
+        // line of a head, interim, or trailer section goes through here, so none of them can carry it; the
+        // whitespace is not part of the value (RFC 9110 §5.5), so nothing a recipient reads changes.
+        value = HttpResponseFieldRules.TrimEdgeWhitespace(value);
+
         byte[] buffer = new byte[128];
 
         while (!TryEncodeHeader(name, value, buffer, out int bytesWritten))

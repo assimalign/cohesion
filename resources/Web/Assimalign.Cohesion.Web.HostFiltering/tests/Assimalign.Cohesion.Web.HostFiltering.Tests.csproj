@@ -4,6 +4,9 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Shouldly" />
@@ -12,6 +15,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.HostFiltering" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />

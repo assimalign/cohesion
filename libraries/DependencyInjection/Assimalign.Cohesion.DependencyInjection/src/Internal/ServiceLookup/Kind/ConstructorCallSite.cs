@@ -3,7 +3,6 @@ using System.Reflection;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class ConstructorCallSite : CallSiteService
 {
@@ -20,7 +19,7 @@ internal sealed class ConstructorCallSite : CallSiteService
     {
         if (!serviceType.IsAssignableFrom(constructorInfo.DeclaringType))
         {
-            throw new ArgumentException(Resources.GetImplementationTypeCantBeConvertedToServiceType(constructorInfo.DeclaringType, serviceType));
+            throw new ArgumentException(ErrorMessageFormatter.GetImplementationTypeCantBeConvertedToServiceType(constructorInfo.DeclaringType, serviceType));
         }
 
         ServiceType = serviceType;

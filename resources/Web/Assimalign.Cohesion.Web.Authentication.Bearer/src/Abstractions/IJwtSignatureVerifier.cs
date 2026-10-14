@@ -4,8 +4,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 
 /// <summary>
 /// Verifies the signature of a JSON Web Token for the bearer handler. This Web-specific
-/// compatibility seam is retained so existing bearer configuration remains source-compatible;
-/// its built-in RSA and ECDSA factories adapt the reusable IdentityModel signature verifiers.
+/// interface remains the extension contract for custom verifiers; its built-in RSA and ECDSA
+/// implementations adapt the reusable IdentityModel signature verifiers.
 /// </summary>
 /// <remarks>
 /// Implementations are keyed by concrete key material (an HMAC secret, an RSA or ECDSA public key),

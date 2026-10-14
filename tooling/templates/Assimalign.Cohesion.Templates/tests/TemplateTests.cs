@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -107,6 +108,19 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
             Directory.GetFiles(Path.Combine(output, "bin"), "index.html", SearchOption.AllDirectories)
                 .ShouldNotBeEmpty("The standalone SPA must carry the page served by Program.cs into its output.");
         }
+
+        if (template is "cohesion-web" or "cohesion-spa")
+        {
+            // The plain templates must answer with no code changes: the self-contained build starts
+            // on a machine without Cohesion shared frameworks installed, and the entry point binds
+            // the configured endpoint without a UseServer call.
+            byte[]? index = template == "cohesion-spa"
+                ? await File.ReadAllBytesAsync(Path.Combine(output, "wwwroot", "index.html"), cancellationToken)
+                : null;
+            string body = await _workspace.GetFromBuiltWebApplicationAsync(output, name, "/", cancellationToken,
+                index is null ? null : (client, token) => AssertSpaRoutesAsync(client, index, token));
+            body.ShouldContain(template == "cohesion-web" ? "Hello from" : "<html", Case.Insensitive);
+        }
         foreach (string project in SourceProjects(output))
         {
             XDocument document = XDocument.Load(project);
@@ -125,6 +139,45 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
             {
                 manifests.ShouldBeEmpty($"{project} must remain a plain executable.");
                 Directory.GetFiles(obj, "Resource*.g.cs", SearchOption.AllDirectories).ShouldBeEmpty();
+            }
+        }
+    }
+
+    private static async Task AssertSpaRoutesAsync(HttpClient client, byte[] index,
+        CancellationToken cancellationToken = default)
+    {
+        // Arrange: a dot in an earlier segment must not turn a client route into an asset path.
+        string[] routes = ["/settings", "/settings/profile", "/release.v1/settings"];
+        string[] missingAssets = ["/missing.js", "/assets/missing.css", "/settings/profile.json"];
+        HttpMethod[] methods = [HttpMethod.Get, HttpMethod.Head];
+
+        foreach (string route in routes)
+        {
+            foreach (HttpMethod method in methods)
+            {
+                // Act
+                using var request = new HttpRequestMessage(method, route);
+                using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+                byte[] body = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+
+                // Assert
+                response.StatusCode.ShouldBe(HttpStatusCode.OK, $"{method} {route} should serve index.html.");
+                (response.Content.Headers.ContentType?.MediaType).ShouldBe("text/html");
+                response.Content.Headers.ContentLength.ShouldBe(index.LongLength);
+                body.ShouldBe(method == HttpMethod.Get ? index : []);
+            }
+        }
+
+        foreach (string asset in missingAssets)
+        {
+            foreach (HttpMethod method in methods)
+            {
+                // Act
+                using var request = new HttpRequestMessage(method, asset);
+                using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+
+                // Assert
+                response.StatusCode.ShouldBe(HttpStatusCode.NotFound, $"{method} {asset} must not fall back to index.html.");
             }
         }
     }
@@ -416,10 +469,10 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
     [TemplateFeedFact("cohesion-web", DisplayName = "Cohesion Test [Templates] - Build: web generates only enabled manifests")]
     public Task Build_Web_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-web");
 
-    /// <summary>Builds the spa scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-spa", DisplayName = "Cohesion Test [Templates] - Build: spa generates only enabled manifests")]
-    public Task Build_Spa_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-spa");
+    /// <summary>Builds the SPA scaffold and verifies client routes, missing assets and manifest opt-in.</summary>
+    /// <returns>A task representing consumer build and request verification.</returns>
+    [TemplateFeedFact("cohesion-spa", DisplayName = "Cohesion Test [Templates] - Build: SPA serves client routes and preserves missing asset responses")]
+    public Task Build_Spa_ShouldServeClientRoutesAndPreserveMissingAssetsAsync() => BuildTemplateAsync("cohesion-spa");
 
     /// <summary>Builds the database scaffold against its available package closure.</summary>
     /// <returns>A task representing consumer build and manifest verification.</returns>

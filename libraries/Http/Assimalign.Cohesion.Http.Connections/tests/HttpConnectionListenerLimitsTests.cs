@@ -17,6 +17,7 @@ public class HttpConnectionListenerLimitsTests
         limits.MaxRequestLineSize.ShouldBe(8 * 1024);
         limits.MaxRequestHeaderCount.ShouldBe(100);
         limits.MaxRequestHeadersTotalSize.ShouldBe(32 * 1024);
+        limits.MaxChunkFramingLineSize.ShouldBe(8 * 1024);
         limits.MaxRequestBodySize.ShouldBe(30_000_000);
         limits.KeepAliveTimeout.ShouldBe(TimeSpan.FromSeconds(130));
         limits.RequestHeadersTimeout.ShouldBe(TimeSpan.FromSeconds(30));
@@ -88,6 +89,7 @@ public class HttpConnectionListenerLimitsTests
         Should.Throw<ArgumentOutOfRangeException>(() => limits.MaxRequestLineSize = value);
         Should.Throw<ArgumentOutOfRangeException>(() => limits.MaxRequestHeaderCount = value);
         Should.Throw<ArgumentOutOfRangeException>(() => limits.MaxRequestHeadersTotalSize = value);
+        Should.Throw<ArgumentOutOfRangeException>(() => limits.MaxChunkFramingLineSize = value);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Limits: Should reject a negative max request body size")]

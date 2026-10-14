@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 /// once they have released the in-memory pair, so a server session's cleanup meets a disposal that
 /// fails. Clients dial <see cref="Inner"/>.
 /// </summary>
-internal sealed class DisposeFailingConnectionListener : ConnectionListener
+internal sealed class DisposeFailingConnectionListener : DuplexConnectionListener
 {
     /// <summary>The message of the failure every accepted connection's disposal throws.</summary>
     public const string FailureMessage = "The connection failed to close.";
@@ -27,22 +27,24 @@ internal sealed class DisposeFailingConnectionListener : ConnectionListener
     /// <summary>Gets the in-memory listener clients dial.</summary>
     public InMemoryConnectionListener Inner { get; }
 
+    public override ListenerId Id => Inner.Id;
+
     public override EndPoint EndPoint => Inner.EndPoint;
 
     public override ConnectionCapabilities Capabilities => Inner.Capabilities;
 
     public override ValueTask BindAsync(CancellationToken cancellationToken = default) => Inner.BindAsync(cancellationToken);
 
-    public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
         => new DisposeFailingConnection(await Inner.AcceptAsync(cancellationToken).ConfigureAwait(false));
 
     public override ValueTask DisposeAsync() => Inner.DisposeAsync();
 
-    private sealed class DisposeFailingConnection : Connection
+    private sealed class DisposeFailingConnection : DuplexConnection
     {
-        private readonly Connection _inner;
+        private readonly IDuplexConnection _inner;
 
-        public DisposeFailingConnection(Connection inner)
+        public DisposeFailingConnection(IDuplexConnection inner)
         {
             _inner = inner;
         }
@@ -60,6 +62,10 @@ internal sealed class DisposeFailingConnectionListener : ConnectionListener
         public override ConnectionCapabilities Capabilities => _inner.Capabilities;
 
         public override ConnectionState State => _inner.State;
+
+        public override ConnectionDirection Direction => _inner.Direction;
+
+        protected override IConnectionFeatureCollection? InnerFeatures => _inner.Features;
 
         public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 

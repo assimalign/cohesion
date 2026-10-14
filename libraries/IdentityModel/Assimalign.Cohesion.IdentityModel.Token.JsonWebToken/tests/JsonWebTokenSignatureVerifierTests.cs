@@ -28,7 +28,7 @@ public sealed class JsonWebTokenSignatureVerifierTests
         byte[] signature = privateKey.SignData(signingInput, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         JsonWebToken token = JsonWebToken.Parse(
             string.Concat(signingInputText, ".", Base64Url.EncodeToString(signature)));
-        IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateRsa(publicKey, "rsa-key-1");
+        RsaJsonWebTokenSignatureVerifier verifier = RsaJsonWebTokenSignatureVerifier.Create(publicKey, "rsa-key-1");
 
         // Act
         bool verified = verifier.CanVerify(token.Algorithm!, token.Header.KeyId) &&
@@ -43,7 +43,7 @@ public sealed class JsonWebTokenSignatureVerifierTests
     {
         // Arrange
         using ECDsa p256 = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(p256);
+        EcdsaJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(p256);
 
         // Act
         bool canVerify = verifier.CanVerify(JoseAlgorithms.ES384, keyId: null);
@@ -70,7 +70,7 @@ public sealed class JsonWebTokenSignatureVerifierTests
         using ECDsa _ = publicKey;
 
         // Act
-        Action create = () => JsonWebTokenSignatureVerifier.CreateEcdsa(publicKey);
+        Action create = () => EcdsaJsonWebTokenSignatureVerifier.Create(publicKey);
 
         // Assert
         Should.Throw<ArgumentException>(create);
@@ -81,7 +81,7 @@ public sealed class JsonWebTokenSignatureVerifierTests
     {
         // Arrange
         using ECDsa p256 = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(p256);
+        EcdsaJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(p256);
         byte[] signingInput = Encoding.ASCII.GetBytes("eyJhbGciOiJFUzI1NiJ9.e30");
         var malformedSignature = new byte[63];
 

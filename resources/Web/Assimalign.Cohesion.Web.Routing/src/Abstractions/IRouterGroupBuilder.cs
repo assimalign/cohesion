@@ -23,13 +23,20 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// parameter at the same depth.
 /// </para>
 /// <para>
-/// Shared configuration is declared first, children second. <see cref="WithMetadata"/> and the
-/// <see cref="WithParameterPolicy(string, RouteParameterPolicy)"/> overloads may only be called
-/// before the group registers its first child route or nested group; afterwards the group's shared
-/// configuration is <em>frozen</em> and further calls throw. This freeze rule is what makes the
-/// composition deterministic: shared values are guaranteed to apply to <em>every</em> child, and a
-/// child can never observe a different group state depending on registration order.
+/// The two kinds of shared configuration follow different ordering rules (#1055):
 /// </para>
+/// <list type="bullet">
+/// <item><b>Metadata is order-independent.</b> <see cref="WithMetadata"/> and every feature verb
+/// built on <see cref="IRouterConventionBuilder"/> (for example <c>RequireRateLimiting</c>) apply to
+/// every child route of the group and of its nested groups, whether the child was mapped before or
+/// after the call, because metadata is composed when the route table is built. Attaching metadata
+/// after the route table was built throws.</item>
+/// <item><b>Parameter policies are declared first.</b> A child resolves its inline policies when
+/// its template is parsed at registration, so the <see cref="WithParameterPolicy(string, RouteParameterPolicy)"/>
+/// overloads may only be called before the group maps its first child route or nested group.
+/// Afterwards the group's policies are frozen and further calls throw, which guarantees every child
+/// resolves against the same policy set.</item>
+/// </list>
 /// <para>
 /// Overrides are child-over-group, deterministically: group metadata items are placed
 /// <em>before</em> route-level items in each child's <see cref="IRouterRouteMetadataCollection"/>,
@@ -39,7 +46,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// registration for that route only.
 /// </para>
 /// </remarks>
-public interface IRouterGroupBuilder
+public interface IRouterGroupBuilder : IRouterConventionBuilder
 {
     /// <summary>
     /// Gets the full composed route-template prefix applied to child routes, including every
@@ -54,8 +61,8 @@ public interface IRouterGroupBuilder
 
     /// <summary>
     /// Creates a nested route group whose prefix is this group's prefix joined with
-    /// <paramref name="prefix"/>, and which inherits a snapshot of this group's shared parameter
-    /// policies and endpoint metadata.
+    /// <paramref name="prefix"/>, which inherits a snapshot of this group's shared parameter
+    /// policies and, when the route table is built, all of this group's endpoint metadata.
     /// </summary>
     /// <param name="prefix">
     /// The route-template prefix of the nested group, relative to this group. May contain
@@ -69,29 +76,29 @@ public interface IRouterGroupBuilder
     /// parameter name duplicated across the nesting levels).
     /// </exception>
     /// <remarks>
-    /// Creating a nested group freezes this group's shared configuration (the nested group
-    /// snapshots it), so declare all shared metadata and policies before nesting.
+    /// Creating a nested group freezes this group's parameter policies (the nested group snapshots
+    /// them), so declare shared policies before nesting. Metadata stays open: metadata attached to
+    /// this group later still reaches the nested group's routes.
     /// </remarks>
     IRouterGroupBuilder MapGroup(string prefix);
 
     /// <summary>
-    /// Adds shared endpoint metadata applied to every child route subsequently registered through
-    /// this group (and inherited by nested groups).
+    /// Adds shared endpoint metadata applied to every child route of this group and of its nested
+    /// groups, including children mapped before this call.
     /// </summary>
     /// <param name="items">The metadata items to share. Must not contain <see langword="null"/> entries.</param>
     /// <returns>The current route group builder, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="items"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="items"/> contains a <see langword="null"/> entry.</exception>
     /// <exception cref="InvalidOperationException">
-    /// A child route or nested group has already been registered — the group's shared
-    /// configuration is frozen.
+    /// The route table has already been built, so the metadata could no longer apply.
     /// </exception>
     /// <remarks>
     /// Group items are placed before route-level items in each child's metadata collection, so the
     /// last-wins <c>GetMetadata&lt;T&gt;</c> rule lets a route-level item of the same type override
     /// the group's.
     /// </remarks>
-    IRouterGroupBuilder WithMetadata(params object[] items);
+    new IRouterGroupBuilder WithMetadata(params object[] items);
 
     /// <summary>
     /// Registers a shared route parameter policy for an inline policy name, applied when resolving
@@ -104,8 +111,8 @@ public interface IRouterGroupBuilder
     /// <exception cref="ArgumentNullException"><paramref name="policyName"/> or <paramref name="policy"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="policyName"/> is empty.</exception>
     /// <exception cref="InvalidOperationException">
-    /// A child route or nested group has already been registered — the group's shared
-    /// configuration is frozen.
+    /// A child route or nested group has already been registered — the group's parameter
+    /// policies are frozen.
     /// </exception>
     /// <remarks>
     /// Registering a name that is already registered (a built-in, or an outer group's registration)
@@ -125,8 +132,8 @@ public interface IRouterGroupBuilder
     /// <exception cref="ArgumentNullException"><paramref name="policyName"/> or <paramref name="factory"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="policyName"/> is empty.</exception>
     /// <exception cref="InvalidOperationException">
-    /// A child route or nested group has already been registered — the group's shared
-    /// configuration is frozen.
+    /// A child route or nested group has already been registered — the group's parameter
+    /// policies are frozen.
     /// </exception>
     IRouterGroupBuilder WithParameterPolicy(string policyName, Func<string?, RouteParameterPolicy> factory);
 
@@ -140,7 +147,7 @@ public interface IRouterGroupBuilder
     /// prefix itself.
     /// </param>
     /// <param name="handler">The handler invoked when the composed route matches.</param>
-    /// <returns>The current route group builder, for chaining.</returns>
+    /// <returns>The mapped route's builder, for attaching route-level metadata.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="template"/> or <paramref name="handler"/> is <see langword="null"/>.
     /// </exception>
@@ -151,7 +158,7 @@ public interface IRouterGroupBuilder
     /// <exception cref="InvalidOperationException">
     /// The composed template references an inline policy name unknown to the group's policy map.
     /// </exception>
-    IRouterGroupBuilder Map(HttpMethod method, string template, IRouterRouteHandler handler);
+    IRouterRouteBuilder Map(HttpMethod method, string template, IRouterRouteHandler handler);
 
     /// <summary>
     /// Registers a child route with route-level endpoint metadata whose template is this group's
@@ -167,7 +174,7 @@ public interface IRouterGroupBuilder
     /// Route-level endpoint metadata, appended after the group's shared metadata so it overrides
     /// group items under the last-wins rule.
     /// </param>
-    /// <returns>The current route group builder, for chaining.</returns>
+    /// <returns>The mapped route's builder, for attaching route-level metadata.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="template"/>, <paramref name="handler"/>, or <paramref name="metadata"/>
     /// is <see langword="null"/>.
@@ -176,7 +183,7 @@ public interface IRouterGroupBuilder
     /// <exception cref="InvalidOperationException">
     /// The composed template references an inline policy name unknown to the group's policy map.
     /// </exception>
-    IRouterGroupBuilder Map(HttpMethod method, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata);
+    IRouterRouteBuilder Map(HttpMethod method, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata);
 
     /// <summary>
     /// Registers a child route accepting multiple HTTP methods whose template is this group's
@@ -188,7 +195,7 @@ public interface IRouterGroupBuilder
     /// prefix itself.
     /// </param>
     /// <param name="handler">The handler invoked when the composed route matches.</param>
-    /// <returns>The current route group builder, for chaining.</returns>
+    /// <returns>The mapped route's builder, for attaching route-level metadata.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="methods"/>, <paramref name="template"/>, or <paramref name="handler"/>
     /// is <see langword="null"/>.
@@ -197,7 +204,7 @@ public interface IRouterGroupBuilder
     /// <exception cref="InvalidOperationException">
     /// The composed template references an inline policy name unknown to the group's policy map.
     /// </exception>
-    IRouterGroupBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler);
+    IRouterRouteBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler);
 
     /// <summary>
     /// Registers a child route accepting multiple HTTP methods, with route-level endpoint metadata,
@@ -213,7 +220,7 @@ public interface IRouterGroupBuilder
     /// Route-level endpoint metadata, appended after the group's shared metadata so it overrides
     /// group items under the last-wins rule.
     /// </param>
-    /// <returns>The current route group builder, for chaining.</returns>
+    /// <returns>The mapped route's builder, for attaching route-level metadata.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="methods"/>, <paramref name="template"/>, <paramref name="handler"/>, or
     /// <paramref name="metadata"/> is <see langword="null"/>.
@@ -222,7 +229,7 @@ public interface IRouterGroupBuilder
     /// <exception cref="InvalidOperationException">
     /// The composed template references an inline policy name unknown to the group's policy map.
     /// </exception>
-    IRouterGroupBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata);
+    IRouterRouteBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata);
 
     /// <summary>
     /// Registers a child route accepting multiple HTTP methods, with optional route-level endpoint
@@ -244,7 +251,7 @@ public interface IRouterGroupBuilder
     /// policy name the group also registered replaces the group's registration for this route —
     /// the deterministic child-over-group override for parameter policies.
     /// </param>
-    /// <returns>The current route group builder, for chaining.</returns>
+    /// <returns>The mapped route's builder, for attaching route-level metadata.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="methods"/>, <paramref name="template"/>, <paramref name="handler"/>, or
     /// <paramref name="policies"/> is <see langword="null"/>.
@@ -253,5 +260,5 @@ public interface IRouterGroupBuilder
     /// <exception cref="InvalidOperationException">
     /// The composed template references an inline policy name unknown to the configured policy map.
     /// </exception>
-    IRouterGroupBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection? metadata, Action<RouteParameterPolicyMap> policies);
+    IRouterRouteBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection? metadata, Action<RouteParameterPolicyMap> policies);
 }

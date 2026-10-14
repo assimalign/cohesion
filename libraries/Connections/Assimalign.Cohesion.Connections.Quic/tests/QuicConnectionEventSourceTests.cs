@@ -17,10 +17,12 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections.Quic.Internal;
+using Assimalign.Cohesion.Connections.Quic.Tests.TestObjects;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Connections.Quic.Tests;
 
-// The lifecycle test gates on QuicListener.IsSupported and no-ops where the platform lacks a QUIC
+// Lifecycle tests report a discovery-time skip where the platform lacks a QUIC
 // implementation, like the rest of this suite; the name and manifest tests need no QUIC support.
 [Collection(nameof(EventSourceCollection))]
 [SupportedOSPlatform("windows")]
@@ -54,14 +56,9 @@ public class QuicConnectionEventSourceTests
         manifest.ShouldContain("Assimalign.Cohesion.Connections.Quic", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - QuicConnectionEventSource: Should report each listener, connection, and stream transition once and restore the gauges")]
+    [QuicFact(DisplayName = "Cohesion Test [Connections.Quic] - QuicConnectionEventSource: Should report each listener, connection, and stream transition once and restore the gauges")]
     public async Task ConnectionLifecycle_LoopbackPairWithStream_ShouldReportEachTransitionOnceAndRestoreGauges()
     {
-        if (!QuicListener.IsSupported)
-        {
-            return;
-        }
-
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
@@ -81,8 +78,8 @@ public class QuicConnectionEventSourceTests
             };
         }, cancellation.Token);
 
-        ValueTask<MultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token);
-        MultiplexedConnection client = await QuicConnectionFactory.Create(options =>
+        ValueTask<IMultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token);
+        MultiplexedConnection client = (MultiplexedConnection)await QuicConnectionFactory.Create(options =>
         {
             options.ClientAuthenticationOptions = new SslClientAuthenticationOptions
             {
@@ -92,8 +89,8 @@ public class QuicConnectionEventSourceTests
                 RemoteCertificateValidationCallback = static (_, _, _, _) => true
             };
         }).ConnectAsync(listener.EndPoint, cancellation.Token);
-        MultiplexedConnection server = await accept;
-        Connection stream = await client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
+        MultiplexedConnection server = (MultiplexedConnection)await accept;
+        IDuplexConnection stream = await client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
         long connectionsWhileOpen = QuicConnectionEventSource.Log.CurrentConnections;
         long streamsWhileOpen = QuicConnectionEventSource.Log.CurrentStreams;
 
@@ -125,6 +122,56 @@ public class QuicConnectionEventSourceTests
         events.Where(e => IsFor(e, "ConnectionClosed", server.Id)).ShouldHaveSingleItem();
         events.Where(e => IsFor(e, "ConnectionClosed", client.Id)).ShouldHaveSingleItem();
         events.Where(e => e.EventName == "ListenerClosed").ShouldHaveSingleItem().Payload![0].ShouldBe(listenerId);
+    }
+
+    [QuicFact(DisplayName = "Cohesion Test [Connections.Quic] - QuicConnectionEventSource: Should report a handshake the listener dropped once")]
+    public async Task HandshakeFailed_OnClientRefusedByCertificatePolicy_ShouldReportOnce()
+    {
+        // Arrange — the listener requires a client certificate the first client does not have.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        using X509Certificate2 clientCertificate = QuicTestCertificate.CreateClient();
+        using EventSourceRecorder recorder = new(QuicConnectionEventSource.Log, EventLevel.Verbose);
+
+        QuicConnectionListener listener = await QuicConnectionListener.CreateAsync(options =>
+        {
+            options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+            options.ServerAuthenticationOptions = new SslServerAuthenticationOptions
+            {
+                ServerCertificate = certificate,
+                ApplicationProtocols = [new SslApplicationProtocol("cohesion-test")],
+                EnabledSslProtocols = SslProtocols.Tls13,
+                ClientCertificateRequired = true,
+                RemoteCertificateValidationCallback = static (_, presented, _, _) => presented is not null
+            };
+        }, cancellation.Token);
+
+        Task<IMultiplexedConnection> accept = listener.AcceptAsync(cancellation.Token).AsTask();
+
+        // Act — the refused client is dropped, and the same accept goes on to return the next client.
+        await QuicTestClient.ConnectRefusedAsync(listener.EndPoint, cancellation.Token);
+        while (!accept.IsCompleted && !recorder.Events.Any(e => e.EventName == "HandshakeFailed"))
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(10), cancellation.Token);
+        }
+
+        MultiplexedConnection client = (MultiplexedConnection)await QuicTestClient.CreateFactory(clientCertificate).ConnectAsync(listener.EndPoint, cancellation.Token);
+        MultiplexedConnection server = (MultiplexedConnection)await accept;
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+        await listener.DisposeAsync();
+
+        // Assert
+        IReadOnlyList<EventWrittenEventArgs> events = recorder.Events;
+        events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+
+        string listenerId = events.Where(e => e.EventName == "ListenerBound").ShouldHaveSingleItem().Payload![0].ShouldBeOfType<string>();
+        EventWrittenEventArgs dropped = events.Where(e => e.EventName == "HandshakeFailed").ShouldHaveSingleItem();
+        dropped.Level.ShouldBe(EventLevel.Warning);
+        dropped.PayloadNames.ShouldBe(["listenerId", "exceptionType", "exceptionMessage"]);
+        dropped.Payload![0].ShouldBe(listenerId);
+        dropped.Payload[1].ShouldBeOfType<string>().ShouldNotBeNullOrWhiteSpace();
+        events.Where(e => IsFor(e, "ConnectionOpened", server.Id)).ShouldHaveSingleItem();
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - QuicConnectionEventSource: Should publish its connection and stream counters")]

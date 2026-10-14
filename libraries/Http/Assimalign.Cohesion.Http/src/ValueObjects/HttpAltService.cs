@@ -77,17 +77,17 @@ public readonly struct HttpAltService : IEquatable<HttpAltService>
     {
         if (string.IsNullOrEmpty(protocolId) || !IsToken(protocolId))
         {
-            throw new ArgumentException("The protocol identifier must be a non-empty RFC 7230 token.", nameof(protocolId));
+            throw new ArgumentException(ErrorMessages.ProtocolIdentifierInvalid, nameof(protocolId));
         }
 
         if (port < 0 || port > 65535)
         {
-            throw new ArgumentOutOfRangeException(nameof(port), port, "The port must be within 0..65535.");
+            throw new ArgumentOutOfRangeException(nameof(port), port, ErrorMessages.PortOutOfRange);
         }
 
         if (maxAgeSeconds is < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(maxAgeSeconds), maxAgeSeconds, "The max-age must be non-negative.");
+            throw new ArgumentOutOfRangeException(nameof(maxAgeSeconds), maxAgeSeconds, ErrorMessages.MaxAgeInvalid);
         }
 
         ProtocolId = protocolId;

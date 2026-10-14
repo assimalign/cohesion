@@ -1,19 +1,24 @@
 using System;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Enforces an <see cref="HttpMinDataRate"/> as an average over a transfer, measuring only the time
-/// actually spent waiting for the peer. Shared by the HTTP/1.1 streaming request-body read (a slow
-/// sender trickling its body) and the streaming response write (a slow reader refusing to drain).
+/// actually spent waiting for the peer. Shared by the request-body reads of every version (a slow
+/// sender trickling its body: <c>Http1RequestBodyStream</c>, <c>Http2RequestBodyStream</c>,
+/// <c>Http3RequestBodyStream</c>) and every response path of every version, buffered and streamed (a
+/// slow reader refusing to drain, #1384), including the HTTP/2 connection's shared output.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The gate is pure accounting: it owns no timer and performs no I/O. The caller bounds each
-/// blocking transport operation with the delay from <see cref="TryGetOperationTimeout"/>, then
-/// reports the elapsed wait and octets moved through <see cref="Record"/>. Because only the wait
-/// duration of the blocking operation is recorded, an application that is slow to read (or a peer
-/// slow to acknowledge) between operations never counts against the peer's rate.
+/// The gate's accounting performs no I/O. The caller bounds each blocking transport operation with
+/// the delay from <see cref="TryGetOperationTimeout"/>, then reports the elapsed wait and octets moved
+/// through <see cref="Record"/>. A response path does both through <see cref="MinDataRateWait"/>, which
+/// borrows the gate's one reusable deadline (<see cref="RentDeadline"/>) and arms it only while an
+/// operation actually waits. The gate serves one transfer, whose operations run one at a time.
+/// Because only the wait duration of the blocking operation is recorded, an application that is slow
+/// to read (or a peer slow to acknowledge) between operations never counts against the peer's rate.
 /// </para>
 /// <para>
 /// The invariant is: the cumulative wait may not exceed <c>gracePeriod + bytes / bytesPerSecond</c>.
@@ -39,6 +44,13 @@ internal sealed class MinDataRateGate
     private long _bytesTransferred;
     private long _ticksWaited;
 
+    // #1384 — the deadline MinDataRateWait bounds a pending operation with: created at the gate's first
+    // bounded operation, armed only while one waits, and reset after it, so a transfer pays for one
+    // source at most however many operations it runs. Replaced only after it fired, since a cancelled
+    // source cannot be reset. _deadlineInUse marks it lent out.
+    private CancellationTokenSource? _deadline;
+    private int _deadlineInUse;
+
     /// <summary>
     /// Initializes the gate for the supplied rate policy and clock.
     /// </summary>
@@ -54,6 +66,12 @@ internal sealed class MinDataRateGate
         _frequency = timeProvider.TimestampFrequency;
         _graceTicks = (long)(rate.GracePeriod.TotalSeconds * _frequency);
     }
+
+    /// <summary>
+    /// Gets the grace period, in <see cref="TimeProvider"/> ticks, during which the rate is not yet
+    /// enforced.
+    /// </summary>
+    public long GraceTicks => _graceTicks;
 
     /// <summary>
     /// Gets the clock the caller should read timestamps from so its measured waits align with this
@@ -83,11 +101,27 @@ internal sealed class MinDataRateGate
             return false;
         }
 
-        double seconds = remainingTicks / (double)_frequency;
-        timeout = seconds >= _maxOperationTimeout.TotalSeconds
+        timeout = ToOperationTimeout(remainingTicks);
+        return true;
+    }
+
+    /// <summary>
+    /// Converts a wait, in <see cref="TimeProvider"/> ticks, to the timeout a blocking transport operation
+    /// is bounded by, clamped to the same sane upper bound as <see cref="TryGetOperationTimeout"/>.
+    /// </summary>
+    /// <param name="ticks">The wait, in clock ticks; a non-positive value yields <see cref="TimeSpan.Zero"/>.</param>
+    /// <returns>The operation timeout.</returns>
+    public TimeSpan ToOperationTimeout(long ticks)
+    {
+        if (ticks <= 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        double seconds = ticks / (double)_frequency;
+        return seconds >= _maxOperationTimeout.TotalSeconds
             ? _maxOperationTimeout
             : TimeSpan.FromSeconds(seconds);
-        return true;
     }
 
     /// <summary>
@@ -118,5 +152,55 @@ internal sealed class MinDataRateGate
     {
         long allowedTicks = _graceTicks + (long)(_bytesTransferred / _bytesPerSecond * _frequency);
         return allowedTicks - _ticksWaited;
+    }
+
+    /// <summary>
+    /// Lends out the gate's reusable deadline for one operation, unarmed: the operation starts with its
+    /// token, and only an operation that waits arms it. Every rental is matched by
+    /// <see cref="ReturnDeadline"/>.
+    /// </summary>
+    /// <returns>
+    /// The gate's deadline, created on first use; or, should a second operation run while it is lent out,
+    /// which the transfer's one-at-a-time contract does not do, a separate deadline of its own.
+    /// </returns>
+    internal CancellationTokenSource RentDeadline()
+    {
+        if (Interlocked.Exchange(ref _deadlineInUse, 1) == 1)
+        {
+            return CreateDeadline();
+        }
+
+        return _deadline ??= CreateDeadline();
+    }
+
+    /// <summary>
+    /// Takes back a deadline <see cref="RentDeadline"/> lent out, once its operation is over: disarmed for
+    /// the next operation, or discarded when it fired, since a cancelled source cannot be reset.
+    /// </summary>
+    /// <param name="deadline">The deadline the operation used.</param>
+    internal void ReturnDeadline(CancellationTokenSource deadline)
+    {
+        if (!ReferenceEquals(deadline, _deadline))
+        {
+            deadline.Dispose();
+            return;
+        }
+
+        if (!deadline.TryReset())
+        {
+            _deadline = null;
+            deadline.Dispose();
+        }
+
+        Volatile.Write(ref _deadlineInUse, 0);
+    }
+
+    private CancellationTokenSource CreateDeadline()
+    {
+        // On the system clock the timer is created by the first CancelAfter, so a transfer whose
+        // operations never wait creates none; another clock needs its timer bound at construction.
+        return ReferenceEquals(_timeProvider, TimeProvider.System)
+            ? new CancellationTokenSource()
+            : new CancellationTokenSource(Timeout.InfiniteTimeSpan, _timeProvider);
     }
 }

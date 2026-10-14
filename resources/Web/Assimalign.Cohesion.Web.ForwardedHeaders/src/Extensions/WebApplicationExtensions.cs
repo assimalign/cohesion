@@ -21,12 +21,15 @@ public static class WebApplicationExtensions
         /// </summary>
         /// <remarks>
         /// <para>
-        /// <b>Ordering contract: register this middleware first.</b> Every middleware
-        /// that consumes client identity — CORS, authentication, cookie policy, redirect
-        /// generation, rate limiting, access logging — must run <em>after</em> it, or it
-        /// will observe the proxy hop instead of the client. Until the repo-wide
-        /// middleware-ordering rules land (#26/#145), ordering is by registration order:
-        /// make this the first <c>Use</c> call on the pipeline.
+        /// <b>Ordering contract: register this middleware at the front.</b> Every middleware
+        /// that consumes client identity before calling the next one — host filtering, HTTPS
+        /// redirection, CORS, authentication, cookie policy, redirect generation, rate
+        /// limiting — must run <em>after</em> it, or it will observe the proxy hop instead of
+        /// the client. Consumers that read after the pipeline unwinds (HSTS emission, access
+        /// logging) see the resolved identity wherever they sit, because the feature stays on
+        /// the exchange. Until the repo-wide middleware-ordering rules land (#26/#145),
+        /// ordering is by registration order. Only middleware that reads no client identity on the
+        /// way in may precede it: <c>UseHttpLogging</c> and <c>UseSecurityHeaders</c>.
         /// </para>
         /// <para>
         /// The options are validated and snapshotted here, at composition time — there is
@@ -53,7 +56,7 @@ public static class WebApplicationExtensions
         /// <summary>
         /// Adds the forwarded-headers middleware with the supplied trust-model options.
         /// See <see cref="UseForwardedHeaders(Action{ForwardedHeadersOptions})"/> for the
-        /// resolution semantics and the first-position ordering contract.
+        /// resolution semantics and the ordering contract.
         /// </summary>
         /// <param name="options">The trust-model options. Validated and snapshotted at composition time.</param>
         /// <returns>The same pipeline builder for chaining.</returns>

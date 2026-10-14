@@ -17,6 +17,17 @@ namespace Assimalign.Cohesion.Http;
 public interface IHttpStoredSession : IHttpSession
 {
     /// <summary>
+    /// Gets whether buffered state needs to be persisted. The default is
+    /// <see langword="true"/> so existing implementations keep committing.
+    /// </summary>
+    /// <remarks>
+    /// Implementations that track changes may return <see langword="false"/>
+    /// when no payload write is required. Idle-timeout refresh is independent
+    /// of modification tracking.
+    /// </remarks>
+    bool IsModified => true;
+
+    /// <summary>
     /// Changes the identifier while preserving buffered state and marks the
     /// session modified so its next commit writes under the new identifier.
     /// </summary>

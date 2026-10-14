@@ -1,5 +1,6 @@
 using Assimalign.Cohesion.Http.Internal;
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -33,12 +34,10 @@ namespace Assimalign.Cohesion.Http;
 /// decoded as UTF-8.
 /// </para>
 /// <para>
-/// Cohesion's <see cref="IHttpFormCollection"/> stores one value per key
-/// (single <see cref="HttpQueryValue"/>); when a urlencoded body sends the
-/// same key multiple times, the values are comma-joined per RFC 7230 §3.2.2
-/// before being added to the collection. Multi-value-aware form access is a
-/// future enhancement once the form-collection API grows a multi-value
-/// indexer.
+/// Both encodings preserve every occurrence of a field in arrival order.
+/// Each <see cref="HttpQueryValue"/> exposes the ordered values; its scalar
+/// <see cref="HttpQueryValue.Value"/> returns the first occurrence, including
+/// an empty one. Form values are never comma-joined.
 /// </para>
 /// </remarks>
 // Deviates from AGENTS.md interface-first rule per design decision:
@@ -163,8 +162,8 @@ public sealed class HttpFormFeature : IHttpFormFeature
                 // RFC 2046 §5.1.1 boundaries are bounded to 70 characters; a
                 // wildly long boundary is either malformed or an attempt to
                 // grow the look-ahead buffer unboundedly. Reject it up front.
-                throw new InvalidDataException(
-                    $"Multipart boundary length limit {_options.MultipartBoundaryLengthLimit} exceeded.");
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartBoundaryLengthLimitExceeded, _options.MultipartBoundaryLengthLimit);
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartBoundaryLength, message));
             }
 
             await ReadMultipartAsync(request.Body, boundary, form, cancellationToken).ConfigureAwait(false);
@@ -189,17 +188,10 @@ public sealed class HttpFormFeature : IHttpFormFeature
         Dictionary<string, List<string>> parsed = await reader.ReadFormAsync(cancellationToken).ConfigureAwait(false);
         foreach (KeyValuePair<string, List<string>> pair in parsed)
         {
-            // RFC 7230 §3.2.2 — comma-join repeated values into a single
-            // representation. Cohesion's HttpFormCollection stores one
-            // HttpQueryValue per key; a multi-value indexer is a future
-            // enhancement.
-            string value = pair.Value.Count switch
+            foreach (string value in pair.Value)
             {
-                0 => string.Empty,
-                1 => pair.Value[0],
-                _ => string.Join(",", pair.Value),
-            };
-            form.Add(pair.Key, new HttpQueryValue(value));
+                form.Add(pair.Key, new HttpQueryValue(value));
+            }
         }
     }
 
@@ -212,8 +204,18 @@ public sealed class HttpFormFeature : IHttpFormFeature
             BodyLengthLimit = _options.MultipartBodyLengthLimit,
         };
 
+        int sectionCount = 0;
         while (await reader.ReadNextSectionAsync(cancellationToken).ConfigureAwait(false) is { } section)
         {
+            // Count every section before reading its body, including files and unnamed sections
+            // that will be discarded. Checking before incrementing also avoids counter overflow.
+            if (sectionCount >= _options.ValueCountLimit)
+            {
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionCountLimitExceeded, _options.ValueCountLimit);
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartSectionCount, message));
+            }
+            sectionCount++;
+
             ParseContentDisposition(section.ContentDisposition, out string? name, out string? fileName);
 
             if (string.IsNullOrEmpty(name))
@@ -225,7 +227,12 @@ public sealed class HttpFormFeature : IHttpFormFeature
                 continue;
             }
 
-            if (fileName is not null)
+            // A part is a file only when it names one. A browser sends an optional
+            // <input type="file"> left empty as filename="" with an empty body
+            // (WHATWG HTML, multipart/form-data encoding), so an empty name is no
+            // file: it is read as a value, as ASP.NET Core's IsFileDisposition
+            // rule does, rather than failing the whole form.
+            if (!string.IsNullOrEmpty(fileName))
             {
                 HttpFormFile file = await ReadFileSectionAsync(section, name, fileName, cancellationToken).ConfigureAwait(false);
                 form.Add(file);

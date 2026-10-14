@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -96,7 +97,7 @@ public readonly struct HttpForwardedValues : IReadOnlyList<string>, IEquatable<H
     {
         if (!TryParse(value, out HttpForwardedValues result))
         {
-            throw new HttpInvalidForwardedException($"The value is not a valid X-Forwarded-* list: '{value.ToString()}'.");
+            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.XForwardedListInvalid, value.ToString()));
         }
         return result;
     }
@@ -199,7 +200,7 @@ public readonly struct HttpForwardedValues : IReadOnlyList<string>, IEquatable<H
     {
         if (_entries is null)
         {
-            return 0;
+            return new HashCode().ToHashCode();
         }
         var hash = new HashCode();
         foreach (string entry in _entries)

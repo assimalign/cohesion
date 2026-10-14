@@ -81,6 +81,13 @@ well-formed on the wire — not cookie *policy* (see the split below):
   `ArgumentException` — so a hostile value can never split or corrupt the
   emitted `Set-Cookie` line. The invariant holds for the object's lifetime
   because `Name`/`Value` are immutable.
+- **Attribute grammar.** The `HttpCookieOptions.Path` and `Domain` setters
+  throw `ArgumentException` for a value outside RFC 6265 §4.1.1, so a path
+  or domain built from untrusted input cannot add an attribute
+  (`Path=/x; SameSite=None`) or a control character to the line. `Path` is
+  US-ASCII without `;` or controls. `Domain` is dot-separated
+  letter-digit-hyphen labels, optionally preceded by one dot. `null` (and an
+  empty `Domain`) omits the attribute.
 - **Parse-side size limits.** `HttpCookieCollection` enforces
   `HttpCookieLimits` (name+value ≤ 4096, attribute value ≤ 1024, bounded
   attribute count) while parsing; oversized cookies/attributes are ignored,
@@ -110,14 +117,17 @@ read path &mdash; they hand the request over with the raw `Cookie`
 header on `request.Headers`, and the extension property tokenizes on
 demand the first time `request.Cookies` is read.
 
-On the write path, the transports' response serializers
-(`Http1MessageWriter`, `HPackEncoder` via `Http2ConnectionContext`,
-`Http3HeaderCodec.EncodeResponseHeaders`, `Http1ProtocolUpgrade`) look
-up `IHttpResponseCookieFeature` from the feature collection and, when
-present, emit each cookie as a separate `Set-Cookie` header line
-(RFC 6265 §3 forbids comma-folding for `Set-Cookie`). When no feature
-is attached, the response simply has no `Set-Cookie` headers &mdash;
-no allocations, no enumeration cost.
+On the write path, the response collection writes every mutation through
+to `response.Headers[Set-Cookie]`, one header value per cookie, and the
+transports' response serializers (`Http1MessageWriter`, `HPackEncoder`
+via `Http2ConnectionContext`, `Http3HeaderCodec.EncodeResponseHeaders`)
+emit each value as a separate `Set-Cookie` field line (RFC 6265 §3
+forbids comma-folding for `Set-Cookie`). They take no dependency on this
+package, and neither does the HTTP/1.1 upgrade writer (`Http1ProtocolUpgrade`),
+which writes the `101` head's `Set-Cookie` header the same way. No
+serializer reads `IHttpResponseCookieFeature`. When no cookie is appended,
+the response simply has no `Set-Cookie` headers &mdash; no allocations, no
+enumeration cost.
 
 ## Implementing a custom feature
 
@@ -131,3 +141,12 @@ directly and attach instances via
 `request.Cookies` and `response.Cookies` extension properties consult
 the feature collection for any implementation, not just the package's
 defaults.
+
+To replace a feature that is already installed, remove its slot first.
+The feature collection is keyed by `IHttpFeature.Name`, and
+`Get<TFeature>()` returns the first match, so a second feature with a
+different name leaves the existing one in charge. A replacement response
+feature must also keep `Set-Cookie` in sync, because that header is what
+the transports serialize. `Web.CookiePolicy` does both: it removes the
+existing feature's slot and queues its cookies into that feature's
+header-synchronized collection.

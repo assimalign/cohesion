@@ -47,3 +47,10 @@ Instance engines and services remain caller-owned. Factory products belong to th
 `CreateBuilder(args)` loads the default configuration when it creates the builder, as Web's does: optional base/environment JSON, `COHESION_CONFIG__` environment variables, the ambient resource settings and the arguments; providers added later win. `CreateBuilder()` and `new DatabaseApplicationBuilder(options)` start with an empty configuration. Unlike Web, there is no `CreateBuilder(options)` (owner decision 54): pass host settings with `new DatabaseApplicationBuilder(options)`. The environment and content root are read when the builder is created (from the ambient resource for `CreateBuilder(args)`, else `AppContext.BaseDirectory` for the files; from `Options` for the other overloads), and Build's options snapshot takes both from `Environment`. Build creates the one provider and logger factory: building `Services` or `Logging` directly yields a separate instance the application never uses, and building `Logging` makes the application's Build fail, as with Web's builder. Services use the Cohesion interpreted resolver (`EnableDynamicCode = false`) on both JIT and NativeAOT, with scope validation and explicit closed factories/instances; Build registers the environment, configuration and logger factory in the provider. See [DESIGN.md](DESIGN.md) for ordering, rollback, isolation and ownership details.
 
 The runtime references the area root and non-area infrastructure, never Database model packages. Existing enabled-resource runner/admin/telemetry integration is preserved; this implementation adds no ApplicationModel functionality.
+
+An enabled resource's standalone `admin` control plane accepts `/cohesion/v1` only from transport
+peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other peers receive 403 regardless of
+forwarded headers. This restricts remote standalone access supported by 10.0.0-preview.1 (#1431).
+Bare `/healthz`, `/readyz`, and `/livez` stay open, and gateway-managed behavior is unchanged.
+
+The model server options take `IDuplexConnectionListener`; client composition supplies an `IDuplexConnectionFactory` for the shared database pool.

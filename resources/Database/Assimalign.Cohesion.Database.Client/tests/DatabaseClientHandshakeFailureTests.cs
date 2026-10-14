@@ -39,7 +39,7 @@ public sealed class DatabaseClientHandshakeFailureTests
         {
             for (int accepted = 0; accepted < 2; accepted++)
             {
-                await using Connection connection = await listener.AcceptAsync(timeout.Token);
+                await using IDuplexConnection connection = await listener.AcceptAsync(timeout.Token);
                 ReadResult startup = await connection.Input.ReadAsync(timeout.Token);
                 connection.Input.AdvanceTo(startup.Buffer.End);
                 connection.Abort(new SocketException((int)SocketError.ConnectionReset));
@@ -143,7 +143,7 @@ public sealed class DatabaseClientHandshakeFailureTests
 
     private static async Task RejectStartupAsync(InMemoryConnectionListener listener, byte[] errorPayload, CancellationToken cancellationToken)
     {
-        await using Connection transport = await listener.AcceptAsync(cancellationToken);
+        await using IDuplexConnection transport = await listener.AcceptAsync(cancellationToken);
         await using var channel = new ProtocolChannel(transport.AsStream(), SqlProtocol.Family);
         (await ReadAsync(channel.Reader, cancellationToken)).Type.ShouldBe(ProtocolMessageType.Startup);
         await WriteAsync(channel.Writer, ProtocolMessageType.Error, errorPayload, cancellationToken);
@@ -152,7 +152,7 @@ public sealed class DatabaseClientHandshakeFailureTests
 
     private static async Task AnswerStatementAsync(InMemoryConnectionListener listener, CancellationToken cancellationToken)
     {
-        await using Connection transport = await listener.AcceptAsync(cancellationToken);
+        await using IDuplexConnection transport = await listener.AcceptAsync(cancellationToken);
         await using var channel = new ProtocolChannel(transport.AsStream(), SqlProtocol.Family);
         (await ReadAsync(channel.Reader, cancellationToken)).Type.ShouldBe(ProtocolMessageType.Startup);
         await WriteAsync(channel.Writer, ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, cancellationToken);

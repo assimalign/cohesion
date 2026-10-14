@@ -21,4 +21,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 	</ItemGroup>
 	
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
 </Project>

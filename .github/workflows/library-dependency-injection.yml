@@ -2,10 +2,11 @@ name: DependencyInjection
 on:
   push:
     paths:
+      - "build/TestSupport/**"
       - "libraries/DependencyInjection/**"
       - "!libraries/DependencyInjection/**/*.slnx"
       - "!libraries/DependencyInjection/**/*.md"
-      - ".github/workflows/library-DependencyInjection.yml" # When Pipeline File Changes
+      - ".github/workflows/library-dependency-injection.yml" # When Pipeline File Changes
 permissions:
   contents: read
 
@@ -13,6 +14,7 @@ jobs:
   build:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     continue-on-error: false
     strategy:
       matrix:

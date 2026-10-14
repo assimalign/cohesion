@@ -5,7 +5,7 @@
 The familiar property-style `context.User` access from ASP.NET Core,
 restored on top of a wire-level HTTP protocol core that does not know
 about identity, **plus the scheme registration model and per-request
-dispatch surface** that concrete scheme handlers (Cookie, Bearer) plug
+dispatch surface** that concrete scheme handlers (Cookie, Bearer, Certificate) plug
 into.
 
 The package began (before #790) as one feature contract, one default
@@ -14,7 +14,7 @@ only. Issue #790 grew it into the home for the **authentication scheme
 model**: the handler contract, the named-scheme registry with
 default-scheme selection, the `ClaimsPrincipal`-based result types, and
 the request-time dispatch service. The concrete handlers still live in
-their own packages (`…Cookie`, `…Bearer`); this package owns only the
+their own packages (`…Cookie`, `…Bearer`, `…Certificate`); this package owns only the
 model they share. See "The scheme model" below.
 
 The design is shaped by three constraints that pull in different
@@ -47,7 +47,7 @@ different:
 - **Middleware composes it.** Authentication-result metadata, ticket
   properties, and downstream re-authentication all want to mutate the
   same object reference, not look it up by name and risk replacing it.
-- **AOT-safe lookup.** `Features.Get<IHttpAuthenticationFeature>()` is
+- **AOT-safe lookup.** `Features.Get<IAuthenticationFeature>()` is
   `typeof(T)`-keyed; no reflection, no string-table lookup, no boxing.
 
 `IHttpContext.Features` &mdash; defined in the protocol core but
@@ -65,7 +65,7 @@ later is additive and source-compatible; locking in a wide surface up
 front based on guesses is not.
 
 This deliberately mirrors ASP.NET Core's
-`IHttpAuthenticationFeature` evolution: the original shape was just
+`IAuthenticationFeature` evolution: the original shape was just
 `User`, and per-scheme handlers grew in `IAuthenticationService`
 sibling features rather than bloating the per-request feature.
 
@@ -73,7 +73,7 @@ sibling features rather than bloating the per-request feature.
 
 Every consumer that touches `context.User` would otherwise need a
 defensive null-check. Returning a singleton empty `ClaimsPrincipal`
-(no identity, no claims) when no `IHttpAuthenticationFeature` is
+(no identity, no claims) when no `IAuthenticationFeature` is
 attached matches the ASP.NET Core `HttpContext.User` default so
 existing patterns like `if (context.User.Identity?.IsAuthenticated)`
 work unchanged. The empty principal is a static singleton; it costs
@@ -81,7 +81,7 @@ nothing to return.
 
 The setter, in contrast, throws on `null` &mdash; setting "no user"
 should be done by removing the feature
-(`context.Features.Set<IHttpAuthenticationFeature>(null)`), not by
+(`context.Features.Set<IAuthenticationFeature>(null)`), not by
 installing a feature with a null `User`. That keeps the invariant
 "if a feature exists, its `User` is non-null" cheap to reason about.
 
@@ -172,7 +172,7 @@ singleton installed on every request's feature collection (the same
 mechanism `RouterFeature` uses). `context.AuthenticateAsync()` and
 friends resolve it type-keyed from `context.Features` — there is no
 request-time service location. The service reads `AuthenticationOptions`
-live, so schemes registered by chained `AddCookie`/`AddJwtBearer` calls
+live, so schemes registered by chained `AddCookie`/`AddJwtBearer`/`AddCertificate` calls
 that run *after* the service is created are still resolved; and it caches
 each request's handler on `context.Items` so an authenticate followed by
 a challenge reuses one initialized instance.
@@ -180,49 +180,96 @@ a challenge reuses one initialized instance.
 **Result feature alongside the principal feature.**
 `IAuthenticationResultFeature` holds the default-scheme `AuthenticateResult`
 (ticket, properties, failure) so authorization and diagnostics can inspect
-*how* the principal was established, next to `IHttpAuthenticationFeature`
+*how* the principal was established, next to `IAuthenticationFeature`
 which holds only `context.User`. This mirrors ASP.NET Core's
 `IAuthenticateResultFeature`.
 
-**`IApiEndpointMetadata` is the redirect-vs-status seam.** A cookie
+**`ApiEndpointMetadata` is the redirect-vs-status marker.** A cookie
 challenge on a browser endpoint redirects to a login page; on an API
 endpoint it must emit a bare `401`. The decision keys on the endpoint
-metadata marker `IApiEndpointMetadata` (mirroring the .NET 10 cookie
-handler), resolved reflection-free through the #150 metadata bag surfaced
-by `Web.Routing`. The marker is defined here (an empty interface) but read
-only by the cookie handler; the bearer handler is always an API scheme and
-needs no check.
+sealed metadata marker `ApiEndpointMetadata`, resolved reflection-free through the #150
+metadata bag surfaced by `Web.Routing`. Attach `ApiEndpointMetadata.Instance` to the
+endpoint. The marker carries no data and needs no interface; only the cookie handler reads
+it, while the bearer handler is always an API scheme and needs no check.
 
 **Builder-time registration lives with the model, not in `*.Hosting`.**
 (Revised 2026-07-10 with the Web-area dependency rule — the original #790
 design placed the verbs in `Web.Hosting`.) The hosting/runtime module
-neither references nor is referenced by the feature libraries, so
-`AddAuthentication` (on the root `IWebApplicationBuilder`), the
-`AuthenticationBuilder` scheme surface, and `UseAuthentication` live in
-*this* package, and each handler package grafts its own scheme verb onto
-`AuthenticationBuilder` via `extension(...)` (`AddCookie` in the Cookie
-package, `AddJwtBearer` in the Bearer package). Composition stays
-dependency-free — the service is attached as a typed feature
-(`builder.AddFeature`), schemes are registered as values, and no service
-container or configuration binding is involved, so moving the verbs out
-of Hosting does not violate the "DI/config composition only in
-`*.Hosting`" philosophy. The ticket-crypto seam travels with the builder:
-`AuthenticationBuilder.DataProtectionProvider` defaults to a
+neither references nor is referenced by the feature libraries, so the
+registration verb, the `AuthenticationBuilder` scheme surface, and
+`UseAuthentication` live in *this* package, and each handler package
+grafts its own scheme verb onto `AuthenticationBuilder` via
+`extension(...)` (`AddCookie` in the Cookie package, `AddJwtBearer` in
+the Bearer package, `AddCertificate` in the Certificate package).
+
+**Registration is `builder.Services.AddAuthentication(auth => ...)`**
+(owner decisions 34 and 35, 2026-10-09, #1380). The package declares a
+component integration over `AuthenticationBuilder.Build`
+(`src/Properties/ComponentIntegrations.cs`); the generator projects the
+builder template onto `IServiceProviderBuilder` in the application's
+compilation, so the package takes no dependency-injection reference. The
+template constructs an `AuthenticationBuilder` (public, parameterless),
+runs the callback, calls `Build()` and registers the resulting
+`IAuthenticationService` as an `IHttpFeature` singleton, the only
+lifetime `Web.Hosting` accepts:
+
+```csharp
+builder.Services.AddAuthentication(auth =>
+{
+    auth.Options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    auth.UseDataProtection(dataProtection)
+        .AddCookie()
+        .AddJwtBearer(options => { /* keys, issuers, audiences */ });
+});
+```
+
+Until #1380 the verb was an `extension(IWebApplicationBuilder)` member that
+returned the `AuthenticationBuilder` for chaining, with overloads taking a
+default scheme and a data-protection provider. Both now live on the builder
+the callback receives (`Options.DefaultScheme`, `UseDataProtection`), and
+the scheme graft is unchanged. Composition stays dependency-free —
+schemes are registered as values and no service container or
+configuration binding is involved; a composition surface without a
+container registers `new AuthenticationBuilder()...Build()` through
+`IWebApplicationBuilder.AddFeature`. The ticket-crypto seam travels with
+the builder: `AuthenticationBuilder.DataProtectionProvider` defaults to a
 file-system-backed rotating key ring under `AppContext.BaseDirectory`
-when no provider is supplied to `AddAuthentication` (the host-content-root
-default that Hosting used to supply is gone — pass a provider explicitly
-to control key placement). `AuthenticationService.Create` and the public
-handler factories (`CookieAuthentication.CreateHandler`,
-`JwtBearerAuthentication.CreateHandler`) remain the seams the verbs use
-while the concrete handler and service implementations stay `internal`.
+unless `UseDataProtection` supplied one (the host-content-root default
+that Hosting used to supply is gone — pass a provider explicitly to
+control key placement). Reading the provider fixes it: a scheme verb
+derives its protector at registration, so `UseDataProtection` after a
+scheme has read the provider throws instead of leaving that scheme on
+the earlier key ring. The builder cannot tell a scheme's read from any
+other, so a caller that reads `DataProtectionProvider` (to share the key
+ring with antiforgery, say) fixes it too, and the error says either may
+have read it. `AuthenticationService.Create` and the public
+handler factories (`CookieAuthenticationHandler.Create`,
+`JwtBearerHandler.Create`, `CertificateAuthenticationHandler.Create`) remain the seams the verbs use
+on the public sealed handler and service implementations. Each `Create` returns its concrete
+type; construction is private and the existing interfaces remain the extension contracts.
 
 ## Family map
 
+The scheme packages reference the shared authentication model; Certificate also reads the TLS
+feature from `Http.Tls`. Arrows show dependencies.
+
+```mermaid
+flowchart LR
+    Bearer["Web.Authentication.Bearer"] --> Auth["Web.Authentication"]
+    Certificate["Web.Authentication.Certificate"] --> Auth
+    Cookie["Web.Authentication.Cookie"] --> Auth
+    Certificate --> Tls["Http.Tls"]
+    Auth --> Http["Http"]
+    Auth --> Web["Web"]
+    Auth --> Protection["Security.DataProtection"]
+```
+
 | Package | Role | Dependencies |
 |---------|------|---------------|
-| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) + builder-time registration (`AddAuthentication`, `AuthenticationBuilder`, `UseAuthentication`) | `Assimalign.Cohesion.Http`, `Assimalign.Cohesion.Web`, `Security.DataProtection` |
-| `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) + the grafted `AddCookie` verb | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
+| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) + builder-time registration (the `builder.Services.AddAuthentication` component integration over `AuthenticationBuilder`, and `UseAuthentication`) | `Assimalign.Cohesion.Http`, `Assimalign.Cohesion.Web`, `Security.DataProtection` |
 | `&hellip;Web.Authentication.Bearer` | Bearer-token scheme handler (JWT validation + signature seam) + the grafted `AddJwtBearer` verb | This package, `IdentityModel.Token.JsonWebToken` |
+| `&hellip;Web.Authentication.Certificate` | Validated TLS client-certificate principal, application mapping and validation + the grafted `AddCertificate` verb | This package, `Http.Tls` |
+| `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) + the grafted `AddCookie` verb | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
 
 Dependency direction is one-way: scheme handlers depend on this
 package; this package depends on the protocol core and the root Web
@@ -236,7 +283,7 @@ the `App.Web` shared framework delivers the family to applications
 `<IsAotCompatible>true</IsAotCompatible>` is inherited from the shared
 build targets. The package contains no reflection, no runtime code
 generation, and no dynamic type loading. The feature lookup uses
-`typeof(IHttpAuthenticationFeature)` as a JIT-time constant key into a
+`typeof(IAuthenticationFeature)` as a JIT-time constant key into a
 `Dictionary<Type, object>`; trim and AOT roots are unaffected.
 
 `ClaimsPrincipal` itself is AOT-safe in .NET 10; no special
@@ -246,21 +293,62 @@ serialization or runtime-policy surface is consumed by this package.
 
 - **Concrete scheme handlers.** This package defines the scheme *model*
   (the handler contract, the registry, the dispatch service); the actual
-  Cookie and Bearer handlers live in dedicated packages, and any other
-  scheme (API key, mutual-TLS) is a further package or a custom
+  Cookie, Bearer and Certificate handlers live in dedicated packages, and any other
+  scheme (such as API key) is a further package or a custom
   `IAuthenticationHandler`. This package ships no handler.
-- **Concrete scheme verbs.** `AddCookie`/`AddJwtBearer` ship with their
+- **Concrete scheme verbs.** `AddCookie`/`AddJwtBearer`/`AddCertificate` ship with their
   handler packages as `extension(AuthenticationBuilder)` members; this
-  package exposes only the scheme-agnostic surface (`AddAuthentication`,
-  `AddScheme`, `UseAuthentication`).
+  package exposes only the scheme-agnostic surface (`AuthenticationBuilder`
+  with `AddScheme`, `UseDataProtection` and `Build`, which the projected
+  `builder.Services.AddAuthentication` verb drives, and
+  `UseAuthentication`).
 - **OAuth2 / OIDC interactive login.** Authorization-code and other
   redirect-based sign-in flows are follow-ups behind the IdentityModel
   and IdentityHub epics, not part of this scheme model.
-- **Authorization.** Policy evaluation, role checks, and requirement
-  handlers live in `Assimalign.Cohesion.Web.Authorization`.
+- **Authorization.** Policy evaluation, role and claim requirements,
+  and per-endpoint scheme selection live in
+  `Assimalign.Cohesion.Web.Authorization`, which answers a failed policy
+  through this package's `ChallengeAsync`/`ForbidAsync`.
 - **Wire-level identity.** TLS client certificates, mutual-TLS
   identity, and HTTP `Authorization` header parsing remain in the
   transport / protocol layers; this package only consumes the result.
 - **A claim-transformation pipeline.** Middleware that needs to
   reshape claims should mutate the principal it installs; the feature
   itself stays a passive holder.
+
+## Public implementation and preview.1 compatibility (#1465)
+
+Owner decision 59 moves the static entry point onto the public sealed
+`AuthenticationService` implementation, with a private constructor.
+`AuthenticationService.Create(options)` keeps its parameters, live-options behavior and
+validation, and now returns `AuthenticationService` instead of `IAuthenticationService`.
+
+The static entry point shipped in 10.0.0-preview.1. Existing calls keep the same spelling and
+remain source-compatible; assigning the returned value to `IAuthenticationService` still works.
+The concrete return type changes the CLR method signature, so this is binary-breaking and
+consumers must rebuild. The break is accepted during previews on decision 15's terms.
+
+## API endpoint marker and preview.1 compatibility (#1466)
+
+Owner decision 59 removes the empty `IApiEndpointMetadata` interface that shipped in
+10.0.0-preview.1. The sealed `ApiEndpointMetadata` type and its shared `Instance` remain.
+This is source- and binary-breaking for consumers of the removed interface, accepted during
+previews on decision 15's terms. Replace custom marker implementations and interface lookups
+with `ApiEndpointMetadata.Instance` and `GetEndpointMetadata<ApiEndpointMetadata>()`,
+then rebuild. Existing endpoint declarations attaching `ApiEndpointMetadata.Instance`
+keep their spelling and behavior: Cookie sends bare 401/403 for a marked endpoint and redirects
+an unmarked endpoint.
+
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

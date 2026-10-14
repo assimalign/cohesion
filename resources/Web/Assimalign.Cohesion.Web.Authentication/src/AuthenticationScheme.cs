@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.Authentication;
 
@@ -58,5 +59,5 @@ public sealed class AuthenticationScheme
     /// <exception cref="InvalidOperationException">The factory returned <see langword="null"/>.</exception>
     public IAuthenticationHandler CreateHandler()
         => _handlerFactory() ?? throw new InvalidOperationException(
-            $"The handler factory for scheme '{Name}' returned null.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationHandlerFactoryResultNull, Name));
 }

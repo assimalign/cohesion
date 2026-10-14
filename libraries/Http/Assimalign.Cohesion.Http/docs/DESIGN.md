@@ -22,6 +22,32 @@ differs is the *lifecycle* and the *eligibility rules*, not the representation.
   `IHttpTrailerCollection : IHttpHeaderCollection`, surfaced directly on
   `IHttpRequest.Trailers` / `IHttpResponse.Trailers`.
 
+### Small header collections and cached fields (#1417)
+
+A parameterless `HttpHeaderCollection` holds its first field in the collection
+itself. Subsequent distinct fields use a lazy dictionary, while the first field
+remains inline. Seeding a response with a process-cached `Date` therefore allocates
+nothing and consumes none of the dictionary capacity needed by application
+fields. The core knows no Date policy or clock; this is generic collection
+storage, and the transport owns the default field and its lifetime.
+
+The capacity constructor retains a preallocated dictionary. A constructor passed
+a dictionary retains that exact live store, including a caller's comparer and
+later external mutations. `AsReadOnly` points at the original collection, so a
+view created while it is empty follows later inline insertion, dictionary growth,
+removal and reuse. Mutations through the view still fail. `Add` retains an empty
+value as a present field; assigning an empty value through the indexer removes
+it. Enumeration visits the inline field and then the dictionary. Field-name order
+after removals and reinsertions is unspecified, as it was for dictionary storage;
+repeated values within a field retain their order.
+
+This changes no public contract from 10.0.0-preview.1. It removes the eager empty
+dictionary allocation and the first field's bucket/entry allocations. The
+collection itself carries the inline key/value and the live-view reference;
+larger collections still allocate their ordinary dictionary. The alternative,
+putting the first field into that dictionary when the second arrives, would make
+a default Date trigger an extra resize at ordinary field capacity boundaries.
+
 ### Why trailers belong on the core message interfaces (not behind a feature)
 
 Cookies, sessions, forms, and antiforgery are *layered application* semantics,
@@ -44,12 +70,30 @@ rendering logic, the `HttpFieldRules` classifier, etc.).
 ### `IsSupported` and failing loudly
 
 `IsSupported` is a **capability** signal: whether this exchange surfaces a
-trailer section (HTTP/1.1 chunked, or HTTP/2 / HTTP/3 → yes; a non-chunked
-HTTP/1.1 message → no). When `false`, `HttpTrailerCollection` is empty and
+trailer section. When `false`, `HttpTrailerCollection` is empty and
 **mutation throws** `InvalidOperationException`, so a server that adds trailers
 to an exchange that physically cannot transmit them fails at the point of
 addition rather than silently dropping them on the wire. The shared
 `HttpTrailerCollection.Unsupported` singleton is the default.
+
+The `Assimalign.Cohesion.Http.Connections` transports report it per direction
+and version (decision 18, `docs/libraries/Http/DECISIONS.md` ADR 2):
+
+| Version | `Request.Trailers` | `Response.Trailers` |
+|---|---|---|
+| HTTP/1.1 | Supported for a chunked request; unsupported otherwise | Unsupported |
+| HTTP/2 | Supported | Supported: sent as a HEADERS frame that ends the stream |
+| HTTP/3 | Supported | Supported: sent as a HEADERS frame before the stream's FIN |
+
+A supported request collection is filled once the body has been read to its
+end. Every version holds a received trailer section to one rule set: a
+connection-specific field or a field in the `IsProhibitedInTrailers` set makes
+the request malformed. A supported response collection also refuses, when they
+are added, the fields a trailer section cannot carry — pseudo-headers,
+connection-specific fields, and the `IsProhibitedInTrailers` set — with
+`ArgumentException`. A response to `HEAD` sends no trailers, and a `CONNECT`
+exchange reports the response collection unsupported, since its stream becomes
+a DATA-only tunnel.
 
 ### Interface evolution via a default member
 
@@ -60,8 +104,10 @@ section be added to the core message model without breaking the many existing
 inherit the safe unsupported default. The abstract `HttpRequest` / `HttpResponse`
 bases override it with a concrete `HttpTrailerCollection` property (and explicit
 interface mapping), and the transports override *that* where they actually
-surface trailers — HTTP/1.1 attaches a supported, populated collection for a
-chunked request's parsed trailer section.
+surface trailers — HTTP/1.1 for a chunked request, HTTP/2 and HTTP/3 for every
+request, each attaching a supported collection it fills from the parsed trailer
+section once the body has been read to its end — and where they emit them:
+HTTP/2 and HTTP/3 return a supported response collection.
 
 ### Repeated fields, combining, and `Set-Cookie`
 
@@ -69,6 +115,45 @@ chunked request's parsed trailer section.
 lines are preserved without forcing a lossy early join; the comma-folded
 `Value` is computed on demand for the common case where RFC 9110 §5.2 permits
 combining a list-valued field into one line.
+
+Combining a field repeated `n` times costs time and allocation linear in `n`.
+Every transport combines a repeated line with `HttpHeaderValue.Concat`, one
+line at a time. Concat used to copy every value into a new exact array on each
+call, which made `n` repeats quadratic. An HTTP/3 request of one-octet QPACK
+references reached about 32,000 repeats per request (#1082). Concat now
+appends in amortized constant time:
+
+- **Exact arrays up to four values.** The common one-to-four-value field
+  allocates exactly what it did before.
+- **Geometric growth past four.** The array grows to twice the value count. A
+  value past four keeps its array in a small private holder that records how many
+  of the array's elements belong to it. Every accessor reads only those
+  elements: the indexer, `Count`, `Value`, enumeration, `CopyTo`, `ToArray`,
+  equality, and the hash.
+- **The struct stays one reference wide.** `_values` is the only field: `null`,
+  a string, a caller's array, or the holder. The struct is 8 bytes on 64-bit, so
+  a header collection's dictionary entry stays 24 bytes. A count field beside the
+  reference would have padded the struct to 16 bytes and every entry to 32, on
+  every request, response and trailer collection, to serve fields repeated five
+  or more times. One field also cannot be read torn.
+- **Atomic slot claims.** The next append writes into the first spare slot,
+  claimed with a compare-and-exchange from `null`, and returns a new holder. The
+  first append from a given value takes the slot. Any other append from that
+  value finds the slot taken and copies, on any thread, so two values appended to
+  one original never see each other's. Appended values are never `null`, and only
+  a holder's array has spare slots, so a caller's array is never written to.
+- **Accepted costs.** Each append past four allocates one 32-byte holder (on
+  64-bit), so `n` repeats allocate about `32n` bytes of holders plus the arrays.
+  A value can hold its array alive at up to twice the size its values need.
+
+The alternative was to group repeats in every transport before building the
+collection. That fixes each caller separately, and any caller that misses it
+stays quadratic. Fixing Concat covers HTTP/1.1, HTTP/2, HTTP/3, the trailer
+readers, and `AppendValue` in one place. `Cookie` is the exception. Its crumbs
+join into one string with `"; "`, and an immutable string cannot grow in place,
+so `HttpFieldNormalization.CombineFieldValue` copies the growing value for
+every crumb. The HTTP/2 and HTTP/3 transports collect a section's crumbs and
+join them once at the end of the section (#1082).
 
 `Set-Cookie` is the field that must **never** be folded: each cookie occupies
 its own field line (RFC 9110 §5.3, RFC 6265 §3), and HTTP/2 / HTTP/3 likewise
@@ -90,9 +175,12 @@ transports — they are stated once in `HttpFieldRules`.
 - `IsSetCookie` / `ProhibitsCombining` — the no-fold rule.
 - `IsProhibitedInTrailers` — the RFC 9110 §6.5.1 exclusion set (framing,
   routing, request modifiers, authentication, content-processing controls, and
-  the `Trailer` field itself). A transport draining `response.Trailers` (or a
-  caller staging them) checks this so framing/routing fields like
-  `Content-Length` never leak into a trailer section.
+  the `Trailer` field itself). Every transport checks it on a received trailer
+  section, HTTP/1.1's chunked reader included, and HTTP/2 and HTTP/3 also check
+  it on a response trailer collection, so framing/routing fields like
+  `Content-Length` never travel in a trailer section: a received trailer section
+  carrying one is malformed, and a response trailer collection refuses one when
+  it is added.
 
 Keeping these rules in one place is what lets the cross-version normalization
 layer (the `.11` work) translate fields between HTTP/1.1, HTTP/2, and HTTP/3
@@ -108,11 +196,13 @@ dictionaries. Fully AOT/trim safe.
 
 - **Trailer emission / per-version surfacing.** The core models the trailer
   collection; whether a given transport surfaces or emits it is the transport's
-  concern, and `IsSupported` reports the truth per exchange. The HTTP/1.1
-  transport surfaces inbound request trailers (chunked) today; HTTP/2 / HTTP/3
-  trailing-HEADERS surfacing and HTTP/1.1 outbound chunked-trailer emission are
-  wired incrementally by the version transports — the model makes each a
-  drop-in (`IsSupported = true` + a populated `HttpTrailerCollection`).
+  concern, and `IsSupported` reports the truth per exchange (the table above).
+  The HTTP/1.1 (chunked), HTTP/2 (#1314) and HTTP/3 (#1066) transports surface
+  request trailers, and HTTP/2 and HTTP/3 send response trailers (#1315).
+  HTTP/1.1 response trailers stay out (decision 18): a buffered HTTP/1.1
+  response carries `Content-Length`, and HTTP/1.1 clients rarely consume chunked
+  trailers. If a consumer appears, the model makes it a drop-in
+  (`IsSupported = true` + a populated `HttpTrailerCollection`).
 - **Per-field parsers.** `HttpFieldRules` classifies field *names*; it does not
   parse field *values* (dates, cache-control directives, etc.). Value parsing
   belongs to the field-specific consumer, and the shared toolkit those consumers
@@ -150,6 +240,81 @@ quirks.
   field coalesces with `"; "` (RFC 9113 §8.2.3, RFC 9114 §4.2.1); `Set-Cookie`
   is never folded; other list fields combine as distinct values. Previously the
   HTTP/3 path combined cookies with a comma; now it matches HTTP/2.
+- **Request-target forms** (`ValidateExtendedConnect`, `ValidateRequestTarget`)
+  — the pseudo-header shapes HTTP/2 and HTTP/3 share. An extended CONNECT
+  carries a non-empty `:protocol` with `:scheme`, `:path`, and `:authority`
+  (RFC 8441 §4, RFC 9220 §3). A classic CONNECT carries the host and port in
+  `:authority` and neither `:scheme` nor `:path` (RFC 9113 §8.5, RFC 9114 §4.4),
+  and a `:path` that starts with `*` is exactly `*` on an OPTIONS request
+  (RFC 9110 §7.1, #1334). `:path`, `:authority`, and every `Host` value hold
+  only VCHAR, as HTTP/1.1 holds its request line and `Host` (#1341, #1387):
+  HPACK and QPACK decode obs-text as Latin-1, which an ordinary value may
+  carry but no request target or host does. `ValidateRequestTarget` also
+  holds `:method` to what `HttpMethod` can represent, a token (RFC 9110
+  §9.1) of at most 32 characters (`HttpMethod.MaximumLength`, internal), so
+  a request that passes can always be built with
+  `HttpMethod.GetCanonicalizedValue`, which throws for anything else. Both
+  return a violation message rather than throw, and the message never
+  quotes the peer's text, so HTTP/2 resets the stream with `PROTOCOL_ERROR` and
+  HTTP/3 with `H3_MESSAGE_ERROR`. `ValidateRequestTarget` reuses
+  `HttpRequestTarget.TryParse` for the authority-form, so HTTP/1.1, which
+  parses its request line through the same type, accepts the same CONNECT and
+  asterisk-form targets.
+- **Field syntax** (`IsValidFieldName`, `IsValidFieldValue`,
+  `IndexOfInvalidControlCharacter`) — the one field rule every reader and
+  writer applies, received or sent (#1341; decision 27 of the HTTP/Web
+  program). The members take `ReadOnlySpan<char>`, allocate nothing, and
+  return a boolean or an index, so each caller raises its own error: a `400`
+  on HTTP/1.1, a malformed-request stream error on HTTP/2 and HTTP/3, an
+  exception before the first byte on a writer.
+  - A **name** is a token, `1*tchar` (RFC 9110 §5.1, §5.6.2). That excludes
+    every HTTP/1.1 delimiter (SP, HTAB, `:`, CR, LF), every control character,
+    and every non-ASCII character. HTTP/2 and HTTP/3 also require lowercase and
+    check that themselves; pseudo-headers are not field names.
+  - A **value** has no NUL, CR, or LF, and no SP or HTAB at either end
+    (RFC 9110 §5.5, RFC 9113 §8.2.1, RFC 9114 §4.1.2, §10.3). This is the minimum a
+    recipient must enforce and a sender must never break: CR and LF end an
+    HTTP/1.1 field line, and a hop that strips boundary whitespace changes the
+    value.
+  - **Other control characters** are a separate, stricter check:
+    `IndexOfInvalidControlCharacter` finds any CTL but HTAB (`%x00-08`,
+    `%x0A-1F`, `%x7F`), NUL, CR, and LF included. RFC 9110 §5.5 calls such a
+    value invalid but lets a recipient keep it, so the check is a separate
+    member. HTTP/1.1 applies it to every received value once SP and HTAB are
+    trimmed. obs-text (`%x80-FF`, C1 controls included) is a valid octet in
+    both rules.
+  - The rules judge characters, not octets. Every reader decodes a field
+    octet as Latin-1 (HTTP/1.1 since #1341, QPACK, and HPACK since #1387), so
+    obs-text reaches the rules as the character of the same value, and a
+    character above U+00FF is never produced by a reader; it is left to the
+    encoder that writes it.
+
+  Callers: HTTP/1.1's `Http1FieldLine`, for headers and chunked trailers, and
+  `Http1ChunkExtensions`, for the tokens and quoted strings of chunk
+  extensions. Since #1183 every response head writer applies `IsValidFieldName`
+  and `IndexOfInvalidControlCharacter` to each field line as it encodes it, on
+  all three versions and in the `Http.ProtocolUpgrade` 101 writer, and refuses
+  the head before writing a byte with an `HttpException` whose code is
+  `HttpErrorCode.InvalidResponseField`. The one refusal that comes after bytes
+  went out is a streamed response's trailer section, which follows its head and
+  body; the transport resets that stream. The code is the same in both cases, so
+  its documentation tells a caller to check `IHttpExchangeControl.HasResponseStarted`
+  before replacing the response, and each public member that throws it
+  (`IHttpExchangeControl`'s interim write and tunnel accept, and the interim
+  response, extended CONNECT, protocol upgrade, and response streaming features)
+  documents what the refusal leaves behind. A sender may not generate a value
+  outside `field-content`, so the writers refuse every control character but
+  HTAB, not only NUL, CR, and LF. They do not refuse SP and HTAB at a value's
+  ends, which split nothing and are not part of the value; the HTTP/2 and
+  HTTP/3 encoders, whose versions make such a value malformed, send it without
+  them. Since #1376 the HTTP/2 and HTTP/3 decoders
+  apply the same rule to every received field line, heads and trailer sections
+  alike (`HttpReceivedFieldRules` in the transport): a lowercase token name, and
+  a value that passes `IsValidFieldValue` and holds no other control character
+  either, so all three versions refuse the same requests. A check in the header
+  collection alone would not be enough: any `IHttpHeaderCollection`
+  implementation could bypass it, and a value built over an array shares that
+  array with its caller.
 
 ### Version-specific boundaries that must NOT cross
 
@@ -169,7 +334,8 @@ and must not be normalized away:
 ### AOT posture
 
 Pure logic over the existing collections — no reflection, no codegen. Fully
-AOT/trim safe.
+AOT/trim safe. The field-syntax checks scan spans with `SearchValues<char>`
+and `IndexOfAny`, which vectorize and allocate nothing.
 
 ## Host values and allowlist matching
 
@@ -207,6 +373,14 @@ alongside allocating `Host` / `Port` convenience properties:
   is not a decimal 1–65535. `Host` falls back to the raw value in that case.
 - The split is structural, not semantic: host characters are not validated
   against the `reg-name` grammar and IPv6 contents are not parsed as addresses.
+- Only SP and HTAB are trimmed from the value before the split (RFC 9110
+  §5.6.3, `HttpFieldSyntax.TrimOws`). `string.Trim()` also stripped `U+0085`
+  and `U+00A0`, which an HTTP/1.1 transport decoding octets as Latin-1 can
+  deliver, so `api.test\xA0` matched an `api.test` allowlist entry while a front
+  end that routes on the raw value saw another host (#1341). HTTP/1.1 now
+  answers such a `Host` with `400` before it reaches `HttpHost`; the narrower
+  trim also covers the HTTP/2 and HTTP/3 `:authority`. The routing constraint's
+  matcher trims the same way.
 
 **Parity with routing.** Parity is now *shared code*, not two mirrored copies:
 the structural `host[:port]` split (`TrySplitHostPort`) and the port parse
@@ -274,6 +448,129 @@ Pure span logic over strings — no reflection, no codegen. Fully AOT/trim safe.
 - **No `reg-name` charset validation** — against a real allowlist, junk hosts
   fail to match anyway; the grammar check would add cost without adding
   security.
+
+## Query parameters (`HttpQuery`)
+
+`HttpQuery.Parse` splits the raw query on `&`, splits each parameter on its
+first `=`, and percent-decodes both halves (RFC 3986 §2.1) into an
+`HttpQueryCollection`. Every transport parses the query through it, so a query
+reads the same on HTTP/1.1, HTTP/2 and HTTP/3.
+
+A parameter with an empty name — `?=1`, a bare `=` — is **skipped** (#1323).
+`HttpQueryKey` is never empty, and RFC 3986 §3.4 gives the query no syntax that
+would make such a parameter an error, so it is left out of the collection and
+stays visible only in the raw `HttpQuery.Value`. Before #1323 the parse threw
+`ArgumentException` while the transport read the request head, so any client
+could fail its own connection or stream, and have the server log the failure as
+a defect, with one `=`.
+
+### Repeated values (#1335, decision 31)
+
+A key maps to an ordered `HttpQueryValue` list. `HttpQuery.Parse` appends
+instead of replacing, including empty and interleaved occurrences. `Count`
+on the collection still counts distinct keys; `Count` on a value counts its
+occurrences. Existing case-insensitive key matching is unchanged. The values
+follow the ordered name/value model in the [WHATWG URL parser](https://url.spec.whatwg.org/#urlencoded-parsing);
+this change does not alter the existing plus-sign or empty-name parsing rules.
+
+`Value`, `ToString`, conversion to string, and typed scalar getters read the
+**first** occurrence. Enumerating or indexing the value reads every occurrence,
+without comma joining. `HttpQueryValue.Empty` has zero occurrences and a scalar
+empty string; `new HttpQueryValue("")` has one empty occurrence. Equality and
+hashing compare the whole ordered list. `HttpQueryCollection.Add` appends;
+its setter replaces the whole list, and removal removes the key and all values.
+The existing dictionary constructor still wraps its store.
+
+The value privately reuses `HttpHeaderValue`'s immutable geometric append
+storage, avoiding quadratic copies for attacker-controlled repeats without
+adopting header comma-folding. No collection interface gains a member, no
+reflection is introduced, and the value remains one reference wide. The Web
+endpoint generator emits loops over this list for supported query sequences;
+scalar bindings still use `Value`.
+
+**Breaking changes from 10.0.0-preview.1**, accepted during previews on decision
+15's terms: parsed duplicates select the first scalar instead of the last;
+`Add` appends duplicates instead of throwing; value equality observes all
+occurrences; a missing value is distinct from one explicitly empty occurrence.
+Serialization now includes every value. Supported scalar sequence parameters
+in generated endpoints infer query binding; an explicit `[FromBody]` retains
+body binding (see Web.Api's DESIGN).
+
+**In-repository caller audit.** No caller or existing test explicitly requires
+last-wins. The following scalar readers now observe the first occurrence:
+
+- `ConfigurationEndpointService` (ConfigurationStore.Hosting): `name`.
+- `SecretsEndpointService` (SecretStore.Hosting): `path`, `name`,
+  `application`, and `resource` through its query helper.
+- `LogSpaceHttp`: `limit`, `since`, `resource`, and `cursor`.
+- `EndpointBindingGenerator`: explicit scalar query binding and scalar
+  route-to-query fallback; Http.Connections' HTTP/1, HTTP/2 and HTTP/3 examples:
+  `name`.
+- `HttpLoggingMiddleware.SerializeQuery` and
+  `WebServerTelemetry.GetQueryAttribute`: their existing scalar projection
+  records the first occurrence once per key. Their disclosure/redaction scope
+  is unchanged.
+
+Non-scalar consumers were checked too. `OutputCacheKeyBuilder` now includes
+all occurrences in order for both all-key and selected-key variation, with
+escaped components so decoded separators cannot collide. `HttpQuery.Create`
+now writes every occurrence, covering HTTPS and directory redirects and
+`RewriteContext` serialization. `RewriteUrl` parses replacements through the
+same parser. Request wrappers retain the complete collection by reference.
+
+## Writing a path and a query back out (`ToUriComponent`, `HttpQuery.Create`)
+
+Every transport hands middleware a **decoded** request: `HttpPath.FromUriComponent`
+decodes the path, and `HttpQuery.Parse` decodes the query into a collection. A
+component that writes the request back into a URL, such as a redirect's
+`Location`, needs the inverse of each, and before #1324 the Web redirects wrote
+the decoded path as it was: `/caf%C3%A9` became `/café`, which the HTTP/1.1
+writer sends as `/caf?`, and `/100%25` became `/100%`, which is not a URI
+reference (RFC 9110 §10.2.2). The inverses live here, beside the decoder whose
+rules they have to mirror:
+
+- **`HttpPath.ToUriComponent()`** encodes each segment (RFC 3986 §3.3): `/` and
+  every `pchar` (unreserved, sub-delims, `:` and `@`) are written as they are,
+  and everything else is percent-encoded as UTF-8, a lone surrogate as U+FFFD. A
+  `%` is written as `%25`, **except** where it begins an escape `UrlDecoder`
+  leaves as written, which a decoded path can only carry because the request did:
+  - `%2F` or `%2f`. `UrlDecoder` never decodes an encoded slash, so it can never
+    become a segment separator (the routing `{**}` invariant depends on that).
+  - A sequence that is not valid UTF-8: an invalid or lone byte (the Latin-1
+    `/caf%E9`, a stray continuation `%A9`), a truncated sequence (`/%C3` at the
+    end), an overlong one (`%C0%AE`) or an encoded surrogate (`%ED%A0%80`).
+
+  Encoding the `%` of either kind again would write `%252F` or `%25E9`: it
+  decodes to the same `HttpPath`, but it is a different URI, which a cache or
+  another server in front reads as another resource. `UrlDecoder.DecodesEscapeAt`
+  runs the decoder's own rule at the `%`, so the two cannot drift; any other `%`
+  must have arrived as `%25`, because the decoder would have decoded it, and is
+  escaped. The rule is applied to the decoded text and holds for the encoded
+  text: an escape that a lead byte needs as its continuation is one the encoder
+  keeps, since a character it encodes never starts with a continuation byte. So
+  `FromUriComponent(path.ToUriComponent())` equals `path` for every path. A
+  request-target in canonical form (upper-case hex, nothing escaped that need not
+  be) comes back unchanged, except where it spells as `%25` a `%` that begins an
+  escape the decoder leaves: `/a%2F` and `/a%252F` both decode to `/a%2F`,
+  `/caf%E9` and `/caf%25E9` both decode to `/caf%E9`, and the decoded form cannot
+  tell them apart. Each is written back in the form a client sends, `/a%2F` and
+  `/caf%E9`, which decodes to the same path. (#1324's review, 2026-10-10: the
+  first version kept only `%2F`, so `/caf%E9` came back as `/caf%25E9`.)
+- **`HttpQuery.Create(IHttpQueryCollection)`** joins the entries with `&` in
+  key enumeration order and each key's values in arrival order, percent-encodes
+  each name and value except for the
+  unreserved characters, so an `&`, `=` or `+` inside one cannot split or change
+  it, and writes an empty value as the bare name. `Parse` reads it back as the
+  same collection. It is not the query the request carried: only the parsed
+  collection survives the transport, so order and percent-encoding are rebuilt.
+
+A space, `?` or `#` never needs encoding in a path that came from a request:
+`HttpPath` rejects them, and the transports fail a request-target whose path
+decodes to one (`HttpRequestTargetDecodeParityTests`, `Http2MalformedPathTests`,
+`Http3MalformedPathTests` in Http.Connections). Both helpers are value-object
+members, not feature contracts, so decision 20's rule for the core is unchanged.
+`Web.HttpsPolicy`, `Web.StaticFiles` and `Web.Rewrite` build their redirects
+with them.
 
 ## Media types and content negotiation
 
@@ -357,16 +654,45 @@ matches real-world compression behavior while still honoring an explicit
 no-compression preference. When no Accept-Encoding header is present the selector
 returns `identity` (do not compress for a client that never advertised support).
 
-### `HttpContentTypes` — the extension map
+### `HttpContentTypes` — the extension map and its two lookups
 
 The extension-to-content-type table is a `static FrozenDictionary<string,string>`
 built once at startup with case-insensitive keys and no reflection. `FrozenDictionary`
 (not a plain `Dictionary` or a reflection-scanned MIME registry) is the AOT-safe choice
-for a read-mostly lookup that is hot on the static-file path. Resolution matches the
-**final** extension of a file name (`archive.tar.gz` → `.gz`). The table covers common
+for a read-mostly lookup that is hot on the static-file path. The table covers common
 web asset types rather than the full IANA registry; consumers that need custom mappings
 build their own overlay with `CreateMap`, which clones the defaults and applies
 overrides — the default table is immutable and shared.
+
+**Two lookups, never a guess between them (#1186, decision 29).** The table is read
+through a file-name lookup (`TryGetFromFileName`, `GetFromFileName`) and an extension
+lookup (`TryGetFromExtension`, `GetFromExtension`). Each takes the default table or a
+caller-supplied one, and the `Get` forms return `Fallback` (`application/octet-stream`)
+where the `Try` forms return `false`.
+
+- **The file-name lookup** reads the **final** extension of the name's final segment
+  (after the last `/` or `\`), so `archive.tar.gz` is `.gz` and `assets.v2/site.css` is
+  `.css`. Leading dots belong to the name. A name with no extension maps to nothing: one
+  with no dot (`html`, `README`), a dotfile (`.json`, `.env`), one of dots only (`.`,
+  `..`), and one ending in a dot (`index.html.`). A dotfile with an extension of its own
+  resolves by it (`.config.json` is JSON). This is the dotfile rule of Python's
+  `os.path.splitext`.
+- **The extension lookup** requires the leading dot: an extension is a dot followed by
+  at least one character, none of them a dot or a path separator, which is exactly what
+  the file-name lookup can extract. `css`, `site.css`, and `.tar.gz` map to nothing.
+
+The single `TryGetContentType(fileNameOrExtension)` it replaces accepted both forms and
+could not tell a file named `json` from the bare extension token `json`, so it read every
+dotless name as an extension. `Web.StaticFiles` passes file names, so an upload named
+`html` under the static root was served as `text/html` — stored XSS from a file name —
+and passed the `ServeUnknownContentTypes = false` gate meant to block it. The bare-token
+form is gone rather than kept beside the split: a lookup that guesses is the defect. The
+source break is accepted during the previews.
+
+`CreateMap` still accepts a key with or without its leading dot. A key is always an
+extension, so there is nothing to disambiguate: the key `gltf` maps `.gltf`, and a file
+named `gltf` still maps to nothing. A key with an interior dot (`.tar.gz`) is stored but
+never matched, because neither lookup produces one.
 
 ### AOT posture
 
@@ -564,6 +890,185 @@ case-sensitively per the RFC.
 No reflection or dynamic serialization; the format path uses a small `StringBuilder` and the parse
 path is span-based. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
 
+## The extended CONNECT seam
+
+### What it is
+
+An HTTP/2 or HTTP/3 *extended CONNECT* (RFC 8441, RFC 9220) is a `CONNECT` request that carries
+`:protocol`, asking to run another protocol, most often WebSocket, over its one stream. The core
+carries two generic seam members for it and no feature contract:
+
+- **`HttpExchangeInterceptorRequestContext.Protocol`** is the `:protocol` the transport validated
+  (RFC 8441 §4, RFC 9220 §3), or `null` on any other request. It is the only signal that tells a
+  request-parse hook an extended CONNECT from a classic one; the method alone cannot.
+- **`IHttpExchangeControl.CanAcceptTunnel` and `AcceptTunnelAsync`** are the per-stream counterpart of
+  `TakeOver`. The accept is one-shot: it answers `200` in a head that does not end the stream (without
+  `Content-Length`, `Transfer-Encoding` or connection-specific fields), takes the exchange over, and
+  returns the stream as a duplex `Stream`. Reads deliver the client's `DATA`, writes go out as
+  `DATA` under flow control, and disposing ends the server's side. The first attempt on an extended
+  CONNECT latches, so `CanAcceptTunnel` is `false` once `AcceptTunnelAsync` has been called, whether
+  or not that call succeeded. The member's documentation carries the full contract. HTTP/1.1's
+  control reports `false`, because its `CONNECT` and upgrades take the whole connection over instead.
+
+The application-facing feature, `IHttpExtendedConnectFeature` (`context.ExtendedConnect`), ships in
+`Assimalign.Cohesion.Http.ExtendedConnect`. Its interceptor installs the feature from `Protocol` and
+binds it to the exchange control, the way `Http.ProtocolUpgrade` wraps `TakeOver`. The transport's
+DESIGN carries the wire behavior, and `docs/libraries/Http/DECISIONS.md` (ADR 1) records why the
+tunnel exists.
+
+### Why seam members, not a feature contract
+
+Only the transport can perform the accept: it writes a HEADERS block without `END_STREAM` through the
+connection's shared HPACK or QPACK state and frames `DATA` under the stream's flow-control windows.
+#1316 therefore put the feature contract in the core, so that the transport could install its own
+implementation without referencing a feature package. That contradicted the rule in "Why the seam is
+core and the features are not" below, and owner decision 20 (2026-10-09) reversed it in #1368: the
+accept became a mechanism on `IHttpExchangeControl`, the generic control that exists so that a new
+wire mechanism needs no per-capability contract, and the feature returned to `Http.ExtendedConnect`,
+its preview.1 home. The TLS session feature that sat beside it moved to `Assimalign.Cohesion.Http.Tls`
+in #1367, so the core now holds no transport-produced feature contract.
+
+Two consequences follow:
+
+- **The feature depends on a registration.** It exists only on a listener that registers
+  `HttpExtendedConnectInterceptor.Create()`; the Web host does by default. The HTTP/2 and HTTP/3
+  transports advertise extended CONNECT regardless, so a listener without the interceptor surfaces a
+  client's extended CONNECT as an ordinary `CONNECT`.
+- **An extended CONNECT pays for the response phase.** The interceptor reaches the control through
+  `AddResponseInterceptor`, so the transport builds a response sink and an exchange control for each
+  extended CONNECT, once per WebSocket handshake. Every other exchange keeps the fast path.
+
+`IHttpExchangeControl` shipped in preview.1, and the two members were added as plain interface
+members, not default implementations: a throwing default on a public seam would hide an unsupported
+mechanism behind a runtime failure. The only shipped implementers are the transport's three
+controls. For an implementer outside this repository the addition is a source break: a class
+written against preview.1's interface no longer compiles until it implements `CanAcceptTunnel` and
+`AcceptTunnelAsync` (Http.ExtendedConnect DESIGN, "Behavior change from 10.0.0-preview.1", which also
+records that the feature now needs its interceptor registered).
+
+### What it does not do
+
+It carries octets, not a protocol: WebSocket framing comes from the BCL over the accepted stream,
+and the handshake from `Http.WebSockets`. A classic `CONNECT` (no `:protocol`) has no `Protocol`, and
+nothing here dials the request's authority. `AcceptTunnelAsync` is the stream tunnel a classic
+`CONNECT` over HTTP/2 or HTTP/3 (RFC 9113 §8.5) would need, so adding that later is a package change,
+not a core one.
+
+## The client-fault report
+
+### What it is
+
+`IHttpExchangeControl.ClientFaultStatusCode` reports the `4xx` status the transport answers an
+exchange with because the client's request was at fault, or `null`. A transport that dispatches a
+request at its head learns some faults only while the application reads the body: the body breaks the
+message framing (a malformed chunk size, a malformed trailer section) or a configured limit (its size,
+its data rate, the bounds on a trailer section). The read throws, as any stream read does, and the
+transport answers the exchange itself, replacing a response that has not started and closing the
+connection (`Http.Connections` DESIGN, "Reporting the client fault"). The member tells the code that
+observes the exception that it was the client's fault, without inspecting the exception.
+
+HTTP/2 and HTTP/3 report it too (#1378). Those versions frame the request themselves, so a body that
+breaks the framing — content that contradicts its `content-length`, or a malformed trailer section —
+makes the request malformed, and the transport resets the stream instead of answering it (RFC 9113
+§8.1.1, RFC 9114 §4.1.2). No status reaches the wire, and the member reports `400`, the status
+HTTP/1.1 answers a malformed body with, so a host classifies the exchange the same on every version.
+A body over a limit (`413`, `408`, and on HTTP/3 `431` for its trailer section) is answered with its
+status, as on HTTP/1.1. The reset also fires the exchange's cancellation, so a read on these versions
+reports the fault's `IOException` rather than the cancellation (`Http.Connections` DESIGN, "Client
+faults on HTTP/2 and HTTP/3").
+
+A connection lost before the dispatched body completes instead cancels the exchange on every
+protocol (#1430, #1439; owner decision 45). `RequestCancelled` fires, the read throws
+`OperationCanceledException` carrying that exchange token, and `ClientFaultStatusCode` remains
+`null`. This includes HTTP/1.1 EOF before its declared body ends, replacing #1340's incomplete-body
+`400`. The read's exception and token change from 10.0.0-preview.1 under decision 15; malformed
+framing bytes and configured limits retain their client-fault status.
+
+### Why a probe on the control, not a typed exception or a feature contract
+
+Owner decision 28 (2026-10-09) chose the seam for #1340, under decision 20's rule that the core holds
+base contracts and generic seams only:
+
+- **The body stays a plain `Stream`.** Client-fault statuses still accompany `InvalidDataException`
+  and `IOException`. A core exception type carrying the status would
+  be a concern-specific contract in the core, and every wrapper stream (decompression, capture, a form
+  parser) would have to preserve it.
+- **The control is the transport's per-exchange surface.** It already reports exchange state through
+  report-don't-throw probes (`HasResponseStarted`, `CanTakeOver`, `CanAcceptTunnel`); a client fault is
+  one more fact of that kind. A feature package wraps it into a typed feature from the control its
+  response interceptor captures, as `Http.ProtocolUpgrade` wraps `TakeOver`. The Web host does
+  (`IWebClientFaultFeature`, `Web.Server`).
+
+### Why a default member
+
+Unlike `CanAcceptTunnel` and `AcceptTunnelAsync`, the member has a default implementation that returns
+`null`, the precedent of the trailer collections ("Interface evolution via a default member", above).
+`null` means "no client fault reported", which is exactly what an implementation that predates the
+member, or a protocol version whose transport does not report faults yet, can honestly say. Nothing is
+hidden behind a runtime failure, so adding it is not a source break. The server transport overrides it
+on every version: HTTP/1.1 since #1340, HTTP/2 and HTTP/3 since #1378.
+
+### A response abandoned by its client (#1432)
+
+`IHttpExchangeControl.ResponseAbortedByClient` reports the response-side outcome separately from
+`ClientFaultStatusCode`: the transport ended the response because its peer stopped accepting it,
+whether by a connection or stream reset, HTTP/3 `STOP_SENDING`, or the minimum response data rate.
+It starts `false`, latches `true` for the rest of the exchange, and implies no HTTP status. The
+transport publishes the reason before exposing the response failure; a locally initiated slow-read
+abort publishes it before firing cancellation too. The exchange's `RequestCancelled` fires, and
+response failures normalized by the transport carry that token. Driver stream-closure notification
+can precede the write's observation of a peer reset; the latch is readable when the write fails.
+
+This is another generic fact on the exchange control, following decision 20 and the request-side
+report. Its default implementation returns `false`, so an existing implementation need not add a
+member. #1432 explicitly sanctions this addition to the public interface; it is recorded for the
+owner's stage review. An application exception, application cancellation, local reset, or a rejected
+request body alone does not set the response report. A consumer must read the latch, rather than infer
+it from `OperationCanceledException`, `IOException`, or a cancelled request token.
+
+The Web host projects the value through `IWebResponseClientFaultFeature` in `Web.Server`; its existing
+response-starting feature implements that second interface over the same control. This covers a
+bodiless streamed `GET` without adding a feature object or another response interceptor. The core and
+transport reference no Web package, and the Web root gains no contract. `Web.ErrorHandling` reads the
+projection before classifying the caught exception, so even a middleware wrapper that changes the
+exception type leaves the exchange cancelled, with no `OnException` or Error log. #1401 can consume
+the same fact for its event source.
+
+**Compatibility with 10.0.0-preview.1.** The default member is additive. Outcome classification changes
+under decision 15: peer-abandoned responses and a slow HTTP/1.1 streamed response no longer reach the
+application fault observer as faults. The cross-protocol minimum-rate enforcement was added by #1384;
+the response latch adds no new rate policy or wire reset code.
+
+### The body signal: `HttpExchangeInterceptorRequestContext.CanHaveBody` (#1378)
+
+The control exists only in an exchange's response phase, which costs a response sink and the control
+itself, so a host that publishes the report joins the response phase only of an exchange whose body
+can fault. On HTTP/1.1 the head shows that: a `Transfer-Encoding`, or a `Content-Length` other than
+zero. An HTTP/2 or HTTP/3 request need not declare its body at all: content follows a HEADERS frame
+that did not end the stream, or a request stream that has not ended. Only the transport sees that, so
+the request context carries it as a generic fact, as it carries `Protocol` for an extended CONNECT:
+
+- **HTTP/1.1** — the framing declares a body: a `Transfer-Encoding`, or a `Content-Length` other than
+  zero. The transport decides the framing before the head hooks run, so they see it.
+- **HTTP/2** — the HEADERS frame did not carry `END_STREAM`, whatever `content-length` it declares:
+  DATA or a trailer section may still follow, and either can make the request malformed.
+- **HTTP/3** — the request stream had not visibly ended with its HEADERS frame, or a positive declared
+  content length still requires validation. The transport looks
+  for a FIN already buffered behind the frame, without reading or waiting. The QUIC driver publishes
+  a clean transport end through Connections' `IMultiplexedConnectionStream.IsInputCompleted` root member (#1427, #1453).
+  The transport samples completion before probing the pipe, so an asynchronous producer publishing
+  its final DATA between the two cannot hide those bytes. It combines completion with an empty pipe buffer, so a head followed directly by FIN reports
+  `false` even before the stream-backed pipe reads zero bytes, unless a positive content length
+  requires the body read to report missing content. Buffered DATA, open streams, and
+  drivers without observed completion remain conservative. The in-memory pipe reports FIN directly.
+- **CONNECT** never has one: the octets after its head are tunnel traffic, not content.
+
+The alternative #1378 weighed — a host that joins every HTTP/2 and HTTP/3 exchange — gives up the fast
+path for every one of them, a `GET` included, to learn what the transport already knows. The property
+is optional and defaults to `true`: a context built outside a transport, a test fake, can have a body
+until it says it cannot, which errs toward taking the response phase rather than toward missing a
+fault.
+
 ## The exchange interceptor seam
 
 ### One seam, one interface, one registration
@@ -599,6 +1104,22 @@ Three contract mechanics carry the design:
   request-only interceptor (e.g. `Http.RequestLimits`, default-installed by
   Web.Hosting) is never the reason a response sink and exchange control are
   constructed.
+- **A request hook can claim one exchange's response phase.** A response-scoped
+  interceptor costs every exchange its response sink and exchange control. An
+  interceptor that needs them for a few exchanges only declares `Request` and,
+  from a request-parse hook, adds itself (or any interceptor) to that exchange
+  alone: `HttpExchangeInterceptorRequestContext.AddResponseInterceptor`. The
+  transport then runs the response phase for that exchange with the listener's
+  response interceptors first and the added ones after, each at most once, and
+  every other exchange keeps the fast path. `Http.ProtocolUpgrade`, which
+  Web.Hosting installs by default and which needs the exchange control only for
+  an HTTP/1.1 upgrade or `CONNECT`, is the case it exists for.
+  The first added interceptor is held in one singleton array (#1389). With no
+  listener response interceptors, the transport retains that same array; a
+  second distinct addition promotes the parse-side storage to a list. Equality
+  deduplication and listener-first order remain unchanged. This changes neither
+  public contracts nor preview.1 behavior: per-exchange response joining was
+  introduced after preview.1.
 - **The sync/async split encodes pump safety.** The four parse-path hooks are
   `void` and must be CPU-only — on HTTP/2 they run on the connection's single
   frame pump, where a stalled hook stalls every multiplexed stream; the two
@@ -617,7 +1138,7 @@ The seam sits inside a deliberate layering model, stated once here because every
 | Level | Owns | Extension surface |
 |---|---|---|
 | Connections | bytes, pipes, TLS | connection layers (`UseTls`) |
-| Http.Connections | wire framing, protocol conformance, limits, flow control | this interceptor seam (+ the control's wire mechanisms) |
+| Http.Connections | wire framing, protocol conformance, limits, flow control | this interceptor seam (+ the control's wire mechanisms, and connection facts as facets on `ConnectionInfo`) |
 | Http.* feature packages | one capability each; the bridge from transport tap to app-facing `IHttpFeature` | implement `IHttpExchangeInterceptor`; install features |
 | Web (application) | the pipeline and **all decisions** — cancel/abort, error responses, policies | middleware + `IHttpContext` |
 
@@ -639,10 +1160,11 @@ referencing any feature package. In lifecycle order:
 - `AfterRequestHead(context)` runs after the head is parsed and before the body
   is surfaced: attach typed features, adjust the body-size knob, or throw the
   typed rejection.
-- `BeforeRequestBody(context)` runs after every head hook and the knob freeze,
-  immediately before the transport reads (HTTP/1.1) or exposes (HTTP/2 / HTTP/3)
-  the body — the knobs are read-only here; observe, attach, or reject. Skipped
-  for CONNECT tunnels.
+- `BeforeRequestBody(context)` runs after every head hook, immediately before
+  the transport surfaces the body: observe, attach, or reject. The body-size
+  knob freezes at the first body read on HTTP/1.1 and HTTP/3, so it is still
+  adjustable here; HTTP/2 freezes it before this hook. Skipped for CONNECT
+  tunnels.
 - `Stream AfterRequestBody(context, body)` runs after the body stream is
   materialized: return the stream unchanged or a wrapper (read-only decorators,
   digest hashing, decompression). Wrappers own what they wrap.
@@ -664,12 +1186,29 @@ is transport-owned (`HttpConnectionListenerOptions.Interceptors` in
 `Http.Connections`) because *when* hooks run is a transport decision; *what*
 they can do is defined here.
 
-Unlike the ExtendedConnect Items-key bridge (one-way, post-parse, no shared
-symbol), this seam is a compile-time contract — justified specifically by
-mutation the transport must enforce mid-parse, pre-dispatch feature attachment,
-and stream replacement, none of which a loosely-typed key can express. New
-capabilities that only need one-way post-parse publication should still prefer
-the Items-key bridge.
+Unlike an `Items`-key bridge (one-way, post-parse, no shared symbol — what
+extended CONNECT used before its tunnel), this seam is a compile-time contract —
+justified specifically by mutation the transport must enforce mid-parse,
+pre-dispatch feature attachment, and stream replacement, none of which a
+loosely-typed key can express. A capability that only needs one-way post-parse
+publication can still use an `Items` key.
+
+A transport never puts a feature contract in this core. It publishes what it
+knows about a connection as a *facet* on the exchange's connection info: an
+extra interface the `HttpConnectionInfo` it hands out also implements, found
+with a type test on that HTTP snapshot (the TLS handshake contract is the `Connections.Tls` package's
+`ITlsConnectionInfo`, which `Assimalign.Cohesion.Http.Tls` turns into
+`context.TlsConnection`). The transport obtains these TLS facts through the underlying
+connection's `Tls` feature; connection decorators forward `InnerFeatures` (#1452).
+A wire mechanism only the transport can perform is
+offered through `IHttpExchangeControl`, which a feature package wraps
+(`context.Upgrade` over `TakeOver`, `context.ExtendedConnect` over
+`AcceptTunnelAsync`). A request fact a hook needs that the parsed head cannot
+show is a member of the request context (`Protocol`, the validated `:protocol`
+of an extended CONNECT; `CanHaveBody`, whether content may follow the head). Either way the feature package owns the
+application-facing contract, and the transport references no feature package.
+The rule has no exceptions left: the last two transport-produced contracts moved
+out in #1367 (TLS) and #1368 (extended CONNECT).
 
 ### Contract details that are load-bearing
 
@@ -686,6 +1225,21 @@ the Items-key bridge.
   The transport keeps the context alive until the body is consumed — the
   documented lifetime is "until the request body is consumed or the exchange
   completes", not "until dispatch".
+- **The context is also the request-body rate cell (#1383).** `MinRequestBodyDataRate` (an
+  `HttpMinDataRate`, `null` = no rate) is seeded by every transport from its listener limits and
+  frozen at the first read of the request body on every protocol
+  (`FreezeMinRequestBodyDataRate()` / `IsMinRequestBodyDataRateReadOnly`), so a hook, middleware or
+  endpoint can lower, raise or disable it for one request until then. HTTP/2 freezes the body-size
+  knob at dispatch but this one only at its reader's first read, so the two freeze independently.
+  `HttpMinDataRate` is a core value object for this reason: the context, the transport's listener
+  limits and the typed feature in `Http.RequestLimits` all name it, and core can name nothing in
+  `Http.Connections`. Moving it from there was a source and binary break (the transport's DESIGN,
+  "Per-request data rates (#1383)", records it).
+- **And the response rate cell (#1384).** `MinResponseDataRate` is the slow-read defence's knob: seeded
+  the same way, frozen at the response's first write (`FreezeMinResponseDataRate()` /
+  `IsMinResponseDataRateReadOnly`), independently of the request-body knobs. The context therefore
+  lives as long as the exchange that ran request hooks, not only until its body is consumed: the
+  transport hands it to the exchange so the response can read the knob when it starts.
 - **Interceptor instances are shared across all connections/requests** and must
   be stateless; per-request state goes in `Features`. Hooks are CPU-only.
 - **Rejection is typed.** `HttpRequestRejectedException` carries a 4xx/5xx
@@ -696,7 +1250,9 @@ the Items-key bridge.
 - **Evolution rules:** v1 context members are `required` (init-only, except the
   deliberately-mutable body-size knob); all future members must be optional
   with defaults so existing construction sites (including test fakes — the
-  context is deliberately constructible in tests) keep compiling.
+  context is deliberately constructible in tests) keep compiling. `Protocol`,
+  `MinRequestBodyDataRate` and `MinResponseDataRate` are such members: a context built without them
+  reads `null`.
 
 ### AOT posture
 
@@ -885,9 +1441,12 @@ context instead of per-capability members:
   `IHttpExchangeControl` on `HttpExchangeInterceptorResponseContext.Control` — the
   single generic surface for the transport-owned wire mechanisms outside the
   normal response path: interim (`1xx`) writes (`CanWriteInterimResponse` /
-  `WriteInterimResponseAsync`) and the raw-stream takeover (`CanTakeOver` /
-  `TakeOver()`). One control deliberately replaces the former per-capability
-  contracts (`IHttpConnectionTakeover`, `IHttpInterimResponseWriter`): a new
+  `WriteInterimResponseAsync`), the raw-connection takeover (`CanTakeOver` /
+  `TakeOver()`), the extended CONNECT stream tunnel (`CanAcceptTunnel` /
+  `AcceptTunnelAsync`), and the client-fault reports (`ClientFaultStatusCode` and
+  `ResponseAbortedByClient`, "The client-fault report" above). One control deliberately replaces the former per-capability
+  contracts (`IHttpConnectionTakeover`, `IHttpInterimResponseWriter`, and the
+  core `IHttpExtendedConnectFeature` that #1368 removed): a new
   wire mechanism composes from the hooks plus this control instead of adding a
   new core abstraction and new transport plumbing. The control carries
   mechanisms, not decisions — aborting is `IHttpContext.Cancel`, on the
@@ -897,7 +1456,8 @@ context instead of per-capability members:
   `Http.Streaming` wraps the sink in `IHttpResponseStreamingFeature`;
   `Http.InterimResponses` wraps the control's interim writes in
   `IHttpInterimResponseFeature`; `Http.ProtocolUpgrade` wraps the control's
-  takeover in `IHttpProtocolUpgradeFeature`.
+  takeover in `IHttpProtocolUpgradeFeature`; `Http.ExtendedConnect` wraps the
+  control's tunnel accept in `IHttpExtendedConnectFeature`.
 
 So the streaming write/flush API, its state machine, the SSE wire format, the
 interim-response ergonomics, and all upgrade semantics live in feature packages;
@@ -922,9 +1482,22 @@ word — it fires immediately before the commit on whichever path commits first.
 - **Capability probes are report-don't-throw.** `CanTakeOver` is `false` on
   HTTP/2 / HTTP/3 (multiplexed streams over a shared connection; those protocols
   removed `Upgrade`) and once the exchange can no longer be handed off;
+  `CanAcceptTunnel` is `false` on HTTP/1.1, on any exchange that is not an
+  extended CONNECT, and once the tunnel was accepted or the response started;
   `CanWriteInterimResponse` flips to `false` once the final head is committed.
-  Feature packages degrade (e.g. `context.Upgrade == null`) rather than surface
-  a feature whose action could never work.
+  Feature packages degrade (e.g. `context.Upgrade == null`,
+  `context.ExtendedConnect == null`) rather than surface a feature whose action
+  could never work. `ClientFaultStatusCode` reports in the same spirit: `null`
+  until the transport latches a client fault, then that status for the rest of the
+  exchange, and `null` from any control that does not report faults. `ResponseAbortedByClient`
+  likewise stays `false` unless the transport latches a response the client abandoned, and then
+  remains `true` without implying a status or requiring exception-type inspection.
+- **`AcceptTunnelAsync` registers the tunnel before writing the head**, the
+  per-stream analogue of `TakeOver` claiming the connection first: from that
+  instant the exchange is taken over, so neither the transport's send path nor
+  the raw response sink can put a second head on the stream, even if writing the
+  `200` fails. Its guards run before anything is written, in a fixed order:
+  accepted once, cancelled, response started, stream reset or connection closed.
 - **`TakeOver()` is one-shot** and claims the connection *before* any transition
   byte is written, so two features can never fight over the same connection and
   a failed accept can never be followed by a second HTTP response on a
@@ -934,7 +1507,8 @@ word — it fires immediately before the commit on whichever path commits first.
   checkpoints** with the version's wire behavior (h1 writes no response and
   ends the connection after the exchange, h2 `RST_STREAM(CANCEL)`, h3 stream
   abort), and the control's probes observe it: a cancelled exchange reports
-  `CanWriteInterimResponse == false` and `CanTakeOver == false`.
+  `CanWriteInterimResponse == false`, `CanTakeOver == false` and
+  `CanAcceptTunnel == false`.
 - **`Control` is optional** (`null` in hand-built test contexts).
 
 ### AOT posture
@@ -1018,24 +1592,47 @@ needs:
 outcome = HttpConditionalRequest.Evaluate(context)      // steps 1–4 → 304 / 412 / proceed
 if outcome != Proceed              → send 304 / 412
 else if a Range header is present:
-    applyRange = ifRange is null  ||  ifRange.Matches(currentETag, currentLastModified)   // step 5
+    applyRange = ifRange is null  ||  ifRange.Matches(currentETag, currentLastModified, responseDate)   // step 5
     if applyRange   → HttpRangeSelector.Select(...)     → 206 / 416 / (Full → 200)
     else            → 200 full          // validator stale: give the client the whole thing
 else                               → 200 full
 ```
 
-Two correctness details:
+Three correctness details:
 
 - **`If-Range` is always strong.** The entity-tag form uses
   `HttpEntityTag.StrongEquals` (a weak or absent current tag never applies the
-  range); the date form applies the range only when the representation has not
-  been modified after the client's date (`Last-Modified ≤ If-Range date`, the
-  Kestrel rule). A mismatch *ignores* the range (full `200`) — `If-Range` is
-  "give me the whole thing if my copy is stale", never a `412`.
-- **One-second granularity.** `HttpIfRange.Matches` truncates the representation's
-  `Last-Modified` to whole seconds before the date comparison, because an
-  HTTP-date carries only whole seconds; a sub-second write therefore does not read
-  as "modified".
+  range). A mismatch *ignores* the range (full `200`) — `If-Range` is "give me
+  the whole thing if my copy is stale", never a `412`.
+- **A date applies the range only on an exact match with a strong
+  `Last-Modified` (#1185).** RFC 9110 §13.1.5 makes the date form true only when
+  the date "exactly matches" `Last-Modified`, and only when that date is a strong
+  validator (§8.8.2.2). §8.8.2.2 lets an origin server treat `Last-Modified` as
+  strong only when it reliably knows the representation did not change twice
+  during that second, which a timestamp alone cannot show. `Matches` therefore
+  uses a conservative heuristic modeled on §8.8.2.2's client rule, which reads the
+  `Date` of the response that delivered the cached copy: `Last-Modified` counts as
+  strong only when it is at least one second before `responseDate`. So a
+  representation modified in the current second, or dated after the response (a
+  clock running ahead), never applies a date. The heuristic cannot detect one
+  case: the representation changes twice inside the validator's second, and the
+  client's copy was taken between the two changes. Both versions carry the same
+  `Last-Modified`, so the client's date matches and it gets a `206` of bytes that
+  do not splice with its copy. The strong `ETag` form has no such case and is the
+  reliable path for resuming a transfer. The caller passes `responseDate`,
+  normally the current time, because the core reads no ambient clock (the
+  `HttpFreshness` rule). Through 10.0.0-preview.1 the date form applied the range
+  whenever `Last-Modified ≤ If-Range date`, the rule ASP.NET Core's StaticFiles
+  and `RangeHelper` use. A client holding a *later* date (a file replaced by an
+  older copy, or a client clock ahead of the server's) then got a `206` of a
+  representation its partial copy does not splice with. The two-argument `Matches` was replaced
+  rather than kept beside the new one, since it cannot decide strength without a
+  date. That is a source break for a caller outside this repository, accepted
+  during the previews on the terms of the HTTP/Web program's decision 15.
+- **One-second granularity.** The date comparison and the strength test both run
+  on whole Unix seconds, because an HTTP-date carries only whole seconds. A
+  sub-second write therefore does not read as "modified", and a date built in code
+  with a sub-second part names the second it falls in.
 
 ### AOT posture (range/If-Range)
 
@@ -1057,6 +1654,68 @@ reflection, no runtime codegen, no dynamic dispatch. Trim-safe by construction
   primitives, reading the `Range` / `If-Range` / conditional fields off an
   `IHttpRequest` and populating `HttpConditionalRequestContext` is the consuming
   middleware's job.
+
+## Feature lookup by contract (`Get<TFeature>`)
+
+`IHttpFeatureCollection` is keyed by name. `Features.Get<TFeature>()`
+(`HttpFeatureCollectionExtensions`) looks up a contract instead: it returns the
+first installed feature that implements `TFeature`, in enumeration order. That
+order is the local features, then each defaults level's features that no level
+above it hides by name.
+
+- **No allocation on `HttpFeatureCollection`.** Every transport context carries
+  that exact type, and per-request readers call the lookup on every request: the
+  `Http.Forwarded` `Effective*` members, which host filtering, routing's
+  `RequireHost` and rate limiting read, among others. Enumerating through
+  `OfType<TFeature>().FirstOrDefault()` allocated the LINQ iterator and the
+  collection's `yield` enumerator on each call. The lookup now scans the backing
+  dictionaries with their struct enumerators and walks the defaults chain itself
+  (raised by the #1077 review). #1337 finishes that path by enumerating entries
+  directly: `Dictionary.Values` otherwise creates a 24-byte wrapper on the first
+  lookup of every populated exchange, even after the lookup code is warmed up.
+  Both `Get<T>` and the search in `Set<T>(null)` use this path.
+- **The same answer as enumeration.** A defaults-level feature is skipped when a
+  level above installs its name, whatever that level's feature implements, as
+  the enumerator skips it. A defaults source of any other type, a derived
+  `HttpFeatureCollection` included, is enumerated through its own enumerator,
+  because a derived type can re-implement `IEnumerable<IHttpFeature>`. That path
+  now uses a plain loop, removing the LINQ iterator; any allocation in the
+  implementation's own enumerator remains. Exact-type checks preserve custom
+  enumeration order and disposal. The fallback selects the non-generic
+  `IEnumerable` enumerator, as `OfType` did, even when an implementation gives
+  its generic enumerator a different order. A universal allocation guarantee would need
+  an optional public lookup seam; #1337 leaves that boundary question open and
+  adds no public interface member.
+- **Still `O(n)`.** The scan covers typically fewer than ten features. A caller
+  that needs `O(1)` caches the resolved feature.
+
+The #1381 capacity hint still sizes the same name-keyed dictionary; no second
+index or invalidation cache is needed. Web.Compression, Web.RequestTimeouts,
+Web.Rewrite and Web.Diagnostics request views forward `_inner.Features`, so they
+retain the same collection and use the same fast path.
+
+`HttpFeatureCollectionTests` pins warmed hits/misses through defaults and checks
+shadowing against enumeration. `HttpFeatureLookupTests` also checks fresh
+presized exchanges, typed removal, reused slots and a derived collection's
+custom enumeration. The ordering tests pin existing behavior; the six allocation
+cases fail on the Stage 14 base with 24,000 bytes for 1,000 fresh exchanges and
+pass with zero after this fix.
+
+**Allocation comparison (#1337).** Windows x64, .NET 10.0, Debug, 1,000 fresh
+exchanges with code warmed on a separate collection, four hits and four misses
+per exchange; construction and stamping are outside the measured region:
+
+| Features / initial capacity | preview.1 LINQ lookup expression | Stage 14 base fast path | #1337 entry scan |
+|---|---:|---:|---:|
+| 4 | 1,112 B/exchange | 24 B/exchange | 0 B/exchange |
+| 16 | 1,112 B/exchange | 24 B/exchange | 0 B/exchange |
+
+The comparison evaluates the original LINQ expression against today's collection,
+not a whole-server benchmark of preview.1. The repeated-lookup cost is 136 bytes
+per LINQ lookup plus the first 24-byte Values wrapper; the entry scan allocates
+zero on the first lookup and thereafter. Run the core tests filtered to
+`HttpFeatureLookupTests` with the normal console logger to reproduce the numbers.
+Lookup semantics and the public surface are unchanged from 10.0.0-preview.1.
 
 ## Forwarding headers (RFC 7239 `Forwarded` + `X-Forwarded-*`)
 
@@ -1202,6 +1861,107 @@ array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzer
   ubiquitous `X-Forwarded-*` headers plus RFC 7239; other vendor variants are a
   consumer overlay if ever needed.
 
+## Status codes and reason phrases (RFC 9110 §15)
+
+`HttpStatusCode` holds one table: the IANA HTTP Status Code Registry's assigned
+codes and the phrase the registry gives each (#1204). That is RFC 9110 §15's
+phrase for every code RFC 9110 defines, and the defining RFC's for the rest,
+`226 IM Used` (RFC 3229) included. The registry lists `510` as "Not Extended
+(OBSOLETED)" since RFC 2774 moved to Historic; that annotation is not part of
+the phrase, so the table sends `510 Not Extended`.
+- **The phrase table is not validation.** `ReasonPhrase` returns a registered
+  phrase or an empty string for a code absent from the table. `ToString()`
+  renders `200 OK`, or `299 ` with the separating space and no phrase, for the
+  HTTP/1.1 status line (the transport's head writer and the Http.ProtocolUpgrade
+  `101`/`200` writer). A default-constructed instance still renders an empty
+  string. Web.ProblemDetails and Web.OpenApi read the phrase too. Before #1204
+  Web.OpenApi kept a private RFC 9110 copy,
+  because the core still had pre-RFC 9110 wording ("Ok", "Redirect Keep Verb",
+  "Request Entity Too Large", "Request Uri Too Long", "Requested Range Not
+  Satisfiable", "Un-Processable Entity", "Http Version Not Supported"). That
+  wording reached HTTP/1.1 status lines and problem titles in 10.0.0-preview.1.
+- **Every code from 100 through 599 is valid (#1414).** `IsValid`, the constructor
+  and implicit conversion from `int` accept the inclusive numeric range in
+  [RFC 9110 §15](https://www.rfc-editor.org/rfc/rfc9110.html#section-15). Anything
+  below 100 or above 599 still fails. The original number is preserved; the
+  recipient applies the `x00` class semantics when it does not recognize it.
+  An empty phrase avoids inventing a registered meaning for a private or newly
+  registered code. No new public member or reason-phrase table entry is needed.
+- **Reserved and temporary codes.** The phrase table still omits `418` and
+  temporary registrations such as `104`; both are now numerically valid and
+  have empty phrases. The reserved `306` retains `(Unused)`, and the public
+  `Unused` accessor remains `[Obsolete]`, preserving #1204's compatibility
+  choice. Range validation neither asserts registry assignment nor recommends
+  sending a reserved code.
+- **All three transports.** HTTP/1.1 writes `HTTP/1.1 299 \r\n` with the required
+  space and an empty phrase, as allowed by
+  [RFC 9112 §4](https://www.rfc-editor.org/rfc/rfc9112.html#section-4). HTTP/2 and
+  HTTP/3 write only `:status: 299`; no reason phrase is carried. The existing
+  numeric interim/final rules still apply: `104` and `199` can be sent through
+  the interim seam, while a final response cannot use 1xx. `101` continues to
+  require the protocol-upgrade path.
+- **`IsValid` caller audit.** The only production caller outside the constructor
+  is `ProblemDetailsDefaults.GetTitle`. It now uses `ReasonPhrase` only when
+  nonempty, preserving the prior generic title for an unregistered code:
+  `Error` below 500 and `Internal Server Error` for 5xx. An explicit title is
+  preserved. This title policy is independent of the empty wire phrase.
+
+**Breaking behavior from 10.0.0-preview.1** (decision 15): a caller that relied
+on `IsValid` returning false, or construction throwing, for an unregistered
+100–599 value now gets a valid status. The public members and registered
+phrases are unchanged. Core tests cover every integer in the range, invalid
+boundaries and phrase rendering; transport tests exercise buffered and streamed
+responses on all three protocols, and the unregistered interim encoders.
+
+## Methods are case-sensitive (RFC 9110 §9.1)
+
+`HttpMethod` keeps its token exactly as given and compares it byte for byte:
+`Equals`, `GetHashCode` and the operators are ordinal, and
+`GetCanonicalizedValue` returns a standard method's shared instance only for its
+exact upper-case token. `get` is an unknown extension method: it is not `GET`,
+it is not safe, idempotent or cacheable, and nothing that tests for `GET` matches
+it (#1301, decision 26).
+
+**Why.** RFC 9110 §9.1 defines methods as case-sensitive, and conformant
+intermediaries treat `get` as a method they do not know. Before #1301 the
+constructor upper-cased every token and equality ignored case, so this server
+applied the standard semantics a proxy, WAF or cache in front of it did not:
+
+- a method-based access rule at the intermediary was bypassed by `post` or
+  `delete`;
+- `head` had its response body suppressed while the intermediary, seeing an
+  unknown method, waited for one, which misframes the next response on a shared
+  upstream connection;
+- `connect` with `:scheme` and `:path` passed the HTTP/2 and HTTP/3 pseudo-header
+  checks as an ordinary request (they already compared `CONNECT` ordinally), then
+  became `CONNECT` and skipped the request-body hooks;
+- `connect host:port` on HTTP/1.1 became a `CONNECT` request and opened a
+  tunnel. It is now rejected as a malformed request-target (authority-form on a
+  method that is not `CONNECT`), and `options *` is rejected the same way,
+  because asterisk-form belongs to `OPTIONS` alone.
+
+Every transport parses the method through `GetCanonicalizedValue`, so the rule
+holds on HTTP/1.1, HTTP/2 and HTTP/3 alike, and so does every consumer that
+compares against the standard instances (routing, CORS, antiforgery, output
+caching, telemetry). Telemetry now reports `get` as `_OTHER` with
+`http.request.method_original` = `get`, as the semantic convention intends.
+
+**Breaking change** (accepted during the previews on decision 15's terms). A method
+built from a token that is not upper case, including through the implicit
+conversion from `string`, no longer equals the standard method it spells, and
+`Value` keeps the case it was given. Code that wrote `request.Method == "get"`
+or mapped a route with `new HttpMethod("get")` now names a different method.
+
+**Alternatives considered.**
+
+- **Reject a non-standard-case method with `400`/`501`.** RFC 9110 lets a server
+  answer an unknown method with `501`, and an application that wants that can do it
+  in its pipeline; the transport's job is to report what was sent, not to guess
+  which extension methods the application serves.
+- **Keep folding and compare ordinally only at the edges.** Every consumer would
+  need to know which comparison is safe; one forgotten case-insensitive check
+  reopens the gap. Fixing the value type closes it everywhere at once.
+
 ## The QUERY method (RFC 10008)
 
 RFC 10008 registers `QUERY`: a **safe, idempotent** method that carries the query
@@ -1219,7 +1979,8 @@ change. This section records the three semantic decisions QUERY forced.
 *method* is the correct home for facts the RFC defines *about the method*, and
 every consumer that reasons about them (antiforgery, a future output cache,
 retry policy, a CORS preflight decision) already holds an `HttpMethod`. They are
-plain switches over the canonical (upper-cased) token — fully AOT/trim-safe, no
+plain ordinal switches over the token, so only the exact upper-case standard
+tokens match (see "Methods are case-sensitive") — fully AOT/trim-safe, no
 layering impact — and they answer:
 
 | Method | `IsSafe` | `IsIdempotent` | `IsCacheable` | `CacheKeyIncludesContent` |
@@ -1241,8 +2002,9 @@ total (a default-constructed `HttpMethod`, whose `Value` is `null`, also reports
 
 `HttpMethod.Query` and the `"QUERY"` arm in `GetCanonicalizedValue` were the only
 other additions. Adding the constant is **non-breaking**: `HttpMethod` equality
-is `OrdinalIgnoreCase` over the token, so any pre-existing `new HttpMethod("QUERY")`
-already compared equal to the new canonical value.
+is over the token, so any pre-existing `new HttpMethod("QUERY")` already compared
+equal to the new canonical value. (Equality was `OrdinalIgnoreCase` then and is
+ordinal since #1301, so `new HttpMethod("query")` no longer does.)
 
 ### `Accept-Query` is an SFV consumer, projected onto `HttpMediaType`
 
@@ -1294,7 +2056,7 @@ built without re-deriving method semantics from the RFC.
 
 ### Antiforgery: QUERY is spec-safe but stays token-required
 
-The one deliberately non-mechanical decision. `HttpAntiforgeryService.IsSafeMethod`
+The one deliberately non-mechanical decision. `HttpAntiforgery.IsSafeMethod`
 exempts only the **bodiless** safe methods (GET/HEAD/OPTIONS/TRACE) from token
 validation. QUERY is spec-safe and idempotent — `HttpMethod.IsSafe` reports `true`
 — but it **carries a request body**, so its CSRF exposure parallels POST: a
@@ -1326,3 +2088,75 @@ runtime codegen, no dynamic dispatch. Builds clean under the trim/AOT analyzers
 - **Field wiring.** Reading `Accept-Query` off a response, emitting it, and the
   content-type negotiation for QUERY content are the consumer's job, consistent
   with the media-type and caching sections.
+
+Transport integrations distinguish the `IConnection` identity/lifetime root from `IDuplexConnection` byte pipes and `IMultiplexedConnectionStream` streams. Core HTTP request/response and connection-info contracts do not acquire a transport dependency.
+
+## Exception message resources (#1467)
+
+Resource keys name the failure with a short PascalCase noun phrase, at most 40 characters
+(#1471). The rule also applies to names below that limit: never copy or truncate the message.
+These internal names are independent of the preserved message text and placeholders.
+`ItemTrailingCharacters` and `ListTrailingCharacters` name the structured-field parse failures,
+matching `DictionaryTrailingCharacters`.
+
+Exception diagnostics live in `src/Properties/ErrorMessages.resx`. The shared build targets
+use MSBuild strongly typed resource generation to produce an internal `ErrorMessages` class
+in this assembly's `RootNamespace`, under the intermediate output directory. No designer source
+is checked in, and a command-line or NativeAOT build uses the same embedded resources.
+Formatted diagnostics use `string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`.
+The invariant messages, exception types, error codes and existing input-redaction rules stay
+unchanged; this introduces no public API or breaking behavior against 10.0.0-preview.1.
+EventSource templates, log messages and HTTP response bodies keep their existing owners.
+
+The request-target and structured-field parsers also use these resources for error strings
+later passed to their throwing `Parse` entry points. `HttpMethod` and `HttpStatusCode` perform
+message formatting inside their existing failure conditions, keeping resource lookup and
+formatting allocations off successful construction. Neither their accepted values nor their
+exception text changes.
+
+## Value objects at `default` (#1479)
+
+`default(T)` bypasses constructors, so hand-written HTTP value objects must support
+hashing, equality, string formatting and their existing comparison operators with
+zero-initialized storage. A null string contributes zero to its existing comparer-based
+hash; a composite hash combines those contributions as before. Equality remains the
+authority: equal values must hash equally. In particular, the raw-string comparers
+on `HttpHost` and `HttpQuery` distinguish null from an explicitly constructed empty
+string; this change does not merge those values. Collection-backed values that already
+equate default with their empty collection must also share its hash. The forwarding
+element and list types now use the existing empty-accumulator hash at default,
+matching explicitly constructed empty collections without changing populated hashes.
+
+Where a type exposes `CompareTo`, its default sorts before other distinct values and
+compares equal to an equivalent default/empty value. Types without an ordering contract
+do not acquire one. `ToString()` and implicit string conversions never return null.
+Raw storage properties retain their existing representation and can still be null at
+default; optional properties such as a missing port or charset still return null.
+
+Default-safe hashing does not make a default `HttpHeaderKey` a valid header name.
+`HttpHeaderCollection.Add` rejects its null `Value` with `ArgumentNullException`
+before choosing inline or dictionary storage. Non-empty indexer insertion delegates
+to `Add` and has the same validation. Empty and populated collections, including
+capacity-backed and supplied-dictionary collections, therefore preserve the rejection
+from 10.0.0-preview.1 without mutating their contents. The exception's `ParamName`
+is now `key.Value` instead of the comparer's `obj`: code inspecting this diagnostic
+observes a behavior change from preview.1 (decision 15). `HttpHeaderCollectionTests`
+covers these paths; empty inline collections already rejected the key before this fix.
+
+`HttpPath` treats default as an empty path for `Concat` and `StartsWith`: concatenating
+it returns the other operand, it is a prefix of every path, and only an empty prefix
+matches it. It remains unequal to the constructed root path. `HttpMediaType.Suffix`
+returns an empty string when the subtype is absent. `HttpRequestTarget.ToString()`
+returns an empty string when no raw target was stored. No constructor, validation,
+public signature, generator declaration or non-default comparison rule changes.
+Null guards introduce no allocation or validation on populated-value paths.
+
+**Breaking behavior from 10.0.0-preview.1** (decision 15): default values that previously
+threw during hashing, path operations or suffix access now produce the results above;
+string formatting and conversion that returned null now return an empty string.
+Default forwarding elements and lists now hash like their equal empty values, so
+dictionary and hash-set lookups work across both representations.
+Callers relying on those exceptions or null strings observe different behavior.
+`HttpDefaultValueTests` covers every repaired core type, existing ordering where
+available, equality/hash consistency and dictionary/hash-set round trips. Each per-type
+regression fails with the implementation restored to the session's base commit.

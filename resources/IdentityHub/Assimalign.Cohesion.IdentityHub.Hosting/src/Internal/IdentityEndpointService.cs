@@ -19,6 +19,7 @@ using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting;
+using Assimalign.Cohesion.Web.SecurityHeaders;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
@@ -163,6 +164,18 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
 
         _host = builder.Build();
         IWebApplicationPipelineBuilder pipeline = _host;
+
+        // First, so every response carries the fields: the JSON endpoints and the Local device-approval
+        // page alike. Nothing IdentityHub serves loads a subresource, is meant to be framed, or needs a
+        // referrer, so one strict policy fits all of it.
+        pipeline.UseSecurityHeaders(policy =>
+        {
+            policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+                .DefaultSrc(sources => sources.None())
+                .FormAction(sources => sources.Self())
+                .BaseUri(sources => sources.None()));
+            policy.ReferrerPolicy = ReferrerPolicy.NoReferrer;
+        });
         pipeline.Use(next => context => InvokeAsync(context, next));
         _controlPlane?.ObserveEndpoint("https", _endpoint);
         await ((IHost)_host).StartAsync(cancellationToken).ConfigureAwait(false);
@@ -186,7 +199,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         }
     }
 
-    private async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
+    internal async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
         string path = context.Request.Path.Value;
         bool namespaced = path == Route("/cohesion/v1") ||
@@ -780,7 +793,21 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
     {
         if (!_requireAuthentication)
         {
-            return ResourceCredentialStatus.Authorized;
+            // The accepted transport peer is authoritative; forwarded headers cannot grant access.
+            if (context.ConnectionInfo.RemoteEndPoint is not IPEndPoint endpoint)
+            {
+                return ResourceCredentialStatus.Forbidden;
+            }
+
+            IPAddress address = endpoint.Address;
+            if (address.IsIPv4MappedToIPv6)
+            {
+                address = address.MapToIPv4();
+            }
+
+            return address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback)
+                ? ResourceCredentialStatus.Authorized
+                : ResourceCredentialStatus.Forbidden;
         }
 
         ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
@@ -986,15 +1013,12 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
             string.IsNullOrEmpty(supplied.Fragment);
     }
 
+    // The security fields (CSP, Referrer-Policy, X-Frame-Options, nosniff) come from the
+    // UseSecurityHeaders policy StartAsync registers ahead of every route.
     private static void SetDevelopmentApprovalHeaders(IHttpContext context)
     {
         context.Response.Headers[HttpHeaderKey.CacheControl] = "no-store";
         context.Response.Headers[HttpHeaderKey.Pragma] = "no-cache";
-        context.Response.Headers[HttpHeaderKey.ContentSecurityPolicy] =
-            "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
-        context.Response.Headers["Referrer-Policy"] = "no-referrer";
-        context.Response.Headers["X-Frame-Options"] = "DENY";
-        context.Response.Headers[HttpHeaderKey.XContentTypeOptions] = "nosniff";
     }
 
     private static bool RequireRead(IHttpContext context)

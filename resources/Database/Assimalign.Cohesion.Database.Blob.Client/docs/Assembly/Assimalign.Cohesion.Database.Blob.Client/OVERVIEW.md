@@ -1,7 +1,7 @@
 # Blob client API
 
 `BlobClient.Create(BlobClientOptions)` returns the sealed `BlobClient`. Options require shared
-`DatabaseConnectionSettings` and an `IConnectionFactory`; creating a client performs no I/O.
+`DatabaseConnectionSettings` and an `IDuplexConnectionFactory`; creating a client performs no I/O.
 `ConnectAsync` rents an authenticated, sealed `BlobConnection` bound to the selected database.
 
 | Member | Result and ownership |

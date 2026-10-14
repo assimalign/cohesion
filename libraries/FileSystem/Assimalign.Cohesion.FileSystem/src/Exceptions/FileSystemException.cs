@@ -1,10 +1,10 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-using Properties;
 
 /// <summary>
 /// Domain exception raised by Cohesion <see cref="IFileSystem"/> implementations. Carries a
@@ -45,6 +45,27 @@ public class FileSystemException : SystemException
     public virtual FileSystemErrorCode Code { get; } = FileSystemErrorCode.Other;
 
     /// <summary>
+    /// Throws a <see cref="FileSystemException"/> with <see cref="FileSystemErrorCode.PathOutsideRoot"/>
+    /// indicating that <paramref name="path"/> resolves outside the file system's root directory.
+    /// </summary>
+    /// <remarks>
+    /// The message names only the caller's path. It deliberately leaves out the root and the
+    /// resolved host location, which would disclose the host's directory layout to whoever sees
+    /// the message.
+    /// </remarks>
+    /// <param name="path">The path as the caller supplied it.</param>
+    /// <param name="innerException">Optional inner exception.</param>
+    /// <exception cref="FileSystemException">Always.</exception>
+    [DoesNotReturn]
+    public static void ThrowPathOutsideRoot(FileSystemPath path, Exception? innerException = null)
+    {
+        throw new FileSystemException(
+            FileSystemErrorCode.PathOutsideRoot,
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.PathOutsideRoot, path),
+            innerException);
+    }
+
+    /// <summary>
     /// Throws a <see cref="FileSystemException"/> indicating that the directory does not exist.
     /// </summary>
     [DoesNotReturn]
@@ -52,7 +73,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] DirectoryNotFoundException? innerException = null)
     {
-        var message = string.Format(ErrorMessages.DirectoryNotFound, path);
+        var message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DirectoryNotFound, path);
         throw new FileSystemException(
             code: FileSystemErrorCode.NotFound,
             message: message,
@@ -67,7 +88,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] FileNotFoundException? innerException = null)
     {
-        var message = string.Format(ErrorMessages.FileNotFound, path);
+        var message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.FileNotFound, path);
         throw new FileSystemException(
             FileSystemErrorCode.NotFound,
             message,
@@ -97,7 +118,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] Exception? innerException = null)
     {
-        var message = string.Format(ErrorMessages.PathTooLong, path);
+        var message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.PathTooLong, path);
         throw new FileSystemException(
             FileSystemErrorCode.PathTooLong,
             message,
@@ -112,7 +133,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] Exception? innerException = null)
     {
-        var message = string.Format(ErrorMessages.AccessDeniedToPath, path);
+        var message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.AccessDeniedToPath, path);
         throw new FileSystemException(
             FileSystemErrorCode.AccessDenied,
             message,

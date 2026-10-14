@@ -140,8 +140,9 @@ internal sealed class TestHttpResponse : IHttpResponse
 }
 
 /// <summary>
-/// A stand-in for the router's route-match publication: installing it on the (decorated) feature
-/// collection is exactly what <c>UseRouting</c> does between matching and dispatching.
+/// A stand-in for the endpoint <c>UseRouting</c> publishes: installing it on the feature collection
+/// ahead of the timeout middleware is what routing does before calling <c>next</c>. Set
+/// <see cref="IsPreflight"/> to model the candidate endpoint routing publishes for a CORS preflight.
 /// </summary>
 internal sealed class FakeRouteMatchFeature : IRouteMatchFeature
 {
@@ -151,6 +152,7 @@ internal sealed class FakeRouteMatchFeature : IRouteMatchFeature
         => _metadata = new Routing.Metadata.RouterRouteMetadataCollection(metadata);
 
     public string Name => nameof(IRouteMatchFeature);
+    public bool IsPreflight { get; init; }
     public IRouterRoute? Route => null;
     public RouteValueDictionary? Values => null;
     public IRouterRouteMetadataCollection Metadata => _metadata;
@@ -179,6 +181,8 @@ internal sealed class FakeResponseStreamingFeature : IHttpResponseStreamingFeatu
 /// </summary>
 internal sealed class ManualTimeProvider : TimeProvider
 {
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
     private readonly Lock _gate = new();
     private readonly List<ManualTimer> _timers = new();
     private DateTimeOffset _utcNow = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -211,7 +215,7 @@ internal sealed class ManualTimeProvider : TimeProvider
     }
 
     /// <summary>Advances the clock, firing every timer whose due time elapses.</summary>
-    public void Advance(TimeSpan delta)
+    public void Advance(TimeSpan delta, Action? beforeCallbacks = null)
     {
         List<ManualTimer> due = new();
 
@@ -230,6 +234,7 @@ internal sealed class ManualTimeProvider : TimeProvider
 
         // Fire outside the gate: a callback cancels a CancellationTokenSource, which may run
         // continuations inline and re-enter the provider (e.g. to re-arm or dispose a timer).
+        beforeCallbacks?.Invoke();
         foreach (ManualTimer timer in due)
         {
             timer.Fire();

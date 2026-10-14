@@ -64,3 +64,5 @@ probe such as `MATCH (n:Missing) RETURN n` keeps the transaction.
 standalone composition or the concrete hosting builder's build-aware engine
 factory. This lets the consumer pass already resolved values and register nested
 components while keeping the model package dependency-free.
+
+`GraphDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.

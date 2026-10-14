@@ -37,8 +37,20 @@ The current `ResourceContext` does not expose peer trust-grant issuers, so this 
 seed cross-application grants until that hosting seam is defined. Validation requires the exact issuer,
 P-256 signature and RFC 7638 `kid`, target-resource audience, `iss/sub/aud/exp/nbf/iat/jti`, and a
 maximum 24-hour lifetime. Missing or invalid credentials return 401; a valid credential for another
-audience or a command whose owner differs from its issuer returns 403. Plain applications do not
-require authentication.
+audience or a command whose owner differs from its issuer returns 403.
+
+Without a gateway identity, standalone resources and plain applications accept requests under
+`/cohesion/v1` only when the transport remote endpoint is `127.0.0.1`, `::1`, or IPv4-mapped
+`127.0.0.1`. Other peers, including absent or non-IP endpoints, receive 403. The explicit refusal
+makes the development-only access rule clear; forwarded headers never establish locality.
+Bare `/healthz`, `/readyz`, and `/livez` remain open for orchestrators and load balancers; their
+namespaced aliases follow the control-plane rule. These routes are relative to the configured
+endpoint base path. Gateway-managed credential validation is unchanged.
+
+This is a behavior break from 10.0.0-preview.1 (#1431, owner decision 46, accepted on
+decision 15's preview terms): a reachable
+standalone listener previously accepted remote control-plane reads, commands, and stop requests
+without credentials. Remote management now requires a gateway identity and credentials.
 
 Issuer keys are parsed and checked with the shared `JsonWebKey.TryValidateEs256SigningKey`, and the
 verifier is a thin configuration of the shared ES256 `JsonWebTokenValidator` with
@@ -120,3 +132,13 @@ The concrete application and IHost route share it. Startup failures still roll b
 
 Each `AddNamespace` declaration is a registration, and `ConfigurationStoreRepository` is a singleton seeded from the resolved declarations. `AddNamespace` is an explicit `IConfigurationStoreApplicationBuilder` shim over the public concrete verb, which returns the builder for chaining and still rejects a repeated namespace name at registration. `ConfigurationEndpointService` is disposable; the application now disposes it through the provider.
 
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

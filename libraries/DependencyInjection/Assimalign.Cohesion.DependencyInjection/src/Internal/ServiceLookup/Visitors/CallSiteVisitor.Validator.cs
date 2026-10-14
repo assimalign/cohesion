@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidatorVisitor.CallSiteValidatorState, Type?>
 {
@@ -25,13 +24,13 @@ internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidat
             if (serviceType == scopedService)
             {
                 throw new InvalidOperationException(
-                    Resources.GetDirectScopedResolvedFromRootExceptionMessage(
+                    ErrorMessageFormatter.GetDirectScopedResolvedFromRootExceptionMessage(
                         serviceType,
                         nameof(ServiceLifetime.Scoped).ToLowerInvariant()));
             }
 
             throw new InvalidOperationException(
-                Resources.GetScopedResolvedFromRootExceptionMessage(
+                ErrorMessageFormatter.GetScopedResolvedFromRootExceptionMessage(
                     serviceType,
                     scopedService,
                     nameof(ServiceLifetime.Scoped).ToLowerInvariant()));
@@ -52,7 +51,7 @@ internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidat
         // which singleton reached it.
         if (firstScopedService != null && state.Singleton != null)
         {
-            throw new InvalidOperationException(Resources.GetScopedInSingletonExceptionMessage(
+            throw new InvalidOperationException(ErrorMessageFormatter.GetScopedInSingletonExceptionMessage(
                 firstScopedService,
                 state.Singleton.ServiceType,
                 nameof(ServiceLifetime.Scoped).ToLowerInvariant(),

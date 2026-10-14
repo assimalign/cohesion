@@ -1,0 +1,32 @@
+<Project>
+  <!-- The SDK's GenerateResource task (CoreResGen, under PrepareResources) emits and compiles the
+       internal accessors below. A full build reaches PrepareResources through CoreBuild, but
+       Visual Studio's design-time build runs CompileDesignTime -> Compile only, so without this
+       the accessor is never generated and IntelliSense reports CS0103 on ErrorMessages while
+       the build itself succeeds. Prepending PrepareResources to Compile is a no-op in full
+       builds, where CoreBuild has already run it; GenerateResource stays incremental. -->
+  <PropertyGroup>
+    <CompileDependsOn>PrepareResources;$(CompileDependsOn)</CompileDependsOn>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Update="Properties\ErrorMessages.resx">
+      <StronglyTypedLanguage>CSharp</StronglyTypedLanguage>
+      <StronglyTypedClassName>ErrorMessages</StronglyTypedClassName>
+      <StronglyTypedNamespace>$(RootNamespace)</StronglyTypedNamespace>
+      <StronglyTypedFileName>$(IntermediateOutputPath)ErrorMessages.g.cs</StronglyTypedFileName>
+      <PublicClass>false</PublicClass>
+      <ManifestResourceName>$(RootNamespace).ErrorMessages</ManifestResourceName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <!-- Existing non-exception strings keep their resource file and accessor name. -->
+  <ItemGroup>
+    <EmbeddedResource Update="Properties\Resources.resx">
+      <StronglyTypedLanguage>CSharp</StronglyTypedLanguage>
+      <StronglyTypedClassName>Resources</StronglyTypedClassName>
+      <StronglyTypedNamespace>$(RootNamespace)</StronglyTypedNamespace>
+      <StronglyTypedFileName>$(IntermediateOutputPath)Resources.g.cs</StronglyTypedFileName>
+      <PublicClass>false</PublicClass>
+      <ManifestResourceName>$(RootNamespace).Resources</ManifestResourceName>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

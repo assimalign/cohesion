@@ -107,8 +107,7 @@ public sealed class HttpTrailerCollection : IHttpTrailerCollection
         if (!IsSupported)
         {
             throw new InvalidOperationException(
-                "This exchange does not support a trailer section, so trailers cannot be added. " +
-                "Check IHttpTrailerCollection.IsSupported before adding trailers.");
+                ErrorMessages.TrailersNotSupported);
         }
     }
 }

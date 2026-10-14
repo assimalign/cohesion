@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Http.Tests;
 
 /// <summary>
 /// End-to-end RFC 9110 &#167; 13.2.2 composition tests: the range/precondition primitives layer the
-/// <c>If-Range</c> range-application decision (step 5, <see cref="HttpIfRange.Matches"/>) and range
+/// <c>If-Range</c> range-application decision (step 5, <see cref="HttpIfRange.Matches(HttpEntityTag?, DateTimeOffset?, DateTimeOffset)"/>) and range
 /// selection (<see cref="HttpRangeSelector"/>) on top of the shared conditional-request evaluator
 /// (steps 1&#8211;4, <see cref="HttpConditionalRequest.Evaluate"/>). These tests exercise the full
 /// consumer flow — the typed decision of proceed / <c>304</c> / <c>412</c> / <c>206</c> / <c>416</c> /
@@ -18,6 +18,7 @@ public class HttpRangePreconditionCompositionTests
 {
     private static readonly DateTimeOffset _lastModified = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly HttpEntityTag _currentTag = HttpEntityTag.Strong("v1");
+    private static readonly DateTimeOffset _responseDate = _lastModified.AddDays(1);
     private const long ContentLength = 1000;
 
     private enum ResponseKind
@@ -67,7 +68,7 @@ public class HttpRangePreconditionCompositionTests
         }
 
         // Step 5: honor the range only when there is no If-Range or its validator still matches.
-        bool applyRange = ifRange is not HttpIfRange gate || gate.Matches(_currentTag, _lastModified);
+        bool applyRange = ifRange is not HttpIfRange gate || gate.Matches(_currentTag, _lastModified, _responseDate);
         if (!applyRange)
         {
             return ResponseKind.Ok200;

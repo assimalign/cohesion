@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Security.DataProtection;
 /// <summary>
 /// Persists the key ring's keys as opaque <see cref="KeyDocument"/> blobs. This is the seam
 /// that makes keys survive restarts and be shared across nodes: the default implementation is
-/// file-system backed (<see cref="KeyRepository.CreateFileSystem(string)"/>); a
+/// file-system backed (<see cref="FileSystemKeyRepository.Create(string)"/>); a
 /// secret-store-backed implementation is a planned follow-up.
 /// </summary>
 /// <remarks>

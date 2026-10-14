@@ -2,7 +2,7 @@
 
 ## Platform sink and boundaries
 
-Item 31b makes LogSpace the Platform sink for Hosting.Telemetry. The resource root remains contract-only; all composition is in Hosting. OTLP/HTTP JSON logs are accepted, protobuf receives 415 with an OTLP/JSON-only detail. /v1/traces and /v1/metrics are reserved POST routes returning 501 after authentication/content validation: libraries/Logging has no span or instrument primitive, and protobuf is deferred. No gRPC framing or response-trailer support exists in the HTTP server; therefore the SDK otlp endpoint changed from grpc/tcp 4317 to https/tcp 4318, Certificate=tls. query stays https/tcp 8443. Both Public flags remain false: application reachability through observed endpoints is not external exposure.
+Item 31b makes LogSpace the Platform sink for Hosting.Telemetry. The resource root remains contract-only; all composition is in Hosting. OTLP/HTTP JSON logs are accepted, protobuf receives 415 with an OTLP/JSON-only detail. /v1/traces and /v1/metrics are reserved POST routes returning 501 after authentication/content validation: libraries/Logging has no span or instrument primitive, and protobuf is deferred. The HTTP server has no gRPC framing (response trailers ship on HTTP/2 and HTTP/3 since decision 18, but gRPC hosting stays outside the HTTP/Web program); therefore the SDK otlp endpoint changed from grpc/tcp 4317 to https/tcp 4318, Certificate=tls. query stays https/tcp 8443. Both Public flags remain false: application reachability through observed endpoints is not external exposure.
 
 ## HTTP and TLS
 
@@ -18,7 +18,18 @@ The private ES256 verifier is a thin configuration of the shared `JsonWebTokenVa
 
 Both paths consult the resource's registered `IResourceCredentialVerifier` first (`ResourceRuntime.TryGetCredentialVerifier`); `NoResult` falls through to the default verifier. The mapped caller is then authorized the same way for either source: its `Application` must be the ambient application, ingestion admits only `TelemetryEmitter` callers with a nonblank `Subject` (the emitter), and management admits only `Gateway` callers whose `Subject` is the ambient gateway. For application-key tokens this reproduces the former iss/sub/scope rules exactly.
 
-The query middleware is registered BEFORE UseResourceControlPlane in LogSpaceControlPlaneEndpointService. ResourceControlPlaneMiddleware.InvokeAsync authenticates unknown /cohesion/v1/* paths then returns 404 (Web.Hosting.Resources/src/Internal/ResourceControlPlaneMiddleware.cs:44-59,185-191); it would swallow a later query handler. The earlier LogSpace middleware rejects telemetry-scoped credentials on every namespaced query/management request before forwarding other routes, protecting /stop and /commands despite the unchanged shared verifier. Query accepts only own-name audience with gateway subject and ordinary bootstrap/dev tokens. No cohesion-export audience was added.
+The query middleware is registered BEFORE UseResourceControlPlane in LogSpaceControlPlaneEndpointService. ResourceControlPlaneMiddleware.InvokeAsync authenticates unknown /cohesion/v1/* paths then returns 404 (Web.Hosting/src/Resources/ResourceControlPlaneMiddleware.cs); it would swallow a later query handler. The earlier LogSpace middleware rejects telemetry-scoped credentials on every namespaced query/management request before forwarding other routes, protecting /stop and /commands despite the unchanged shared verifier. Query accepts only own-name audience with gateway subject and ordinary bootstrap/dev tokens. No cohesion-export audience was added.
+
+Without a gateway identity, the query middleware permits `/cohesion/v1` and every path below it
+only when the exchange's transport `RemoteEndPoint` is `127.0.0.1`, `::1`, or IPv4-mapped
+`127.0.0.1`. It performs this check before serving `/cohesion/v1/logs` or forwarding management
+and namespaced probes to the shared middleware. Missing and non-IP endpoints fail closed;
+forwarded headers never grant access. Other peers receive `403 Forbidden`, chosen to make the
+development-only access restriction clear. Bare `/healthz`, `/readyz`, and `/livez` stay open for
+orchestrators and load balancers. The OTLP listener and gateway credential checks retain their
+existing behavior. This is a breaking security change from 10.0.0-preview.1, which admitted remote
+standalone query and management requests (#1431, owner decision 46; preview compatibility follows
+decision 15).
 
 ## Storage, lifecycle and query
 
@@ -50,3 +61,13 @@ Background-work registration belongs to the concrete `LogSpaceApplicationBuilder
 
 `LogSegmentStore` is a singleton shared by `SegmentFlushService`, `OtlpReceiverEndpointService`, and the query endpoint. When the ambient `otlp` endpoint exists, the flush service registers in the builder constructor, directly after telemetry and ahead of every `AddService` call, so segments flush for the whole lifetime of the other services.
 
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

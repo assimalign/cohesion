@@ -12,8 +12,12 @@ namespace Assimalign.Cohesion.ObjectValidation;
 public sealed class ValidationContext<T> : IValidationContext
 {
     private readonly Type _type;
-    private readonly ConcurrentStack<IValidationError> _errors;
-    private readonly ConcurrentStack<ValidationInvocation> _invocations;
+
+    // Queues, not stacks: errors and invocations enumerate in the order they were added, which is the order
+    // the rules ran. A nested profile's errors are copied into each enclosing context in that order too, so
+    // they stay in place under their parent member.
+    private readonly ConcurrentQueue<IValidationError> _errors;
+    private readonly ConcurrentQueue<ValidationInvocation> _invocations;
 
     private ValidationContext() { }
 
@@ -25,8 +29,8 @@ public sealed class ValidationContext<T> : IValidationContext
     public ValidationContext(T instance)
     {
         this._type = typeof(T);
-        this._errors = new ConcurrentStack<IValidationError>();
-        this._invocations = new ConcurrentStack<ValidationInvocation>();
+        this._errors = new ConcurrentQueue<IValidationError>();
+        this._invocations = new ConcurrentQueue<ValidationInvocation>();
 
         Instance = instance;
     }
@@ -41,8 +45,8 @@ public sealed class ValidationContext<T> : IValidationContext
                 message: $"The instance of type '{typeof(T).Name}' cannot be null");
         } 
         this._type = typeof(T);
-        this._errors = new ConcurrentStack<IValidationError>();
-        this._invocations = new ConcurrentStack<ValidationInvocation>();
+        this._errors = new ConcurrentQueue<IValidationError>();
+        this._invocations = new ConcurrentQueue<ValidationInvocation>();
 
         Instance = instance;
     }
@@ -60,12 +64,13 @@ public sealed class ValidationContext<T> : IValidationContext
     public Type InstanceType => this._type;
 
     /// <summary>
-    /// A collection of validation failures that occurred.
+    /// The validation failures that occurred, in the order they were added: the order the rules that
+    /// reported them ran.
     /// </summary>
     public IEnumerable<IValidationError> Errors => this._errors;
 
     /// <summary>
-    /// A collection of invoked 
+    /// The rule invocations, in the order they were added: the order the rules ran.
     /// </summary>
     public IEnumerable<ValidationInvocation> Invocations => this._invocations;
 
@@ -83,7 +88,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// 
     /// </summary>
     /// <param name="error"></param>
-    public void AddFailure(IValidationError error) => this._errors.Push(new ValidationError(error));
+    public void AddFailure(IValidationError error) => this._errors.Enqueue(new ValidationError(error));
 
     /// <summary>
     /// 
@@ -91,7 +96,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="failureMessage"></param>
     public void AddFailure(string failureMessage)
     {
-        _errors.Push(new ValidationError()
+        _errors.Enqueue(new ValidationError()
         {
             Message = failureMessage
         });
@@ -104,7 +109,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="failureMessage"></param>
     public void AddFailure(string failureSource, string failureMessage)
     {
-        _errors.Push(new ValidationError()
+        _errors.Enqueue(new ValidationError()
         {
             Message = failureMessage,
             Source = failureSource
@@ -117,6 +122,6 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="invocation"></param>
     public void AddInvocation(ValidationInvocation invocation)
     {
-        this._invocations.Push(invocation);
+        this._invocations.Enqueue(invocation);
     }
 }

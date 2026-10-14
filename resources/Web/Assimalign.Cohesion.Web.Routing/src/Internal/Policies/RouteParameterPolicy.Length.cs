@@ -36,7 +36,7 @@ internal sealed class LengthRouteParameterPolicy : RouteParameterPolicy
         ArgumentOutOfRangeException.ThrowIfNegative(minLength);
         if (maxLength < minLength)
         {
-            throw new ArgumentOutOfRangeException(nameof(maxLength), maxLength, "The maximum length must be greater than or equal to the minimum length.");
+            throw new ArgumentOutOfRangeException(nameof(maxLength), maxLength, ErrorMessages.MaximumLengthBelowMinimum);
         }
 
         MinLength = minLength;

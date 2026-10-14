@@ -11,10 +11,12 @@ namespace Assimalign.Cohesion.Web.HostFiltering;
 /// <remarks>
 /// <para>
 /// The allowlist is compiled into an <c>Assimalign.Cohesion.Http.HttpHostMatcher</c> exactly
-/// once, when <c>UseHostFiltering</c> is called (builder time); requests whose
-/// transport-resolved host does not match are rejected with <c>400 Bad Request</c> before any
-/// later middleware runs. Invalid patterns — and an empty allowlist, which would silently
-/// reject every request — throw from the registration call, never from a request.
+/// once, when <c>UseHostFiltering</c> is called (builder time); requests whose effective host
+/// does not match are rejected with <c>400 Bad Request</c> before any later middleware runs.
+/// The effective host is the host a trusted proxy forwarded when <c>UseForwardedHeaders</c> ran
+/// first and accepted a hop, otherwise the transport-resolved host. Invalid patterns — and an
+/// empty allowlist, which would silently reject every request — throw from the registration
+/// call, never from a request.
 /// </para>
 /// <para>
 /// Patterns follow the <c>HttpHostMatcher</c> grammar: exact hosts (<c>example.com</c>,

@@ -14,11 +14,11 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// </summary>
 internal sealed class GraphProtocolClient : IAsyncDisposable
 {
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly ProtocolFrameReader _reader;
     private readonly ProtocolFrameWriter _writer;
 
-    internal GraphProtocolClient(IConnection connection)
+    internal GraphProtocolClient(IDuplexConnection connection)
     {
         _connection = connection;
         var stream = connection.AsStream();

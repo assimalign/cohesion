@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,8 @@ internal sealed class Http3Connection : HttpConnection
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    private readonly int _featureCapacity;
+    private readonly HttpResponseHeaderPolicy _responseHeaderPolicy;
     private readonly Http3QPackOptions _qpackOptions;
     private Http3ConnectionContext? _openContext;
 
@@ -26,24 +29,38 @@ internal sealed class Http3Connection : HttpConnection
         Http3ConnectionListenerOptions.Http3Limits limits,
         IHttpExchangeInterceptor[] requestInterceptors,
         IHttpExchangeInterceptor[] responseInterceptors,
-        Http3QPackOptions qpackOptions)
+        int featureCapacity,
+        Http3QPackOptions qpackOptions,
+        HttpResponseHeaderPolicy? responseHeaderPolicy = null)
         : base(isSecure)
     {
         _connection = connection;
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
+        _featureCapacity = featureCapacity;
+        _responseHeaderPolicy = responseHeaderPolicy ?? HttpResponseHeaderPolicy.Default;
         _qpackOptions = qpackOptions;
     }
 
     public override ConnectionId Id => _connection.Id;
 
+    public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
+
+    public override EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
+
+    public override ConnectionCapabilities Capabilities => _connection.Capabilities;
+
+    public override IConnectionFeatureCollection Features => _connection.Features;
+
+    public override HttpProtocol Protocol => HttpProtocol.Http30;
     public override ConnectionState State => _connection.State;
 
     public override CancellationToken ConnectionClosed => _connection.ConnectionClosed;
 
     public override void Abort(Exception? reason = null)
     {
+        _openContext?.MarkLocalConnectionClose();
         _connection.Abort(reason);
     }
 
@@ -56,10 +73,10 @@ internal sealed class Http3Connection : HttpConnection
 
         if (!IsSupportedPlatform())
         {
-            throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
+            throw new PlatformNotSupportedException(ErrorMessages.QuicPlatformNotSupported);
         }
 
-        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _qpackOptions);
+        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _qpackOptions, _responseHeaderPolicy);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
@@ -75,13 +92,20 @@ internal sealed class Http3Connection : HttpConnection
         // emission lives here in the HTTP/3 layer; the connection-first close
         // ordering (bidirectional streams drained, then CONNECTION_CLOSE, then
         // the critical unidirectional streams released) stays in the QUIC
-        // driver's DisposeAsync. Emission is best-effort and precedes it.
-        if (_openContext is not null)
+        // driver's DisposeAsync. Emission is best-effort and precedes it. When a host began a graceful
+        // close earlier, its GOAWAY is the one sent, and the close is complete once it is written.
+        try
         {
-            await _openContext.SendGoAwayAsync().ConfigureAwait(false);
+            if (_openContext is not null)
+            {
+                await _openContext.CompleteGracefulCloseAsync().ConfigureAwait(false);
+            }
         }
-
-        await _connection.DisposeAsync().ConfigureAwait(false);
+        finally
+        {
+            _openContext?.MarkLocalConnectionClose();
+            await _connection.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     [SupportedOSPlatformGuard("windows")]

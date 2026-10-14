@@ -31,10 +31,11 @@ both backed by an `IHttpFormFeature` stored in `IHttpContext.Features`.
 | `IHttpFormFileCollection` | Collection of uploaded files |
 | `HttpFormCollection` | Default in-memory implementation |
 | `HttpFormFile` | Default in-memory / spill-to-disk file implementation |
-| `HttpFormFileCollection` | Default in-memory file collection |
+| `HttpFormFileCollection` | Default in-memory file collection; keeps every part of a multiple-file field |
 | `IHttpFormFeature` | Per-exchange parsed-form state stored in `IHttpContext.Features` |
 | `HttpFormFeature` | Default feature: streaming urlencoded + multipart parser (public, `sealed`) |
 | `HttpFormOptions` | Per-parse limits (value/key/section sizes, spill threshold, boundary length) |
+| `HttpFormLimitExceededException` | The cause (`InnerException`) of the `InvalidDataException` a parse throws when a body exceeds a limit, so a caller can answer 413 rather than 400 |
 | `HttpContextFormExtensions` | `request.Form` extension property + `context.ReadFormAsync(...)` extension method |
 
 ## Usage
@@ -121,8 +122,10 @@ public `HttpFormFeature` and surfaced by `HttpContextFormExtensions`
 surface, and the limits; integration tests round-trip real `HttpClient`
 requests through an HTTP/1.1 listener into `HttpFormFeature`.
 
-Known constraint: `IHttpFormCollection` stores one value per key, so a
-urlencoded body that repeats a key has its values comma-joined (RFC 7230
-§3.2.2). A multi-value indexer is a separate, larger API change tracked
-independently. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design
-rationale, error model, and non-goals.
+Both encodings keep every repeated scalar value in arrival order. Enumerate
+`form[key]` or use its integer indexer and `Count` to read them all;
+`form[key].Value` returns the first occurrence, including an empty one.
+Values containing commas stay intact. This replaces preview.1's multipart
+last-value and urlencoded comma-joined behavior (decision 31). See
+[`docs/DESIGN.md`](docs/DESIGN.md) for compatibility, the full design,
+error model, and non-goals.

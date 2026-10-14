@@ -165,7 +165,7 @@ The diagram below traces a query from client to kernel in a host composing two m
 facts it depicts are stated here in prose so the section stands without it:
 
 - **The endpoint is the model selector; there is no multiplexing front door.** Each model server
-  owns its own `IConnectionListener` (`SqlDatabaseServerOptions.Listener`,
+  owns its own `IDuplexConnectionListener` (`SqlDatabaseServerOptions.Listener`,
   `KeyValueDatabaseServerOptions.Listener`), so a host running two models binds two listeners in
   one process. `ProtocolStartupMessage(Version, Database, Principal)` carries **no model field** —
   connecting to a given endpoint has already chosen the model. Routing several models behind one
@@ -196,7 +196,7 @@ facts it depicts are stated here in prose so the section stands without it:
   acknowledges chunks. Documents publishes its nested JSON protocol family but still needs its
   production server/client. `Graph.Client` ships as a NuGet package, outside `App.Database`.
 - **Transport selection belongs to the composition root.** All engine servers accept
-  `IConnectionListener`; `Database.Sql.Tcp` supplies the existing `Listen(Uri)` convenience
+  `IDuplexConnectionListener`; `Database.Sql.Tcp` supplies the existing `Listen(Uri)` convenience
   for consumers that choose TCP. Engine packages reference no concrete transport.
 - **Wire version stays 1.0.** SQL/Key-Value identifiers and payloads are unchanged. Servers
   reject incompatible majors before authentication and negotiate the supported minor baseline.

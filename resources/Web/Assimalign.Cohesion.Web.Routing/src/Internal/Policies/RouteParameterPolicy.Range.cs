@@ -20,7 +20,7 @@ internal sealed class RangeRouteParameterPolicy : RouteParameterPolicy
     {
         if (min > max)
         {
-            throw new ArgumentOutOfRangeException(nameof(min), min, "The minimum value must be less than or equal to the maximum value.");
+            throw new ArgumentOutOfRangeException(nameof(min), min, ErrorMessages.MinimumAboveMaximum);
         }
 
         Min = min;

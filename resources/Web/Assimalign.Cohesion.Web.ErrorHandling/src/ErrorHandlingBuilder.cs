@@ -1,29 +1,39 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Web.ErrorHandling.Internal;
 
 namespace Assimalign.Cohesion.Web.ErrorHandling;
 
 /// <summary>
-/// The composition surface for the <c>OnError</c> hook, returned by <c>AddErrorHandling</c>.
-/// Registrations are consulted in the order they are added; the first to handle a fault ends the
-/// chain, so register specific handlers before general ones.
+/// Composes the <c>OnError</c> hook: the fault handlers an application registers, consulted in the order
+/// they are added. The first to handle a fault ends the chain, so register specific handlers before general
+/// ones.
 /// </summary>
 /// <remarks>
-/// Registration is composition-time only: the builder feeds the feature instance that
-/// <c>AddErrorHandling</c> attached to the application, and the feature reads the registrations
-/// live, so <see cref="OnError(HttpErrorHandler)"/> calls after the root verb still take effect.
-/// Registering handlers while the application is serving is not supported. To replace the
-/// terminal <c>ProblemDetails</c> default entirely, register a handler that always returns
-/// <see langword="true"/> — the default only runs when every registration passes.
+/// <para>
+/// Applications receive one in the <c>builder.Services.AddErrorHandling(errors => errors.OnError(...))</c>
+/// callback. That verb is a component integration (<c>Properties/ComponentIntegrations.cs</c>, owner
+/// decision 34): it creates the builder, runs the callback, calls <see cref="Build"/>, and registers the
+/// resulting <see cref="IErrorHandlingFeature"/> as an <c>IHttpFeature</c> singleton. A composition surface
+/// without a service container registers <see cref="Build"/>'s result through
+/// <c>IWebApplicationBuilder.AddFeature</c>.
+/// </para>
+/// <para>
+/// To replace the terminal <c>ProblemDetails</c> default entirely, register a handler that always returns
+/// <see langword="true"/>: the default only runs when every registration passes.
+/// </para>
 /// </remarks>
 public sealed class ErrorHandlingBuilder
 {
-    private readonly ErrorHandlingFeature _feature;
+    private readonly List<IErrorHandler> _handlers = new();
 
-    internal ErrorHandlingBuilder(ErrorHandlingFeature feature)
+    /// <summary>
+    /// Initializes a builder with no handlers. Built as is, it yields a hook that renders every fault as the
+    /// RFC 9457 <c>ProblemDetails</c> payload.
+    /// </summary>
+    public ErrorHandlingBuilder()
     {
-        _feature = feature;
     }
 
     /// <summary>
@@ -36,7 +46,7 @@ public sealed class ErrorHandlingBuilder
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        _feature.AddHandler(handler);
+        _handlers.Add(handler);
         return this;
     }
 
@@ -53,7 +63,19 @@ public sealed class ErrorHandlingBuilder
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        _feature.AddHandler(new DelegateErrorHandler(handler));
+        _handlers.Add(new DelegateErrorHandler(handler));
         return this;
+    }
+
+    /// <summary>
+    /// Builds the <c>OnError</c> hook from the handlers registered so far.
+    /// </summary>
+    /// <remarks>
+    /// The hook holds a snapshot of the registrations: handlers added after this call do not reach it.
+    /// </remarks>
+    /// <returns>The hook, an <see cref="IErrorHandlingFeature"/> for the application to register.</returns>
+    public IErrorHandlingFeature Build()
+    {
+        return new ErrorHandlingFeature(_handlers.ToArray());
     }
 }

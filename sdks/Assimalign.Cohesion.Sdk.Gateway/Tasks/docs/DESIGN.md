@@ -281,6 +281,15 @@ lifting, project and manifest-package references, boundary-aware generated sourc
 duplicate/unknown providers, AOT propagation, `COHSDK001`, `COHGW001`, and the first clean
 restore with no pre-existing assets file or global-packages cache entry.
 
+The package-only feeds used by Gateway smoke, templates, and `ConsumerWorkspace` must
+include the complete transitive library closure. `Http.Connections` requires the Connections
+feature packages `StreamAbort`, `StreamLimits`, and `Tls` alongside Connections and TCP;
+packing their project references does not emit those dependency packages. Both the SDK smoke
+pack list and its feed-verification list name all three, and `ConsumerWorkspace` checks their
+canonical-version archives before constructing an isolated consumer. `Logging.EventSource`
+and `Web.Authentication.Certificate` arrive through the App and App.Web framework packs,
+respectively; neither belongs to the standalone gateway package closure (#1461).
+
 CI must also publish and execute a self-contained Gateway smoke application on Windows,
 Linux, and macOS, including the in-process host lifecycle path and isolated content roots. A
 Linux NativeAOT publish runs the same bounded in-process smoke. Release publication must consume

@@ -92,7 +92,7 @@ server sends it (Protocol `DESIGN.md`), and the client holds peers to that: an e
 frame that carries it, in the handshake or in an exchange, is a `ProtocolViolation`
 that breaks the connection, so the code means a failed dial and nothing else (a
 malformed handshake error frame is a `ProtocolViolation` too). The catch is broad on
-purpose: `IConnectionFactory` is an open seam, and each transport throws its own types.
+purpose: `IDuplexConnectionFactory` is an open seam, and each transport throws its own types.
 Three exceptions pass through unchanged: `OperationCanceledException` when the caller's
 token is canceled, `ObjectDisposedException`, and `OutOfMemoryException`. Any other
 failure the transport reports once the caller's token is canceled (a socket the
@@ -119,7 +119,7 @@ should report `ConnectionFailure` instead is an owner question (plan §12).
 
 ```mermaid
 flowchart TD
-    Rent["RentAsync"] --> Dial["IConnectionFactory.ConnectAsync"]
+    Rent["RentAsync"] --> Dial["IDuplexConnectionFactory.ConnectAsync"]
     Dial -->|connected| Handshake["startup, authenticate, ready"]
     Dial -->|"caller's token canceled"| Canceled["OperationCanceledException for the caller's token, any transport failure inside"]
     Dial -->|ObjectDisposedException| Disposed["ObjectDisposedException, unchanged"]
@@ -276,7 +276,7 @@ counters.
 ## Settings and compatibility
 
 Connection strings carry database, principal, endpoint, and pool size. Drivers are
-typed `IConnectionFactory` options, composed statically. Typed endpoints also
+typed `IDuplexConnectionFactory` options, composed statically. Typed endpoints also
 support in-memory transports. The endpoint selects the model; startup carries no
 model discriminator.
 
@@ -380,3 +380,23 @@ The client core has no public interface left and no `Abstractions/` folder
   frame that carries the client-local code, and a malformed handshake error frame (each a
   `ProtocolViolation`), and `SqlClientDialFailureTests` pins the reset's chain through
   `SqlClient.ConnectAsync`.
+
+## Duplex transport composition
+
+`ConnectionFactory` accepts `IDuplexConnectionFactory`. The shared client reads and writes
+framed bytes through the returned `IDuplexConnection`; the common `IConnection` root carries
+identity, features and lifecycle only. TCP, InMemory and TLS-layered duplex factories satisfy
+this contract. The pool owns each established connection and disposes it when discarded or
+when the pool closes; transport disposal has signaled `ConnectionClosed` before it completes.
+
+### Breaking changes from 10.0.0-preview.1 (#1459)
+
+`DatabaseClientOptions.ConnectionFactory` changes from `IConnectionFactory?` to
+`IDuplexConnectionFactory?`. Changing the property's getter and setter signatures breaks
+preview.1 binaries and source that supplies a factory typed only as `IConnectionFactory`.
+This preview break is accepted under owner decisions 15 and 58. Rebuild consumers and use
+`IDuplexConnectionFactory` for factory variables and custom implementations. Custom factories
+can derive from `DuplexConnectionFactory`, implement `ConnectCoreAsync` returning
+`ValueTask<IDuplexConnection>`, and produce a `DuplexConnection` implementation. Built-in TCP,
+InMemory and TLS-layered duplex factories already satisfy the new contract. Database wire
+framing, handshake and model messages are unchanged.

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Web.Routing;
@@ -173,7 +174,7 @@ public class RouteValueDictionary : IDictionary<string, object?>, IReadOnlyDicti
 
         if (ContainsKeyArray(key))
         {
-            throw new ArgumentException($"An element with the key '{key}' already exists in the RouteValueDictionary.", nameof(key));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteValueKeyAlreadyExists, key), nameof(key));
         }
 
         EnsureCapacity(_count + 1);

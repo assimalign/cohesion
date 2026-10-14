@@ -5,14 +5,12 @@ using Assimalign.Cohesion.Connections.InMemory.Internal;
 namespace Assimalign.Cohesion.Connections.InMemory;
 
 /// <summary>
-/// Creates cross-wired pairs of in-memory <see cref="Connection"/> instances for socketless testing.
+/// Creates cross-wired pairs of in-memory <see cref="DuplexConnection"/> instances for socketless testing.
 /// </summary>
 /// <remarks>
 /// The two returned connections are the two ends of a single duplex channel: bytes written to the
-/// client's <see cref="Connection.Output"/> arrive on the server's <see cref="Connection.Input"/> and
+/// client's <see cref="DuplexConnection.Output"/> arrive on the server's <see cref="DuplexConnection.Input"/> and
 /// vice versa, so a test can drive a live, multi-round-trip exchange with no operating-system socket.
-/// This is the shared primitive that consolidates the previously duplicated pipe-pair connection
-/// doubles across the transport test projects.
 /// </remarks>
 public static class InMemoryConnectionPair
 {
@@ -45,7 +43,7 @@ public static class InMemoryConnectionPair
     /// <returns>
     /// The <c>Client</c> and <c>Server</c> ends of the connection. Both are live and bidirectional on return.
     /// </returns>
-    public static (Connection Client, Connection Server) Create(
+    public static (DuplexConnection Client, DuplexConnection Server) Create(
         ConnectionCapabilities? capabilities = null,
         EndPoint? clientEndPoint = null,
         EndPoint? serverEndPoint = null)

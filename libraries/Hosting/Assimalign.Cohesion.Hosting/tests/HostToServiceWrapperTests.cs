@@ -559,6 +559,9 @@ public class HostToServiceWrapperTests
 
         // Assert
         await childBudgetCanceled.Task.WaitAsync(timeoutSource.Token);
+        // Observing the child's cancellation does not join its remaining stop sequence.
+        await WaitForStateAsync(child, HostState.Stopped, timeoutSource.Token);
+        await WaitForStateAsync(parent, HostState.Stopped, timeoutSource.Token);
         child.Context.State.ShouldBe(HostState.Stopped);
         parent.Context.State.ShouldBe(HostState.Stopped);
     }

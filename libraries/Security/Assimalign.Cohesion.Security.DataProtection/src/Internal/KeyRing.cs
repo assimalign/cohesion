@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Security.Cryptography;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 
@@ -22,8 +24,18 @@ namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 /// across the fleet. Revoked keys are rejected immediately regardless of the window.
 /// </para>
 /// <para>
-/// Time is read through an injected <see cref="TimeProvider"/> so rotation and grace are
-/// unit-testable without real delays.
+/// <b>Snapshot and reloads.</b> The keys live in an immutable snapshot that readers take
+/// without a lock. Only a reload or a key creation replaces it, one at a time under the
+/// reload lock, so protecting or unprotecting with a key the ring holds never waits on a
+/// repository read. A payload whose key id is not in the snapshot reloads the repository at
+/// most once per unknown-key reload interval, because the payload's sender chooses that id:
+/// inside the interval an unknown id is reported unknown after one timestamp read and a second
+/// snapshot lookup, without the lock. Misses that arrive while a reload runs wait for it on the
+/// lock and share its result.
+/// </para>
+/// <para>
+/// Time is read through an injected <see cref="TimeProvider"/> so rotation, grace, and the
+/// reload throttle are unit-testable without real delays.
 /// </para>
 /// </remarks>
 internal sealed class KeyRing
@@ -32,16 +44,33 @@ internal sealed class KeyRing
     private readonly TimeProvider _time;
     private readonly TimeSpan _keyLifetime;
     private readonly TimeSpan _gracePeriod;
-    private readonly object _sync = new();
+    private readonly long _unknownKeyReloadInterval;
+    private readonly Lock _reloadSync = new();
 
-    private Dictionary<Guid, ManagedKey> _keys;
+    // Replaced whole under _reloadSync, never mutated after publication, read without a lock.
+    private volatile FrozenDictionary<Guid, ManagedKey> _keys;
 
-    public KeyRing(IKeyRepository repository, TimeProvider time, TimeSpan keyLifetime, TimeSpan gracePeriod)
+    // The TimeProvider timestamp before which an unknown key id may not reload the repository.
+    // Written under _reloadSync, after the snapshot of the read it belongs to is published, and
+    // read without it. A stale read only sends a caller to the lock, where the value is read again.
+    private long _unknownKeyReloadNotBefore = long.MinValue;
+
+    public KeyRing(
+        IKeyRepository repository,
+        TimeProvider time,
+        TimeSpan keyLifetime,
+        TimeSpan gracePeriod,
+        TimeSpan unknownKeyReloadInterval)
     {
         _repository = repository;
         _time = time;
         _keyLifetime = keyLifetime;
         _gracePeriod = gracePeriod;
+        _unknownKeyReloadInterval = ToTimestampUnits(unknownKeyReloadInterval, time.TimestampFrequency);
+
+        // The initial load does not start the throttle window: the first unknown id after
+        // startup still reloads at once, so a node that starts just before another node
+        // rotates picks the new key up on first sight.
         _keys = LoadKeys();
     }
 
@@ -50,17 +79,28 @@ internal sealed class KeyRing
     {
         DateTimeOffset now = _time.GetUtcNow();
 
-        lock (_sync)
+        ManagedKey? active = FindActive(_keys, now);
+        if (active is not null)
         {
-            ManagedKey? active = FindActive(now);
+            return active;
+        }
+
+        lock (_reloadSync)
+        {
+            // Another caller may have reloaded or created a key while this one waited.
+            active = FindActive(_keys, now);
             if (active is not null)
             {
                 return active;
             }
 
-            // Another node may have created an active key since we last loaded.
-            _keys = LoadKeys();
-            active = FindActive(now);
+            // Another node may have created an active key since we last loaded. This reload is
+            // not throttled: it runs only while the snapshot holds no active key, and the key
+            // it finds or creates ends that.
+            FrozenDictionary<Guid, ManagedKey> loaded = LoadKeys();
+            _keys = loaded;
+
+            active = FindActive(loaded, now);
             if (active is not null)
             {
                 return active;
@@ -68,28 +108,21 @@ internal sealed class KeyRing
 
             ManagedKey created = CreateKey(now);
             _repository.StoreKey(KeySerializer.Serialize(created));
-            _keys[created.KeyId] = created;
+            _keys = WithKey(loaded, created);
             return created;
         }
     }
 
     /// <summary>Resolves the key that produced a payload, enforcing revocation and the grace window.</summary>
-    /// <exception cref="DataProtectionException">The key is unknown, revoked, or past its grace window.</exception>
+    /// <exception cref="DataProtectionException">
+    /// The key is unknown, revoked, or past its grace window, or the repository could not be read
+    /// while reloading for an unknown key id.
+    /// </exception>
     public ManagedKey ResolveForUnprotect(Guid keyId)
     {
-        ManagedKey? key = Lookup(keyId);
-        if (key is null)
+        if (!_keys.TryGetValue(keyId, out ManagedKey? key))
         {
-            // The payload may name a key another node created after our snapshot; reload once.
-            lock (_sync)
-            {
-                if (!_keys.ContainsKey(keyId))
-                {
-                    _keys = LoadKeys();
-                }
-            }
-
-            key = Lookup(keyId);
+            key = ReloadForUnknownKey(keyId);
         }
 
         if (key is null)
@@ -110,18 +143,65 @@ internal sealed class KeyRing
         return key;
     }
 
-    private ManagedKey? Lookup(Guid keyId)
+    // The payload may name a key another node created after our snapshot, so an unknown id
+    // reloads the repository. The id comes from the payload's sender, so the reload is
+    // throttled to one per interval, and callers that miss while it runs share its result.
+    private ManagedKey? ReloadForUnknownKey(Guid keyId)
     {
-        lock (_sync)
+        // Inside the window a miss costs one timestamp read and one more snapshot lookup: no
+        // lock, no repository read. The caller's first lookup may have run before the reload
+        // that closed the window published its snapshot, so the id is looked up again. That
+        // reload published its snapshot before it wrote the window, so this read of the window
+        // makes that snapshot, or a later one, visible here.
+        if (_time.GetTimestamp() < Volatile.Read(ref _unknownKeyReloadNotBefore))
         {
-            return _keys.TryGetValue(keyId, out ManagedKey? key) ? key : null;
+            return _keys.TryGetValue(keyId, out ManagedKey? published) ? published : null;
+        }
+
+        lock (_reloadSync)
+        {
+            // A caller that waited here shares the reload that ran while it waited.
+            if (_keys.TryGetValue(keyId, out ManagedKey? key))
+            {
+                return key;
+            }
+
+            long started = _time.GetTimestamp();
+            if (started < _unknownKeyReloadNotBefore)
+            {
+                return null;
+            }
+
+            // The window is measured from the read's start, so a key written while the read ran
+            // still resolves within one interval of its write.
+            long notBefore = AddSaturating(started, _unknownKeyReloadInterval);
+
+            FrozenDictionary<Guid, ManagedKey> loaded;
+            try
+            {
+                loaded = LoadKeys();
+            }
+            catch (Exception exception)
+            {
+                // A failed read closes the window too, so a repository that keeps failing is not
+                // read on every miss. The failure surfaces as the area exception, as it does for
+                // every caller that misses inside the window it closes.
+                Volatile.Write(ref _unknownKeyReloadNotBefore, notBefore);
+                throw new DataProtectionException("The key repository could not be read to resolve the key that produced this payload.", exception);
+            }
+
+            // Publish the snapshot before the window, so a miss that sees the window closed also
+            // sees the keys this read loaded.
+            _keys = loaded;
+            Volatile.Write(ref _unknownKeyReloadNotBefore, notBefore);
+            return loaded.TryGetValue(keyId, out key) ? key : null;
         }
     }
 
-    private ManagedKey? FindActive(DateTimeOffset now)
+    private static ManagedKey? FindActive(FrozenDictionary<Guid, ManagedKey> keys, DateTimeOffset now)
     {
         ManagedKey? best = null;
-        foreach (ManagedKey key in _keys.Values)
+        foreach (ManagedKey key in keys.Values)
         {
             if (key.IsRevoked || now < key.ActivatedAt || now >= key.ExpiresAt)
             {
@@ -143,7 +223,7 @@ internal sealed class KeyRing
         return new ManagedKey(Guid.NewGuid(), now, now, now + _keyLifetime, isRevoked: false, master);
     }
 
-    private Dictionary<Guid, ManagedKey> LoadKeys()
+    private FrozenDictionary<Guid, ManagedKey> LoadKeys()
     {
         Dictionary<Guid, ManagedKey> map = new();
         foreach (KeyDocument document in _repository.GetAllKeys())
@@ -154,6 +234,24 @@ internal sealed class KeyRing
             }
         }
 
-        return map;
+        return map.ToFrozenDictionary();
+    }
+
+    private static FrozenDictionary<Guid, ManagedKey> WithKey(FrozenDictionary<Guid, ManagedKey> keys, ManagedKey key)
+    {
+        Dictionary<Guid, ManagedKey> map = new(keys);
+        map[key.KeyId] = key;
+        return map.ToFrozenDictionary();
+    }
+
+    private static long ToTimestampUnits(TimeSpan interval, long frequency)
+    {
+        double units = Math.Ceiling(interval.Ticks * ((double)frequency / TimeSpan.TicksPerSecond));
+        return units >= long.MaxValue ? long.MaxValue : Math.Max(1L, (long)units);
+    }
+
+    private static long AddSaturating(long timestamp, long units)
+    {
+        return timestamp > long.MaxValue - units ? long.MaxValue : timestamp + units;
     }
 }

@@ -321,7 +321,7 @@ public sealed class DatabaseClientEventSourceTests
 
     private static async Task AnswerStatementWithConnectionFailureAsync(InMemoryConnectionListener listener, CancellationToken cancellationToken)
     {
-        await using Connection transport = await listener.AcceptAsync(cancellationToken);
+        await using IDuplexConnection transport = await listener.AcceptAsync(cancellationToken);
         await using var channel = new ProtocolChannel(transport.AsStream(), SqlProtocol.Family);
         (await ReadAsync(channel.Reader, cancellationToken)).Type.ShouldBe(ProtocolMessageType.Startup);
         await WriteAsync(channel.Writer, ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, cancellationToken);
@@ -355,18 +355,18 @@ public sealed class DatabaseClientEventSourceTests
     /// <summary>
     /// Dials through another factory and returns connections whose disposal throws.
     /// </summary>
-    private sealed class DisposeFailingConnectionFactory : IConnectionFactory
+    private sealed class DisposeFailingConnectionFactory : DuplexConnectionFactory
     {
-        private readonly IConnectionFactory _inner;
+        private readonly IDuplexConnectionFactory _inner;
 
-        public DisposeFailingConnectionFactory(IConnectionFactory inner)
+        public DisposeFailingConnectionFactory(IDuplexConnectionFactory inner)
         {
             _inner = inner;
         }
 
-        public ConnectionCapabilities Capabilities => _inner.Capabilities;
+        public override ConnectionCapabilities Capabilities => _inner.Capabilities;
 
-        public async ValueTask<IConnection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+        protected override async ValueTask<IDuplexConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
             => new DisposeFailingConnection(await _inner.ConnectAsync(endPoint, cancellationToken));
     }
 
@@ -374,13 +374,13 @@ public sealed class DatabaseClientEventSourceTests
     /// A connection that closes its transport on disposal and then throws, the way a transport whose
     /// teardown fails does.
     /// </summary>
-    private sealed class DisposeFailingConnection : IConnection
+    private sealed class DisposeFailingConnection : IDuplexConnection
     {
         public const string FailureMessage = "The transport could not close.";
 
-        private readonly IConnection _inner;
+        private readonly IDuplexConnection _inner;
 
-        public DisposeFailingConnection(IConnection inner)
+        public DisposeFailingConnection(IDuplexConnection inner)
         {
             _inner = inner;
         }
@@ -393,6 +393,7 @@ public sealed class DatabaseClientEventSourceTests
         public ConnectionDirection Direction => _inner.Direction;
         public ConnectionCapabilities Capabilities => _inner.Capabilities;
         public ConnectionState State => _inner.State;
+        public IConnectionFeatureCollection Features => _inner.Features;
         public CancellationToken ConnectionClosed => _inner.ConnectionClosed;
 
         public void Abort(Exception? reason = null) => _inner.Abort(reason);

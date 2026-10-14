@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 
 using Shouldly;
@@ -160,5 +161,147 @@ public class HttpFeatureCollectionTests
         enumerated.Length.ShouldBe(2);
         enumerated.ShouldContain(sample);
         enumerated.ShouldContain(other);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFeatureCollection: Get<T> on the concrete collection allocates nothing, found or missing")]
+    public void GetOfT_ConcreteCollectionWithDefaults_ShouldNotAllocate()
+    {
+        // Arrange — a defaults level under the collection, so the hit is found below a level it must not
+        // be hidden by, and the miss walks both levels.
+        HttpFeatureCollection defaults = new();
+        defaults.Set(new NamedFeature("Defaults.Other"));
+        defaults.Set(new SampleFeature("default"));
+        HttpFeatureCollection features = new(defaults);
+        features.Set(new NamedFeature("Local.Other"));
+        _ = features.Get<ISampleFeature>();
+        _ = features.Get<IMissingFeature>();
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1_000; i++)
+        {
+            _ = features.Get<ISampleFeature>();
+            _ = features.Get<IMissingFeature>();
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        allocated.ShouldBe(0L);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFeatureCollection: Get<T> reads through to a feature installed only in the defaults")]
+    public void GetOfT_FeatureOnlyInDefaults_ShouldReturnDefault()
+    {
+        // Arrange
+        HttpFeatureCollection defaults = new();
+        SampleFeature fallback = new("default");
+        defaults.Set(fallback);
+        HttpFeatureCollection features = new(defaults);
+        features.Set(new OtherFeature());
+
+        // Act
+        ISampleFeature? resolved = features.Get<ISampleFeature>();
+
+        // Assert
+        resolved.ShouldBeSameAs(fallback);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFeatureCollection: Get<T> skips a default that a same-named local feature of another type hides")]
+    public void GetOfT_LocalOfAnotherTypeShadowsDefault_ShouldReturnNull()
+    {
+        // Arrange — enumeration never yields the hidden default, so neither may the lookup.
+        HttpFeatureCollection defaults = new();
+        defaults.Set(new SampleFeature("hidden"));
+        HttpFeatureCollection features = new(defaults);
+        features.Set(new NamedFeature(nameof(SampleFeature)));
+
+        // Act
+        ISampleFeature? resolved = features.Get<ISampleFeature>();
+
+        // Assert
+        resolved.ShouldBeNull();
+        features.OfType<ISampleFeature>().ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFeatureCollection: Get<T> skips a nested default that an intermediate defaults level hides")]
+    public void GetOfT_NestedDefaultsHiddenByIntermediateLevel_ShouldReturnFirstVisibleFeature()
+    {
+        // Arrange — three concrete levels. The intermediate level hides the deepest level's first match
+        // by name, so the lookup must check every level above the one it scans, not only the top.
+        HttpFeatureCollection deepest = new();
+        deepest.Set(new TaggedFeature("A", "deepest-a"));
+        TaggedFeature visible = new("B", "deepest-b");
+        deepest.Set(visible);
+        HttpFeatureCollection intermediate = new(deepest);
+        intermediate.Set(new NamedFeature("A"));
+        HttpFeatureCollection features = new(intermediate);
+        features.Set(new NamedFeature("Top"));
+
+        // Act
+        ISampleFeature? resolved = features.Get<ISampleFeature>();
+
+        // Assert
+        resolved.ShouldBeSameAs(visible);
+        resolved.ShouldBeSameAs(features.OfType<ISampleFeature>().FirstOrDefault());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFeatureCollection: Get<T> returns a feature from a foreign defaults source that nothing above hides")]
+    public void GetOfT_ForeignDefaultsNotShadowed_ShouldReturnForeignFeature()
+    {
+        // Arrange
+        HttpFeatureCollection foreignInner = new();
+        TaggedFeature visible = new("Inner", "foreign-inner");
+        foreignInner.Set(visible);
+        DerivedFeatureCollection foreign = new(foreignInner);
+        foreign.Set(new TaggedFeature("Hidden.ByTop", "foreign-hidden"));
+        HttpFeatureCollection features = new(foreign);
+        features.Set(new NamedFeature("Hidden.ByTop"));
+
+        // Act
+        ISampleFeature? resolved = features.Get<ISampleFeature>();
+
+        // Assert
+        resolved.ShouldBeSameAs(visible);
+        resolved.ShouldBeSameAs(features.OfType<ISampleFeature>().FirstOrDefault());
+    }
+
+    private interface IMissingFeature : IHttpFeature
+    {
+    }
+
+    private sealed class NamedFeature : IOtherFeature
+    {
+        public NamedFeature(string name)
+        {
+            Name = name;
+        }
+
+        public string Name { get; }
+    }
+
+    private sealed class TaggedFeature : ISampleFeature
+    {
+        public TaggedFeature(string name, string tag)
+        {
+            Name = name;
+            Tag = tag;
+        }
+
+        public string Name { get; }
+
+        public string Tag { get; }
+    }
+
+    // Not the exact HttpFeatureCollection type, so the lookup enumerates it rather than scanning it.
+    private sealed class DerivedFeatureCollection : HttpFeatureCollection
+    {
+        public DerivedFeatureCollection()
+        {
+        }
+
+        public DerivedFeatureCollection(IHttpFeatureCollection defaults)
+            : base(defaults)
+        {
+        }
     }
 }

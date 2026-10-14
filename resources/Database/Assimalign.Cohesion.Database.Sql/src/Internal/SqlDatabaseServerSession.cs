@@ -28,7 +28,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 {
     private readonly SqlDatabaseServer _server;
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly SqlDatabaseServerOptions _options;
     private readonly SqlDatabaseEngine _engine;
     private readonly DatabaseAuthenticator _authenticator;
@@ -43,7 +43,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
     internal SqlDatabaseServerSession(
         SqlDatabaseServer server,
-        IConnection connection,
+        IDuplexConnection connection,
         SqlDatabaseServerOptions options,
         SqlDatabaseEngine engine,
         DatabaseAuthenticator authenticator)

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
@@ -27,7 +29,7 @@ public sealed class HttpContentDigestMismatchException : HttpException
     /// </summary>
     /// <param name="algorithm">The digest algorithm whose declared digest the content failed.</param>
     public HttpContentDigestMismatchException(HttpDigestAlgorithm algorithm)
-        : base($"The request body does not match its Content-Digest ('{algorithm}').")
+        : base(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentDigestMismatchForAlgorithm, algorithm))
     {
         Algorithm = algorithm;
         Code = HttpErrorCode.ReadingError;

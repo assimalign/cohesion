@@ -58,7 +58,7 @@ internal ref struct StructuredFieldParser
     {
         var parser = new StructuredFieldParser(input);
         bool ok = parser.ParseItemField(out result);
-        error = ok ? null : parser._error ?? "Malformed structured field item.";
+        error = ok ? null : parser._error ?? ErrorMessages.MalformedStructuredFieldItem;
         return ok;
     }
 
@@ -66,7 +66,7 @@ internal ref struct StructuredFieldParser
     {
         var parser = new StructuredFieldParser(input);
         bool ok = parser.ParseListField(out result);
-        error = ok ? null : parser._error ?? "Malformed structured field list.";
+        error = ok ? null : parser._error ?? ErrorMessages.MalformedStructuredFieldList;
         return ok;
     }
 
@@ -74,7 +74,7 @@ internal ref struct StructuredFieldParser
     {
         var parser = new StructuredFieldParser(input);
         bool ok = parser.ParseDictionaryField(out result);
-        error = ok ? null : parser._error ?? "Malformed structured field dictionary.";
+        error = ok ? null : parser._error ?? ErrorMessages.MalformedStructuredFieldDictionary;
         return ok;
     }
 
@@ -89,7 +89,7 @@ internal ref struct StructuredFieldParser
         SkipSp();
         if (!Eof)
         {
-            return Fail("Unexpected trailing characters after item.");
+            return Fail(ErrorMessages.ItemTrailingCharacters);
         }
         result = item;
         return true;
@@ -106,7 +106,7 @@ internal ref struct StructuredFieldParser
         SkipSp();
         if (!Eof)
         {
-            return Fail("Unexpected trailing characters after list.");
+            return Fail(ErrorMessages.ListTrailingCharacters);
         }
         result = StructuredFieldList.CreateRaw(members);
         return true;
@@ -123,7 +123,7 @@ internal ref struct StructuredFieldParser
         SkipSp();
         if (!Eof)
         {
-            return Fail("Unexpected trailing characters after dictionary.");
+            return Fail(ErrorMessages.DictionaryTrailingCharacters);
         }
         result = StructuredFieldDictionary.CreateRaw(members);
         return true;
@@ -151,13 +151,13 @@ internal ref struct StructuredFieldParser
             }
             if (Current != ',')
             {
-                return Fail("Expected ',' separating list members.");
+                return Fail(ErrorMessages.ListSeparatorMissing);
             }
             _pos++; // consume ','
             SkipOws();
             if (Eof)
             {
-                return Fail("Trailing comma in list.");
+                return Fail(ErrorMessages.TrailingCommaInList);
             }
         }
         members = list.ToArray();
@@ -213,10 +213,10 @@ internal ref struct StructuredFieldParser
             items.Add(item);
             if (!Eof && Current != ' ' && Current != ')')
             {
-                return Fail("Inner list items must be separated by a space.");
+                return Fail(ErrorMessages.InnerListSeparatorMissing);
             }
         }
-        return Fail("Unterminated inner list.");
+        return Fail(ErrorMessages.UnterminatedInnerList);
     }
 
     // ------------------------------------------------------------------
@@ -263,13 +263,13 @@ internal ref struct StructuredFieldParser
             }
             if (Current != ',')
             {
-                return Fail("Expected ',' separating dictionary members.");
+                return Fail(ErrorMessages.DictionarySeparatorMissing);
             }
             _pos++; // consume ','
             SkipOws();
             if (Eof)
             {
-                return Fail("Trailing comma in dictionary.");
+                return Fail(ErrorMessages.TrailingCommaInDictionary);
             }
         }
         members = list.ToArray();
@@ -339,7 +339,7 @@ internal ref struct StructuredFieldParser
         key = string.Empty;
         if (Eof || !StructuredFieldGrammar.IsKeyStartChar(Current))
         {
-            return Fail("Expected a key.");
+            return Fail(ErrorMessages.KeyMissing);
         }
         int start = _pos;
         _pos++;
@@ -360,7 +360,7 @@ internal ref struct StructuredFieldParser
         result = default;
         if (Eof)
         {
-            return Fail("Expected a bare item.");
+            return Fail(ErrorMessages.BareItemMissing);
         }
         char c = Current;
         if (c == '-' || StructuredFieldGrammar.IsDigit(c))
@@ -391,7 +391,7 @@ internal ref struct StructuredFieldParser
         {
             return ParseToken(out result);
         }
-        return Fail($"Unexpected character '{c}' at start of a bare item.");
+        return Fail(string.Format(CultureInfo.CurrentCulture, ErrorMessages.BareItemStartCharacterInvalid, c));
     }
 
     // ------------------------------------------------------------------
@@ -403,7 +403,7 @@ internal ref struct StructuredFieldParser
         result = default;
         if (Eof)
         {
-            return Fail("Expected a number.");
+            return Fail(ErrorMessages.NumberMissing);
         }
         int start = _pos;
         if (Current == '-')
@@ -412,11 +412,11 @@ internal ref struct StructuredFieldParser
         }
         if (Eof)
         {
-            return Fail("Expected a digit after '-'.");
+            return Fail(ErrorMessages.NegativeNumberDigitMissing);
         }
         if (!StructuredFieldGrammar.IsDigit(Current))
         {
-            return Fail("Expected a digit.");
+            return Fail(ErrorMessages.DigitMissing);
         }
 
         bool isDecimal = false;
@@ -445,7 +445,7 @@ internal ref struct StructuredFieldParser
             {
                 if (integerDigits > 12)
                 {
-                    return Fail("Decimal has more than 12 integer digits.");
+                    return Fail(ErrorMessages.DecimalIntegerTooLong);
                 }
                 _pos++;
                 numberLength++;
@@ -459,11 +459,11 @@ internal ref struct StructuredFieldParser
 
             if (!isDecimal && numberLength > 15)
             {
-                return Fail("Integer has more than 15 digits.");
+                return Fail(ErrorMessages.IntegerTooLong);
             }
             if (isDecimal && numberLength > 16)
             {
-                return Fail("Decimal is too long.");
+                return Fail(ErrorMessages.DecimalTooLong);
             }
         }
 
@@ -477,11 +477,11 @@ internal ref struct StructuredFieldParser
 
         if (fractionDigits == 0)
         {
-            return Fail("Decimal has no digits after the decimal point.");
+            return Fail(ErrorMessages.DecimalFractionMissing);
         }
         if (fractionDigits > 3)
         {
-            return Fail("Decimal has more than three fractional digits.");
+            return Fail(ErrorMessages.DecimalFractionTooLong);
         }
         decimal decimalValue = decimal.Parse(
             numberSpan,
@@ -518,14 +518,14 @@ internal ref struct StructuredFieldParser
             }
             if (c < ' ' || c > '~')
             {
-                return Fail("String contains a character outside the printable ASCII range.");
+                return Fail(ErrorMessages.StringCharactersInvalid);
             }
             _pos++;
         }
 
         if (Eof)
         {
-            return Fail("Unterminated string.");
+            return Fail(ErrorMessages.UnterminatedString);
         }
 
         // Slow path: at least one escape sequence is present.
@@ -538,12 +538,12 @@ internal ref struct StructuredFieldParser
             {
                 if (Eof)
                 {
-                    return Fail("String ends with a trailing backslash.");
+                    return Fail(ErrorMessages.StringEscapeIncomplete);
                 }
                 char next = _input[_pos++];
                 if (next != '"' && next != '\\')
                 {
-                    return Fail("Invalid escape sequence in string.");
+                    return Fail(ErrorMessages.InvalidEscapeSequenceInString);
                 }
                 builder.Append(next);
             }
@@ -554,14 +554,14 @@ internal ref struct StructuredFieldParser
             }
             else if (c < ' ' || c > '~')
             {
-                return Fail("String contains a character outside the printable ASCII range.");
+                return Fail(ErrorMessages.StringCharactersInvalid);
             }
             else
             {
                 builder.Append(c);
             }
         }
-        return Fail("Unterminated string.");
+        return Fail(ErrorMessages.UnterminatedString);
     }
 
     // ------------------------------------------------------------------
@@ -600,7 +600,7 @@ internal ref struct StructuredFieldParser
         }
         if (close < 0)
         {
-            return Fail("Unterminated byte sequence.");
+            return Fail(ErrorMessages.UnterminatedByteSequence);
         }
 
         ReadOnlySpan<char> content = _input.Slice(start, close - start);
@@ -609,14 +609,14 @@ internal ref struct StructuredFieldParser
             if (!StructuredFieldGrammar.IsAlpha(c) && !StructuredFieldGrammar.IsDigit(c)
                 && c != '+' && c != '/' && c != '=')
             {
-                return Fail("Byte sequence contains a character outside the base64 alphabet.");
+                return Fail(ErrorMessages.ByteSequenceCharactersInvalid);
             }
         }
 
         byte[] buffer = new byte[((content.Length + 3) / 4) * 3];
         if (!Convert.TryFromBase64Chars(content, buffer, out int written))
         {
-            return Fail("Byte sequence is not valid base64.");
+            return Fail(ErrorMessages.ByteSequenceEncodingInvalid);
         }
 
         _pos = close + 1; // consume the content and closing ':'
@@ -635,7 +635,7 @@ internal ref struct StructuredFieldParser
         _pos++; // consume '?'
         if (Eof)
         {
-            return Fail("Expected '0' or '1' after '?'.");
+            return Fail(ErrorMessages.BooleanSuffixInvalid);
         }
         char c = Current;
         if (c == '1')
@@ -650,7 +650,7 @@ internal ref struct StructuredFieldParser
             result = StructuredFieldBareItem.CreateBoolean(false);
             return true;
         }
-        return Fail("Boolean must be '?0' or '?1'.");
+        return Fail(ErrorMessages.BooleanValueInvalid);
     }
 
     // ------------------------------------------------------------------
@@ -667,7 +667,7 @@ internal ref struct StructuredFieldParser
         }
         if (number.Type != StructuredFieldType.Integer)
         {
-            return Fail("Date must be an integer number of seconds.");
+            return Fail(ErrorMessages.DatePrecisionInvalid);
         }
         result = StructuredFieldBareItem.CreateDate(number.AsInteger());
         return true;
@@ -683,7 +683,7 @@ internal ref struct StructuredFieldParser
         _pos++; // consume '%'
         if (Eof || Current != '"')
         {
-            return Fail("Display string must begin with '%\"'.");
+            return Fail(ErrorMessages.DisplayStringPrefixInvalid);
         }
         _pos++; // consume DQUOTE
 
@@ -695,13 +695,13 @@ internal ref struct StructuredFieldParser
             {
                 if (_pos + 2 > _input.Length)
                 {
-                    return Fail("Truncated percent-encoding in display string.");
+                    return Fail(ErrorMessages.TruncatedPercentEncodingInDisplayString);
                 }
                 char h1 = _input[_pos];
                 char h2 = _input[_pos + 1];
                 if (!StructuredFieldGrammar.IsLowerHex(h1) || !StructuredFieldGrammar.IsLowerHex(h2))
                 {
-                    return Fail("Display string percent-encoding must use two lowercase hex digits.");
+                    return Fail(ErrorMessages.DisplayStringPercentEncodingInvalid);
                 }
                 _pos += 2;
                 bytes.Add((byte)((HexValue(h1) << 4) | HexValue(h2)));
@@ -715,21 +715,21 @@ internal ref struct StructuredFieldParser
                 }
                 catch (DecoderFallbackException)
                 {
-                    return Fail("Display string is not valid UTF-8.");
+                    return Fail(ErrorMessages.DisplayStringEncodingInvalid);
                 }
                 result = StructuredFieldBareItem.CreateDisplayString(value);
                 return true;
             }
             else if (c < ' ' || c > '~')
             {
-                return Fail("Display string contains a character outside the printable ASCII range.");
+                return Fail(ErrorMessages.DisplayStringCharactersInvalid);
             }
             else
             {
                 bytes.Add((byte)c);
             }
         }
-        return Fail("Unterminated display string.");
+        return Fail(ErrorMessages.UnterminatedDisplayString);
     }
 
     private static int HexValue(char c) => c <= '9' ? c - '0' : c - 'a' + 10;

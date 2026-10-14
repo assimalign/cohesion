@@ -179,6 +179,39 @@ raises. Events 7 and 8 carry the `ServiceProviderInitialized` keyword (`0x1`).
   the convention (issue #1037). The descriptor dump moved from `Informational` to `Verbose` at the
   same time, so forwarding at `Information` does not log every registration.
 
+### Shared diagnostic test recorder
+
+`build/TestSupport/EventSourceRecorder.cs` is the canonical test-only `EventListener` used by this
+project and the Connections root, Tcp, Quic, NamedPipes and Udp test projects. Each links it
+with one MSBuild `Compile`/`Link` item rooted at `CohesionRepositoryDirectory`, as documented
+in `.claude/rules/testing.md`. No shipped library owns the helper (owner decision 52, #1448).
+The recorder preserves event payloads and optionally waits for named counters to publish.
+Its state belongs to each listener instance and never crosses an assembly boundary. No
+shipped project compiles this folder or references the test assembly. Keeping one file
+prevents the event and counter helpers from drifting across source test suites.
+
+## NativeAOT compatibility checks
+
+The Web NativeAOT guard (`resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard`,
+#1052) surfaced the call-site factory's trim/AOT diagnostics as ILC errors. They are resolved the
+way the upstream container resolves them:
+
+- `ServiceDescriptor.ImplementationType` carries
+  `[DynamicallyAccessedMembers(PublicConstructors)]`, matching the constructor parameter it is
+  assigned from, so the constructors the factory selects survive trimming (IL2072).
+- `ServiceProvider.VerifyAotCompatibility` is `!RuntimeFeature.IsDynamicCodeSupported`. While it
+  holds, the call-site factory rejects an `IEnumerable<T>` whose `T` is a value type, and an
+  open-generic closure over a value-type argument, with an `InvalidOperationException` at
+  call-site construction. Code for those instantiations may not exist without dynamic code.
+- The remaining `MakeGenericType`/`MakeArrayType` sites (`CreateOpenGeneric`,
+  `EnumerableCallSite.ServiceType`/`ImplementationType`) carry `UnconditionalSuppressMessage`
+  (IL3050) whose justification is that check: only reference-type instantiations, which share
+  canonical code, are ever created under NativeAOT.
+
+Hosting modules register factories and instances only (`resource-areas.md`), so none of them relies
+on value-type enumerables or open generics; the checks turn a latent native crash into a
+descriptive startup failure for anyone who does.
+
 ## Layout Example
 
 ```text
@@ -220,3 +253,13 @@ builder.AddSingleton(typeof(IMyClock), typeof(SystemClock));
 IServiceProvider provider = builder.Build();
 IServiceScope scope = provider.CreateScope();
 ```
+
+## Build-generated resources (#1467)
+
+Exception messages are held in `src/Properties/ErrorMessages.resx`. The internal `ErrorMessages` accessor is generated in the project
+root namespace by MSBuild's GenerateResource task through
+`build/Targets/Build.ErrorMessages.targets`. The generated source stays under
+`obj/`; no checked-in designer or Visual Studio custom tool is required. Ordinary
+`dotnet build`, CI and NativeAOT publication use the same embedded resources.
+Existing message text is preserved. Resource names describe failures in short PascalCase
+noun phrases of at most 40 characters (#1471); callers use the renamed internal accessors.

@@ -8,6 +8,15 @@ generated ULID value types. New identity semantics are additive links to canonic
 users and service principals expose `IIdentitySubject`, while application credential records
 expose `IdentityCredential`.
 
+## Generated string value-type compatibility (#1472)
+
+Regeneration removes `ToString(string?, IFormatProvider?)` from `Username` and `Domain`.
+Both types exposed that overload in `10.0.0-preview.1`, so its removal is a source and binary
+breaking change under the preview compatibility policy (HTTP/Web program decision 15).
+Replace calls such as `username.ToString(format, provider)` with `username.ToString()` and
+recompile consumers. The removed overload did not apply formatting or culture to initialized
+string values; `ToString()` preserves their text and now returns an empty string for `default`.
+
 ## Canonical identity ownership
 
 IdentityModel owns subjects, identifiers, claims, credentials, authentication sessions and

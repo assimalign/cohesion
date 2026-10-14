@@ -67,6 +67,26 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/tests/
 └── {Feature}Tests.cs
 ```
 
+## Shared EventSource recorder
+
+Event-source tests link the canonical test-only `build/TestSupport/EventSourceRecorder.cs`
+instead of copying it. Add this one item to each consuming test csproj:
+
+```xml
+<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+```
+
+Use `Assimalign.Cohesion.Testing` to resolve the recorder. This is MSBuild's built-in
+`Compile`/`Link` support, rooted at the existing `CohesionRepositoryDirectory` property.
+`CohesionSharedSource` resolves owning projects under `libraries/` and `resources/`, so it
+is not used for neutral support files under `build/`. No assembly reference or support project
+is needed. Only test projects link this file. Its neutral namespace is the deliberate linked-source
+exception to the consuming project's `RootNamespace` (owner decision 52, #1448).
+The recorder is an `EventListener`, not an `EventSource`, and its instances stay inside each test
+assembly, so it does not duplicate a process-global provider.
+Event-source tests still use a collection with `DisableParallelization = true` and assert counters by
+delta and events by identifier, because background work can outlive an earlier test.
+
 ## Running tests — pass the project, not the folder
 
 `dotnet test <dir>` works only while a `tests/` folder holds exactly one project. Where it holds

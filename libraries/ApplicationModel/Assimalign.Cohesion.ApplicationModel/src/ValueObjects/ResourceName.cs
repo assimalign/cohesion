@@ -1,5 +1,3 @@
-using Assimalign.Cohesion.ApplicationModel.Internal;
-
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
@@ -7,7 +5,4 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 public partial struct ResourceName
 {
-    internal partial class ResourceNameJsonConverter
-    {
-    }
 }

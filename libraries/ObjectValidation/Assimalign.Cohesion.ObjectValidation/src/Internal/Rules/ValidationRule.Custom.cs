@@ -36,18 +36,12 @@ internal sealed class CustomValidationRule<TValue> : ValidationRuleBase<TValue>
         }
     }
 
+    // An exception from the delegate propagates: validation fails closed. Caught and reported as "not
+    // invoked", it let the value pass with no error (#1292).
     public override bool TryValidate(TValue value, out IValidationContext context)
     {
-        try
-        {
-            context = new ValidationContext<TValue>(value);
-            _validation.Invoke(value, context);
-            return true;
-        }
-        catch
-        {
-            context = null;
-            return false;
-        }
+        context = new ValidationContext<TValue>(value);
+        _validation.Invoke(value, context);
+        return true;
     }
 }

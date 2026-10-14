@@ -29,13 +29,13 @@ namespace Assimalign.Cohesion.Database.Client;
 /// </remarks>
 public sealed class DatabaseClient : IAsyncDisposable
 {
-    private readonly IConnectionFactory _connectionFactory;
+    private readonly IDuplexConnectionFactory _connectionFactory;
     private readonly ProtocolMessageFamily _family;
     private readonly ConcurrentStack<DatabaseConnection> _idle = new();
     private readonly SemaphoreSlim _slots;
     private bool _isDisposed;
 
-    private DatabaseClient(DatabaseConnectionSettings settings, IConnectionFactory connectionFactory, ProtocolMessageFamily family)
+    private DatabaseClient(DatabaseConnectionSettings settings, IDuplexConnectionFactory connectionFactory, ProtocolMessageFamily family)
     {
         Settings = settings;
         _connectionFactory = connectionFactory;

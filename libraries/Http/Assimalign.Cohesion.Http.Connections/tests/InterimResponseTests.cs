@@ -24,11 +24,11 @@ public class InterimResponseTests
 {
     // The application-facing interim-response feature (103 Early Hints, manual 100 Continue) is an
     // opt-in feature package that plugs in via the response-interceptor seam — registered here the
-    // same way the streaming tests register HttpResponseStreaming.CreateInterceptor(). The automatic
+    // same way the streaming tests register HttpResponseStreamingInterceptor.Create(). The automatic
     // Expect: 100-continue handshake and the 1xx-as-final-status guard are transport behavior and do
     // NOT need this.
     private static void EnableInterimResponses(HttpConnectionListenerOptions options)
-        => options.Interceptors.Add(HttpInterimResponses.CreateInterceptor());
+        => options.Interceptors.Add(HttpInterimResponseInterceptor.Create());
 
     // ------------------------------------------------------------------ HTTP/1.1
 
@@ -44,7 +44,7 @@ public class InterimResponseTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // #810: the request dispatches at head — the withheld body no longer blocks dispatch, so a
         // handler can inspect the head (and could answer 401 / 417) before anything is solicited.
@@ -93,7 +93,7 @@ public class InterimResponseTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Ok;
@@ -117,7 +117,7 @@ public class InterimResponseTests
         EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.InterimResponse.ShouldNotBeNull();
@@ -152,7 +152,7 @@ public class InterimResponseTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Continue;
@@ -169,11 +169,11 @@ public class InterimResponseTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
         EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         IHttpInterimResponseFeature interim = context.Features.Get<IHttpInterimResponseFeature>()!;
@@ -196,14 +196,14 @@ public class InterimResponseTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interim/Http2: An interim response is a separate HEADERS frame (1xx status, no Content-Length) before the final HEADERS")]
     public async Task Http2_Interim_ShouldEmitHeadersFrameBeforeFinal()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/page", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/page", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
         EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         IHttpInterimResponseFeature interim = context.Features.Get<IHttpInterimResponseFeature>()!;
@@ -236,13 +236,13 @@ public class InterimResponseTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interim/Http2: A 1xx final status code is rejected")]
     public async Task Http2_FinalStatus1xx_ShouldThrow()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/page", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/page", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Continue;
@@ -264,7 +264,7 @@ public class InterimResponseTests
         EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         IHttpInterimResponseFeature interim = context.Features.Get<IHttpInterimResponseFeature>()!;
@@ -304,7 +304,7 @@ public class InterimResponseTests
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.StatusCode = HttpStatusCode.Continue;
@@ -326,7 +326,7 @@ public class InterimResponseTests
         EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         IHttpInterimResponseFeature interim = context.Features.Get<IHttpInterimResponseFeature>()!;

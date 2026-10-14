@@ -25,6 +25,11 @@ namespace Assimalign.Cohesion.Web.Routing.Metadata;
 /// snapshots at construction. Host patterns are parsed once here and reused for every
 /// request, so a malformed pattern fails at the producer rather than at match time.
 /// </para>
+/// <para>
+/// The constraints select among routes; they do not control access. The host they match is one
+/// the client asserts, on the wire or through a trusted proxy that forwards it, so any client can
+/// reach a host-constrained route by sending a host it accepts.
+/// </para>
 /// </remarks>
 public sealed class RouteHostMetadata
 {
@@ -48,7 +53,7 @@ public sealed class RouteHostMetadata
         {
             if (hosts[index] is null)
             {
-                throw new ArgumentException("Host patterns must not be null.", nameof(hosts));
+                throw new ArgumentException(ErrorMessages.HostPatternNull, nameof(hosts));
             }
 
             _hosts[index] = RouteHostConstraint.Parse(hosts[index]);
@@ -73,7 +78,7 @@ public sealed class RouteHostMetadata
         {
             if (_hosts[index].Host.Length == 0)
             {
-                throw new ArgumentException("Host constraints must be created through RouteHostConstraint.Parse or TryParse; a default-initialized constraint matches nothing.", nameof(hosts));
+                throw new ArgumentException(ErrorMessages.HostConstraintNotInitialized, nameof(hosts));
             }
         }
     }

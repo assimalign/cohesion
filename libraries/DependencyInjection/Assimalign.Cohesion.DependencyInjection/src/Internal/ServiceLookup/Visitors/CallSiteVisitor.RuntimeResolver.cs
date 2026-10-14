@@ -2,7 +2,6 @@
 using System.Threading;
 using System.Reflection;
 
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
@@ -131,7 +130,7 @@ internal sealed class CallSiteRuntimeResolverVisitor : CallSiteVisitor<CallSiteR
             if (callSite.IsResolving)
             {
                 throw new InvalidOperationException(
-                    Resources.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(callSite.ServiceType)));
+                    ErrorMessageFormatter.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(callSite.ServiceType)));
             }
 
             callSite.IsResolving = true;

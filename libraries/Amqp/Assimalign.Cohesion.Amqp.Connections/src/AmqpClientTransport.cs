@@ -19,14 +19,14 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// <see cref="ConnectionCapabilities.IsReliable"/> and <see cref="ConnectionCapabilities.IsOrdered"/>).
 /// </para>
 /// <para>
-/// For a single-stream carrier each established <see cref="IConnection"/> backs one AMQP connection.
+/// For a single-stream carrier each established <see cref="IDuplexConnection"/> backs one AMQP connection.
 /// For a multiplexed carrier each established <see cref="IMultiplexedConnection"/> backs one AMQP
 /// connection whose bidirectional carrier stream is opened when the connection context is opened.
 /// </para>
 /// </remarks>
 public sealed class AmqpClientTransport : IAsyncDisposable
 {
-    private readonly IConnectionFactory? _factory;
+    private readonly IDuplexConnectionFactory? _factory;
     private readonly IMultiplexedConnectionFactory? _multiplexedFactory;
     private readonly EndPoint _endPoint;
     private readonly AmqpTransportOptions _options;
@@ -41,7 +41,7 @@ public sealed class AmqpClientTransport : IAsyncDisposable
     /// <param name="options">The AMQP transport options.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> or <paramref name="endPoint"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when the carrier does not deliver a reliable, ordered byte stream.</exception>
-    public AmqpClientTransport(IConnectionFactory factory, EndPoint endPoint, AmqpTransportOptions? options = null)
+    public AmqpClientTransport(IDuplexConnectionFactory factory, EndPoint endPoint, AmqpTransportOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -99,7 +99,7 @@ public sealed class AmqpClientTransport : IAsyncDisposable
 
         if (_factory is not null)
         {
-            IConnection carrier = await _factory.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
+            IDuplexConnection carrier = await _factory.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
 
             connection = new AmqpSingleStreamTransportConnection(carrier, _options);
         }

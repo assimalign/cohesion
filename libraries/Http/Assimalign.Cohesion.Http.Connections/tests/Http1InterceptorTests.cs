@@ -261,7 +261,7 @@ public class Http1InterceptorTests
         InvocationRecordingInterceptor late = new();
         options.Interceptors.Add(late);
 
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         await ReadSingleContextAsync(context);
 
         late.HeadInvocations.ShouldBe(0);
@@ -275,7 +275,7 @@ public class Http1InterceptorTests
         options.UseHttp1(new TestConnectionListener(connection), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadSingleContextAsync(context);
     }
 
@@ -300,7 +300,7 @@ public class Http1InterceptorTests
         options.UseHttp1(new TestConnectionListener(connection), configure ?? (static _ => { }));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
 
         bool yielded;
         await using (IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator())

@@ -22,11 +22,11 @@ public class JsonContentSerializationTests
 {
     private static TestHttpContext ComposeContext()
     {
-        TestWebApplicationBuilder builder = new();
-        builder.AddJsonSerialization(TestJsonContext.Default);
+        IHttpContentSerializationFeature feature = SerializationComponents.CreateJsonFeature(TestJsonContext.Default)
+            .ShouldBeAssignableTo<IHttpContentSerializationFeature>()!;
 
         TestHttpContext context = new();
-        context.Features.Set(builder.Features.OfType<IHttpContentSerializationFeature>().Single());
+        context.Features.Set(feature);
 
         return context;
     }
@@ -112,9 +112,7 @@ public class JsonContentSerializationTests
     public void CanReadCanWrite_ResolverCoverage_ShouldReflectContracts()
     {
         // Arrange
-        TestWebApplicationBuilder builder = new();
-        builder.AddJsonSerialization(TestJsonContext.Default);
-        IHttpContentSerializationFeature feature = builder.Features.OfType<IHttpContentSerializationFeature>().Single();
+        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
 
         // Act / Assert
         feature.Readers.Single().CanRead(typeof(TestOrder)).ShouldBeTrue();
@@ -196,10 +194,8 @@ public class JsonContentSerializationTests
     public async Task WriteContentAsync_NoWritersRegistered_ShouldThrow()
     {
         // Arrange
-        TestWebApplicationBuilder builder = new();
-        builder.AddContentSerialization();
         TestHttpContext context = new();
-        context.Features.Set(builder.Features.OfType<IHttpContentSerializationFeature>().Single());
+        context.Features.Set(new ContentSerializationBuilder().Build());
 
         // Act / Assert
         await Should.ThrowAsync<HttpContentSerializationException>(

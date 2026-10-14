@@ -41,9 +41,59 @@ equivalent. It carries the four data-bearing fields plus a comment:
 `MediaType` is the `text/event-stream` constant. The type is a `readonly struct`
 with `init`-only properties — allocation-free to construct and pass by value.
 
-`EventType`, `Id`, and `Comment` MUST be single-line (the wire format terminates a
-field at the first newline); only `Data` may contain line breaks. This is a
-documented caller contract, not enforced, to keep the formatter allocation-light.
+`EventType` and `Comment` are nullable `ServerSentEventFieldValue` values. This
+generated string value object rejects CR and LF on construction and implicit
+string conversion; NUL is valid in both fields. `Id` is a nullable
+`ServerSentEventId`, a second generated string value object that rejects CR, LF,
+and NUL. These types carry the validation rules; property accessors do not
+perform validation. Only `Data` may contain line breaks.
+
+The [WHATWG parsing algorithm](https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream)
+ends a line at CR, LF, or CRLF. Its `id` processing leaves the last event ID buffer
+unchanged when the field contains NUL, so the stricter ID type prevents callers
+from assigning an id the client would ignore. Event types and comments preserve
+NUL, including comments constructed through `KeepAlive`.
+
+Both types allow an empty string: an empty `Id` resets the client's last event
+id, an empty `Comment` emits a comment line, and an empty `EventType` is omitted
+as before. Their checked-in nullable conversions preserve `null`, including
+assignment from a nullable string. `default(ServerSentEventFieldValue)` and
+`default(ServerSentEventId)` contain no string; the formatter omits them, even
+when wrapped in non-null nullable values. It never turns an absent id into an
+id reset.
+
+`IsValid` and `TryCreate` allow callers to validate without exceptions. Invalid
+construction throws `ArgumentException` with a message from `ErrorMessages` that
+does not echo the input. `KeepAlive(string)` and `WriteKeepAliveAsync(string, ...)`
+retain their existing signatures and default comment, and check the comment
+through the same conversion before any write or flush.
+
+### Breaking changes from 10.0.0-preview.1 (#1475)
+
+`EventType` and `Comment` change from `string?` to
+`ServerSentEventFieldValue?`; `Id` changes from `string?` to `ServerSentEventId?`.
+These are binary breaks requiring consumers to recompile. Valid string and null
+assignments still compile through implicit conversions; readers that need text
+should use `@event.Id?.Value` (and likewise for `EventType` and `Comment`). Code
+using string members, string-specific generic APIs, or the old property
+signatures must migrate. CR and LF now throw at conversion for all three fields;
+NUL throws only for `Id`. NUL in event types, comments, and keep-alive comments
+retains its exact UTF-8 format from preview.1. Other valid events retain their
+exact format too, and multi-line `Data` still splits into `data:` lines.
+
+Preview.1 documented a single-line contract but wrote these fields verbatim.
+When an application placed untrusted text in them, it could inject fields or
+whole events (CWE-93). Reachability depends on that application input path; this
+package does not itself bind remote input to event metadata. The affected package
+is `Assimalign.Cohesion.Http.ServerSentEvents`; advisory severity is assessed as
+moderate because client-side impact depends on the application's event handlers.
+
+The regression suite exercises CR, LF, and CRLF rejection in each metadata
+field, NUL rejection only in `Id`, extra-field and extra-event payloads, and both
+keep-alive helpers. Compatibility tests pin exact bytes for NUL in event types,
+comments, and keep-alive comments, plus valid fields, null/empty fields, and
+multi-line data. Value-object tests cover validation, nullable conversion, and
+default-value omission; the streaming tests include an HTTP/1.1 round trip.
 
 ## The formatter
 
@@ -63,7 +113,7 @@ and NativeAOT-safe. `Format(event)` is the convenience overload returning a
 `Assimalign.Cohesion.Http.Streaming`). Each serializes the event and does
 `WriteAsync` + `FlushAsync` so the peer observes it immediately. This is where SSE
 meets the streaming write path — no transport dependency, just the feature contract.
-A host enables streaming by registering `HttpResponseStreaming.CreateInterceptor()`
+A host enables streaming by registering `HttpResponseStreamingInterceptor.Create()`
 on the transport; a handler then resolves the feature via `context.Response.Streaming`.
 
 ### Header-commit and content type
@@ -94,3 +144,5 @@ delivered id.
 
 No reflection, no runtime code generation. The event model is a value struct; the
 formatter is span/`IBufferWriter<byte>` arithmetic over UTF-8.
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

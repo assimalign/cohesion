@@ -6,6 +6,13 @@ on:
       # listed separately because it belongs to the Gateway's tests, not to this area
       # (.claude/rules/resource-areas.md) — the Web runtime it composes is still this area's.
       - 'resources/Web/**'
+      - 'sdks/Assimalign.Cohesion.Sdk.Web/**'
+      - 'build/TestSupport/**'
+      - 'build/ResourceGenerationCheck/**'
+      - 'build/Build.targets'
+      - 'build/Targets/Build.ErrorMessages.targets'
+      - 'build/Tasks/**'
+      - 'build/Targets/Build.CodeGeneration.*'
       - '!resources/Web/**/*.slnx'
       - '!resources/Web/**/*.md'
       - 'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/**'
@@ -17,7 +24,11 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
+      # Every leg reports its own result. With fail-fast, one failing project cancelled the rest
+      # of the matrix and left a branch with no signal for the other Web libraries (#1093).
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # Every buildable Web project is listed so the area's dependency-rule guard
@@ -26,10 +37,12 @@ jobs:
         # Web.ApplicationModel control-plane package.
         projects: [
             'Assimalign.Cohesion.Web',
+            'Assimalign.Cohesion.Web.Antiforgery',
             'Assimalign.Cohesion.Web.ApplicationModel',
             'Assimalign.Cohesion.Web.Api',
             'Assimalign.Cohesion.Web.Authentication',
             'Assimalign.Cohesion.Web.Authentication.Bearer',
+            'Assimalign.Cohesion.Web.Authentication.Certificate',
             'Assimalign.Cohesion.Web.Authentication.Cookie',
             'Assimalign.Cohesion.Web.Authorization',
             'Assimalign.Cohesion.Web.Caching',
@@ -43,18 +56,23 @@ jobs:
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.HostFiltering',
             'Assimalign.Cohesion.Web.Hosting',
-            'Assimalign.Cohesion.Web.Hosting.Health',
-            'Assimalign.Cohesion.Web.Hosting.Resources',
             'Assimalign.Cohesion.Web.HttpsPolicy',
+            'Assimalign.Cohesion.Web.OpenApi',
             'Assimalign.Cohesion.Web.ProblemDetails',
             'Assimalign.Cohesion.Web.Query',
             'Assimalign.Cohesion.Web.RateLimiting',
             'Assimalign.Cohesion.Web.RequestTimeouts',
+            'Assimalign.Cohesion.Web.Rewrite',
             'Assimalign.Cohesion.Web.Routing',
+            'Assimalign.Cohesion.Web.SecurityHeaders',
             'Assimalign.Cohesion.Web.Serialization',
+            # The shared action runs Web.Server/tests/Assimalign.Cohesion.Web.Server.Tests.csproj.
+            'Assimalign.Cohesion.Web.Server',
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.StaticFiles',
-            'Assimalign.Cohesion.Web.Testing'
+            'Assimalign.Cohesion.Web.Testing',
+            'Assimalign.Cohesion.Web.Validation',
+            'Assimalign.Cohesion.Web.WebSockets'
         ]
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +88,7 @@ jobs:
   https-sample:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: ['Assimalign.Cohesion.Web.HttpsHost']
@@ -80,3 +99,50 @@ jobs:
           global-json-file: global.json
       - run: dotnet build build/Tasks -c Release
       - run: dotnet build libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release
+
+  # NativeAOT guard (#1052): a representative Web application — routing (groups, branching, the
+  # static-file fallback), URL rewrite and redirect rules (#782),
+  # source-generated typed binding and JSON, error handling, Cookie + JWT
+  # Bearer, authorization, antiforgery, cookie policy, security headers, static files, compression,
+  # CORS, rate limiting, request timeouts, handler return values, request validation, file uploads and
+  # the OpenAPI document — published with PublishAot. The guard promotes the trim/AOT analyzer
+  # diagnostics and ILC's per-assembly summaries (IL2104/IL3053) to errors, so a trim or AOT warning in
+  # any Web library it reaches fails the publish; the smoke run then exercises every feature over real
+  # HTTP and fails the job on the first failed check.
+  # WebSockets (#765): a permessage-deflate echo behind the UseWebSockets origin policy.
+  aot-guard:
+    name: "Web NativeAOT guard [ubuntu-latest]"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - run: dotnet build build/Tasks -c Release
+      - name: Check build-generated resources with the CLI
+        run: dotnet run --project build/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj -c Release -p:ContinuousIntegrationBuild=true
+      - name: Check build-generated resources with NativeAOT
+        run: |
+          dotnet publish build/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj -c Release -r linux-x64 -p:PublishAot=true -o "${{ runner.temp }}/resource-generation-check"
+          "${{ runner.temp }}/resource-generation-check/Assimalign.Cohesion.ResourceGenerationCheck"
+      - name: Publish without EventSource support for the binary-size baseline
+        run: dotnet publish resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj -c Release -r linux-x64 -p:EventSourceSupport=false -o "${{ runner.temp }}/web-aot-guard-no-events"
+      - name: Publish the guard with NativeAOT (trim/AOT warnings are errors)
+        run: dotnet publish resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj -c Release -r linux-x64 -p:EventSourceSupport=true -o "${{ runner.temp }}/web-aot-guard"
+      - name: Record the linux-x64 EventSource binary-size delta
+        shell: bash
+        run: |
+          without_events=$(stat -c %s "${{ runner.temp }}/web-aot-guard-no-events/Assimalign.Cohesion.Web.AotGuard")
+          with_events=$(stat -c %s "${{ runner.temp }}/web-aot-guard/Assimalign.Cohesion.Web.AotGuard")
+          delta=$((with_events - without_events))
+          {
+            echo '### Web NativeAOT EventSourceSupport size (linux-x64)'
+            echo '| EventSourceSupport | Native executable bytes |'
+            echo '| --- | ---: |'
+            echo "| false | $without_events |"
+            echo "| true | $with_events |"
+            echo "| delta | $delta |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "EventSourceSupport delta: $delta bytes ($without_events without, $with_events with)."
+      - name: Run the smoke checks against the native binary
+        run: '"${{ runner.temp }}/web-aot-guard/Assimalign.Cohesion.Web.AotGuard" --smoke'

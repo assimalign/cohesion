@@ -43,7 +43,7 @@ public sealed class HttpAltServiceAdvertisementOptions
         {
             if (value < TimeSpan.Zero)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "The max-age must be non-negative.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.MaxAgeNegative);
             }
 
             _maxAge = value;

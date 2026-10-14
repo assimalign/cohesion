@@ -16,19 +16,32 @@ internal static class QuicTestCertificate
     /// </summary>
     public static X509Certificate2 Create()
     {
+        return Create("localhost", "1.3.6.1.5.5.7.3.1"); // id-kp-serverAuth
+    }
+
+    /// <summary>
+    /// Creates a self-signed client certificate (client-authentication EKU) for mutual-TLS handshakes.
+    /// </summary>
+    public static X509Certificate2 CreateClient()
+    {
+        return Create("cohesion-client", "1.3.6.1.5.5.7.3.2"); // id-kp-clientAuth
+    }
+
+    private static X509Certificate2 Create(string subject, string extendedKeyUsage)
+    {
         using RSA rsa = RSA.Create(2048);
 
-        CertificateRequest request = new("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        CertificateRequest request = new($"CN={subject}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 
         SubjectAlternativeNameBuilder sanBuilder = new();
 
-        sanBuilder.AddDnsName("localhost");
+        sanBuilder.AddDnsName(subject);
         sanBuilder.AddIpAddress(IPAddress.Loopback);
 
         request.CertificateExtensions.Add(sanBuilder.Build());
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: false));
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, // id-kp-serverAuth
+            new OidCollection { new Oid(extendedKeyUsage) },
             critical: false));
 
         using X509Certificate2 ephemeral = request.CreateSelfSigned(

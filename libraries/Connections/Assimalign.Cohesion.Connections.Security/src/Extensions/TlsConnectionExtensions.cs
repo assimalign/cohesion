@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Connections.Security;
 /// </summary>
 public static class TlsConnectionExtensions
 {
-    extension(IConnection connection)
+    extension(IDuplexConnection connection)
     {
         /// <summary>
         /// Upgrades the connection to a server-side TLS session, performing the TLS handshake over the
@@ -20,9 +20,9 @@ public static class TlsConnectionExtensions
         /// </summary>
         /// <param name="options">The server TLS options.</param>
         /// <param name="cancellationToken">A token to cancel the handshake.</param>
-        /// <returns>A new secured <see cref="IConnection"/>.</returns>
+        /// <returns>A new secured <see cref="IDuplexConnection"/>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
-        public ValueTask<IConnection> UpgradeToTlsAsync(TlsServerOptions options, CancellationToken cancellationToken = default)
+        public ValueTask<IDuplexConnection> UpgradeToTlsAsync(TlsServerOptions options, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(connection);
             ArgumentNullException.ThrowIfNull(options);
@@ -36,9 +36,9 @@ public static class TlsConnectionExtensions
         /// </summary>
         /// <param name="options">The client TLS options.</param>
         /// <param name="cancellationToken">A token to cancel the handshake.</param>
-        /// <returns>A new secured <see cref="IConnection"/>.</returns>
+        /// <returns>A new secured <see cref="IDuplexConnection"/>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
-        public ValueTask<IConnection> UpgradeToTlsAsync(TlsClientOptions options, CancellationToken cancellationToken = default)
+        public ValueTask<IDuplexConnection> UpgradeToTlsAsync(TlsClientOptions options, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(connection);
             ArgumentNullException.ThrowIfNull(options);
@@ -47,32 +47,40 @@ public static class TlsConnectionExtensions
         }
     }
 
-    extension(IConnectionListener listener)
+    extension(IDuplexConnectionListener listener)
     {
         /// <summary>
         /// Returns a listener whose accepted connections are secured with server-side TLS.
         /// </summary>
         /// <param name="options">The server TLS options.</param>
-        /// <returns>The TLS-layered <see cref="IConnectionListener"/>.</returns>
+        /// <returns>The TLS-layered <see cref="IDuplexConnectionListener"/>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
-        public IConnectionListener UseTls(TlsServerOptions options)
+        /// <remarks>
+        /// Each accepted connection's handshake runs on its own task, at most
+        /// <see cref="TlsServerOptions.MaxConcurrentHandshakes"/> at a time, and <c>AcceptAsync</c> returns
+        /// connections whose handshake has completed. A handshake that fails or exceeds
+        /// <see cref="TlsServerOptions.HandshakeTimeout"/>, including one refused by the client-certificate
+        /// policy, closes only that connection and is reported through the
+        /// <c>Assimalign.Cohesion.Connections</c> event source; the listener keeps accepting.
+        /// </remarks>
+        public IDuplexConnectionListener UseTls(TlsServerOptions options)
         {
             ArgumentNullException.ThrowIfNull(listener);
             ArgumentNullException.ThrowIfNull(options);
 
-            return listener.Use(new TlsConnectionLayer(options));
+            return listener.Use(new TlsConnectionLayer(options), options.MaxConcurrentHandshakes);
         }
     }
 
-    extension(IConnectionFactory factory)
+    extension(IDuplexConnectionFactory factory)
     {
         /// <summary>
         /// Returns a factory whose established connections are secured with client-side TLS.
         /// </summary>
         /// <param name="options">The client TLS options.</param>
-        /// <returns>The TLS-layered <see cref="IConnectionFactory"/>.</returns>
+        /// <returns>The TLS-layered <see cref="IDuplexConnectionFactory"/>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
-        public IConnectionFactory UseTls(TlsClientOptions options)
+        public IDuplexConnectionFactory UseTls(TlsClientOptions options)
         {
             ArgumentNullException.ThrowIfNull(factory);
             ArgumentNullException.ThrowIfNull(options);

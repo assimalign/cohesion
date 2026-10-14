@@ -14,7 +14,7 @@ depending on this package.
 
 - `IHttpResponseStreamingFeature` — the typed streaming API (`StartAsync`,
   `WriteAsync`, `FlushAsync`, `CompleteAsync`, `HasStarted`).
-- `HttpResponseStreaming.CreateInterceptor()` — the `IHttpExchangeInterceptor` a
+- `HttpResponseStreamingInterceptor.Create()` — the `IHttpExchangeInterceptor` a
   host registers to make streaming available on every exchange.
 - `Response.Streaming` / `Response.SupportsStreaming` — ergonomic accessors on
   `IHttpResponse`.
@@ -28,7 +28,7 @@ depending on this package.
 
 ```csharp
 // Host / composition root — opt into streaming:
-options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
 
 // Handler:
 context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain";
@@ -37,6 +37,19 @@ await stream.WriteAsync(chunk1);
 await stream.FlushAsync();      // the client observes chunk1 now
 await stream.WriteAsync(chunk2);
 ```
+
+## Recovering a refused head
+
+If a streaming call throws `HttpException` with `Code == HttpErrorCode.InvalidResponseField`,
+the transport refused the head before writing bytes. `HasStarted` stays false. Replace the invalid
+fields, then retry `StartAsync` or `CompleteAsync`, or write a buffered replacement. Completion
+becomes final only after its flush succeeds.
+
+When the transport supplies exchange control, `HasStarted` follows its existing commitment state;
+a later I/O failure after commitment still reports true and cannot be answered with another head.
+Hand-built interceptor contexts without control use a fallback that advances only after a sink
+call succeeds. Response-starting callbacks remain once per exchange even when a refused head is
+retried. See `DESIGN.md` for the preview.1 behavior change and fallback limitation.
 
 ## Layering
 

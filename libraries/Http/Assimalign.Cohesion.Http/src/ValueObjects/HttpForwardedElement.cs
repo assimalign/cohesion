@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
@@ -112,7 +113,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
         {
             if (forNode.IsEmpty)
             {
-                throw new ArgumentException("The 'for' node is empty.", nameof(@for));
+                throw new ArgumentException(ErrorMessages.ForNodeEmpty, nameof(@for));
             }
             forValue = forNode;
             list.Add(new HttpForwardedParameter(ForName, forNode.ToString()));
@@ -121,7 +122,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
         {
             if (byNode.IsEmpty)
             {
-                throw new ArgumentException("The 'by' node is empty.", nameof(by));
+                throw new ArgumentException(ErrorMessages.ByNodeEmpty, nameof(by));
             }
             byValue = byNode;
             list.Add(new HttpForwardedParameter(ByName, byNode.ToString()));
@@ -130,7 +131,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
         {
             if (string.IsNullOrWhiteSpace(host))
             {
-                throw new ArgumentException("The 'host' value is empty.", nameof(host));
+                throw new ArgumentException(ErrorMessages.HostValueEmpty, nameof(host));
             }
             list.Add(new HttpForwardedParameter(HostName, host));
         }
@@ -138,7 +139,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
         {
             if (string.IsNullOrWhiteSpace(proto))
             {
-                throw new ArgumentException("The 'proto' value is empty.", nameof(proto));
+                throw new ArgumentException(ErrorMessages.ProtoValueEmpty, nameof(proto));
             }
             list.Add(new HttpForwardedParameter(ProtoName, proto));
         }
@@ -149,7 +150,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
                 if (IsRegisteredName(extension.Name))
                 {
                     throw new ArgumentException(
-                        $"Extension parameter '{extension.Name}' reuses a registered parameter name.", nameof(extensions));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExtensionParameterNameReserved, extension.Name), nameof(extensions));
                 }
                 list.Add(extension);
             }
@@ -191,7 +192,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
     {
         if (!TryParse(value, out HttpForwardedElement result))
         {
-            throw new HttpInvalidForwardedException($"The value is not a valid forwarded element: '{value.ToString()}'.");
+            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardedElementInvalid, value.ToString()));
         }
         return result;
     }
@@ -402,7 +403,7 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
     {
         if (_parameters is null)
         {
-            return 0;
+            return new HashCode().ToHashCode();
         }
         var hash = new HashCode();
         foreach (HttpForwardedParameter parameter in _parameters)

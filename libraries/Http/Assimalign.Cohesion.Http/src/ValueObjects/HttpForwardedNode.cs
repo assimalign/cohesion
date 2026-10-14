@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -133,7 +134,7 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
     {
         if (!TryParse(value, out HttpForwardedNode result))
         {
-            throw new HttpInvalidForwardedException($"The value is not a valid forwarded node: '{value.ToString()}'.");
+            throw new HttpInvalidForwardedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardedNodeInvalid, value.ToString()));
         }
         return result;
     }

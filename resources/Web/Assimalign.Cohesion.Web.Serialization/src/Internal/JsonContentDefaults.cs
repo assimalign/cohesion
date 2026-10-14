@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 
@@ -32,9 +33,7 @@ internal static class JsonContentDefaults
         if (!options.TryGetTypeInfo(type, out JsonTypeInfo? typeInfo))
         {
             throw new HttpContentSerializationException(
-                $"The registered JSON type-info resolver has no serialization contract for '{type}'. " +
-                "Add the type to the application's JsonSerializerContext (e.g. [JsonSerializable(typeof(" + type.Name + "))]) " +
-                "or register a resolver that covers it via AddJsonSerialization.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.JsonSerializationContractMissing, type, type.Name));
         }
 
         return typeInfo;

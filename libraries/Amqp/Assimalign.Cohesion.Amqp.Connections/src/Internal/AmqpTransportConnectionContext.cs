@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 
 internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
 {
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly AmqpTransportOptions _options;
     private readonly SemaphoreSlim _protocolLock;
     private readonly SemaphoreSlim _writeLock;
@@ -21,7 +21,7 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
     private AmqpProtocolHeader _localProtocolHeader;
     private AmqpProtocolHeader? _remoteProtocolHeader;
 
-    public AmqpTransportConnectionContext(IConnection connection, AmqpTransportOptions options)
+    public AmqpTransportConnectionContext(IDuplexConnection connection, AmqpTransportOptions options)
     {
         _connection = connection;
         _options = options;

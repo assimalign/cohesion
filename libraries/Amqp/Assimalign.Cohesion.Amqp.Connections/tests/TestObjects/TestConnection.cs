@@ -11,17 +11,17 @@ using Assimalign.Cohesion.Connections.InMemory;
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
-/// An in-memory <see cref="Connection"/> double backed by the shared <see cref="InMemoryConnectionPair"/>
+/// An in-memory <see cref="IDuplexConnection"/> double backed by the shared <see cref="InMemoryConnectionPair"/>
 /// driver. The near end is exposed through the standard connection surface, and the far ends are
 /// exposed so a test can play the remote peer: bytes written to <see cref="PeerOutput"/> appear on the
 /// connection's <see cref="Input"/>, and bytes the connection writes to <see cref="Output"/> can be
 /// observed on <see cref="PeerInput"/>. Use <see cref="CreatePair"/> to produce two cross-wired
 /// connections that act as each other's remote peer.
 /// </summary>
-internal sealed class TestConnection : Connection
+internal sealed class TestConnection : MultiplexedConnectionStream
 {
-    private readonly Connection _self;
-    private readonly Connection _peer;
+    private readonly IDuplexConnection _self;
+    private readonly IDuplexConnection _peer;
     private Exception? _abortReason;
     private bool _isAborted;
     private bool _isDisposed;
@@ -31,7 +31,7 @@ internal sealed class TestConnection : Connection
     {
     }
 
-    private TestConnection((Connection Self, Connection Peer) ends)
+    private TestConnection((IDuplexConnection Self, IDuplexConnection Peer) ends)
     {
         _self = ends.Self;
         _peer = ends.Peer;
@@ -49,7 +49,7 @@ internal sealed class TestConnection : Connection
     /// </summary>
     public static (TestConnection Left, TestConnection Right) CreatePair(ConnectionCapabilities? capabilities = null)
     {
-        (Connection left, Connection right) = CreateEndPointedPair(capabilities);
+        (IDuplexConnection left, IDuplexConnection right) = CreateEndPointedPair(capabilities);
 
         // The two ends are already cross-wired by the driver, so each acts as the other's peer.
         return (new TestConnection((left, right)), new TestConnection((right, left)));
@@ -88,6 +88,10 @@ internal sealed class TestConnection : Connection
     public bool IsDisposed => _isDisposed;
 
     public Exception? AbortReason => _abortReason;
+
+    public bool InputCompleted { get; set; }
+
+    public override bool IsInputCompleted => InputCompleted;
 
     public override ConnectionId Id => _self.Id;
 
@@ -132,8 +136,19 @@ internal sealed class TestConnection : Connection
         return bytes;
     }
 
+    public override void Abort(long errorCode, Exception? reason = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        Abort(reason);
+    }
+
     public override void Abort(Exception? reason = null)
     {
+        if (_isAborted || _isDisposed)
+        {
+            return;
+        }
+
         _isAborted = true;
         _abortReason = reason;
         _self.Abort(reason);
@@ -145,7 +160,7 @@ internal sealed class TestConnection : Connection
         return _self.DisposeAsync();
     }
 
-    private static (Connection Self, Connection Peer) CreateEndPointedPair(ConnectionCapabilities? capabilities)
+    private static (IDuplexConnection Self, IDuplexConnection Peer) CreateEndPointedPair(ConnectionCapabilities? capabilities)
         => InMemoryConnectionPair.Create(
             capabilities ?? DefaultCapabilities,
             clientEndPoint: new IPEndPoint(IPAddress.Loopback, 5672),

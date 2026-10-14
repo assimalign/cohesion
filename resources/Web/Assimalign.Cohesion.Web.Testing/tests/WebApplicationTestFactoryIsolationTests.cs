@@ -100,7 +100,7 @@ public class WebApplicationTestFactoryIsolationTests
     {
         WebApplicationTestFactory factory = new();
 
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(CohesionHttpMethod.Get, pattern, new RouterRouteHandler(async context =>

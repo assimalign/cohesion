@@ -3,6 +3,10 @@ on:
   push:
     paths:
       - "libraries/Core/**"
+      - "build/Tasks/**"
+      - "build/Targets/Build.CodeGeneration.*"
+      - "analyzers/Assimalign.Cohesion.SourceGeneration/**"
+      - "!analyzers/Assimalign.Cohesion.SourceGeneration/**/*.md"
       - "!libraries/Core/**/*.slnx"
       - "!libraries/Core/**/*.md"
       - "libraries/Hosting/**/src/**/*.cs"
@@ -16,6 +20,7 @@ jobs:
   build:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     continue-on-error: false
     strategy:
       matrix:

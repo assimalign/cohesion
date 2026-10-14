@@ -15,6 +15,7 @@ using System.Globalization;
 
 namespace System;
 
+using Assimalign.Cohesion;
 using Assimalign.Cohesion.Internal;
 
 /// <summary>
@@ -303,81 +304,112 @@ public readonly partial struct Ulid :
         return new Ulid(timestamp.ToUnixTimeMilliseconds(), randomness);
     }
 
+    /// <summary>
+    /// Parses a 26-character, case-insensitive Crockford base32 ULID with a leading digit from 0 through 7.
+    /// </summary>
+    /// <param name="base32">The canonical ULID text.</param>
+    /// <returns>The parsed identifier.</returns>
+    /// <exception cref="FormatException">The text is not a canonical ULID.</exception>
     public static Ulid Parse(string base32)
     {
         return Parse(base32.AsSpan());
     }
 
+    /// <summary>
+    /// Parses a 26-character, case-insensitive Crockford base32 ULID with a leading digit from 0 through 7.
+    /// </summary>
+    /// <param name="base32">The canonical ULID text.</param>
+    /// <returns>The parsed identifier.</returns>
+    /// <exception cref="FormatException">The text is not a canonical ULID.</exception>
     public static Ulid Parse(ReadOnlySpan<char> base32)
-    {
-        if (base32.Length != 26)
-        {
-            throw new ArgumentException("invalid base32 length, length:" + base32.Length);
-        }
-        return new Ulid(base32);
-    }
-
-    public static Ulid Parse(ReadOnlySpan<byte> base32)
     {
         if (!TryParse(base32, out var ulid))
         {
-            throw new ArgumentException("invalid base32 length, length:" + base32.Length);
+            throw new FormatException(ErrorMessages.UlidTextInvalid);
         }
         return ulid;
     }
 
-    public static bool TryParse(string base32, out Ulid ulid)
+    /// <summary>
+    /// Parses a 26-byte, case-insensitive Crockford base32 ULID with a leading digit from 0 through 7.
+    /// </summary>
+    /// <param name="base32">The canonical ULID text encoded as UTF-8.</param>
+    /// <returns>The parsed identifier.</returns>
+    /// <exception cref="FormatException">The text is not a canonical ULID.</exception>
+    public static Ulid Parse(ReadOnlySpan<byte> base32)
+    {
+        if (!TryParse(base32, out var ulid))
+        {
+            throw new FormatException(ErrorMessages.UlidTextInvalid);
+        }
+        return ulid;
+    }
+
+    /// <summary>
+    /// Attempts to parse a 26-character, case-insensitive Crockford base32 ULID with a leading digit from 0 through 7.
+    /// </summary>
+    /// <param name="base32">The canonical ULID text.</param>
+    /// <param name="ulid">The parsed identifier, or the default value on failure.</param>
+    /// <returns>Whether the text is a canonical ULID.</returns>
+    public static bool TryParse([NotNullWhen(true)] string? base32, out Ulid ulid)
     {
         return TryParse(base32.AsSpan(), out ulid);
     }
 
+    /// <summary>
+    /// Attempts to parse a 26-character, case-insensitive Crockford base32 ULID with a leading digit from 0 through 7.
+    /// </summary>
+    /// <param name="base32">The canonical ULID text.</param>
+    /// <param name="ulid">The parsed identifier, or the default value on failure.</param>
+    /// <returns>Whether the text is a canonical ULID.</returns>
     public static bool TryParse(ReadOnlySpan<char> base32, out Ulid ulid)
     {
-        if (base32.Length != 26)
+        ulid = default;
+        if (base32.Length != 26 || base32[0] < '0' || base32[0] > '7')
         {
-            ulid = default(Ulid);
             return false;
         }
 
-        try
+        foreach (char character in base32)
         {
-            ulid = new Ulid(base32);
-            return true;
+            if (character >= _charToBase32.Length || _charToBase32[character] == byte.MaxValue)
+            {
+                return false;
+            }
         }
-        catch
-        {
-            ulid = default(Ulid);
-            return false;
-        }
+
+        ulid = new Ulid(base32);
+        return true;
     }
 
+    /// <summary>
+    /// Attempts to parse a 26-byte, case-insensitive Crockford base32 ULID with a leading digit from 0 through 7.
+    /// </summary>
+    /// <param name="base32">The canonical ULID text encoded as UTF-8.</param>
+    /// <param name="ulid">The parsed identifier, or the default value on failure.</param>
+    /// <returns>Whether the text is a canonical ULID.</returns>
     public static bool TryParse(ReadOnlySpan<byte> base32, out Ulid ulid)
     {
-        if (base32.Length != 26)
+        ulid = default;
+        if (base32.Length != 26 || base32[0] < (byte)'0' || base32[0] > (byte)'7')
         {
-            ulid = default(Ulid);
             return false;
         }
 
-        try
+        foreach (byte character in base32)
         {
-            ulid = ParseCore(base32);
-            return true;
+            if (character >= _charToBase32.Length || _charToBase32[character] == byte.MaxValue)
+            {
+                return false;
+            }
         }
-        catch
-        {
-            ulid = default(Ulid);
-            return false;
-        }
+
+        ulid = ParseCore(base32);
+        return true;
     }
 
     static Ulid ParseCore(ReadOnlySpan<byte> base32)
     {
-        if (base32.Length != 26)
-        {
-            throw new ArgumentException("invalid base32 length, length:" + base32.Length);
-        }
-
         var ulid = default(Ulid);
 
         Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 15) = (byte)((_charToBase32[base32[24]] << 5) | _charToBase32[base32[25]]);
@@ -528,7 +560,7 @@ public readonly partial struct Ulid :
     //
     //ISpanFormattable
     //
-    public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider provider)
+    public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
     {
         if (TryWriteStringify(destination))
         {
@@ -542,30 +574,30 @@ public readonly partial struct Ulid :
         }
     }
 
-    public string ToString(string format, IFormatProvider formatProvider) => ToString();
+    public string ToString(string? format, IFormatProvider? formatProvider) => ToString();
 
     //
     // IParsable
     //
     /// <inheritdoc cref="IParsable{TSelf}.Parse(string, IFormatProvider?)" />
-    public static Ulid Parse(string s, IFormatProvider provider) => Parse(s);
+    public static Ulid Parse(string s, IFormatProvider? provider) => Parse(s);
 
     /// <inheritdoc cref="IParsable{TSelf}.TryParse(string?, IFormatProvider?, out TSelf)" />
-    public static bool TryParse([NotNullWhen(true)] string s, IFormatProvider provider, out Ulid result) => TryParse(s, out result);
+    public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, out Ulid result) => TryParse(s, out result);
 
     //
     // ISpanParsable
     //
     /// <inheritdoc cref="ISpanParsable{TSelf}.Parse(ReadOnlySpan{char}, IFormatProvider?)" />
-    public static Ulid Parse(ReadOnlySpan<char> s, IFormatProvider provider) => Parse(s);
+    public static Ulid Parse(ReadOnlySpan<char> s, IFormatProvider? provider) => Parse(s);
 
     /// <inheritdoc cref="ISpanParsable{TSelf}.TryParse(ReadOnlySpan{char}, IFormatProvider?, out TSelf)" />
-    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider provider, out Ulid result) => TryParse(s, out result);
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out Ulid result) => TryParse(s, out result);
 
     //
     // IUtf8SpanFormattable
     //
-    public bool TryFormat(Span<byte> destination, out int bytesWritten, ReadOnlySpan<char> format, IFormatProvider provider)
+    public bool TryFormat(Span<byte> destination, out int bytesWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
     {
         if (TryWriteStringify(destination))
         {

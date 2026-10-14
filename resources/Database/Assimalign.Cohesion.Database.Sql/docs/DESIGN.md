@@ -2842,7 +2842,7 @@ root's rollup).
 
 `SqlDatabaseServer.Create(engine, options)` — or the `AddSqlServer(engine,
 configure)` builder verb — composes a server. The options carry one configured
-`IConnectionListener` instance, not a listener factory. `StartAsync` explicitly
+`IDuplexConnectionListener` instance, not a listener factory. `StartAsync` explicitly
 awaits `BindAsync` before it starts the accept loop or returns; a bind failure is
 propagated only after the listener is terminally disposed, so a partially
 acquired endpoint cannot remain live. `StopAsync` cancels the pending accept,
@@ -4325,3 +4325,25 @@ SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPE
 show the merged type environment with the same provenance. SQL view rows use the statement/transaction
 catalog snapshot, while native registrations stay frozen. INFORMATION_SCHEMA.ROUTINES remains
 absent. The format gate refuses older files without a legacy reader or upgrade path.
+
+## Connection contracts
+
+The server accepts `IDuplexConnection` values through `IDuplexConnectionListener`:
+framed database traffic requires the byte-pipe contract. The transport listener's live
+`Connections` collection is observational; the server owns every connection it accepts,
+performs its I/O, and drains, aborts or disposes it during shutdown. Disposing the listener
+alone does not close accepted connections. `ConnectionClosed` signals local close, abort,
+peer close and, at the latest, completion of connection disposal.
+
+### Breaking changes from 10.0.0-preview.1 (#1459)
+
+`SqlDatabaseServerOptions.Listener` changes from `IConnectionListener?` to
+`IDuplexConnectionListener?`. Changing the property's getter and setter signatures breaks
+preview.1 binaries and source that supplies a listener typed only as `IConnectionListener`.
+This preview break is accepted under owner decisions 15 and 58. Rebuild consumers and use
+`IDuplexConnectionListener` for listener variables and custom implementations. Custom listeners
+can derive from `DuplexConnectionListener`, supply `Id`, and implement `AcceptCoreAsync`
+returning `ValueTask<IDuplexConnection>`; the base handles shared accept dispatch and live
+connection tracking. Custom byte-pipe connections derive from `DuplexConnection` or implement
+`IDuplexConnection`. Built-in duplex listeners already satisfy the new contract. Database wire
+framing, handshake and model messages are unchanged.

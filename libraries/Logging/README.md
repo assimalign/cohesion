@@ -40,8 +40,8 @@ L1. The family depends on `Assimalign.Cohesion.Core` and nothing else, and has n
 `Microsoft.Extensions.*` dependency. By convention a Cohesion library reports on its *own* behavior
 through an internal event source rather than a logging dependency (`.claude/rules/event-source.md`);
 `Logging.EventSource` turns those events into entries when an application asks for them. The App hosting kernel
-carries the root and `Logging.Console`; `Logging.Debug` and `Logging.EventSource` are ordinary NuGet
-packages.
+carries the root, `Logging.Console`, and `Logging.EventSource`; `Logging.Debug` remains an ordinary
+NuGet package. Web entry-point builders forward Web and HTTP transport events by default.
 
 ## Further Reading
 

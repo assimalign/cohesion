@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Diagnostics;
 
@@ -152,7 +153,7 @@ public readonly struct HttpAcceptQuery : IEquatable<HttpAcceptQuery>
     {
         if (!TryParse(input, out HttpAcceptQuery result))
         {
-            throw new HttpInvalidStructuredFieldException($"The value is not a valid Accept-Query field: '{input.ToString()}'.");
+            throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AcceptQueryFieldInvalid, input.ToString()));
         }
         return result;
     }
@@ -235,7 +236,7 @@ public readonly struct HttpAcceptQuery : IEquatable<HttpAcceptQuery>
         }
         catch (ArgumentException)
         {
-            throw new HttpInvalidStructuredFieldException($"The media range '{rangeText}' cannot be encoded as an Accept-Query member.");
+            throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AcceptQueryMediaRangeInvalid, rangeText));
         }
 
         IReadOnlyList<HttpMediaTypeParameter> parameters = mediaRange.Parameters;
@@ -250,7 +251,7 @@ public readonly struct HttpAcceptQuery : IEquatable<HttpAcceptQuery>
             HttpMediaTypeParameter parameter = parameters[i];
             if (!StructuredFieldGrammar.IsValidKey(parameter.Name))
             {
-                throw new HttpInvalidStructuredFieldException($"The media-type parameter name '{parameter.Name}' is not a valid Accept-Query structured-field key.");
+                throw new HttpInvalidStructuredFieldException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AcceptQueryParameterNameInvalid, parameter.Name));
             }
             pairs[i] = new KeyValuePair<string, StructuredFieldBareItem>(parameter.Name, StructuredFieldBareItem.FromString(parameter.Value));
         }

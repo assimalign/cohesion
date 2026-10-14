@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// layer. TLS is composed onto the connection listener before registration
 /// (for example via the security library's <c>UseTls</c> layer), and the
 /// layered listener reports <see cref="ConnectionSecurity.Tls"/> on its
-/// <see cref="IConnectionListener.Capabilities"/>; the HTTP layer derives
+/// <see cref="IDuplexConnectionListener.Capabilities"/>; the HTTP layer derives
 /// its effective scheme from that capability rather than from a
 /// registration-time hint.
 /// </summary>
@@ -58,7 +58,7 @@ public class HttpConnectionIsSecurePropagationTests
         options.UseHttp1(transportListener);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         List<HttpScheme> schemes = new();
@@ -85,7 +85,7 @@ public class HttpConnectionIsSecurePropagationTests
         options.UseHttp2(transportListener);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -110,7 +110,7 @@ public class HttpConnectionIsSecurePropagationTests
         // accepted connection's backing state down while assertions still
         // read off the context.
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadSingleContextAsync(httpConnectionContext);
     }
 

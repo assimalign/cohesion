@@ -17,7 +17,7 @@ internal static class ProblemDetailsDefaults
 
     /// <summary>
     /// Resolves the human-readable title for an HTTP status code &#8212; its reason phrase for known
-    /// codes, or a class-appropriate generic title otherwise.
+    /// codes, or <c>"Internal Server Error"</c> for codes at least 500 and <c>"Error"</c> otherwise.
     /// </summary>
     /// <param name="status">The numeric HTTP status code.</param>
     /// <returns>The title to use for the <c>"about:blank"</c> problem type.</returns>
@@ -25,13 +25,11 @@ internal static class ProblemDetailsDefaults
     {
         if (HttpStatusCode.IsValid(status))
         {
-            // HttpStatusCode.ToString() renders "<code> <phrase>" (e.g. "404 Not Found"); take the
-            // phrase after the first space so the title carries only the human-readable portion.
-            string text = new HttpStatusCode(status).ToString();
-            int space = text.IndexOf(' ');
-            if (space >= 0 && space + 1 < text.Length)
+            // Valid codes need not be registered. Keep a useful title when core has no reason phrase.
+            string reasonPhrase = new HttpStatusCode(status).ReasonPhrase;
+            if (reasonPhrase.Length > 0)
             {
-                return text[(space + 1)..];
+                return reasonPhrase;
             }
         }
 

@@ -95,7 +95,7 @@ public readonly struct StructuredFieldList
     {
         if (!TryParse(input, out StructuredFieldList result, out string? error))
         {
-            throw new HttpInvalidStructuredFieldException(error ?? "Malformed structured field list.");
+            throw new HttpInvalidStructuredFieldException(error ?? ErrorMessages.MalformedStructuredFieldList);
         }
         return result;
     }

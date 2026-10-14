@@ -14,11 +14,11 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// </summary>
 internal sealed class BlobProtocolClient : IAsyncDisposable
 {
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly ProtocolFrameReader _reader;
     private readonly ProtocolFrameWriter _writer;
 
-    internal BlobProtocolClient(IConnection connection)
+    internal BlobProtocolClient(IDuplexConnection connection)
     {
         _connection = connection;
         var stream = connection.AsStream();

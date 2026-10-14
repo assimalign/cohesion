@@ -287,7 +287,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                IHttpConnection connection = await listener.AcceptOrListenAsync(cancellationToken)
+                IHttpConnection connection = await listener.AcceptAsync(cancellationToken)
                     .ConfigureAwait(false);
                 Task task = ServeConnectionAsync(connection, cancellationToken);
                 lock (_connectionGate)

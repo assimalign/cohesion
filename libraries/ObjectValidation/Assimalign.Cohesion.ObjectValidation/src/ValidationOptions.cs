@@ -1,7 +1,10 @@
 ﻿namespace Assimalign.Cohesion.ObjectValidation;
 
 /// <summary>
-/// 
+/// Options that control how a <see cref="Validator"/> evaluates its profiles: which failures it reports
+/// (<see cref="ValidationMode"/> between items, <see cref="ContinueThroughValidationChain"/> within one
+/// item's chain of rules), and whether a failure throws instead of returning a
+/// <see cref="ValidationResult"/>.
 /// </summary>
 public sealed class ValidationOptions
 {

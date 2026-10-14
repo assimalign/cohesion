@@ -27,4 +27,20 @@
 	<Folder Name="/Core/Assimalign.Cohesion.Core/tests/">
 		<Project Path="Assimalign.Cohesion.Core/tests/Assimalign.Cohesion.Core.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Core/analyzers/Assimalign.Cohesion.SourceGeneration/src/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration/src/Assimalign.Cohesion.SourceGeneration.csproj" />
+	</Folder>
+	<Folder Name="/Core/analyzers/Assimalign.Cohesion.SourceGeneration/tests/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration/tests/Assimalign.Cohesion.SourceGeneration.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Core/analyzers/Assimalign.Cohesion.SourceGeneration/docs/">
+		<File Path="../../analyzers/Assimalign.Cohesion.SourceGeneration/docs/DESIGN.md" />
+		<File Path="../../analyzers/Assimalign.Cohesion.SourceGeneration/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Core/analyzers/Assimalign.Cohesion.CodeFixes/src/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.CodeFixes/src/Assimalign.Cohesion.CodeFixes.csproj" />
+	</Folder>
+	<Folder Name="/Core/analyzers/Assimalign.Cohesion.CodeFixes/tests/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.CodeFixes/tests/Assimalign.Cohesion.CodeFixes.Tests.csproj" />
+	</Folder>
 </Solution>

@@ -50,4 +50,11 @@ public enum FileSystemErrorCode
     /// The file system is configured read-only and rejects the requested mutation.
     /// </summary>
     ReadOnly,
+
+    /// <summary>
+    /// The path resolves outside the file system's root directory. A provider that enforces
+    /// containment raises this before it touches its backing store, so nothing outside the root
+    /// is read, created, changed, or probed for existence.
+    /// </summary>
+    PathOutsideRoot,
 }

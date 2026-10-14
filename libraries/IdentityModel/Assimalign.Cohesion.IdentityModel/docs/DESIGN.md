@@ -1055,3 +1055,12 @@ a decision recorded here:
 | `[L01.01.12.08]` #612 | SAML token package to assertion grade. |
 | `[L01.01.12.09]` #616 | Cross-protocol claim mapping, migration fixtures, compliance matrices, NativeAOT evidence, and the family's `docs/Assembly/` API reference pages (deferred from earlier features so the reference is written once against the settled surface). |
 | `[L01.01.12.16]` #970 | Design item 25b: compact ES256 `JsonWebTokenWriter` and reusable RSA/ECDSA verifier moved below Web into the JWT package. |
+
+## NativeAOT sample factory migration (#1465)
+
+The family NativeAOT sample now constructs asymmetric verifiers with
+`EcdsaJsonWebTokenSignatureVerifier.Create(...)` and `RsaJsonWebTokenSignatureVerifier.Create(...)`.
+Rebuild the sample against the updated JWT package; its DESIGN records the factory source and
+binary breaks against 10.0.0-preview.1 on decision 15's terms. This cleanup changes no API or
+behavior in the IdentityModel root package and preserves the sample's verification checks.
+Advisory: not applicable: API shape.

@@ -176,7 +176,7 @@ public sealed class CertificateAuthorityManagerTests
     private static IDataProtectionProvider CreateProtectionProvider(string dataPath)
     {
         return DataProtectionProvider.Create(
-            KeyRepository.CreateFileSystem(Path.Combine(dataPath, "test-key-ring")),
+            FileSystemKeyRepository.Create(Path.Combine(dataPath, "test-key-ring")),
             options =>
             {
                 options.ApplicationDiscriminator = "SecretStore.Hosting.Tests";

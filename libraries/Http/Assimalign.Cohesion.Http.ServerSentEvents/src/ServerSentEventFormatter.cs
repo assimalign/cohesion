@@ -36,20 +36,20 @@ public static class ServerSentEventFormatter
     {
         ArgumentNullException.ThrowIfNull(writer);
 
-        if (@event.Comment is { } comment)
+        if (@event.Comment is { Value: not null } comment)
         {
             // A comment is a line whose field name is empty: ": <text>".
-            WriteField(writer, ReadOnlySpan<char>.Empty, comment);
+            WriteField(writer, ReadOnlySpan<char>.Empty, comment.Value);
         }
 
-        if (!string.IsNullOrEmpty(@event.EventType))
+        if (@event.EventType is { } eventType && !string.IsNullOrEmpty(eventType.Value))
         {
-            WriteField(writer, "event", @event.EventType);
+            WriteField(writer, "event", eventType.Value);
         }
 
-        if (@event.Id is { } id)
+        if (@event.Id is { Value: not null } id)
         {
-            WriteField(writer, "id", id);
+            WriteField(writer, "id", id.Value);
         }
 
         if (@event.Retry is { } retry)

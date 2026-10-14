@@ -25,19 +25,22 @@ public sealed class HttpFormCollection : IHttpFormCollection
     /// <inheritdoc />
     public HttpQueryValue this[string key] => _values.TryGetValue(key, out HttpQueryValue value) ? value : HttpQueryValue.Empty;
 
+    /// <summary>Gets the uploaded files in arrival order.</summary>
     public HttpFormFileCollection Files { get; } = new HttpFormFileCollection();
 
     /// <inheritdoc />
     IHttpFormFileCollection IHttpFormCollection.Files => Files;
 
     /// <summary>
-    /// Adds a form value.
+    /// Appends form values, preserving all existing occurrences in arrival order.
     /// </summary>
     /// <param name="key">The form key.</param>
     /// <param name="value">The form value.</param>
     public void Add(string key, HttpQueryValue value)
     {
-        _values[key] = value;
+        _values[key] = _values.TryGetValue(key, out HttpQueryValue existing)
+            ? HttpQueryValue.Concat(existing, value)
+            : value;
     }
 
     /// <summary>

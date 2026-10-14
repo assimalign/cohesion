@@ -204,6 +204,13 @@ The factory owns its forwarders:
 
 There is deliberately no start or stop. Forwarding is active for the forwarder's whole lifetime.
 
+`ILoggerFactoryBuilder.HasForwarders` lets a hosting composition preserve an application's own
+forwarding before adding a default. It reports whether any registration exists, without invoking
+the registration or building the factory. `LoggerFactoryBuilder` reads its registration count.
+The interface supplies a default `false` implementation so existing custom builders remain source
+compatible; a custom builder that supports forwarders should override the probe. This additive
+surface follows owner decision 49 (#1399), rather than exposing the builder's mutable registrations.
+
 An asynchronous `StartAsync`/`StopAsync` contract was considered and rejected (#1036), for four reasons:
 
 - Enabling a listener is synchronous and nothing is queued, so the tasks would always complete at once.

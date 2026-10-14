@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// argument selects nothing further — connections always reach the bound listener, whose endpoint the
 /// returned connection reports as its remote endpoint.
 /// </remarks>
-public sealed class InMemoryConnectionFactory : ConnectionFactory
+public sealed class InMemoryConnectionFactory : DuplexConnectionFactory
 {
     private readonly InMemoryConnectionListener _listener;
 
@@ -38,12 +38,12 @@ public sealed class InMemoryConnectionFactory : ConnectionFactory
     /// <inheritdoc />
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="endPoint"/> is <see langword="null"/>.</exception>
     /// <exception cref="ConnectionAbortedException">Thrown when the bound listener has been disposed.</exception>
-    public override ValueTask<Connection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override ValueTask<IDuplexConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        return ValueTask.FromResult(_listener.Connect());
+        return ValueTask.FromResult<IDuplexConnection>(_listener.Connect());
     }
 }

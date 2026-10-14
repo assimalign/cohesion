@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
@@ -20,40 +21,40 @@ public static class WebApplicationStaticFilesExtensions
 {
     extension(IWebApplicationPipelineBuilder builder)
     {
-
+        /// <summary>
+        /// Serves <c>GET</c>/<c>HEAD</c> requests from the application's web root
+        /// (<see cref="IWebApplicationContext.WebRootPath"/>, <c>wwwroot</c> under the content root by
+        /// default), with optionally configured <see cref="StaticFilesOptions"/>.
+        /// </summary>
+        /// <remarks>
+        /// Only the web root is served — never the content root or the process working directory,
+        /// which hold <c>appsettings*.json</c> and the application's binaries. When the application
+        /// has no web root, or the directory does not exist when the pipeline is built, the
+        /// middleware serves nothing and passes every request to the next middleware. The options
+        /// are configured and validated once, when this method is called.
+        /// </remarks>
+        /// <param name="configure">A callback that configures the composition-time options.</param>
+        /// <returns>The same pipeline builder for chaining.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">
+        /// Thrown when the configured options are invalid: a request path that does not begin
+        /// with <c>/</c>, a default-document name that is empty or contains a path separator or
+        /// dot segment, a <c>Cache-Control</c> value that does not parse per RFC 9111, or an
+        /// empty fallback content type while <see cref="StaticFilesOptions.ServeUnknownContentTypes"/> is enabled.
+        /// </exception>
         public IWebApplicationPipelineBuilder UseStaticFiles(Action<StaticFilesOptions>? configure = null)
         {
+            ArgumentNullException.ThrowIfNull(builder);
+
+            var options = new StaticFilesOptions();
+            configure?.Invoke(options);
+            Validate(options);
+
             return builder.Use((IWebApplicationContext context, WebApplicationMiddleware next) =>
             {
-                PhysicalFileSystemOptions options = new()
-                {
-                    IsReadOnly = true,
-                    Name = "StaticFiles",
-                };
+                StaticFilesMiddleware? middleware = WebRootStaticFiles.TryCreate(context, options, "UseStaticFiles");
 
-                WebApplicationMiddleware next2 = next;
-
-                if (context.ContentRootPath is not null and { IsEmpty: false  } )
-                {
-                    options.Root = context.ContentRootPath.Value;
-                }
-                else
-                {
-                    options.Root = Environment.CurrentDirectory;
-                }
-
-                PhysicalFileSystem fileSystem = new(options);
-
-                WebApplicationMiddleware middleware = (IHttpContext context2) =>
-                {
-                    var options = new StaticFilesOptions();
-                    configure?.Invoke(options);
-                    Validate(options);
-                    var middleware = new StaticFilesMiddleware(fileSystem, options);
-                    return middleware.InvokeAsync(context2, next2);
-                };
-
-                return middleware;
+                return middleware is null ? next : httpContext => middleware.InvokeAsync(httpContext, next);
             });
         }
 
@@ -99,13 +100,13 @@ public static class WebApplicationStaticFilesExtensions
         }
     }
 
-    private static void Validate(StaticFilesOptions options)
+    internal static void Validate(StaticFilesOptions options)
     {
         // HttpPath also admits the "*" asterisk form; a mount prefix must be an origin-form path.
         if (options.RequestPath.Value.Length == 0 || options.RequestPath.Value[0] != '/')
         {
             throw new ArgumentException(
-                $"The static-files request path must begin with '/': '{options.RequestPath.Value}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.StaticFilesRequestPathInvalid, options.RequestPath.Value));
         }
 
         foreach (string document in options.DefaultDocuments)
@@ -115,7 +116,7 @@ public static class WebApplicationStaticFilesExtensions
                 || document.AsSpan().IndexOfAnyExcept('.') < 0)
             {
                 throw new ArgumentException(
-                    $"Default-document names must be bare file names: '{document}'.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultDocumentNameInvalid, document));
             }
         }
 
@@ -123,13 +124,13 @@ public static class WebApplicationStaticFilesExtensions
             && !HttpCacheControl.TryParse(options.CacheControl, out _))
         {
             throw new ArgumentException(
-                $"The Cache-Control value is not a valid RFC 9111 field value: '{options.CacheControl}'.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.StaticFilesCacheControlInvalid, options.CacheControl));
         }
 
         if (options.ServeUnknownContentTypes && string.IsNullOrWhiteSpace(options.FallbackContentType))
         {
             throw new ArgumentException(
-                "A fallback content type is required when unknown content types are served.");
+                ErrorMessages.FallbackContentTypeRequired);
         }
     }
 }

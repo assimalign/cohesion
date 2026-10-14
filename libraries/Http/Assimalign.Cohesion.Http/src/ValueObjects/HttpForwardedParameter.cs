@@ -49,8 +49,8 @@ public readonly struct HttpForwardedParameter : IEquatable<HttpForwardedParamete
     /// <inheritdoc />
     public override int GetHashCode()
         => HashCode.Combine(
-            StringComparer.OrdinalIgnoreCase.GetHashCode(Name),
-            StringComparer.Ordinal.GetHashCode(Value));
+            Name is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Name),
+            Value is null ? 0 : StringComparer.Ordinal.GetHashCode(Value));
 
     /// <inheritdoc />
     public override string ToString() => $"{Name}={Value}";

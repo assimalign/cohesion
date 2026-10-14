@@ -10,6 +10,8 @@
 	</Folder>
 	<Folder Name="/Assimalign.Cohesion.Web.Hosting/refs/" >
 		<Project Path="../Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
+		<Project Path="../Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />
+		<Project Path="../Assimalign.Cohesion.Web.Server/src/Assimalign.Cohesion.Web.Server.csproj" />
 		<Project Path="../../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
 		<Project Path="../../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../../libraries/Http/Assimalign.Cohesion.Http.Connections/src/Assimalign.Cohesion.Http.Connections.csproj" />

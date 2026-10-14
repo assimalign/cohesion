@@ -69,7 +69,7 @@ public class HttpAntiforgeryProtectorSeamTests
     private static IHttpAntiforgery CreateNode(string keyDirectory, string discriminator)
     {
         IDataProtector protector = DataProtectionProvider
-            .Create(KeyRepository.CreateFileSystem(keyDirectory), o => o.ApplicationDiscriminator = discriminator)
+            .Create(FileSystemKeyRepository.Create(keyDirectory), o => o.ApplicationDiscriminator = discriminator)
             .CreateProtector(AntiforgeryPurpose);
 
         return HttpAntiforgery.Create(new HttpAntiforgeryOptions
@@ -118,7 +118,7 @@ public class HttpAntiforgeryProtectorSeamTests
     {
         using TempDirectory keys = new();
         IDataProtector shared = DataProtectionProvider
-            .Create(KeyRepository.CreateFileSystem(keys.Path), o => o.ApplicationDiscriminator = "web")
+            .Create(FileSystemKeyRepository.Create(keys.Path), o => o.ApplicationDiscriminator = "web")
             .CreateProtector(AntiforgeryPurpose);
 
         // Two services share the protector but deliberately carry different (ignored) Key bytes.

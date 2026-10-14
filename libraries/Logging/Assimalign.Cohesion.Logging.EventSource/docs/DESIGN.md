@@ -28,8 +28,9 @@ flowchart LR
 | `Assimalign.Cohesion.Logging.Console` / `.Debug` | Sinks: `ILoggerProvider`s that write entries somewhere. |
 | `Assimalign.Cohesion.Logging.EventSource` | A source of entries: forwards event-source events into a factory. |
 
-No instrumented library references this package, and none needs to: the contract between them is the
-event source's *name*. An instrumented library references no Logging package at all.
+Instrumented libraries publish events without a Logging dependency. Web.Hosting also composes the
+application and references this bridge to forward Web diagnostics by default; the connection between
+the bridge and each instrumented package remains the event source's *name*.
 
 ## Why an inbound bridge
 
@@ -67,13 +68,25 @@ The forwarder is an `ILoggerForwarder` (`Assimalign.Cohesion.Logging`): a compon
   rules. The public API is two verbs and an options object; the listener stays internal behind
   `ILoggerForwarder`.
 
-## Packaging: an opt-in package, not an App kernel member
+## Packaging and Web defaults
 
-`Assimalign.Cohesion.Logging.EventSource` stays an ordinary NuGet package that an application references
-when it wants forwarding; it is not a member of the `Assimalign.Cohesion.App` hosting kernel. The kernel
-is derived from the hosting roots' own dependency closure (`build-system.md`), and no host needs this
-package to run: forwarding is a diagnostic choice an application makes, and an application that never
-forwards should not ship the assembly. Revisit if a hosting root starts forwarding by default.
+The App hosting kernel includes this package beside Logging.Console, through one
+`CohesionAppKernelRoot` entry. Every area framework can therefore deliver Web.Hosting's runtime
+reference without duplicating the bridge in its member list. The ordinary NuGet package remains
+available to applications that compose logging separately.
+
+`WebApplication.CreateBuilder(args)` registers forwarding at Build unless
+`EnableEventSourceForwarding` is false or `Logging.HasForwarders` reports an application registration.
+It clears the broad default list and selects `Assimalign.Cohesion.Web.` plus
+`Assimalign.Cohesion.Http.Connections`. It adds no provider or filter rule. Explicit/options-based
+builders and nested Web hosts register nothing automatically. Applications opt into connection-driver
+or other library events by registering their own forwarder before Build.
+
+EventSource listeners are process-wide: concurrent entry-point hosts (including concurrent program
+factories) can each receive and forward another host's events. Payloads such as `serverId` preserve
+server identity where present; logger scopes cannot recover application attribution. Disable automatic
+forwarding in secondary entry points when they share logging sinks. The Web application owns its
+factory and closes the forwarder during disposal, after server shutdown events have arrived.
 
 ## Selecting sources
 
@@ -158,8 +171,8 @@ inside `Assimalign.Cohesion.Logging` and its sub-namespaces — the well-known c
 
 No reflection, no runtime code generation, no serialization. `EventListener` and `EventWrittenEventArgs`
 are trim-safe, and the package builds with no trim or AOT analyzer warnings. A NativeAOT application
-compiles EventSource out unless it sets `<EventSourceSupport>true</EventSourceSupport>`; without it the
-forwarder is inert — no events, no errors.
+using Sdk.Web defaults `<EventSourceSupport>true</EventSourceSupport>` when unset. Other SDKs must
+set it explicitly. An explicit false wins and makes forwarding inert — no events, no errors.
 
 ## Non-goals
 

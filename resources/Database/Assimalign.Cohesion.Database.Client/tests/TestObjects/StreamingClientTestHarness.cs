@@ -35,7 +35,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
     /// <param name="decorateFactory">Wraps the in-memory connection factory the client dials through, or <see langword="null"/> to use it as is.</param>
     /// <param name="database">The database the client binds to.</param>
     internal StreamingClientTestHarness(string response = "complete",
-        Func<IConnectionFactory, IConnectionFactory>? decorateFactory = null, string database = "documents")
+        Func<IDuplexConnectionFactory, IDuplexConnectionFactory>? decorateFactory = null, string database = "documents")
     {
         _response = response;
         Payload = new byte[48 * ChunkLength];
@@ -44,7 +44,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
             Payload[index] = (byte)(index % 251);
         }
 
-        IConnectionFactory factory = _listener.CreateFactory();
+        IDuplexConnectionFactory factory = _listener.CreateFactory();
         Client = DatabaseClient.Create(new DatabaseClientOptions
         {
             Settings = new DatabaseConnectionSettings
@@ -95,7 +95,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
     }
 
-    private async Task ServeAsync(IConnection transport, CancellationToken cancellationToken)
+    private async Task ServeAsync(IDuplexConnection transport, CancellationToken cancellationToken)
     {
         await using (transport)
         await using (var channel = new ProtocolChannel(transport.AsStream(), Family))

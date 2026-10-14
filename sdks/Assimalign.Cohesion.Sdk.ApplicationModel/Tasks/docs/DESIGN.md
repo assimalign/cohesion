@@ -229,3 +229,5 @@ does not choose a platform implementation; platform providers remain package
 contributions consumed by Gateway. It defines no gateway resource-kind table and
 generates no composition verbs: gateway composition is hand-written against the
 area ApplicationModel packages.
+
+Generated resource-reference `ConnectionFactory()` accessors return `IDuplexConnectionFactory` and request that same contract from `ResourceRuntime`. Their consumers exchange framed bytes, so the generated surface selects the duplex contract explicitly; the common `IConnectionFactory` can produce other connection kinds.

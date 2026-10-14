@@ -25,7 +25,8 @@ public class HttpInterimResponseFeatureTests
         RecordingControl control = new();
         HttpExchangeInterceptorResponseContext context = CreateContext(control);
 
-        HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
+        HttpInterimResponseInterceptor interceptor = HttpInterimResponseInterceptor.Create();
+        interceptor.BeforeResponse(context);
 
         context.Features.Get<IHttpInterimResponseFeature>().ShouldNotBeNull();
     }
@@ -35,7 +36,7 @@ public class HttpInterimResponseFeatureTests
     {
         HttpExchangeInterceptorResponseContext context = CreateContext(control: null);
 
-        HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
+        HttpInterimResponseInterceptor.Create().BeforeResponse(context);
 
         context.Features.Get<IHttpInterimResponseFeature>().ShouldBeNull();
     }
@@ -135,14 +136,14 @@ public class HttpInterimResponseFeatureTests
     private static IHttpInterimResponseFeature CreateFeature(IHttpExchangeControl control)
     {
         HttpExchangeInterceptorResponseContext context = CreateContext(control);
-        HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
+        HttpInterimResponseInterceptor.Create().BeforeResponse(context);
         return context.Features.Get<IHttpInterimResponseFeature>()!;
     }
 
     private static FakeHttpContext CreateContextWithFeature(IHttpExchangeControl control)
     {
         HttpExchangeInterceptorResponseContext interceptorContext = CreateContext(control);
-        HttpInterimResponses.CreateInterceptor().BeforeResponse(interceptorContext);
+        HttpInterimResponseInterceptor.Create().BeforeResponse(interceptorContext);
         return new FakeHttpContext(interceptorContext.Features);
     }
 
@@ -174,6 +175,11 @@ public class HttpInterimResponseFeatureTests
         public bool CanTakeOver => false;
 
         public Stream TakeOver() => throw new InvalidOperationException("This fake control does not offer takeover.");
+
+        public bool CanAcceptTunnel => false;
+
+        public ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromException<Stream>(new InvalidOperationException("This fake control does not offer a tunnel."));
     }
 
     /// <summary>

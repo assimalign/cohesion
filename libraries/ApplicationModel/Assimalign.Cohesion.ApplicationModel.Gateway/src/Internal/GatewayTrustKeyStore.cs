@@ -218,7 +218,7 @@ internal sealed class GatewayTrustKeyStore : IGatewayTrustKeyRepository
         string gatewayName,
         string keyRingDirectory)
     {
-        IKeyRepository repository = KeyRepository.CreateFileSystem(keyRingDirectory);
+        IKeyRepository repository = FileSystemKeyRepository.Create(keyRingDirectory);
         if (OperatingSystem.IsWindows())
         {
             byte[] entropy = Encoding.UTF8.GetBytes(

@@ -43,7 +43,7 @@ public class TlsConnectionLayerTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
-        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, IDuplexConnection server) = InMemoryConnectionPair.Create();
         TlsConnectionLayer layer = new(new TlsServerOptions
         {
             AuthenticationOptions =
@@ -57,12 +57,12 @@ public class TlsConnectionLayerTests : IClassFixture<TestCertificateFixture>
             userCertificateValidationCallback: static (_, _, _, _) => true);
 
         // Act: drive the layer's server handshake against a raw client SslStream on the far end.
-        Task<IConnection> serverUpgrade = layer.UpgradeAsync(server, timeout.Token).AsTask();
+        Task<IDuplexConnection> serverUpgrade = layer.UpgradeAsync(server, timeout.Token).AsTask();
         Task clientHandshake = clientSsl.AuthenticateAsClientAsync(
             new SslClientAuthenticationOptions { TargetHost = "localhost" },
             timeout.Token);
         await Task.WhenAll(serverUpgrade, clientHandshake);
-        IConnection secured = await serverUpgrade;
+        IDuplexConnection secured = await serverUpgrade;
 
         // Assert
         secured.Capabilities.Security.ShouldBe(ConnectionSecurity.Tls);

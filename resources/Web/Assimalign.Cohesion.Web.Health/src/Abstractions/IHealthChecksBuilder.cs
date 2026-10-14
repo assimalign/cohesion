@@ -12,7 +12,8 @@ namespace Assimalign.Cohesion.Web.Health;
 /// mutation surface — a running host cannot add or remove checks. Application and resource authors
 /// obtain a builder from <see cref="HealthChecks.CreateBuilder"/>, then register
 /// <see cref="IHealthCheck"/> implementations, inline probes, or
-/// host health contributor instances through <c>Assimalign.Cohesion.Web.Hosting.Health</c>.
+/// host health contributor instances through the adapter in <c>Assimalign.Cohesion.Web.Hosting</c>,
+/// using the <c>Assimalign.Cohesion.Web.Hosting.Health</c> namespace.
 /// </remarks>
 public interface IHealthChecksBuilder
 {

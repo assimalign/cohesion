@@ -37,10 +37,10 @@ namespace Assimalign.Cohesion.Database.Client;
 public sealed class DatabaseConnection : IAsyncDisposable
 {
     private readonly DatabaseClient _owner;
-    private readonly IConnectionFactory _connectionFactory;
+    private readonly IDuplexConnectionFactory _connectionFactory;
     private readonly DatabaseConnectionSettings _settings;
 
-    private IConnection? _connection;
+    private IDuplexConnection? _connection;
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
     private bool _isOpen;
@@ -52,7 +52,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
     private TaskCompletionSource? _exchangeCompletion;
     private Task? _returnTask;
 
-    internal DatabaseConnection(DatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
+    internal DatabaseConnection(DatabaseClient owner, IDuplexConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
         _owner = owner;
         _connectionFactory = connectionFactory;
@@ -217,7 +217,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
     /// its timeout), so it is wrapped as a dial failure too, as Npgsql turns such a cancellation
     /// into a timeout.
     /// </remarks>
-    private async ValueTask<IConnection> DialAsync(CancellationToken cancellationToken)
+    private async ValueTask<IDuplexConnection> DialAsync(CancellationToken cancellationToken)
     {
         EndPoint endPoint = _settings.EndPoint!;
 
@@ -235,7 +235,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or ObjectDisposedException or OutOfMemoryException))
         {
-            // Broad on purpose: IConnectionFactory is an open seam and each transport throws its
+            // Broad on purpose: IDuplexConnectionFactory is an open seam and each transport throws its
             // own types (SocketException, IOException, AuthenticationException, TimeoutException,
             // ConnectionAbortedException), so a list would let the next transport's failure escape.
             throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, $"Failed to connect to {Describe(endPoint)}: {exception.Message}", exception);

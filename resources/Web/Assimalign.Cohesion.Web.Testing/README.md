@@ -12,7 +12,7 @@ complementary modes:
 ```csharp
 await using WebApplicationTestFactory factory = new();
 
-factory.Builder.AddRouting();
+factory.Builder.Services.AddRouting();
 factory.Application.UseRouting().Map(new Route(HttpMethod.Get, "/widgets", new RouterRouteHandler(async context =>
 {
     context.Response.StatusCode = HttpStatusCode.Ok;

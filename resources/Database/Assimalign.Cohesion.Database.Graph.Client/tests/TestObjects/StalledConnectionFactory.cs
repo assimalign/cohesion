@@ -11,11 +11,11 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 /// A connection factory whose dial never completes: it signals that the dial started, then waits
 /// for the caller's cancellation, so a test can cancel a connect mid-dial.
 /// </summary>
-internal sealed class StalledConnectionFactory : IConnectionFactory
+internal sealed class StalledConnectionFactory : DuplexConnectionFactory
 {
     private readonly TaskCompletionSource _dialing = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public ConnectionCapabilities Capabilities { get; } = new(
+    public override ConnectionCapabilities Capabilities { get; } = new(
         ConnectionProtocol.Tcp,
         ConnectionDelivery.Stream,
         IsReliable: true,
@@ -26,7 +26,7 @@ internal sealed class StalledConnectionFactory : IConnectionFactory
     /// <summary>Gets a task that completes when the dial starts.</summary>
     public Task Dialing => _dialing.Task;
 
-    public async ValueTask<IConnection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         _dialing.TrySetResult();
         await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);

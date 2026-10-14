@@ -39,7 +39,7 @@ public sealed class GraphDatabaseServer : DatabaseServer
 {
     private readonly GraphDatabaseEngine _engine;
     private readonly GraphDatabaseServerOptions _options;
-    private readonly IConnectionListener _listener;
+    private readonly IDuplexConnectionListener _listener;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly ConcurrentDictionary<Guid, GraphDatabaseServerSession> _sessions = new();
 
@@ -205,7 +205,7 @@ public sealed class GraphDatabaseServer : DatabaseServer
     {
         while (!softStop.IsCancellationRequested)
         {
-            IConnection connection;
+            IDuplexConnection connection;
 
             try
             {
@@ -246,7 +246,7 @@ public sealed class GraphDatabaseServer : DatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private static async Task RejectAsync(IConnection connection, CancellationToken hardAbort)
+    private static async Task RejectAsync(IDuplexConnection connection, CancellationToken hardAbort)
     {
         try
         {

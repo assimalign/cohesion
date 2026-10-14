@@ -12,5 +12,14 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
 	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
+	<ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
+        <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+    </ItemGroup>
 </Project>

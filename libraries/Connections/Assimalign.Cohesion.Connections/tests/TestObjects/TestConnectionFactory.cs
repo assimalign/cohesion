@@ -6,12 +6,12 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections.Tests;
 
 /// <summary>
-/// A <see cref="ConnectionFactory"/> double that yields pre-queued connections and records the
+/// A <see cref="DuplexConnectionFactory"/> double that yields pre-queued connections and records the
 /// endpoint each connect call was made against.
 /// </summary>
-internal sealed class TestConnectionFactory : ConnectionFactory
+internal sealed class TestConnectionFactory : DuplexConnectionFactory
 {
-    private readonly Queue<Connection> _pending = new();
+    private readonly Queue<DuplexConnection> _pending = new();
     private readonly ConnectionCapabilities _capabilities;
 
     public TestConnectionFactory(ConnectionCapabilities? capabilities = null)
@@ -23,12 +23,12 @@ internal sealed class TestConnectionFactory : ConnectionFactory
 
     public override ConnectionCapabilities Capabilities => _capabilities;
 
-    public void Enqueue(Connection connection) => _pending.Enqueue(connection);
+    public void Enqueue(DuplexConnection connection) => _pending.Enqueue(connection);
 
-    public override ValueTask<Connection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override ValueTask<IDuplexConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         LastEndPoint = endPoint;
 
-        return ValueTask.FromResult(_pending.Dequeue());
+        return ValueTask.FromResult<IDuplexConnection>(_pending.Dequeue());
     }
 }

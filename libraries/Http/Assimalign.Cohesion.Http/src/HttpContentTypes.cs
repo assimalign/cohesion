@@ -12,14 +12,24 @@ namespace Assimalign.Cohesion.Http;
 /// own overlay table with <see cref="CreateMap(IEnumerable{KeyValuePair{string, string}})"/>.
 /// </summary>
 /// <remarks>
-/// Lookups are case-insensitive and match on the final extension of a file name (so
-/// <c>archive.tar.gz</c> resolves as <c>.gz</c>). The table intentionally covers common web
-/// asset types rather than the full IANA registry; unknown extensions fall back to
-/// <see cref="Fallback"/>.
+/// <para>
+/// There are two lookups, and they never guess which one the caller meant.
+/// <see cref="TryGetFromFileName(string, out string)"/> takes a file name and reads the type from
+/// its final extension (so <c>archive.tar.gz</c> resolves as <c>.gz</c>).
+/// <see cref="TryGetFromExtension(string, out string)"/> takes an extension, which must start with
+/// a dot (<c>.css</c>). A file name with no extension maps to nothing: neither <c>html</c> nor the
+/// dotfile <c>.json</c> is an HTML or JSON file, so a caller falls back to its own default instead
+/// of serving either as an active type.
+/// </para>
+/// <para>
+/// Lookups are case-insensitive. The table intentionally covers common web asset types rather
+/// than the full IANA registry; a name or extension with no mapping falls back to
+/// <see cref="Fallback"/> in the <c>Get</c> forms.
+/// </para>
 /// </remarks>
 public static class HttpContentTypes
 {
-    /// <summary>The content type used when an extension is unknown: <c>application/octet-stream</c>.</summary>
+    /// <summary>The content type used when a name has no mapped extension: <c>application/octet-stream</c>.</summary>
     public const string Fallback = "application/octet-stream";
 
     // Extension (with leading dot, lower-case) → content type. Common web assets only.
@@ -116,59 +126,126 @@ public static class HttpContentTypes
         = FrozenDictionary.ToFrozenDictionary(_defaultMappings, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Attempts to resolve a content type from a file name or extension using the default table.
+    /// Attempts to resolve a content type from a file name's extension using the default table.
     /// </summary>
-    /// <param name="fileNameOrExtension">A file name (e.g. <c>site.css</c>) or an extension (e.g. <c>.css</c> or <c>css</c>).</param>
-    /// <param name="contentType">When this method returns <see langword="true"/>, the resolved content type.</param>
-    /// <returns><see langword="true"/> when the extension is mapped; otherwise <see langword="false"/>.</returns>
-    public static bool TryGetContentType(string fileNameOrExtension, out string contentType)
-        => TryGetContentType(Default, fileNameOrExtension, out contentType);
+    /// <remarks>
+    /// The extension is the text from the last dot of the name's final segment (after the last
+    /// <c>/</c> or <c>\</c>) to its end. Leading dots belong to the name, so a name with no dot
+    /// (<c>html</c>, <c>README</c>), a dotfile (<c>.json</c>, <c>.env</c>), a name of dots
+    /// (<c>.</c>, <c>..</c>), and a name that ends in a dot (<c>index.html.</c>) have no extension
+    /// and map to nothing. A dotfile that has an extension of its own resolves by it
+    /// (<c>.config.json</c> is JSON).
+    /// </remarks>
+    /// <param name="fileName">A file name, such as <c>site.css</c>. A path is accepted; only its final segment is read.</param>
+    /// <param name="contentType">When this method returns <see langword="true"/>, the resolved content type; otherwise <see cref="string.Empty"/>.</param>
+    /// <returns><see langword="true"/> when the name has an extension and the extension is mapped; otherwise <see langword="false"/>.</returns>
+    public static bool TryGetFromFileName(string fileName, out string contentType)
+        => TryGetFromFileName(Default, fileName, out contentType);
 
     /// <summary>
-    /// Attempts to resolve a content type from a file name or extension using a caller-supplied table
-    /// (typically one built by <see cref="CreateMap(IEnumerable{KeyValuePair{string, string}})"/>).
+    /// Attempts to resolve a content type from a file name's extension using a caller-supplied
+    /// table (typically one built by <see cref="CreateMap(IEnumerable{KeyValuePair{string, string}})"/>).
     /// </summary>
+    /// <remarks>
+    /// The name is read as <see cref="TryGetFromFileName(string, out string)"/> reads it: a name
+    /// with no extension maps to nothing, whatever keys <paramref name="mappings"/> holds.
+    /// </remarks>
     /// <param name="mappings">The extension-to-content-type table to consult.</param>
-    /// <param name="fileNameOrExtension">A file name or extension.</param>
-    /// <param name="contentType">When this method returns <see langword="true"/>, the resolved content type.</param>
-    /// <returns><see langword="true"/> when the extension is mapped; otherwise <see langword="false"/>.</returns>
+    /// <param name="fileName">A file name, such as <c>site.css</c>. A path is accepted; only its final segment is read.</param>
+    /// <param name="contentType">When this method returns <see langword="true"/>, the resolved content type; otherwise <see cref="string.Empty"/>.</param>
+    /// <returns><see langword="true"/> when the name has an extension and the extension is mapped; otherwise <see langword="false"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="mappings"/> is <see langword="null"/>.</exception>
-    public static bool TryGetContentType(
+    public static bool TryGetFromFileName(
         FrozenDictionary<string, string> mappings,
-        string fileNameOrExtension,
+        string fileName,
         out string contentType)
     {
         ArgumentNullException.ThrowIfNull(mappings);
 
         contentType = string.Empty;
-        if (string.IsNullOrEmpty(fileNameOrExtension)
-            || !TryGetExtension(fileNameOrExtension, out string extension))
+        if (string.IsNullOrEmpty(fileName)
+            || !TryGetExtension(fileName, out ReadOnlySpan<char> extension))
         {
             return false;
         }
 
-        if (mappings.TryGetValue(extension, out string? resolved))
-        {
-            contentType = resolved;
-            return true;
-        }
-        return false;
+        return TryLookup(mappings, extension.ToString(), out contentType);
     }
 
     /// <summary>
-    /// Resolves a content type from a file name or extension using the default table, returning
-    /// <see cref="Fallback"/> when the extension is unknown.
+    /// Attempts to resolve a content type from an extension using the default table.
     /// </summary>
-    /// <param name="fileNameOrExtension">A file name or extension.</param>
+    /// <remarks>
+    /// An extension is a dot followed by at least one character, none of them a dot or a path
+    /// separator: exactly what <see cref="TryGetFromFileName(string, out string)"/> reads from a
+    /// name. Anything else maps to nothing, so <c>css</c> is not read as <c>.css</c>, and a file
+    /// name such as <c>site.css</c> is not an extension.
+    /// </remarks>
+    /// <param name="extension">An extension with its leading dot, such as <c>.css</c>.</param>
+    /// <param name="contentType">When this method returns <see langword="true"/>, the resolved content type; otherwise <see cref="string.Empty"/>.</param>
+    /// <returns><see langword="true"/> when <paramref name="extension"/> is an extension and is mapped; otherwise <see langword="false"/>.</returns>
+    public static bool TryGetFromExtension(string extension, out string contentType)
+        => TryGetFromExtension(Default, extension, out contentType);
+
+    /// <summary>
+    /// Attempts to resolve a content type from an extension using a caller-supplied table
+    /// (typically one built by <see cref="CreateMap(IEnumerable{KeyValuePair{string, string}})"/>).
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="extension"/> must have the form <see cref="TryGetFromExtension(string, out string)"/>
+    /// describes; anything else maps to nothing, whatever keys <paramref name="mappings"/> holds.
+    /// </remarks>
+    /// <param name="mappings">The extension-to-content-type table to consult.</param>
+    /// <param name="extension">An extension with its leading dot, such as <c>.css</c>.</param>
+    /// <param name="contentType">When this method returns <see langword="true"/>, the resolved content type; otherwise <see cref="string.Empty"/>.</param>
+    /// <returns><see langword="true"/> when <paramref name="extension"/> is an extension and is mapped; otherwise <see langword="false"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="mappings"/> is <see langword="null"/>.</exception>
+    public static bool TryGetFromExtension(
+        FrozenDictionary<string, string> mappings,
+        string extension,
+        out string contentType)
+    {
+        ArgumentNullException.ThrowIfNull(mappings);
+
+        contentType = string.Empty;
+        if (!IsExtension(extension))
+        {
+            return false;
+        }
+
+        return TryLookup(mappings, extension, out contentType);
+    }
+
+    /// <summary>
+    /// Resolves a content type from a file name's extension using the default table, returning
+    /// <see cref="Fallback"/> when the name has no extension or the extension is not mapped.
+    /// </summary>
+    /// <param name="fileName">A file name, such as <c>site.css</c>. A path is accepted; only its final segment is read.</param>
     /// <returns>The resolved content type, or <see cref="Fallback"/>.</returns>
-    public static string GetContentType(string fileNameOrExtension)
-        => TryGetContentType(fileNameOrExtension, out string contentType) ? contentType : Fallback;
+    public static string GetFromFileName(string fileName)
+        => TryGetFromFileName(fileName, out string contentType) ? contentType : Fallback;
+
+    /// <summary>
+    /// Resolves a content type from an extension using the default table, returning
+    /// <see cref="Fallback"/> when <paramref name="extension"/> is not an extension (it must start
+    /// with a dot) or is not mapped.
+    /// </summary>
+    /// <param name="extension">An extension with its leading dot, such as <c>.css</c>.</param>
+    /// <returns>The resolved content type, or <see cref="Fallback"/>.</returns>
+    public static string GetFromExtension(string extension)
+        => TryGetFromExtension(extension, out string contentType) ? contentType : Fallback;
 
     /// <summary>
     /// Builds a new content-type table from the defaults overlaid with
     /// <paramref name="additionalMappings"/>. Each override key may be given with or without a
     /// leading dot; a key that matches a default extension replaces the default value.
     /// </summary>
+    /// <remarks>
+    /// A key is always an extension, so the leading dot is optional here and nowhere else: the
+    /// key <c>gltf</c> maps the extension <c>.gltf</c>, and a file named <c>gltf</c> still maps
+    /// to nothing. A lookup reads only a name's final extension, so a key with an interior dot,
+    /// such as <c>.tar.gz</c>, is never matched.
+    /// </remarks>
     /// <param name="additionalMappings">The extension-to-content-type overrides to overlay, or <see langword="null"/>.</param>
     /// <returns>A frozen table combining the defaults and the overrides.</returns>
     public static FrozenDictionary<string, string> CreateMap(
@@ -195,28 +272,44 @@ public static class HttpContentTypes
         return map.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
-    private static bool TryGetExtension(string fileNameOrExtension, out string extension)
+    private static bool TryLookup(FrozenDictionary<string, string> mappings, string extension, out string contentType)
     {
-        ReadOnlySpan<char> span = fileNameOrExtension.AsSpan();
-        int dot = span.LastIndexOf('.');
-        if (dot < 0)
+        if (mappings.TryGetValue(extension, out string? resolved))
         {
-            // A bare extension token such as "css" — normalize to ".css".
-            extension = "." + fileNameOrExtension;
+            contentType = resolved;
             return true;
         }
 
-        ReadOnlySpan<char> tail = span[dot..];
-        if (tail.Length <= 1)
+        contentType = string.Empty;
+        return false;
+    }
+
+    private static bool TryGetExtension(string fileName, out ReadOnlySpan<char> extension)
+    {
+        // Only the final segment names the file: a dot in a directory ("assets.v2/html") is not
+        // the file's extension.
+        ReadOnlySpan<char> name = fileName.AsSpan();
+        name = name[(name.LastIndexOfAny('/', '\\') + 1)..];
+
+        // Leading dots belong to the name, so a dotfile (".json") is all name and no extension.
+        // What remains has an extension only when it holds a dot that is not its last character:
+        // "html" has no dot, and "index.html." ends in one.
+        ReadOnlySpan<char> stem = name.TrimStart('.');
+        int dot = stem.LastIndexOf('.');
+        if (dot < 0 || dot == stem.Length - 1)
         {
-            // A trailing dot with no extension characters.
-            extension = string.Empty;
+            extension = default;
             return false;
         }
 
-        extension = tail.ToString();
+        extension = stem[dot..];
         return true;
     }
+
+    private static bool IsExtension(string extension)
+        => extension is { Length: > 1 }
+            && extension[0] == '.'
+            && extension.AsSpan(1).IndexOfAny('.', '/', '\\') < 0;
 
     private static string NormalizeKey(string key)
         => key[0] == '.' ? key : "." + key;

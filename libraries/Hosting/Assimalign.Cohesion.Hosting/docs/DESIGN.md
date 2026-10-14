@@ -17,6 +17,10 @@ running → `OnStoppingAsync` → services `StoppingAsync`/`StopAsync`/`StoppedA
 Startup is dependency-sensitive: serial startup stops at the first failure, while configured
 concurrent startup collects failures. Either path performs best-effort reverse-order compensation,
 marks the host `Failed`, completes its run signals, and preserves the original startup exception.
+This finalization also runs when startup budget setup or rollback service resolution/enumeration
+throws. A retry executes a fresh attempt and surfaces a persistent failure again. Compared with
+10.0.0-preview.1, such retries now throw instead of silently succeeding while stuck in `Starting`
+(#1079; behavioral breaking change).
 
 On failure, the coordinator disarms the startup timer and drains its shutdown registration before
 compensation can dispose run state or clear the shutdown callback. Reporting therefore cannot
@@ -138,6 +142,11 @@ remaining parent budget and the child's budget. One stop task is retained per ne
 concurrent callers join the same child drain and observe the same failure. Serial parent shutdown
 uses the host's normal reverse-registration traversal; strict reverse dependency order therefore
 requires `StopServicesConcurrently` to remain disabled.
+
+Shutdown-budget tests observe cancellation separately from completion: a child stop delegate can
+report its cancelled token before the child reaches `Stopped`. State assertions therefore await
+that state for both hosts under the test timeout, while the shorter parent budget still bounds the
+child drain. This changes only test synchronization, with no runtime change from 10.0.0-preview.1.
 
 Nesting is lifecycle composition, not process-policy composition. The wrapper calls only the
 child's `StartAsync` and `StopAsync`; it never invokes, replaces, or clears the child's

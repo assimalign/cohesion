@@ -6,6 +6,7 @@
 		The resource's domain composition remains in its Program.cs.
 	-->
 	<PropertyGroup>
+		<EventSourceSupport Condition="'$(EventSourceSupport)' == ''">true</EventSourceSupport>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Web.ApplicationModel</CohesionResourceApplicationModel>
 		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.WebResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Web</CohesionResourceKind>
@@ -19,5 +20,14 @@
 		<CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" Public="false" />
 		<CohesionProbe Include="readiness" Endpoint="http" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="http" Http="/livez" />
+	</ItemGroup>
+
+	<!--
+		wwwroot is the web root UseStaticFiles() serves, resolved under the content root
+		(AppContext.BaseDirectory for a plain application), so it ships with the build and publish
+		output. A consumer's own None Update in the project body still wins.
+	-->
+	<ItemGroup>
+		<None Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	</ItemGroup>
 </Project>

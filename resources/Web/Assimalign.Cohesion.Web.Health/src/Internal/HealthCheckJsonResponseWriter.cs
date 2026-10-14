@@ -14,20 +14,54 @@ using Assimalign.Cohesion.Http;
 /// <c>application/health+json</c> using a hand-written <see cref="Utf8JsonWriter"/>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Serialization is fully hand-written — no reflection-based <c>JsonSerializer</c> — so the
 /// writer is trim- and NativeAOT-safe (mirrors the <c>OpenApiJsonWriter</c> precedent). Diagnostic
 /// <see cref="HealthReportEntry.Data"/> values are written through a closed type switch; anything
-/// outside the known primitive set falls back to its <see cref="object.ToString"/> form rather
-/// than pulling in a runtime serializer.
+/// outside the known primitive set, other than an <see cref="Exception"/>, falls back to its
+/// <see cref="object.ToString"/> form rather than pulling in a runtime serializer.
+/// </para>
+/// <para>
+/// <see cref="Instance"/> publishes no exception text (CWE-209): it never writes an entry's
+/// <see cref="HealthReportEntry.Exception"/>, it replaces a description that contains the
+/// message of that exception or of any exception in its <see cref="Exception.InnerException"/>
+/// chain with <see cref="ReportedExceptionDescription"/>, and it writes the same text for an
+/// <see cref="Exception"/> placed in <see cref="HealthReportEntry.Data"/>.
+/// <see cref="DeveloperDetails"/>, which <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/>
+/// selects, writes each description as the entry carries it, the top-level exception's
+/// <see cref="Exception.Message"/> as an <c>exception</c> member, and an exception in
+/// <see cref="HealthReportEntry.Data"/> as its message only. The service's fixed descriptions for a
+/// thrown or timed-out check apply to both instances, so neither reproduces the 10.0.0-preview.1
+/// output exactly (see <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/>).
+/// </para>
 /// </remarks>
 internal sealed class HealthCheckJsonResponseWriter : IHealthResponseWriter
 {
     /// <summary>
-    /// The shared, stateless default instance.
+    /// The shared default instance, which publishes no exception text.
     /// </summary>
-    public static readonly HealthCheckJsonResponseWriter Instance = new();
+    public static readonly HealthCheckJsonResponseWriter Instance = new(includeDeveloperDetails: false);
+
+    /// <summary>
+    /// The shared instance that also publishes each entry's exception message, selected by
+    /// <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/>.
+    /// </summary>
+    public static readonly HealthCheckJsonResponseWriter DeveloperDetails = new(includeDeveloperDetails: true);
+
+    /// <summary>
+    /// The description <see cref="Instance"/> writes in place of one that contains an exception
+    /// message.
+    /// </summary>
+    internal const string ReportedExceptionDescription = "The check reported an exception.";
 
     private const string HealthJsonContentType = "application/health+json; charset=utf-8";
+
+    private readonly bool _includeDeveloperDetails;
+
+    private HealthCheckJsonResponseWriter(bool includeDeveloperDetails)
+    {
+        _includeDeveloperDetails = includeDeveloperDetails;
+    }
 
     public async ValueTask WriteAsync(IHttpContext context, HealthReport report, CancellationToken cancellationToken = default)
     {
@@ -45,7 +79,7 @@ internal sealed class HealthCheckJsonResponseWriter : IHealthResponseWriter
         await context.Response.Body.WriteAsync(buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
 
-    private static void WriteReport(Utf8JsonWriter writer, HealthReport report)
+    private void WriteReport(Utf8JsonWriter writer, HealthReport report)
     {
         writer.WriteStartObject();
         writer.WriteString("status", ToStatusString(report.Status));
@@ -62,18 +96,19 @@ internal sealed class HealthCheckJsonResponseWriter : IHealthResponseWriter
         writer.WriteEndObject();
     }
 
-    private static void WriteEntry(Utf8JsonWriter writer, HealthReportEntry entry)
+    private void WriteEntry(Utf8JsonWriter writer, HealthReportEntry entry)
     {
         writer.WriteStartObject();
         writer.WriteString("status", ToStatusString(entry.Status));
         writer.WriteNumber("durationMs", entry.Duration.TotalMilliseconds);
 
-        if (entry.Description is not null)
+        string? description = _includeDeveloperDetails ? entry.Description : PublicDescription(entry);
+        if (description is not null)
         {
-            writer.WriteString("description", entry.Description);
+            writer.WriteString("description", description);
         }
 
-        if (entry.Exception is not null)
+        if (_includeDeveloperDetails && entry.Exception is not null)
         {
             writer.WriteString("exception", entry.Exception.Message);
         }
@@ -99,10 +134,43 @@ internal sealed class HealthCheckJsonResponseWriter : IHealthResponseWriter
         writer.WriteEndObject();
     }
 
-    private static void WriteDataValue(Utf8JsonWriter writer, object? value)
+    /// <summary>
+    /// Returns the description the default writer may publish: the entry's own description, unless
+    /// it contains the message of the entry's exception or of an exception in its inner chain. A
+    /// check that returns <c>HealthCheckResult.Unhealthy(exception.Message, exception)</c>, or
+    /// formats the message into its description, would otherwise publish the exception text.
+    /// </summary>
+    private static string? PublicDescription(HealthReportEntry entry)
+    {
+        string? description = entry.Description;
+        if (description is null or HealthCheckService.ThrewDescription or HealthCheckService.TimedOutDescription ||
+            entry.Exception is null)
+        {
+            return description;
+        }
+
+        for (Exception? exception = entry.Exception; exception is not null; exception = exception.InnerException)
+        {
+            string message = exception.Message;
+            if (message.Length > 0 && description.Contains(message, StringComparison.Ordinal))
+            {
+                return ReportedExceptionDescription;
+            }
+        }
+
+        return description;
+    }
+
+    private void WriteDataValue(Utf8JsonWriter writer, object? value)
     {
         switch (value)
         {
+            case Exception exception:
+                // ToString() would write the type, message, inner exceptions and stack trace. The
+                // default instance withholds all of it; the developer instance writes the message
+                // only, as it does for the entry's own exception.
+                writer.WriteStringValue(_includeDeveloperDetails ? exception.Message : ReportedExceptionDescription);
+                break;
             case null:
                 writer.WriteNullValue();
                 break;

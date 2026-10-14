@@ -6,32 +6,53 @@ using Http;
 
 
 /// <summary>
-/// 
+/// Composes a web application: the features every exchange carries, the servers that accept its
+/// requests and its request pipeline, then builds it.
 /// </summary>
-public interface IWebApplicationBuilder 
+/// <remarks>
+/// <para>
+/// The hosting runtime implements this contract (<c>WebApplication.CreateBuilder(args)</c>). Its members
+/// take values and factories over the application context, never a service container, so any
+/// composition surface that implements it can be handed features and servers.
+/// </para>
+/// <para>
+/// Feature packages do not extend this contract. Their registration verbs are component integrations
+/// projected onto the application's service registrations, <c>builder.Services.Add&lt;Feature&gt;(...)</c>,
+/// which register the same <see cref="IHttpFeature"/> singleton <see cref="AddFeature(IHttpFeature)"/>
+/// does (owner decision 34, #1380). <see cref="AddFeature(IHttpFeature)"/> stays the raw registration
+/// path for a feature no package ships a verb for. A request feature is a singleton: the hosting runtime
+/// rejects a scoped, transient or disposable one.
+/// </para>
+/// </remarks>
+public interface IWebApplicationBuilder
 {
-
-      ///// <summary>
-    ///// 
-    ///// </summary>
-    ///// <typeparam name="TFeature"></typeparam>
-    ///// <param name="feature"></param>
-    ///// <returns></returns>
-    //IWebApplicationBuilder AddFeature<TFeature>(TFeature feature) where TFeature : IHttpFeature;
-
-
     /// <summary>
-    /// Adds a feature to be used within the HttpContext Feature Collection. <see cref="IHttpContext.Features"/>
+    /// Adds a feature that the application exposes on <see cref="IWebApplicationContext.Features"/> and
+    /// stamps onto every exchange's <see cref="IHttpContext.Features"/> before any middleware runs.
     /// </summary>
-    /// <param name="feature"></param>
-    /// <returns></returns>
+    /// <remarks>
+    /// Features are registered per application. When two registrations share a feature type, the one
+    /// registered last is the one an exchange carries.
+    /// </remarks>
+    /// <param name="feature">The feature instance.</param>
+    /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="feature"/> is null.</exception>
     IWebApplicationBuilder AddFeature(IHttpFeature feature);
 
     /// <summary>
-    ///
+    /// Adds a feature created from the application context, exposed and stamped onto every exchange like
+    /// one added with <see cref="AddFeature(IHttpFeature)"/>.
     /// </summary>
-    /// <param name="configure"></param>
-    /// <returns></returns>
+    /// <remarks>
+    /// The factory runs once, the first time the application's features are resolved after
+    /// <see cref="Build"/>, so it sees every registration.
+    /// </remarks>
+    /// <param name="configure">The factory that creates the feature.</param>
+    /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The factory returns <see langword="null"/> when the application's features are resolved.
+    /// </exception>
     IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure);
 
     /// <summary>
@@ -74,8 +95,11 @@ public interface IWebApplicationBuilder
     IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline);
 
     /// <summary>
-    /// 
+    /// Builds the application from the registrations. A builder builds one application.
     /// </summary>
-    /// <returns></returns>
+    /// <returns>The built application, ready to start.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder has already built an application, or its registrations cannot be composed into one.
+    /// </exception>
     IWebApplication Build();
 }

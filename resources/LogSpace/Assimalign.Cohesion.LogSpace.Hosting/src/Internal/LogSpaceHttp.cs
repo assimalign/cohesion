@@ -10,6 +10,9 @@ using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
 
+using IPAddress = System.Net.IPAddress;
+using IPEndPoint = System.Net.IPEndPoint;
+
 namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 internal static class LogSpaceHttp
@@ -130,7 +133,28 @@ internal static class LogSpaceHttp
         ResourceContext resource,
         bool telemetry)
     {
-        if (resource.GatewayName is null) { return (true, null); }
+        if (resource.GatewayName is null)
+        {
+            if (telemetry) { return (true, null); }
+
+            // Query runs before the shared control plane, so it must check the transport peer too.
+            if (context.ConnectionInfo.RemoteEndPoint is IPEndPoint endpoint)
+            {
+                IPAddress address = endpoint.Address;
+                if (address.IsIPv4MappedToIPv6)
+                {
+                    address = address.MapToIPv4();
+                }
+
+                if (address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback))
+                {
+                    return (true, null);
+                }
+            }
+
+            context.Response.StatusCode = HttpStatusCode.Forbidden;
+            return (false, null);
+        }
         string header = context.Request.Headers[HttpHeaderKey.Authorization].ToString();
         ResourceCredentialVerification verification = default;
         if (header.Length < 16384)

@@ -68,3 +68,17 @@ provides that surface for a manifest-backed Web external. The internal wrapper d
 registered graph descriptor and retains its exact resource identity. Typed `DependsOn` chaining
 retains the Web descriptor type. The shared `IResourceCommandDescriptor` seam is available for
 future Web-owned verbs, but this slice adds no Web command kind or mutation handler.
+
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

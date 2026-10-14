@@ -21,6 +21,22 @@ namespace Assimalign.Cohesion.Web.Routing.Tests;
 /// </summary>
 public class PerApplicationRouterStateTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - PerApp: Each RoutingBuilder.Build returns a feature with its own route table")]
+    public void RoutingBuilderBuild_CalledTwice_ShouldReturnIsolatedFeatures()
+    {
+        // Arrange — the builder behind builder.Services.AddRouting() (#1395).
+        RoutingBuilder routing = new();
+
+        // Act
+        IRouterFeature first = routing.Build();
+        IRouterFeature second = routing.Build();
+
+        // Assert — two registrations never share a route table (#789).
+        first.ShouldNotBeSameAs(second);
+        first.Builder.ShouldNotBeSameAs(second.Builder);
+        first.Name.ShouldBe(nameof(IRouterFeature));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - PerApp: Two applications in one process have isolated route tables")]
     public async Task TwoApplications_InOneProcess_ShouldHaveIsolatedRouteTables()
     {
@@ -36,11 +52,12 @@ public class PerApplicationRouterStateTests
         app2.AddRouting();
         app2.UseRouting().Map(new Route(HttpMethod.Get, "/beta", betaHandler));
 
-        // Track fall-through so a 404 (no leak) is observable.
+        // Track requests that selected no route, so a 404 (no leak) is observable. Routing is non-terminal
+        // (#1054), so downstream middleware runs for every request and reads whether a route matched.
         bool app1FellThrough = false;
         bool app2FellThrough = false;
-        app1.Use((ctx, next) => { app1FellThrough = true; return next.Invoke(ctx); });
-        app2.Use((ctx, next) => { app2FellThrough = true; return next.Invoke(ctx); });
+        app1.Use((ctx, next) => { app1FellThrough = ctx.GetRouteMatch() is null; return next.Invoke(ctx); });
+        app2.Use((ctx, next) => { app2FellThrough = ctx.GetRouteMatch() is null; return next.Invoke(ctx); });
 
         // Act & Assert — app 1 serves /alpha but 404s /beta.
         await app1.ExecuteAsync(TestHttpContext.Create(HttpMethod.Get, "/alpha"));

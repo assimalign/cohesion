@@ -8,29 +8,29 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 /// <summary>
-/// A <see cref="ConnectionListener"/> double that yields queued connections.
+/// A <see cref="DuplexConnectionListener"/> double that yields queued connections.
 /// When the queue is empty, <see cref="AcceptAsync"/> waits (like a real
 /// listener) until a connection is enqueued or the accept is cancelled, so
 /// the <see cref="HttpConnectionListener"/> accept loop can keep re-arming.
 /// </summary>
-internal sealed class TestConnectionListener : ConnectionListener
+internal sealed class TestConnectionListener : DuplexConnectionListener
 {
-    private readonly Queue<Connection> _connections = new();
-    private readonly Queue<TaskCompletionSource<Connection>> _waiters = new();
+    private readonly Queue<IDuplexConnection> _connections = new();
+    private readonly Queue<TaskCompletionSource<IDuplexConnection>> _waiters = new();
     private readonly Lock _lock = new();
     private readonly TaskCompletionSource<object?> _waitingForConnection = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConnectionCapabilities _capabilities;
 
-    public TestConnectionListener(params Connection[] connections)
+    public TestConnectionListener(params IDuplexConnection[] connections)
         : this(capabilities: null, connections)
     {
     }
 
-    public TestConnectionListener(ConnectionCapabilities? capabilities, params Connection[] connections)
+    public TestConnectionListener(ConnectionCapabilities? capabilities, params IDuplexConnection[] connections)
     {
         _capabilities = capabilities ?? TestConnection.DefaultCapabilities;
 
-        foreach (Connection connection in connections)
+        foreach (IDuplexConnection connection in connections)
         {
             _connections.Enqueue(connection);
         }
@@ -55,6 +55,8 @@ internal sealed class TestConnectionListener : ConnectionListener
     /// </summary>
     public Task WaitingForConnection => _waitingForConnection.Task;
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 15000);
 
     public override ConnectionCapabilities Capabilities => _capabilities;
@@ -65,7 +67,7 @@ internal sealed class TestConnectionListener : ConnectionListener
         return ValueTask.CompletedTask;
     }
 
-    public void Enqueue(Connection connection)
+    public void Enqueue(IDuplexConnection connection)
     {
         lock (_lock)
         {
@@ -81,7 +83,7 @@ internal sealed class TestConnectionListener : ConnectionListener
         }
     }
 
-    public override ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken)
     {
         lock (_lock)
         {
@@ -92,13 +94,13 @@ internal sealed class TestConnectionListener : ConnectionListener
                 return ValueTask.FromResult(_connections.Dequeue());
             }
 
-            TaskCompletionSource<Connection> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<IDuplexConnection> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             if (cancellationToken.CanBeCanceled)
             {
                 cancellationToken.Register(static state =>
                 {
-                    TaskCompletionSource<Connection> completion = (TaskCompletionSource<Connection>)state!;
+                    TaskCompletionSource<IDuplexConnection> completion = (TaskCompletionSource<IDuplexConnection>)state!;
                     completion.TrySetCanceled();
                 }, waiter);
             }
@@ -106,7 +108,7 @@ internal sealed class TestConnectionListener : ConnectionListener
             _waiters.Enqueue(waiter);
             _waitingForConnection.TrySetResult(null);
 
-            return new ValueTask<Connection>(waiter.Task);
+            return new ValueTask<IDuplexConnection>(waiter.Task);
         }
     }
 

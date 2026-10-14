@@ -1,5 +1,7 @@
 ---
 paths:
+  - "libraries/**/src/**/*.cs"
+  - "resources/**/src/**/*.cs"
   - "**/Internal/EventSource/**"
   - "**/*EventSource*.cs"
   - "libraries/Logging/Assimalign.Cohesion.Logging.EventSource/**"
@@ -15,6 +17,13 @@ in process, `Assimalign.Cohesion.Logging.EventSource` forwards it into `ILogger`
 
 Consumer-facing reference, including the list of instrumented assemblies: `docs/EVENT_SOURCES.md`.
 First implementer: the `Connections.*` drivers (`Tcp`, `Quic`, `NamedPipes`, `Udp`).
+
+**Recorded amendment — Web event sources (owner decision 49, 2026-10-11, #1397).** The owner
+approved decisions (a), (d) and (f) in `docs/programs/WEB_EVENT_SOURCES_SCOPE.md` §3: bounded Web
+payloads and type-only exceptions where messages echo request input, entry-point-gated default
+forwarding to preserve visibility, and an Sdk.Web NativeAOT default. Application exception messages
+remain type plus `Message`, including under default forwarding to configured sinks. These are the
+rules for the later source and delivery changes; this amendment adds no source or default forwarder.
 
 ## Shape of an event source
 
@@ -70,6 +79,9 @@ internal sealed class TcpConnectionEventSource : EventSource
    - The `Assimalign.Cohesion.` prefix identifies every Cohesion source; it is the forwarder's default.
    - The name is the logger category of forwarded entries, so category rules apply unchanged:
      `AddRule("Assimalign.Cohesion.Connections", LogLevel.Debug)` covers every driver.
+   - Category prefixes can overlap: `Assimalign.Cohesion.Web.Diagnostics` is a prefix of the HTTP
+     log's `Assimalign.Cohesion.Web.Diagnostics.HttpLogging`. A filter rule on the source category
+     also tunes the HTTP log. Document this overlap; add no default filter rule for it.
    - Tools take the assembly name: `dotnet-trace collect --providers Assimalign.Cohesion.Connections.Tcp`.
 5. **One singleton.** `public static readonly <Subject>EventSource Log = new();` with a `private`
    parameterless constructor (default, manifest-based settings). Nothing else constructs one.
@@ -110,14 +122,65 @@ internal sealed class TcpConnectionEventSource : EventSource
     `DisposeAsync`) can end the same object. Expose the backing values as `internal` read-only
     properties for tests. A counter that cannot be driven accurately is not shipped.
 11. **Payload hygiene.** No secrets, credentials, tokens, connection strings, or message bodies.
-    Identifiers and endpoints are fine. An exception is written as its type's full name and its
-    `Message`, never `ToString()`: payloads stay bounded, and stack traces belong to the caller that
-    handles the exception.
+    An exception is written as its type's full name and its `Message`, never `ToString()`: payloads
+    stay bounded, and stack traces belong to the caller that handles the exception.
+    - **Type-only carve-out.** Omit the message where it is known to echo request input:
+      Http.Forms' `InvalidDataException`; StaticFiles' `FileSystemException`; application-delegate
+      exceptions in Web.Diagnostics; and JSON and handler exceptions in control-plane commands.
+      Application exceptions outside these carve-outs stay type plus `Message`, including
+      ErrorHandling, completion callbacks and health checks. Each owning `DESIGN.md` states this.
+    - **Attacker-chosen identifiers.** Keep one only where it is the diagnosis, only at Verbose,
+      truncated inside `IsEnabled`, and treated as untrusted text. Limits in characters: `Host`,
+      253; a normalized `Origin`, 256; JWT `kid`, 128; JWT `alg`, 32; a rejected header name, 64.
+    - **Never written by any Web source:**
+      - `url.path`, the query or the raw target;
+      - header values, bodies or form fields;
+      - cookie or session values, tokens, claims, user names or roles;
+      - rate-limit partition keys, cache keys or tag names;
+      - control-plane command payloads, keys or caller identities.
+    - **Web routes and peers.** Routes appear as `routeTemplate`
+      (`IWebEndpointFeature.RouteTemplate`), only in packages already referencing Web.Routing.
+      A peer address appears only in
+      `ConnectionFaulted`/`ConnectionEndedByPeer`, `CredentialRejected` and
+      `ForwardingStopped(UntrustedPeer)`; it is personal data in the sink.
 12. **NativeAOT.** A NativeAOT application receives no events unless it sets
-    `<EventSourceSupport>true</EventSourceSupport>`. Library behavior never depends on whether events are
-    delivered, and the library builds with no trim or AOT analyzer warnings.
+    `<EventSourceSupport>true</EventSourceSupport>`. Sdk.Web defaults `EventSourceSupport` to `true`
+    when unset, preserving an application's explicit choice. The SDK implementation is #1399:
+    measure and document the linux-x64 Web AOT guard binary-size delta first, then cover the default
+    under `PublishAot=true` and explicit overrides with an SDK evaluation test. The guard keeps its
+    own explicit setting because it uses `Microsoft.NET.Sdk`. Library behavior never depends on
+    whether events are delivered, and the library builds with no trim or AOT analyzer warnings.
+13. **Throttle repeatable warnings and errors.** A Warning or Error that a remote client, a scanner
+    or a misconfiguration can repeat at will is raised at most once per second per event, with a
+    `suppressedCount:int` payload. Its counter stays exact and counts every occurrence, including
+    suppressed events. Tcp's `AcceptBackoff` is the precedent. Distinct application faults such as
+    `PipelineFault`, `CompletionCallbackFailed` and `ConnectionFaulted` are not throttled. The one
+    exception is `ResponseHeadRefused`, which header-injection probes drive.
+14. **Web request events.** Per-request events are Verbose and never report success. They carry
+    `requestId`, read inside `IsEnabled` as `IWebRequestIdFeature.RequestId.ToHexString()`. Never read
+    `Activity.Current`: with no ActivitySource listener, Web.Server does not enter `StartActivity`
+    to clear it, so it can be an unrelated ambient activity shared by every request. The request
+    feature supplies the server span's trace id when traced, otherwise the `traceparent` id or a
+    stable random id, so events and the HTTP access log can join.
+15. **Split the signals.** An assembly's same-named `ActivitySource`, `Meter` and `EventSource` have
+    distinct jobs: spans and `http.server.*` metrics live in the BCL `ActivitySource` and `Meter`;
+    operator events and attribution counters live in the `EventSource`. Web sources do not count
+    requests or duplicate their spans with per-request Start/Stop events.
+16. **Default Web forwarding.** The entry-point-gated default forwarder is the sanctioned way
+    Web.Hosting buys back visibility when its self-diagnostics move to its internal `EventSource`.
+    A library never takes `ILogger` to describe itself, and keeps no duplicate logging path.
+    `WebApplicationBuilder.Build` registers forwarding only for `CreateBuilder(args)`, only when
+    the application registered no forwarder of its own, and with an opt-out. Clear `Sources` before
+    adding the `Assimalign.Cohesion.Web.` prefix; add #1300's exact source name when it lands, never
+    the `Connections.` driver prefix. Listeners are process-wide, so nested builders must not
+    register default forwarders. Forwarding reaches configured sinks and does not add a provider;
+    concurrent entry-point program test hosts can see each other's events. Implementation is #1399.
 
 ## Tests (required for every event source)
+
+Link the canonical test-only `build/TestSupport/EventSourceRecorder.cs` using the single
+`Compile`/`Link` item in [testing.md](testing.md#shared-eventsource-recorder). The recorder lives
+in neutral test support, not in a shipped library; use `Assimalign.Cohesion.Testing`.
 
 Each instrumented library's test project carries a `<Subject>EventSourceTests` class that:
 
@@ -142,6 +205,7 @@ Event sources and their counters are process-wide, so these tests run in a
 ## Not yet conforming
 
 Pre-convention sources in `Resilience` (three sources: a concatenated name, an empty name, a name ending
-in `EventSource`) and `Http.Connections` (an empty placeholder) are tracked for migration in
-`docs/EVENT_SOURCES.md`. Do not copy their patterns; bring one into line when you next touch it.
-`DependencyInjection` was the first brought into line this way; its `DESIGN.md` records what changed.
+in `EventSource`) are tracked for migration in `docs/EVENT_SOURCES.md`. Do not copy their patterns;
+bring one into line when you next touch it. `DependencyInjection` was the first brought into line this
+way; its `DESIGN.md` records what changed. `Http.Connections`' empty placeholder was deleted instead
+(#1039): an assembly that raises nothing has none, and its `DESIGN.md` records why.

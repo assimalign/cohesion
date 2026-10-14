@@ -14,11 +14,11 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 /// </summary>
 internal sealed class KeyValueProtocolClient : IAsyncDisposable
 {
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly ProtocolFrameReader _reader;
     private readonly ProtocolFrameWriter _writer;
 
-    internal KeyValueProtocolClient(IConnection connection)
+    internal KeyValueProtocolClient(IDuplexConnection connection)
     {
         _connection = connection;
         var stream = connection.AsStream();

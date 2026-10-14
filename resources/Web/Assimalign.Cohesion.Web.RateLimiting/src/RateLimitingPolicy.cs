@@ -51,7 +51,7 @@ public sealed class RateLimitingPolicy
             throw new ArgumentOutOfRangeException(
                 nameof(permitCount),
                 permitCount,
-                "The permit count must be a positive integer.");
+                ErrorMessages.PermitCountInvalid);
         }
 
         Limiter = limiter;

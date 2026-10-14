@@ -59,7 +59,7 @@ public sealed class BlobClientDialFailureTests
         exception.CancellationToken.ShouldBe(cancellation.Token);
     }
 
-    private static BlobClient CreateClient(IConnectionFactory factory, EndPoint endPoint)
+    private static BlobClient CreateClient(IDuplexConnectionFactory factory, EndPoint endPoint)
         => BlobClient.Create(new BlobClientOptions
         {
             Settings = new DatabaseConnectionSettings

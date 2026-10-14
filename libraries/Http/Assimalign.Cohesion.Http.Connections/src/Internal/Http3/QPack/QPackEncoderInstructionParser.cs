@@ -146,7 +146,7 @@ internal static class QPackEncoderInstructionParser
             {
                 throw new QPackException(
                     Http3ErrorCode.QPackEncoderStreamError,
-                    "A QPACK encoder-stream integer overflowed.");
+                    ErrorMessages.QpackEncoderIntegerOverflow);
             }
 
             if ((continuation & 0x80) == 0)
@@ -181,7 +181,7 @@ internal static class QPackEncoderInstructionParser
         {
             throw new QPackException(
                 Http3ErrorCode.QPackEncoderStreamError,
-                "A QPACK encoder-stream string has a negative length.");
+                ErrorMessages.QpackEncoderStringLengthNegative);
         }
 
         if (index + length > buffer.Length)
@@ -209,7 +209,7 @@ internal static class QPackEncoderInstructionParser
         {
             throw new QPackException(
                 Http3ErrorCode.QPackEncoderStreamError,
-                "A QPACK encoder-stream string has an invalid Huffman encoding.",
+                ErrorMessages.QpackEncoderHuffmanInvalid,
                 ex);
         }
     }

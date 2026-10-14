@@ -35,10 +35,10 @@ public class InMemoryConnectionListenerTests
         InMemoryConnectionFactory factory = listener.CreateFactory();
 
         // Act — a pending accept resolves as soon as the factory dials, mirroring a real listener.
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
-        Connection client = await factory.ConnectAsync(listener.EndPoint, cancellation.Token);
-        Connection server = await acceptTask;
+        IDuplexConnection client = await factory.ConnectAsync(listener.EndPoint, cancellation.Token);
+        IDuplexConnection server = await acceptTask;
 
         byte[] payload = [7, 8, 9];
         await client.Output.WriteAsync(payload, cancellation.Token);
@@ -64,8 +64,8 @@ public class InMemoryConnectionListenerTests
         // Act & Assert
         for (int i = 0; i < 3; i++)
         {
-            Connection client = await factory.ConnectAsync(listener.EndPoint, cancellation.Token);
-            Connection server = await listener.AcceptAsync(cancellation.Token);
+            IDuplexConnection client = await factory.ConnectAsync(listener.EndPoint, cancellation.Token);
+            IDuplexConnection server = await listener.AcceptAsync(cancellation.Token);
 
             server.ShouldNotBeNull();
             client.Id.ShouldNotBe(server.Id);
@@ -82,7 +82,7 @@ public class InMemoryConnectionListenerTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         InMemoryConnectionListener listener = new();
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         // Act
         await listener.DisposeAsync();

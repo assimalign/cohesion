@@ -16,6 +16,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Copy every declared App.Web member for the assembly-level conformance guard. -->
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

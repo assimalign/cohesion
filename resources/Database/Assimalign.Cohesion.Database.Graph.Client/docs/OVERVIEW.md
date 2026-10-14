@@ -35,3 +35,4 @@ Parameters are encoded using the shared scalar codec, but parameter syntax remai
 the server's advertised GQL subset. The client never parses GQL or retries statements.
 See [design](DESIGN.md) for completion and lifetime behavior.
 
+Supply an `IDuplexConnectionFactory` through `GraphClientOptions.ConnectionFactory`; the shared pool owns the duplex connections it establishes.

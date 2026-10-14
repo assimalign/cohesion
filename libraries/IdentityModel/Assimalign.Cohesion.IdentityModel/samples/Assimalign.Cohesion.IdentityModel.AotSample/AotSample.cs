@@ -122,7 +122,7 @@ internal static class AotSample
         TokenJwt.IJsonWebTokenWriter writer = TokenJwt.JsonWebTokenWriter.CreateEs256(key, "gateway-key-1");
         var token = TokenJwt.JsonWebToken.Parse(writer.Write(descriptor));
         TokenJwt.IJsonWebTokenSignatureVerifier verifier =
-            TokenJwt.JsonWebTokenSignatureVerifier.CreateEcdsa(key, "gateway-key-1");
+            TokenJwt.EcdsaJsonWebTokenSignatureVerifier.Create(key, "gateway-key-1");
         byte[] signingInput = Encoding.ASCII.GetBytes(token.SigningInput!);
         byte[] signature = Base64Url.DecodeFromChars(token.Parts!.Signature);
 
@@ -139,7 +139,7 @@ internal static class AotSample
             HashAlgorithmName.SHA256,
             RSASignaturePadding.Pkcs1);
         TokenJwt.IJsonWebTokenSignatureVerifier rsaVerifier =
-            TokenJwt.JsonWebTokenSignatureVerifier.CreateRsa(rsa);
+            TokenJwt.RsaJsonWebTokenSignatureVerifier.Create(rsa);
         Require(
             rsaVerifier.CanVerify(TokenJwt.JoseAlgorithms.RS256, keyId: null) &&
             rsaVerifier.Verify(TokenJwt.JoseAlgorithms.RS256, rsaSigningInput, rsaSignature),

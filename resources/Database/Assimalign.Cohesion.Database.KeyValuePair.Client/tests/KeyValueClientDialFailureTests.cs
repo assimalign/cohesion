@@ -62,7 +62,7 @@ public sealed class KeyValueClientDialFailureTests
         exception.CancellationToken.ShouldBe(cancellation.Token);
     }
 
-    private static KeyValueClient CreateClient(IConnectionFactory factory, EndPoint endPoint)
+    private static KeyValueClient CreateClient(IDuplexConnectionFactory factory, EndPoint endPoint)
         => KeyValueClient.Create(new KeyValueClientOptions
         {
             Settings = new DatabaseConnectionSettings

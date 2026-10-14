@@ -29,14 +29,14 @@ public sealed class JsonWebTokenWriterTests
         // Arrange
         using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using ECDsa publicKey = CreatePublicKey(privateKey);
-        IJsonWebTokenWriter writer = JsonWebTokenWriter.CreateEs256(privateKey, keyId);
+        JsonWebTokenWriter writer = JsonWebTokenWriter.CreateEs256(privateKey, keyId);
         JsonWebTokenDescriptor descriptor = CreateDescriptor(_now.AddHours(1));
         descriptor.Claims.Add(new IdentityClaim("scope", "bootstrap"));
 
         // Act
         string compact = writer.Write(descriptor);
         JsonWebToken token = JsonWebToken.Parse(compact);
-        IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(publicKey, keyId);
+        IJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(publicKey, keyId);
 
         // Assert
         token.Algorithm.ShouldBe(JoseAlgorithms.ES256);
@@ -67,7 +67,7 @@ public sealed class JsonWebTokenWriterTests
             "{\"iss\":\"cohesion-gateway\",\"aud\":\"attacker\",\"exp\":1788699600}"));
         JsonWebToken tampered = JsonWebToken.Parse(
             string.Concat(original.Header, ".", tamperedPayload, ".", original.Signature));
-        IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(publicKey, keyId);
+        IJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(publicKey, keyId);
 
         // Act
         bool verified = Verify(verifier, tampered);
@@ -84,7 +84,7 @@ public sealed class JsonWebTokenWriterTests
         using ECDsa wrongKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         JsonWebToken token = JsonWebToken.Parse(
             JsonWebTokenWriter.CreateEs256(privateKey, keyId).Write(CreateDescriptor(_now.AddHours(1))));
-        IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(wrongKey, keyId);
+        IJsonWebTokenSignatureVerifier verifier = EcdsaJsonWebTokenSignatureVerifier.Create(wrongKey, keyId);
 
         // Act
         bool verified = Verify(verifier, token);
@@ -122,7 +122,7 @@ public sealed class JsonWebTokenWriterTests
     {
         // Arrange
         using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        IJsonWebTokenWriter writer = JsonWebTokenWriter.CreateEs256(privateKey, keyId);
+        JsonWebTokenWriter writer = JsonWebTokenWriter.CreateEs256(privateKey, keyId);
         JsonWebTokenDescriptor descriptor = CreateDescriptor(_now.AddHours(1));
         descriptor.Claims.Add(new IdentityClaim(IdentityClaimTypes.Issuer, issuer));
 

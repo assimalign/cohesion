@@ -1,14 +1,20 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
+using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Configuration;
+using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Hosting.Internal;
+using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 
 using Shouldly;
 
@@ -16,10 +22,127 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
+[Collection(nameof(TelemetryCollection))]
 public class HttpServerConfigurationTests
 {
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Applies automatic Date configuration on both binding paths")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Bind_OnConfiguredDateHeader_ShouldApplyListenerOption(bool useDefaultEndpoint, bool addDateHeader)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["ProxyHttp:AddDateHeader"] = addDateHeader.ToString(),
+        });
+        HttpConnectionListenerOptions options = new() { AddDateHeader = !addDateHeader };
+
+        // Act
+        if (useDefaultEndpoint)
+        {
+            HttpServerConfiguration.BindOrDefault(configuration, "ProxyHttp", options, HttpServerConfiguration.DevelopmentEndPoint);
+        }
+        else
+        {
+            HttpServerConfiguration.Bind(configuration, "ProxyHttp", options);
+        }
+
+        // Assert
+        options.AddDateHeader.ShouldBe(addDateHeader);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Refuses invalid automatic Date configuration")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Bind_OnInvalidDateHeader_ShouldThrow(bool useDefaultEndpoint)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:AddDateHeader"] = "proxy",
+        });
+        HttpConnectionListenerOptions options = new();
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() =>
+        {
+            if (useDefaultEndpoint)
+            {
+                HttpServerConfiguration.BindOrDefault(configuration, "Http", options, HttpServerConfiguration.DevelopmentEndPoint);
+            }
+            else
+            {
+                HttpServerConfiguration.Bind(configuration, "Http", options);
+            }
+        });
+
+        // Assert
+        error.Message.ShouldContain("Http:AddDateHeader", Case.Sensitive);
+        options.AddDateHeader.ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Applies the configured alternate-scheme policy on both binding paths")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Bind_OnConfiguredAlternateSchemes_ShouldApplyListenerOption(bool useDefaultEndpoint, bool allowAlternateSchemes)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["GatewayHttp:AllowAlternateSchemes"] = allowAlternateSchemes.ToString(),
+        });
+        HttpConnectionListenerOptions options = new() { AllowAlternateSchemes = !allowAlternateSchemes };
+
+        // Act
+        if (useDefaultEndpoint)
+        {
+            HttpServerConfiguration.BindOrDefault(configuration, "GatewayHttp", options, HttpServerConfiguration.DevelopmentEndPoint);
+        }
+        else
+        {
+            HttpServerConfiguration.Bind(configuration, "GatewayHttp", options);
+        }
+
+        // Assert
+        options.AllowAlternateSchemes.ShouldBe(allowAlternateSchemes);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Refuses an invalid alternate-scheme policy before registering endpoints")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Bind_OnInvalidAlternateSchemes_ShouldThrow(bool useDefaultEndpoint)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:AllowAlternateSchemes"] = "trusted",
+        });
+        HttpConnectionListenerOptions options = new();
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() =>
+        {
+            if (useDefaultEndpoint)
+            {
+                HttpServerConfiguration.BindOrDefault(configuration, "Http", options, HttpServerConfiguration.DevelopmentEndPoint);
+            }
+            else
+            {
+                HttpServerConfiguration.Bind(configuration, "Http", options);
+            }
+        });
+
+        // Assert
+        error.Message.ShouldContain("Http:AllowAlternateSchemes", Case.Sensitive);
+        options.AllowAlternateSchemes.ShouldBeFalse();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: Resolves the named Secret mount for each secure protocol")]
-    [InlineData("Https", HttpProtocol.Http11)]
+    [InlineData("Https", HttpProtocol.Http11 | HttpProtocol.Http20)]
     [InlineData("Http1s", HttpProtocol.Http11)]
     [InlineData("Http2s", HttpProtocol.Http20)]
     public async Task Bind_HttpsProtocols_ShouldUseCertificateMount(string protocol, HttpProtocol expected)
@@ -81,6 +204,7 @@ public class HttpServerConfigurationTests
             ["Http:Limits:MaxRequestLineSize"] = "4096",
             ["Http:Limits:MaxRequestHeaderCount"] = "50",
             ["Http:Limits:MaxRequestHeadersTotalSize"] = "16384",
+            ["Http:Limits:MaxChunkFramingLineSize"] = "2048",
             ["Http:Limits:MaxRequestBodySize"] = "1048576",
             ["Http:Limits:KeepAliveTimeout"] = "00:01:00",
             ["Http:Limits:RequestHeadersTimeout"] = "00:00:15",
@@ -92,6 +216,7 @@ public class HttpServerConfigurationTests
         limits.MaxRequestLineSize.ShouldBe(4096);
         limits.MaxRequestHeaderCount.ShouldBe(50);
         limits.MaxRequestHeadersTotalSize.ShouldBe(16384);
+        limits.MaxChunkFramingLineSize.ShouldBe(2048);
         limits.MaxRequestBodySize.ShouldBe(1048576);
         limits.KeepAliveTimeout.ShouldBe(TimeSpan.FromMinutes(1));
         limits.RequestHeadersTimeout.ShouldBe(TimeSpan.FromSeconds(15));
@@ -135,6 +260,178 @@ public class HttpServerConfigurationTests
         HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
 
         limits.KeepAliveTimeout.ShouldBe(Timeout.InfiniteTimeSpan);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should bind the minimum request-body data rate from configuration")]
+    public void BindLimits_OnMinRequestBodyDataRateSection_ShouldBindRate()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinRequestBodyDataRate:BytesPerSecond"] = "1000.5",
+            ["Http:Limits:MinRequestBodyDataRate:GracePeriod"] = "00:00:02",
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert
+        limits.MinRequestBodyDataRate.ShouldNotBeNull();
+        limits.MinRequestBodyDataRate!.BytesPerSecond.ShouldBe(1000.5);
+        limits.MinRequestBodyDataRate.GracePeriod.ShouldBe(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: A data-rate section with one dimension should keep the other")]
+    public void BindLimits_OnPartialMinRequestBodyDataRate_ShouldKeepOtherDimension()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinRequestBodyDataRate:GracePeriod"] = "00:00:10",
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert — the rate keeps the built-in 240 octets per second.
+        limits.MinRequestBodyDataRate!.BytesPerSecond.ShouldBe(240);
+        limits.MinRequestBodyDataRate.GracePeriod.ShouldBe(TimeSpan.FromSeconds(10));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should treat 'none' as a disabled minimum request-body data rate")]
+    [InlineData("none")]
+    [InlineData("Disabled")]
+    public void BindLimits_OnDisabledMinRequestBodyDataRate_ShouldSetNull(string value)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinRequestBodyDataRate"] = value,
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert
+        limits.MinRequestBodyDataRate.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should throw on an unusable minimum request-body data rate")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate", "fast")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "0")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "-1")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "NaN")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "Infinity")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "lots")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:GracePeriod", "0")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:GracePeriod", "infinite")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:GracePeriod", "soon")]
+    public void BindLimits_OnUnusableMinRequestBodyDataRate_ShouldThrow(string path, string value)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            [path] = value,
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act and assert — a mistyped security limit fails loudly rather than leaving the default.
+        Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should bind the minimum response data rate from configuration")]
+    public void BindLimits_OnMinResponseDataRateSection_ShouldBindRate()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinResponseDataRate:BytesPerSecond"] = "500",
+            ["Http:Limits:MinResponseDataRate:GracePeriod"] = "00:00:03",
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert — the request-body rate keeps its default.
+        limits.MinResponseDataRate!.BytesPerSecond.ShouldBe(500);
+        limits.MinResponseDataRate.GracePeriod.ShouldBe(TimeSpan.FromSeconds(3));
+        limits.MinRequestBodyDataRate!.BytesPerSecond.ShouldBe(240);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should treat 'none' as a disabled minimum response data rate")]
+    public void BindLimits_OnDisabledMinResponseDataRate_ShouldSetNull()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinResponseDataRate"] = "none",
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert
+        limits.MinResponseDataRate.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should throw on an unusable minimum response data rate")]
+    [InlineData("Http:Limits:MinResponseDataRate", "slow")]
+    [InlineData("Http:Limits:MinResponseDataRate:BytesPerSecond", "0")]
+    [InlineData("Http:Limits:MinResponseDataRate:GracePeriod", "-00:00:01")]
+    public void BindLimits_OnUnusableMinResponseDataRate_ShouldThrow(string path, string value)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            [path] = value,
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act and assert
+        Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Every endpoint should receive the bound minimum response data rate")]
+    public void CopySharedLimits_OnBoundResponseRate_ShouldCopyRateToEndpointLimits()
+    {
+        // Arrange
+        HttpMinDataRate rate = new(500, TimeSpan.FromSeconds(3));
+        Http1ConnectionListenerOptions.Http1Limits template = new() { MinResponseDataRate = rate };
+        Http2ConnectionListenerOptions.Http2Limits http2 = new();
+        Http3ConnectionListenerOptions.Http3Limits http3 = new();
+
+        // Act
+        HttpServerConfiguration.CopySharedLimits(template, http2);
+        HttpServerConfiguration.CopySharedLimits(template, http3);
+
+        // Assert
+        http2.MinResponseDataRate.ShouldBeSameAs(rate);
+        http3.MinResponseDataRate.ShouldBeSameAs(rate);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Every endpoint should receive the bound minimum request-body data rate")]
+    public void CopySharedLimits_OnBoundRate_ShouldCopyRateToEndpointLimits()
+    {
+        // Arrange — the template is what the Limits section is bound onto; each endpoint copies from it.
+        HttpMinDataRate rate = new(1000, TimeSpan.FromSeconds(2));
+        Http1ConnectionListenerOptions.Http1Limits template = new() { MinRequestBodyDataRate = rate };
+        Http2ConnectionListenerOptions.Http2Limits http2 = new();
+        Http3ConnectionListenerOptions.Http3Limits http3 = new();
+
+        // Act
+        HttpServerConfiguration.CopySharedLimits(template, http2);
+        HttpServerConfiguration.CopySharedLimits(template, http3);
+
+        // Assert
+        http2.MinRequestBodyDataRate.ShouldBeSameAs(rate);
+        http3.MinRequestBodyDataRate.ShouldBeSameAs(rate);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should register HTTP/1.1 and HTTP/2 endpoints from configuration")]
@@ -202,32 +499,424 @@ public class HttpServerConfigurationTests
             () => HttpServerConfiguration.Bind(configuration, HttpServerConfiguration.DefaultSectionKey, options));
     }
 
-    private static IConfiguration BuildConfiguration(IDictionary<string, string?> values)
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Default endpoints: the binder registers the development endpoint when none is configured")]
+    public async Task BindOrDefault_NoEndpoints_ShouldRegisterDevelopmentEndPoint()
     {
-        ConfigurationManager manager = new();
-        manager.AddProvider(new SeededConfigurationProvider(values));
-        return manager;
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>());
+        var options = new HttpConnectionListenerOptions();
+
+        // Act
+        HttpServerConfiguration.BindOrDefault(configuration, HttpServerConfiguration.DefaultSectionKey, options, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+
+        // Assert
+        await using HttpConnectionListener listener = new(options);
+        listener.Protocols.ShouldBe(HttpProtocol.Http11);
     }
 
-    private sealed class SeededConfigurationProvider : ConfigurationProvider
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Default endpoints: the binder registers only configured endpoints when present")]
+    public async Task BindOrDefault_ConfiguredEndpoint_ShouldNotRegisterDevelopmentEndPoint()
     {
-        private readonly IDictionary<string, string?> _values;
-
-        public SeededConfigurationProvider(IDictionary<string, string?> values)
+        // Arrange — an HTTP/2 endpoint; a development endpoint would add HTTP/1.1 to the protocols.
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
         {
-            _values = values;
+            ["Http:Endpoints:Main:Protocol"] = "Http2",
+            ["Http:Endpoints:Main:Host"] = "127.0.0.1",
+            ["Http:Endpoints:Main:Port"] = "0",
+        });
+        var options = new HttpConnectionListenerOptions();
+
+        // Act
+        HttpServerConfiguration.BindOrDefault(configuration, HttpServerConfiguration.DefaultSectionKey, options, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+
+        // Assert
+        await using HttpConnectionListener listener = new(options);
+        listener.Protocols.ShouldBe(HttpProtocol.Http20);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should register an HTTP/3 endpoint and advertise it through Alt-Svc")]
+    public async Task Bind_Http3Endpoint_ShouldRegisterHttp3AndEnableAltSvc()
+    {
+        // Arrange — an h3 endpoint beside an https one; the QUIC listener is created unbound here.
+        using CertificateFiles files = CertificateFiles.Create();
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Https",
+            ["Http:Endpoints:Secure:Port"] = "0",
+            ["Http:Endpoints:Secure:Certificate:Path"] = files.PemCertificatePath,
+            ["Http:Endpoints:Secure:Certificate:KeyPath"] = files.PemKeyPath,
+            ["Http:Endpoints:Quic:Protocol"] = "Http3",
+            ["Http:Endpoints:Quic:Port"] = "0",
+            ["Http:Endpoints:Quic:Certificate:Path"] = files.PemCertificatePath,
+            ["Http:Endpoints:Quic:Certificate:KeyPath"] = files.PemKeyPath,
+        });
+        var options = new HttpConnectionListenerOptions();
+        var owned = new List<X509Certificate2>();
+
+        try
+        {
+            // Act
+            HttpServerConfiguration.Bind(configuration, "Http", options, owned.Add, files.Directory);
+
+            // Assert
+            options.AltServiceAdvertisement.Enabled.ShouldBeTrue();
+            await using HttpConnectionListener listener = new(options);
+            listener.Protocols.ShouldBe(HttpProtocol.Http11 | HttpProtocol.Http20 | HttpProtocol.Http30);
+        }
+        finally
+        {
+            DisposeAll(owned);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should leave Alt-Svc off when no HTTP/3 endpoint is configured")]
+    public void Bind_WithoutHttp3Endpoint_ShouldLeaveAltSvcDisabled()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Primary:Protocol"] = "Http1",
+            ["Http:Endpoints:Primary:Port"] = "0",
+        });
+        var options = new HttpConnectionListenerOptions();
+
+        // Act
+        HttpServerConfiguration.Bind(configuration, "Http", options);
+
+        // Assert
+        options.AltServiceAdvertisement.Enabled.ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: Loads the certificate from a PEM or PFX file")]
+    [InlineData("pem-with-key-file")]
+    [InlineData("pem-bundle")]
+    [InlineData("pem-encrypted-key")]
+    [InlineData("pfx")]
+    [InlineData("pfx-relative")]
+    public async Task Bind_CertificateFile_ShouldLoadLeafWithPrivateKey(string source)
+    {
+        // Arrange
+        using CertificateFiles files = CertificateFiles.Create();
+        Dictionary<string, string?> values = new()
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Https",
+            ["Http:Endpoints:Secure:Port"] = "0",
+        };
+        switch (source)
+        {
+            case "pem-with-key-file":
+                values["Http:Endpoints:Secure:Certificate:Path"] = files.PemCertificatePath;
+                values["Http:Endpoints:Secure:Certificate:KeyPath"] = files.PemKeyPath;
+                break;
+            case "pem-bundle":
+                values["Http:Endpoints:Secure:Certificate:Path"] = files.PemBundlePath;
+                break;
+            case "pem-encrypted-key":
+                values["Http:Endpoints:Secure:Certificate:Path"] = files.PemCertificatePath;
+                values["Http:Endpoints:Secure:Certificate:KeyPath"] = files.EncryptedPemKeyPath;
+                values["Http:Endpoints:Secure:Certificate:Password"] = CertificateFiles.Password;
+                break;
+            case "pfx":
+                values["Http:Endpoints:Secure:Certificate:Path"] = files.PfxPath;
+                values["Http:Endpoints:Secure:Certificate:Password"] = CertificateFiles.Password;
+                break;
+            case "pfx-relative":
+                // A relative path resolves against the content root.
+                values["Http:Endpoints:Secure:Certificate:Path"] = System.IO.Path.GetFileName(files.PfxPath);
+                values["Http:Endpoints:Secure:Certificate:Password"] = CertificateFiles.Password;
+                break;
         }
 
-        public override string Name => "Seeded";
+        IConfiguration configuration = BuildConfiguration(values);
+        var options = new HttpConnectionListenerOptions();
+        var owned = new List<X509Certificate2>();
 
-        protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+        try
         {
-            foreach (KeyValuePair<string, string?> value in _values)
-            {
-                entries[Path.Parse(value.Key)] = value.Value;
-            }
+            // Act
+            HttpServerConfiguration.Bind(configuration, "Http", options, owned.Add, files.Directory);
 
-            return Task.CompletedTask;
+            // Assert — the leaf is owned first, carries its key, and the endpoint serves h1 and h2.
+            owned[0].Thumbprint.ShouldBe(files.Certificate.Thumbprint);
+            owned[0].HasPrivateKey.ShouldBeTrue();
+            await using HttpConnectionListener listener = new(options);
+            listener.Protocols.ShouldBe(HttpProtocol.Http11 | HttpProtocol.Http20);
         }
+        finally
+        {
+            DisposeAll(owned);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: A certificate section without a Path names the endpoint")]
+    public void Bind_CertificateSectionWithoutPath_ShouldThrow()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Https",
+            ["Http:Endpoints:Secure:Port"] = "0",
+            ["Http:Endpoints:Secure:Certificate:Password"] = "unused",
+        });
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions()));
+
+        // Assert
+        error.Message.ShouldContain("Secure");
+        error.Message.ShouldContain("Path");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: An unreadable certificate file names the endpoint and the file")]
+    public void Bind_MissingCertificateFile_ShouldThrowNamingEndpointAndPath()
+    {
+        // Arrange
+        string missing = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"cohesion-missing-{Guid.NewGuid():N}.pfx");
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Http2s",
+            ["Http:Endpoints:Secure:Port"] = "0",
+            ["Http:Endpoints:Secure:Certificate:Path"] = missing,
+        });
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions()));
+
+        // Assert
+        error.Message.ShouldContain("Secure");
+        error.Message.ShouldContain(missing);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should bind the HTTP/2 limits from configuration")]
+    public void BindHttp2Limits_ShouldPopulateLimits()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:Http2:MaxStreamsPerConnection"] = "50",
+            ["Http:Limits:Http2:MaxRequestHeaderListSize"] = "8192",
+            ["Http:Limits:Http2:MaxResetStreamsPerWindow"] = "20",
+            ["Http:Limits:Http2:MaxSettingsFramesPerWindow"] = "10",
+            ["Http:Limits:Http2:MaxPingFramesPerWindow"] = "15",
+            ["Http:Limits:Http2:FloodDetectionWindow"] = "00:00:10",
+        });
+        Http2ConnectionListenerOptions.Http2Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindHttp2Limits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert
+        limits.MaxStreamsPerConnection.ShouldBe(50);
+        limits.MaxRequestHeaderListSize.ShouldBe(8192);
+        limits.MaxResetStreamsPerWindow.ShouldBe(20);
+        limits.MaxSettingsFramesPerWindow.ShouldBe(10);
+        limits.MaxPingFramesPerWindow.ShouldBe(15);
+        limits.FloodDetectionWindow.ShouldBe(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should throw on an unparseable HTTP/2 limit")]
+    public void BindHttp2Limits_OnUnparseableValue_ShouldThrow()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:Http2:MaxStreamsPerConnection"] = "lots",
+        });
+        HttpConnectionListenerOptions options = new();
+
+        // Act / Assert — parsed eagerly, even with no endpoint to consume it.
+        Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.Bind(configuration, HttpServerConfiguration.DefaultSectionKey, options));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should hand the configured connection cap to the server")]
+    public void BindConnectionLimit_WhenConfigured_ShouldInvokeCallback()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MaxConcurrentConnections"] = "250",
+        });
+        int? cap = null;
+
+        // Act
+        HttpServerConfiguration.BindConnectionLimit(configuration, HttpServerConfiguration.DefaultSectionKey, value => cap = value);
+
+        // Assert
+        cap.ShouldBe(250);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should reject a connection cap that is not a positive integer")]
+    [InlineData("0")]
+    [InlineData("-3")]
+    [InlineData("many")]
+    public void BindConnectionLimit_OnInvalidValue_ShouldThrow(string value)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MaxConcurrentConnections"] = value,
+        });
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.BindConnectionLimit(configuration, HttpServerConfiguration.DefaultSectionKey, _ => { }));
+
+        // Assert
+        error.Message.ShouldContain("MaxConcurrentConnections");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseConfiguration: Should cap the default server with the configured connection limit")]
+    public async Task UseConfiguration_WithConnectionLimit_ShouldCapTheDefaultServer()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MaxConcurrentConnections"] = "40",
+            ["Http:Endpoints:Primary:Protocol"] = "Http1",
+            ["Http:Endpoints:Primary:Host"] = "127.0.0.1",
+            ["Http:Endpoints:Primary:Port"] = "0",
+        });
+        using EventSourceRecorder recorded = new(await ServerDiagnosticsSource.GetAsync(), EventLevel.Informational);
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Server.UseConfiguration(configuration);
+        await using WebApplication application = builder.Build();
+
+        try
+        {
+            // Act
+            await ((IWebApplication)application).StartAsync(timeout.Token);
+
+            // Assert
+            EventWrittenEventArgs bound = recorded.Events.Where(entry => entry.EventName == "ServerBound").ShouldHaveSingleItem();
+            bound.Payload![bound.PayloadNames!.IndexOf("maxConcurrentConnections")].ShouldBe(40);
+        }
+        finally
+        {
+            await ((IWebApplication)application).StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseConfiguration: An explicit LimitConcurrentConnections takes precedence over the configured cap")]
+    public async Task UseConfiguration_WithExplicitLimit_ShouldPreferExplicitLimit()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MaxConcurrentConnections"] = "40",
+            ["Http:Endpoints:Primary:Protocol"] = "Http1",
+            ["Http:Endpoints:Primary:Host"] = "127.0.0.1",
+            ["Http:Endpoints:Primary:Port"] = "0",
+        });
+        using EventSourceRecorder recorded = new(await ServerDiagnosticsSource.GetAsync(), EventLevel.Informational);
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Server.LimitConcurrentConnections(3).UseConfiguration(configuration);
+        await using WebApplication application = builder.Build();
+
+        try
+        {
+            // Act
+            await ((IWebApplication)application).StartAsync(timeout.Token);
+
+            // Assert
+            EventWrittenEventArgs bound = recorded.Events.Where(entry => entry.EventName == "ServerBound").ShouldHaveSingleItem();
+            bound.Payload![bound.PayloadNames!.IndexOf("maxConcurrentConnections")].ShouldBe(3);
+        }
+        finally
+        {
+            await ((IWebApplication)application).StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: An invalid handshake timeout should name the endpoint and key")]
+    [InlineData("forever")]
+    [InlineData("")]
+    [InlineData("9223372036854775807")]
+    public void Bind_OnInvalidHandshakeTimeout_ShouldThrowNamingEndpoint(string value)
+    {
+        // Arrange — validation precedes certificate loading, so a malformed timeout fails on its own key.
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Https",
+            ["Http:Endpoints:Secure:Port"] = "0",
+            ["Http:Endpoints:Secure:HandshakeTimeout"] = value,
+        });
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions()));
+
+        // Assert
+        error.Message.ShouldContain("Secure");
+        error.Message.ShouldContain("HandshakeTimeout");
+        error.Message.ShouldContain(value);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: An unsupported ClientCertificateMode names the endpoint")]
+    public void Bind_UnsupportedClientCertificateMode_ShouldThrow()
+    {
+        // Arrange
+        using CertificateFiles files = CertificateFiles.Create();
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Https",
+            ["Http:Endpoints:Secure:Port"] = "0",
+            ["Http:Endpoints:Secure:Certificate:Path"] = files.PfxPath,
+            ["Http:Endpoints:Secure:Certificate:Password"] = CertificateFiles.Password,
+            ["Http:Endpoints:Secure:ClientCertificateMode"] = "Sometimes",
+        });
+        var owned = new List<X509Certificate2>();
+
+        try
+        {
+            // Act
+            InvalidOperationException error = Should.Throw<InvalidOperationException>(
+                () => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions(), owned.Add));
+
+            // Assert
+            error.Message.ShouldContain("Secure");
+            error.Message.ShouldContain("ClientCertificateMode");
+        }
+        finally
+        {
+            DisposeAll(owned);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTP configuration: A ClientCertificateMode on a cleartext endpoint is refused")]
+    public void Bind_ClientCertificateModeOnCleartextEndpoint_ShouldThrow()
+    {
+        // Arrange — client certificates are a TLS handshake feature.
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Plain:Protocol"] = "Http1",
+            ["Http:Endpoints:Plain:Port"] = "0",
+            ["Http:Endpoints:Plain:ClientCertificateMode"] = "RequireCertificate",
+        });
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions()));
+
+        // Assert
+        error.Message.ShouldContain("Plain");
+        error.Message.ShouldContain("TLS");
+    }
+
+    private static void DisposeAll(List<X509Certificate2> certificates)
+    {
+        foreach (X509Certificate2 certificate in certificates)
+        {
+            certificate.Dispose();
+        }
+    }
+
+    private static IConfiguration BuildConfiguration(IDictionary<string, string?> values)
+    {
+        return SeededConfiguration.Build(values);
     }
 }

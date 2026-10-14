@@ -7,11 +7,14 @@ namespace Assimalign.Cohesion.Connections;
 /// </summary>
 public sealed class ConnectionAbortedException : ConnectionException
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _defaultMessage = ErrorMessages.ConnectionAborted;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ConnectionAbortedException"/> class.
     /// </summary>
     public ConnectionAbortedException()
-        : base("The connection was aborted.")
+        : base(_defaultMessage)
     {
     }
 
