@@ -471,3 +471,26 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Composition-time path validation (#1477)
+
+Default documents retain their public string collection, but composition parses them into the
+existing `System.IO.FileName` snapshot consumed by the middleware. The existing bare-name and
+dot-name restrictions run before parsing; invalid file characters and names over 255 characters
+now fail with a resource-backed `ArgumentException` before a directory request can reach the
+resolver. Web-root registrations repeat this validation before their deferred snapshot, so a
+captured options object cannot introduce an invalid name after registration.
+
+`MapFallbackToFile` applies the traversal gate and parses the configured mount-relative path
+with `FileSystemPath.Parse` when the route is registered. The normalized relative path is retained
+for serving. The existing optional leading forward slash still denotes the web-root mount;
+root-only and backslash-rooted paths are refused. Unparseable text such as `bad?.html` now throws
+an `ArgumentException` using the package's error resource instead of becoming a request-time 404.
+No new public type or member is added.
+
+**Breaking from 10.0.0-preview.1 (decision 15):** invalid and overlong default-document names
+formerly passed registration and now throw. The fallback registration refusal is a change from
+the branch base only: `MapFallbackToFile` was introduced after preview.1. The released default-name
+defect requires application-controlled invalid configuration; an unauthenticated directory request
+can trigger the resulting failure, but cannot supply the configured name. It is an input-validation
+availability defect (CWE-20), with low severity conditional on that misconfiguration.

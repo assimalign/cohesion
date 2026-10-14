@@ -23,7 +23,7 @@ internal static class WebRootStaticFiles
     {
         // Web-root registrations defer their snapshot until pipeline build. A captured options
         // instance may have changed since registration; validate before opening the mount.
-        WebApplicationStaticFilesExtensions.Validate(options);
+        FileName[] defaultDocuments = WebApplicationStaticFilesExtensions.Validate(options);
 
         if (context.WebRootPath is not { IsEmpty: false } webRoot || !Directory.Exists(webRoot.ToString()))
         {
@@ -38,7 +38,7 @@ internal static class WebRootStaticFiles
             Name = "StaticFiles",
         });
 
-        StaticFilesMiddleware middleware = new(fileSystem, options);
+        StaticFilesMiddleware middleware = new(fileSystem, options, defaultDocuments);
         StaticFilesEventSource.Log.WebRootMounted(webRoot, options.RequestPath);
         return middleware;
     }

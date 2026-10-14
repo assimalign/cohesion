@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -58,12 +59,31 @@ public static class StaticFilesFallbackExtensions
             ArgumentNullException.ThrowIfNull(pattern);
             ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
 
-            string file = "/" + filePath.TrimStart('/');
-            if (StaticFilePath.HasUnsafeSegments(file))
+            string relative = filePath.TrimStart('/');
+            if (relative.Length == 0 || StaticFilePath.HasUnsafeSegments(relative))
             {
                 throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FallbackFileOutsideRoot, filePath), nameof(filePath));
             }
 
+            FileSystemPath parsed;
+            try
+            {
+                parsed = FileSystemPath.Parse(relative);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.FallbackFileOutsideRoot, filePath),
+                    nameof(filePath), exception);
+            }
+
+            if (parsed.IsEmpty || parsed.HasRoot())
+            {
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.FallbackFileOutsideRoot, filePath), nameof(filePath));
+            }
+
+            string file = "/" + parsed.ToString();
             StaticFilesOptions options = new();
             configure?.Invoke(options);
             options.RequestPath = HttpPath.Root;

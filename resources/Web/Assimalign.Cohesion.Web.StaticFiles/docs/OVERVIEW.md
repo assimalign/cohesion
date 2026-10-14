@@ -27,6 +27,10 @@ See [Diagnostics in the design](DESIGN.md#diagnostics) for events and payloads.
 
 ## Usage
 
+`DefaultDocuments` entries must be valid bare file names of at most 255 characters. Invalid
+characters (for example `?`) fail when `UseStaticFiles` is called. `MapFallbackToFile` similarly
+rejects paths that cannot parse inside the web-root mount, including `bad?.html`, during registration.
+
 The parameterless verb serves the application's web root: `wwwroot` under the content root
 (`IWebApplicationContext.WebRootPath`, set by the hosting runtime). It never serves the content
 root itself or the working directory, and it passes every request through when the application

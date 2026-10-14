@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
@@ -39,8 +40,8 @@ public static class WebApplicationStaticFilesExtensions
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
         /// Thrown when the configured options are invalid: a request path that does not begin
-        /// with <c>/</c>, a default-document name that is empty or contains a path separator or
-        /// dot segment, a <c>Cache-Control</c> value that does not parse per RFC 9111, or an
+        /// with <c>/</c>, a default-document name that is not a valid bare file name,
+        /// a <c>Cache-Control</c> value that does not parse per RFC 9111, or a
         /// content-type mapping or fallback that is empty or is not a valid HTTP field value.
         /// </exception>
         public IWebApplicationPipelineBuilder UseStaticFiles(Action<StaticFilesOptions>? configure = null)
@@ -84,8 +85,8 @@ public static class WebApplicationStaticFilesExtensions
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> or <paramref name="fileSystem"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
         /// Thrown when the configured options are invalid: a request path that does not begin
-        /// with <c>/</c>, a default-document name that is empty or contains a path separator or
-        /// dot segment, a <c>Cache-Control</c> value that does not parse per RFC 9111, or an
+        /// with <c>/</c>, a default-document name that is not a valid bare file name,
+        /// a <c>Cache-Control</c> value that does not parse per RFC 9111, or a
         /// content-type mapping or fallback that is empty or is not a valid HTTP field value.
         /// </exception>
         public IWebApplicationPipelineBuilder UseStaticFiles(IFileSystem fileSystem, Action<StaticFilesOptions>? configure)
@@ -95,13 +96,13 @@ public static class WebApplicationStaticFilesExtensions
 
             var options = new StaticFilesOptions();
             configure?.Invoke(options);
-            Validate(options);
+            FileName[] defaultDocuments = Validate(options);
 
-            return builder.Use(new StaticFilesMiddleware(fileSystem, options));
+            return builder.Use(new StaticFilesMiddleware(fileSystem, options, defaultDocuments));
         }
     }
 
-    internal static void Validate(StaticFilesOptions options)
+    internal static FileName[] Validate(StaticFilesOptions options)
     {
         // HttpPath also admits the "*" asterisk form; a mount prefix must be an origin-form path.
         if (options.RequestPath.Value.Length == 0 || options.RequestPath.Value[0] != '/')
@@ -110,14 +111,27 @@ public static class WebApplicationStaticFilesExtensions
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.StaticFilesRequestPathInvalid, options.RequestPath.Value));
         }
 
-        foreach (string document in options.DefaultDocuments)
+        FileName[] defaultDocuments = new FileName[options.DefaultDocuments.Count];
+        for (int index = 0; index < defaultDocuments.Length; index++)
         {
+            string document = options.DefaultDocuments[index];
             if (string.IsNullOrWhiteSpace(document)
                 || document.AsSpan().ContainsAny('/', '\\')
                 || document.AsSpan().IndexOfAnyExcept('.') < 0)
             {
                 throw new ArgumentException(
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultDocumentNameInvalid, document));
+            }
+
+            try
+            {
+                defaultDocuments[index] = new FileName(document);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultDocumentNameInvalid, document),
+                    nameof(options), exception);
             }
         }
 
@@ -134,6 +148,7 @@ public static class WebApplicationStaticFilesExtensions
         }
 
         ValidateContentType(options.FallbackContentType);
+        return defaultDocuments;
     }
 
     private static void ValidateContentType(string contentType)
