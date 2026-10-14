@@ -14,11 +14,10 @@ namespace Assimalign.Cohesion.Http.ServerSentEvents.Tests;
 
 public class ServerSentEventFieldInjectionTests
 {
-    [Theory(DisplayName = "Cohesion Test [Http.ServerSentEvents] - Assign: Each metadata field rejects CR, LF, CRLF and NUL")]
+    [Theory(DisplayName = "Cohesion Test [Http.ServerSentEvents] - Assign: Metadata rejects CR, LF and CRLF; only ids also reject NUL")]
     [InlineData("event", "\r")]
     [InlineData("event", "\n")]
     [InlineData("event", "\r\n")]
-    [InlineData("event", "\0")]
     [InlineData("id", "\r")]
     [InlineData("id", "\n")]
     [InlineData("id", "\r\n")]
@@ -26,7 +25,6 @@ public class ServerSentEventFieldInjectionTests
     [InlineData("comment", "\r")]
     [InlineData("comment", "\n")]
     [InlineData("comment", "\r\n")]
-    [InlineData("comment", "\0")]
     public void Assign_MetadataWithForbiddenCharacter_ShouldThrowWithoutEchoingInput(string field, string forbidden)
     {
         // Arrange
@@ -82,7 +80,6 @@ public class ServerSentEventFieldInjectionTests
     [InlineData("\r")]
     [InlineData("\n")]
     [InlineData("\r\n")]
-    [InlineData("\0")]
     public void KeepAlive_InvalidComment_ShouldThrowBeforeCreatingHeartbeat(string forbidden)
     {
         // Arrange
@@ -99,7 +96,6 @@ public class ServerSentEventFieldInjectionTests
     [InlineData("\r")]
     [InlineData("\n")]
     [InlineData("\r\n")]
-    [InlineData("\0")]
     public async Task WriteKeepAliveAsync_InvalidComment_ShouldLeaveResponseUnstartedThenWriteValidHeartbeat(string forbidden)
     {
         // Arrange

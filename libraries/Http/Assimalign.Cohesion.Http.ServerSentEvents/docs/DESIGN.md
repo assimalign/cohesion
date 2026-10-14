@@ -41,19 +41,26 @@ equivalent. It carries the four data-bearing fields plus a comment:
 `MediaType` is the `text/event-stream` constant. The type is a `readonly struct`
 with `init`-only properties — allocation-free to construct and pass by value.
 
-`EventType`, `Id`, and `Comment` are nullable `ServerSentEventFieldValue` values.
-This generated string value object rejects CR, LF, and NUL on construction and
-implicit string conversion. The [WHATWG parsing algorithm](https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream)
-ends a line at CR, LF, or CRLF; its field processing ignores an `id` containing
-NUL. NUL has no legitimate use in an event type or comment either, so one rule
-covers all three fields. Only `Data` may contain line breaks.
+`EventType` and `Comment` are nullable `ServerSentEventFieldValue` values. This
+generated string value object rejects CR and LF on construction and implicit
+string conversion; NUL is valid in both fields. `Id` is a nullable
+`ServerSentEventId`, a second generated string value object that rejects CR, LF,
+and NUL. These types carry the validation rules; property accessors do not
+perform validation. Only `Data` may contain line breaks.
 
-An empty string is valid: an empty `Id` resets the client's last event id, an
-empty `Comment` emits a comment line, and an empty `EventType` is omitted as
-before. The checked-in nullable conversion preserves `null`, including assignment
-from a nullable string. `default(ServerSentEventFieldValue)` contains no string;
-the formatter omits it, even when wrapped in a non-null nullable value. It never
-turns an absent id into an id reset.
+The [WHATWG parsing algorithm](https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream)
+ends a line at CR, LF, or CRLF. Its `id` processing leaves the last event ID buffer
+unchanged when the field contains NUL, so the stricter ID type prevents callers
+from assigning an id the client would ignore. Event types and comments preserve
+NUL, including comments constructed through `KeepAlive`.
+
+Both types allow an empty string: an empty `Id` resets the client's last event
+id, an empty `Comment` emits a comment line, and an empty `EventType` is omitted
+as before. Their checked-in nullable conversions preserve `null`, including
+assignment from a nullable string. `default(ServerSentEventFieldValue)` and
+`default(ServerSentEventId)` contain no string; the formatter omits them, even
+when wrapped in non-null nullable values. It never turns an absent id into an
+id reset.
 
 `IsValid` and `TryCreate` allow callers to validate without exceptions. Invalid
 construction throws `ArgumentException` with a message from `ErrorMessages` that
@@ -63,14 +70,16 @@ through the same conversion before any write or flush.
 
 ### Breaking changes from 10.0.0-preview.1 (#1475)
 
-The three metadata properties change from `string?` to
-`ServerSentEventFieldValue?`, a binary break requiring consumers to recompile.
-Valid string assignments and null assignments still compile through implicit
-conversions; readers that need text should use `@event.Id?.Value` (and likewise
-for `EventType` and `Comment`). Code using string members, string-specific generic
-APIs, or the old property signatures must migrate. CR, LF, and NUL now throw at
-conversion instead of reaching the wire. Valid events retain their exact UTF-8
-format, and multi-line `Data` still splits into `data:` lines.
+`EventType` and `Comment` change from `string?` to
+`ServerSentEventFieldValue?`; `Id` changes from `string?` to `ServerSentEventId?`.
+These are binary breaks requiring consumers to recompile. Valid string and null
+assignments still compile through implicit conversions; readers that need text
+should use `@event.Id?.Value` (and likewise for `EventType` and `Comment`). Code
+using string members, string-specific generic APIs, or the old property
+signatures must migrate. CR and LF now throw at conversion for all three fields;
+NUL throws only for `Id`. NUL in event types, comments, and keep-alive comments
+retains its exact UTF-8 format from preview.1. Other valid events retain their
+exact format too, and multi-line `Data` still splits into `data:` lines.
 
 Preview.1 documented a single-line contract but wrote these fields verbatim.
 When an application placed untrusted text in them, it could inject fields or
@@ -79,15 +88,12 @@ package does not itself bind remote input to event metadata. The affected packag
 is `Assimalign.Cohesion.Http.ServerSentEvents`; advisory severity is assessed as
 moderate because client-side impact depends on the application's event handlers.
 
-The regression suite exercises rejected characters in each field, extra-field
-and extra-event payloads, and both keep-alive helpers. With production source
-restored to `afa78be23`, all 38 regression cases failed because no exception was
-thrown, while all eight compatibility cases passed. Those compatibility tests
-pin valid bytes, null/empty fields, and multi-line data that already worked at
-that base. With the fix restored, the full package suite passed 77 tests,
-including the new value-object validation/default checks and the existing
-HTTP/1.1 streaming round trip. The package and its SSE example both built without
-warnings or errors.
+The regression suite exercises CR, LF, and CRLF rejection in each metadata
+field, NUL rejection only in `Id`, extra-field and extra-event payloads, and both
+keep-alive helpers. Compatibility tests pin exact bytes for NUL in event types,
+comments, and keep-alive comments, plus valid fields, null/empty fields, and
+multi-line data. Value-object tests cover validation, nullable conversion, and
+default-value omission; the streaming tests include an HTTP/1.1 round trip.
 
 ## The formatter
 

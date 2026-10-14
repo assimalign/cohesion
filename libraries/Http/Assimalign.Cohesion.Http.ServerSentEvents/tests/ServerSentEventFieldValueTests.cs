@@ -14,7 +14,6 @@ public class ServerSentEventFieldValueTests
     [InlineData("secret\rvalue")]
     [InlineData("secret\nvalue")]
     [InlineData("secret\r\nvalue")]
-    [InlineData("secret\0value")]
     public void IsValid_InvalidCandidate_ShouldReturnFalseAndSafeReason(string? candidate)
     {
         // Arrange
@@ -38,7 +37,6 @@ public class ServerSentEventFieldValueTests
     [InlineData("secret\rvalue")]
     [InlineData("secret\nvalue")]
     [InlineData("secret\r\nvalue")]
-    [InlineData("secret\0value")]
     public void Constructor_InvalidCandidate_ShouldThrowWithoutEchoingInput(string? candidate)
     {
         // Arrange
@@ -55,6 +53,8 @@ public class ServerSentEventFieldValueTests
     [Theory(DisplayName = "Cohesion Test [Http.ServerSentEvents] - TryCreate: Empty and single-line Unicode values are preserved")]
     [InlineData("")]
     [InlineData("update")]
+    [InlineData("\0")]
+    [InlineData("phase\0ready")]
     [InlineData("42")]
     [InlineData(": data: literal field value")]
     [InlineData("tab\tvalue")]
@@ -89,12 +89,11 @@ public class ServerSentEventFieldValueTests
 
         // Act
         ServerSentEventFieldValue? field = value;
-        ServerSentEvent @event = new("payload") { EventType = value, Id = value, Comment = value };
+        ServerSentEvent @event = new("payload") { EventType = value, Comment = value };
 
         // Assert
         field.HasValue.ShouldBeFalse();
         @event.EventType.HasValue.ShouldBeFalse();
-        @event.Id.HasValue.ShouldBeFalse();
         @event.Comment.HasValue.ShouldBeFalse();
     }
 
@@ -103,7 +102,7 @@ public class ServerSentEventFieldValueTests
     {
         // Arrange
         ServerSentEventFieldValue value = default;
-        ServerSentEvent @event = new("payload") { EventType = value, Id = value, Comment = value };
+        ServerSentEvent @event = new("payload") { EventType = value, Comment = value };
 
         // Act
         byte[] actual = ServerSentEventFormatter.Format(@event);

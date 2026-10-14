@@ -13,6 +13,9 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
   </resheader>
   <data name="ServerSentEventFieldValueInvalid" xml:space="preserve">
-    <value>A Server-Sent Events field value must be non-null and contain no CR, LF, or NUL characters.</value>
+    <value>A Server-Sent Events field value must be non-null and contain no CR or LF characters.</value>
+  </data>
+  <data name="ServerSentEventIdInvalid" xml:space="preserve">
+    <value>A Server-Sent Events id must be non-null and contain no CR, LF, or NUL characters.</value>
   </data>
 </root>

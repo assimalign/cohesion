@@ -17,5 +17,11 @@
 						   ObjectAccessModifier="public"
 						   ObjectHasImplicitOperators="true"
 						   ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="ValueObjects\ServerSentEventId.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.Http"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true" />
 	</ItemGroup>
 </Project>

@@ -14,8 +14,10 @@ to a client over a long-lived HTTP response.
 - `ServerSentEvent` — the event value model (`event`, `id`, `data`, `retry`,
   comment) with `Message` / `KeepAlive` factories and the `text/event-stream`
   media-type constant.
-- `ServerSentEventFieldValue` — checked single-line text for `EventType`, `Id`,
-  and `Comment`; rejects CR, LF, and NUL, while allowing an empty string.
+- `ServerSentEventFieldValue` — checked single-line text for `EventType` and
+  `Comment`; rejects CR and LF, while allowing NUL and an empty string.
+- `ServerSentEventId` — checked single-line text for `Id`; rejects CR, LF, and
+  NUL, while allowing an empty string to reset the client's last event id.
 - `ServerSentEventFormatter` — WHATWG wire-format serializer (UTF-8 into an
   `IBufferWriter<byte>`, AOT-safe).
 - `WriteEventAsync` / `WriteKeepAliveAsync` extension members on
@@ -41,11 +43,13 @@ await stream.WriteKeepAliveAsync();
 ```
 
 String assignments to `EventType`, `Id`, and `Comment` validate immediately and
-throw `ArgumentException` for CR, LF, or NUL. To handle untrusted text without
-throwing, use the generated `TryCreate` before constructing the event:
+throw `ArgumentException` for CR or LF. `Id` also rejects NUL; event types,
+comments, and `KeepAlive` comments accept and preserve NUL. To handle untrusted
+text without throwing, use the appropriate type's generated `TryCreate` before
+constructing the event:
 
 ```csharp
-if (ServerSentEventFieldValue.TryCreate(candidateId, out var id))
+if (ServerSentEventId.TryCreate(candidateId, out var id))
 {
     await stream.WriteEventAsync(new ServerSentEvent("first\nsecond") { Id = id });
 }
