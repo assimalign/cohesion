@@ -23,7 +23,7 @@ public sealed class GeneratedValueTypeMetadataTests
         var publicValue = CreatePublicValue("text");
         var internalValue = new GeneratedInt(1);
         var noneValue = new GeneratedNoneAccessInt(2);
-        var defaultValue = new GeneratedDefaultAccessInt(3);
+        var defaultValue = CreateDefaultAccessValue(3);
 
         // Assert
         publicValue.Value.ShouldBe("text");
@@ -74,6 +74,10 @@ public sealed class GeneratedValueTypeMetadataTests
         error.Code.ShouldBe(expectedCode);
         error.Message.ShouldNotBeNull().ShouldContain(invalidItem.ItemSpec, Case.Sensitive);
         error.Message.ShouldContain(metadata, Case.Sensitive);
+        if (expectedCode == "COHVT004")
+        {
+            error.Message.ShouldContain("Public, Internal, None (omitted or None emits no modifier)", Case.Sensitive);
+        }
         task.ValueTypesCreated.ShouldBeNull();
         Directory.Exists(outputPath).ShouldBeFalse();
     }
@@ -83,6 +87,12 @@ public sealed class GeneratedValueTypeMetadataTests
     /// <param name="value">The fixture value.</param>
     /// <returns>The generated public value.</returns>
     public static GeneratedPublicString CreatePublicValue(string value) => new GeneratedPublicString(value);
+
+    // This public signature is a compile-time assertion that omitted metadata preserves public accessibility.
+    /// <summary>Creates the fixture whose public accessibility comes from its handwritten partial.</summary>
+    /// <param name="value">The fixture value.</param>
+    /// <returns>The generated public value.</returns>
+    public static GeneratedDefaultAccessInt CreateDefaultAccessValue(int value) => new GeneratedDefaultAccessInt(value);
 
     private static TaskItem CreateItem(string path, string runtimeType)
     {

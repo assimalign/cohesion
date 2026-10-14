@@ -99,9 +99,10 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 
         valid &= ReadChoice(item, "ObjectKind", "COHVT003", ObjectKind.Struct, out ObjectKind kind);
         context.IsClass = kind == ObjectKind.Class;
-        valid &= ReadChoice(item, "ObjectAccessModifier", "COHVT004", ObjectAccessModifier.Internal, out ObjectAccessModifier access);
+        valid &= ReadChoice(item, "ObjectAccessModifier", "COHVT004", ObjectAccessModifier.None, out ObjectAccessModifier access,
+            "Public, Internal, None (omitted or None emits no modifier)");
         // An omitted modifier preserves the accessibility supplied by another partial declaration.
-        context.Access = string.IsNullOrEmpty(item.GetMetadata("ObjectAccessModifier")) || access == ObjectAccessModifier.None ? "" : access.ToString().ToLowerInvariant() + " ";
+        context.Access = access == ObjectAccessModifier.None ? "" : access.ToString().ToLowerInvariant() + " ";
         valid &= ReadBoolean(item, "ObjectHasImplicitOperators", out bool implicitOperators);
         context.HasImplicitOperators = implicitOperators;
         valid &= ReadBoolean(item, "ObjectHasIsValidMethod", out bool validation);
@@ -118,7 +119,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         return valid ? context : null;
     }
 
-    private bool ReadChoice<T>(ITaskItem item, string metadata, string code, T? defaultValue, out T value) where T : struct
+    private bool ReadChoice<T>(ITaskItem item, string metadata, string code, T? defaultValue, out T value, string? allowedValues = null) where T : struct
     {
         string text = item.GetMetadata(metadata);
         if (text.Length == 0 && defaultValue.HasValue)
@@ -133,7 +134,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         }
 
         value = default;
-        MetadataError(item, metadata, code, string.Join(", ", Enum.GetNames(typeof(T))));
+        MetadataError(item, metadata, code, allowedValues ?? string.Join(", ", Enum.GetNames(typeof(T))));
         return false;
     }
 
@@ -474,18 +475,8 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         string write = context.IsString || context.RuntimeType == ObjectRuntimeType.Guid ? "WriteStringValue(value.Value)" : context.RuntimeType == ObjectRuntimeType.Ulid ? "WriteStringValue(value.Value.ToString())" : "WriteNumberValue(value.Value)";
         builder.AppendTabbedLine(1, $$"""
 
-            // Source-generated serializer contexts in this assembly can construct the factory.
-            // The converter that handles values remains private to the value object.
-            internal sealed partial class {{context.Name}}JsonConverter : global::System.Text.Json.Serialization.JsonConverterFactory
-            {
-                /// <inheritdoc/>
-                public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof({{context.Name}});
-
-                /// <inheritdoc/>
-                public override global::System.Text.Json.Serialization.JsonConverter CreateConverter(Type typeToConvert, global::System.Text.Json.JsonSerializerOptions options) => new {{context.Name}}ValueJsonConverter();
-            }
-
-            private sealed class {{context.Name}}ValueJsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.Name}}>
+            // Source-generated serializer contexts in this assembly can construct the converter.
+            internal sealed partial class {{context.Name}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.Name}}>
             {
                 /// <inheritdoc/>
                 public override {{context.Name}} Read(ref global::System.Text.Json.Utf8JsonReader reader, Type typeToConvert, global::System.Text.Json.JsonSerializerOptions options)
@@ -555,21 +546,6 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 
                 private static global::System.Ulid ParseUlid(string? text)
                 {
-                    // A ULID encodes 128 bits in 26 base32 characters, so the first digit is at most 7.
-                    if (text is null || text.Length != 26 || text[0] < '0' || text[0] > '7')
-                    {
-                        throw new FormatException();
-                    }
-
-                    const string alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZabcdefghjkmnpqrstvwxyz";
-                    foreach (char character in text)
-                    {
-                        if (alphabet.IndexOf(character) < 0)
-                        {
-                            throw new FormatException();
-                        }
-                    }
-
                     if (!global::System.Ulid.TryParse(text, out var value))
                     {
                         throw new FormatException();

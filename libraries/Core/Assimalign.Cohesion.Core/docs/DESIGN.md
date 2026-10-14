@@ -17,22 +17,44 @@ Examples below document the intended public shape; some members still throw NotI
 ## Generated value-type conformance
 
 Core's tests compile `CohesionValueType` fixtures for every supported runtime type and exercise
-comparison, validation, parsing, formatting and source-generated JSON metadata. Compilation fixtures
-pin all accessibility modes (Public, Internal, None and omitted) through compilation,
-including public handwritten partials for None and omitted metadata. Invalid-metadata task
-tests assert each `COHVT001` through `COHVT006` diagnostic, the item name and the metadata name,
-and verify that failure produces no generated output. These tests preserve existing behavior.
+comparison, validation, class and struct kinds, parsing, formatting and source-generated JSON
+metadata. `GeneratedValueTypeTests` covers this contract; `GeneratedValueTypeRegressionTests`
+keeps runtime regressions on the earlier generated surface so the same tests can run against the
+baseline generator. Compilation fixtures pin all accessibility modes (Public, Internal, None and
+omitted), including public handwritten partials for None and omitted metadata. Both None and an
+omitted `ObjectAccessModifier` emit no accessibility modifier, leaving the handwritten partial to
+specify it. Invalid-metadata task tests assert each `COHVT001` through `COHVT006` diagnostic, the
+item name and the metadata name, and verify that failure produces no generated output. Public
+test method signatures assert public fixture accessibility at compile time, preserving existing
+behavior without runtime reflection. The conformance classes share a non-parallel collection
+because they temporarily change the current
+culture and count validation calls. Every culture change is restored in `finally`.
+
 The build task remains outside the shipped Core assembly. See the
 [generator contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types) for metadata,
-default-value semantics and preview compatibility changes. `System.Ulid` accepts nullable format
-providers and nullable `TryParse` input in its annotations, matching the BCL interfaces used by
-generated wrappers; its parsing and formatting behavior is unchanged.
+default-value semantics and preview compatibility changes. `GeneratedValueTypeJsonContext` is an
+ordinary source-generated context outside the value-object partials. Each value object declares
+one nested `internal sealed partial class XJsonConverter : JsonConverter<X>` and its
+`JsonConverter` attribute references that converter directly. Same-assembly contexts can construct
+it without reflection-based serialization. A context in another assembly still needs its own
+accessible converter. Existing internal nested converter partials, including ApplicationModel's,
+remain compatible. JSON null handling, invalid-value exceptions and dictionary-key conversion use
+the same converter.
 
-Generated ULID JSON converters validate the case-insensitive ULID alphabet, the 26-character
-length and the leading digit (`0` through `7`) before invoking that decoder. Scalars and dictionary
-keys share this check so malformed text cannot alias a valid identifier. Compared with
-10.0.0-preview.1, malformed and overflowing JSON strings now throw `JsonException`; direct
-`System.Ulid` parsing is unchanged.
+`System.Ulid` owns validation for every string, character-span and UTF-8 `Parse` and `TryParse`
+overload, including those with a nullable format provider. Input must have exactly 26 characters
+from Crockford's base32 alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ`, case-insensitively; `I`, `L`,
+`O` and `U` are invalid. The first character must be `0` through `7` to fit the 128-bit value.
+`TryParse` returns false for invalid text and `Parse` throws `FormatException`. Valid lowercase
+input is accepted, and byte values and canonical uppercase encoding are unchanged.
+
+Generated ULID JSON converters delegate to `Ulid.TryParse`, so scalar values, dictionary keys and
+direct parsing share the same rule. Compared with 10.0.0-preview.1, malformed and overflowing text
+that previously decoded silently is now rejected by `Ulid.Parse` and `Ulid.TryParse`, including
+through generated wrapper parsers. Generated JSON reads reject the same text with `JsonException`.
+Wrong-length `Ulid.Parse` input now throws `FormatException` instead of `ArgumentException`.
+This is an intentional behavioral breaking change: malformed spellings can no longer alias a
+valid identifier or overwrite a dictionary entry under that identifier.
 
 ## Frozen runtime contract
 

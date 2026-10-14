@@ -90,10 +90,14 @@ Metadata:
 | `ObjectRuntimeType` | `Int`, `Short`, `Long`, `UInt`, `UShort`, `ULong`, `Double`, `Decimal`, `String`, `Guid`, `Ulid` | Required |
 | `ObjectNamespace` | Non-empty C# namespace | Required |
 | `ObjectKind` | `Struct`, `Class` | `Struct` |
-| `ObjectAccessModifier` | `public`, `internal`, `None` (omit modifier) | Omitted modifier (C# internal visibility unless another partial specifies it) |
+| `ObjectAccessModifier` | `public`, `internal`, `None` | No modifier, the same as `None`; another partial may specify accessibility |
 | `ObjectHasImplicitOperators` | `true`, `false` | `false` |
 | `ObjectHasIsValidMethod` | `true`, `false` | `false` |
 | `ObjectComparison` | `Ordinal`, `OrdinalIgnoreCase`; only valid for `String` | `Ordinal` |
+
+Omitting `ObjectAccessModifier` or setting it to `None` emits no accessibility modifier. A
+handwritten `public` partial therefore determines public visibility; without an explicit modifier
+on any partial, C# uses internal visibility.
 
 The target supplies `ObjectFilePath` and `ObjectRelativePath` for compilation and IDE links; these
 are derived metadata, not configuration knobs. The generated file has an auto-generated header,
@@ -102,12 +106,13 @@ nullable annotations and XML documentation, without nullable-warning suppression
 **Generated contract.** Structs are `readonly partial struct`; classes are `sealed partial class`.
 Both expose a constructor, a get-only `Value`, `IEquatable<T>`, `IComparable<T>`,
 `IEqualityOperators<T,T,bool>`, `IComparisonOperators<T,T,bool>`, equality and comparison operators,
-`Equals(object?)`, `GetHashCode()`, and a non-null `ToString()`. Debugger display and a private
-nested JSON converter are attached through attributes. An internal nested factory bridges the
-private converter to source-generated JSON contexts in the same assembly, preserving existing
-internal factory partial declarations without publishing a converter API. Implicit conversions are emitted only when
-requested. A string class maps null to null in either conversion, with `NotNullIfNotNull`
-annotations, but its constructor rejects null. Converting a null numeric/Guid/Ulid class to its
+`Equals(object?)`, `GetHashCode()`, and a non-null `ToString()`. Debugger display and a nested
+JSON converter are attached through attributes. The one converter is declared as
+`internal sealed partial class XJsonConverter : JsonConverter<X>`; the value object's
+`JsonConverter` attribute references it directly. Same-assembly source-generated JSON contexts can
+construct it, and existing internal converter partial declarations remain compatible. Implicit
+conversions are emitted only when requested. A string class maps null to null in either conversion,
+with `NotNullIfNotNull` annotations, but its constructor rejects null. Converting a null numeric/Guid/Ulid class to its
 runtime value throws `ArgumentNullException`. Class equality and comparison operators accept null;
 null sorts first and an instance's `Equals(null)` is false.
 
@@ -149,8 +154,9 @@ this boundary on its own.
 null classes itself. Rejected values and invalid Ulid text throw `JsonException` with the reason.
 ULID scalars and dictionary keys must contain exactly 26 characters from the case-insensitive
 [ULID alphabet](https://github.com/ulid/spec#canonical-string-representation), with a leading digit
-from `0` through `7` to prevent 128-bit overflow. Malformed text is rejected before decoding so
-it cannot alias a valid identifier or silently overwrite a dictionary entry.
+from `0` through `7` to prevent 128-bit overflow. The converter delegates to `Ulid.TryParse`,
+which owns this rule for every direct and generated parse path. Malformed text is rejected before
+decoding so it cannot alias a valid identifier or silently overwrite a dictionary entry.
 String defaults write JSON null. Dictionary property-name conversion is supported for every
 runtime type; numbers use invariant culture. A default string wrapper has no valid JSON property
 name and cannot be used as a serialized dictionary key. Consumers using source-generated
@@ -174,7 +180,7 @@ the item, metadata and allowed values; error text lives in the build task.
 | `COHVT001` | Missing or unknown `ObjectRuntimeType` |
 | `COHVT002` | Missing `ObjectNamespace` |
 | `COHVT003` | Invalid `ObjectKind` |
-| `COHVT004` | Invalid `ObjectAccessModifier` |
+| `COHVT004` | Invalid `ObjectAccessModifier`; allowed: `Public`, `Internal`, `None`, or omitted (None and omitted emit no modifier) |
 | `COHVT005` | Invalid boolean metadata |
 | `COHVT006` | Invalid `ObjectComparison`, or comparison metadata on a non-string type |
 
@@ -184,9 +190,13 @@ ordinal. `HttpCookieDomain` (introduced after preview.1) now compares and hashes
 Validated `Parse` now throws `FormatException` on rejection, while `TryParse` returns false.
 JSON null now means default, invalid values surface as `JsonException`, and dictionary keys are
 supported. Malformed and overflowing ULID JSON strings that preview.1 accepted now throw
-`JsonException`. The actual converter remains private, behind an internal factory accessible to
-source-generated contexts in the same assembly. A context in another assembly needs its own
-accessible converter. The Core conformance suite uses a source-generated context without reflection.
+`JsonException`. Core's `Ulid.Parse` and `Ulid.TryParse` now reject that malformed and overflowing
+text directly too, with `FormatException` and false respectively; every string, character-span,
+UTF-8 and provider overload shares the rule. Valid bytes and canonical encoding are unchanged.
+Wrong-length `Ulid.Parse` input now throws `FormatException` instead of `ArgumentException`.
+The generated converter is internal and directly accessible to source-generated contexts in the
+same assembly. A context in another assembly needs its own accessible converter. The Core
+conformance suite uses a source-generated context without reflection.
 `ToString()` on a default string wrapper now returns empty instead of null. These are
 intentional source, binary or behavioral changes under the preview compatibility policy.
 

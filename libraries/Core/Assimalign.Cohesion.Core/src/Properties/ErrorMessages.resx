@@ -129,4 +129,7 @@
   <data name="FileSystemPathError" xml:space="preserve">
     <value>Test</value>
   </data>
+  <data name="UlidTextInvalid" xml:space="preserve">
+    <value>The ULID must contain exactly 26 Crockford base32 characters with a leading digit from 0 through 7.</value>
+  </data>
 </root>

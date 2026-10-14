@@ -123,11 +123,20 @@ public class UlidTest
         guid_smaller.CompareTo(guid_larger).ShouldBeLessThan(0, "a Ulid to Guid cast should preserve order");
     }
 
-    [Fact]
-    public void UlidParseRejectsInvalidStrings()
+    [Fact(DisplayName = "Cohesion Test [Core] - ULID parsing: invalid strings throw FormatException")]
+    public void Parse_InvalidStrings_ShouldThrowFormatException()
     {
-        Assert.Throws<ArgumentException>(() => Ulid.Parse("1234"));
-        Assert.Throws<ArgumentException>(() => Ulid.Parse(Guid.NewGuid().ToString()));
+        // Arrange
+        string shortInput = "1234";
+        string guidInput = Guid.NewGuid().ToString();
+
+        // Act
+        Action parseShortInput = () => Ulid.Parse(shortInput);
+        Action parseGuidInput = () => Ulid.Parse(guidInput);
+
+        // Assert
+        Should.Throw<FormatException>(parseShortInput);
+        Should.Throw<FormatException>(parseGuidInput);
     }
 
     [Fact]
