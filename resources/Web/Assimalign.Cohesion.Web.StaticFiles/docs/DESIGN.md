@@ -146,9 +146,10 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   application decides. `ServeUnknownContentTypes` + `FallbackContentType` opt in explicitly.
 - **Configured content types are HTTP field values (#1476).** Every `ContentTypeMappings`
   value and `FallbackContentType` is checked through `HttpFieldValue.TryCreate` at composition,
-  with a separate non-empty requirement for a content type. This refuses controls other than
+  with a separate non-empty requirement for a content type. This refuses RFC CTLs other than
   interior HTAB and leading or trailing SP/HTAB before a value can reach `Content-Type`.
-  Case and valid interior whitespace are preserved. The fallback is checked even when unknown
+  Case, valid interior whitespace and obs-text (including C1 characters) are preserved; a
+  quoted media-type parameter can contain obs-text. The fallback is checked even when unknown
   types are disabled, so every supplied configuration value is safe. The dictionary and fallback
   retain their string signatures; validation uses the shared core grammar without adding checks
   to `HttpHeaderValue` or per-request response writing. This is a behavior break against

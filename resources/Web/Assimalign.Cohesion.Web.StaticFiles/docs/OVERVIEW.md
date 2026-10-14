@@ -57,8 +57,8 @@ app.UseStaticFiles(contentRoot, options =>
 ```
 
 `ContentTypeMappings` values and `FallbackContentType` must be non-empty HTTP field values.
-Registration rejects controls other than interior HTAB, plus leading or trailing SP/HTAB,
-using `HttpFieldValue`; case is preserved. The fallback is checked even when
+Registration rejects RFC CTLs other than interior HTAB, plus leading or trailing SP/HTAB,
+using `HttpFieldValue`; case and obs-text (including C1 characters) are preserved. The fallback is checked even when
 `ServeUnknownContentTypes` is disabled.
 
 A `ContentTypeMappings` key maps an extension, never a whole file name, so no key types a file
