@@ -634,6 +634,22 @@ is no floating-point drift when comparing `q=0.7` against `q=0.700` — and keep
 RFC 9110 §12.4.2 grammar (at most three fractional digits, range 0–1) enforceable in
 `TryParse` without rounding heuristics.
 
+### Constructor and parser agreement (#1477)
+
+`HttpMediaTypeParameter`, `HttpForwardedParameter`, `HttpCacheControlExtension`,
+and `HttpQualityValue` reject non-token names or preference values in their public
+constructors with `ArgumentException` and a resource-backed message. They reuse
+`HttpFieldName.IsValid` for RFC 9110 §5.6.2's token grammar, the same grammar their
+parsers apply through the shared field-syntax implementation. Wildcards and every
+other legal token character retain their spelling; optional parameter values keep
+their existing quoted-string semantics. Existing null/empty argument guards remain.
+No public member or value type is added (decision V3).
+
+**Breaking behavior from 10.0.0-preview.1:** these constructors previously retained
+non-empty invalid names and tokens even though their parsers discarded or rejected
+them. They now refuse those inputs during construction. Parser behavior and valid
+inputs are unchanged.
+
 ### Why static parsers/selectors, not interfaces
 
 `HttpAcceptParser` and `HttpContentNegotiation` are `static` helper classes, following
@@ -710,8 +726,18 @@ source break is accepted during the previews.
 
 `CreateMap` still accepts a key with or without its leading dot. A key is always an
 extension, so there is nothing to disambiguate: the key `gltf` maps `.gltf`, and a file
-named `gltf` still maps to nothing. A key with an interior dot (`.tar.gz`) is stored but
-never matched, because neither lookup produces one.
+named `gltf` still maps to nothing. After normalizing the optional leading dot,
+`CreateMap` applies the same `IsExtension` predicate as extension lookup (#1477).
+An empty key, a dot without a suffix, an interior dot (`.tar.gz`) or a path separator
+therefore throws a resource-backed `ArgumentException` during map creation. No new
+extension type or public member is needed. Empty mapping values retain the existing
+skip behavior once their key has passed validation.
+
+**Breaking behavior from 10.0.0-preview.1:** invalid keys previously ignored or
+retained by `CreateMap` now throw. In particular `.tar.gz` and `.` could never be
+matched even by preview.1's combined lookup. Keys containing path separators could
+match that older permissive lookup but cannot match either current lookup; they are
+also refused at composition. Valid bare and dotted single extensions are unchanged.
 
 ### AOT posture
 
@@ -962,6 +988,16 @@ carries two generic seam members for it and no feature contract:
   CONNECT latches, so `CanAcceptTunnel` is `false` once `AcceptTunnelAsync` has been called, whether
   or not that call succeeded. The member's documentation carries the full contract. HTTP/1.1's
   control reports `false`, because its `CONNECT` and upgrades take the whole connection over instead.
+
+`Protocol`'s initializer now refuses a non-null value unless `HttpFieldName.IsValid`
+accepts its RFC 9110 token grammar (#1477); spaces, `/`, delimiters and controls
+throw a resource-backed `ArgumentException`. Null continues to mean absent.
+`ValidateExtendedConnect` applies that rule before the transport constructs a context,
+so malformed peer input follows the existing stream-error path. `IsExtendedConnect`
+also requires a token. The `Protocol` initializer postdates 10.0.0-preview.1;
+the validator and classifier existed then, so refusing a non-token protocol on the
+wire or returning false from classification is a breaking behavior change against
+that release. No public surface is added.
 
 The application-facing feature, `IHttpExtendedConnectFeature` (`context.ExtendedConnect`), ships in
 `Assimalign.Cohesion.Http.ExtendedConnect`. Its interceptor installs the feature from `Protocol` and

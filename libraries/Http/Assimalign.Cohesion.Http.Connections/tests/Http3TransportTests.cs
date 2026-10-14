@@ -651,6 +651,37 @@ public class Http3TransportTests
         connection.State.ShouldBe(ConnectionState.Open);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3: A non-token protocol resets only its stream")]
+    [InlineData("web socket")]
+    [InlineData("websocket/1")]
+    public async Task Http3_OnNonTokenProtocol_ShouldResetStreamWithMessageErrorAndServeOthers(string protocol)
+    {
+        // Arrange
+        TestConnection malformed = new(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "CONNECT"),
+            (":protocol", protocol),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test")));
+        TestConnection sibling = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ok", "https", "a"));
+        TestMultiplexedConnection connection = new(malformed, sibling);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
+
+        // Act
+        bool dispatched = await enumerator.MoveNextAsync();
+
+        // Assert
+        dispatched.ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/ok");
+        malformed.AbortReason.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.MessageError);
+        connection.State.ShouldBe(ConnectionState.Open);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Enabling the dynamic table advertises QPACK capacity and blocked streams")]
     public async Task Http3_OnDynamicTableEnabled_ShouldAdvertiseCapacityAndBlockedStreams()
     {

@@ -56,10 +56,10 @@ public class HttpExtendedConnectInterceptorTests
     [InlineData(HttpVersion.Http20, "GET", "websocket")]
     [InlineData(HttpVersion.Http11, "CONNECT", "websocket")]
     [InlineData(HttpVersion.Http11, "GET", null)]
-    [InlineData(HttpVersion.Http20, "CONNECT", "")]
     public void AfterRequestHead_OnAnyOtherRequest_ShouldInstallNothing(HttpVersion version, string method, string? protocol)
     {
         // Arrange — a classic CONNECT, an ordinary request, and hand-built contexts no transport sends.
+        // Empty protocols cannot reach this hook: the context initializer rejects them (#1477).
         IHttpExchangeInterceptor interceptor = HttpExtendedConnectInterceptor.Create();
         HttpExchangeInterceptorRequestContext context = CreateHeadContext(version, HttpMethod.GetCanonicalizedValue(method), protocol);
 

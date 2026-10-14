@@ -17,10 +17,15 @@ public readonly struct HttpMediaTypeParameter : IEquatable<HttpMediaTypeParamete
     /// </summary>
     /// <param name="name">The parameter name.</param>
     /// <param name="value">The parameter value (already unescaped from any quoted-string form).</param>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is null or empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is not an RFC 9110 token.</exception>
     public HttpMediaTypeParameter(string name, string? value)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
+        if (!HttpFieldName.IsValid(name, out _))
+        {
+            throw new ArgumentException(ErrorMessages.TokenNameInvalid, nameof(name));
+        }
+
         Name = name;
         Value = value ?? string.Empty;
     }

@@ -58,3 +58,14 @@ other than internal HTAB and surrounding SP/HTAB are rejected.
 
 `HttpAltService` accepts null/empty same-host values and rejects hosts containing
 controls, spaces or tabs before an advertisement can be formatted.
+
+The public media-type/forwarded parameter, cache extension directive and weighted
+preference constructors require RFC 9110 token names or values. Invalid non-empty
+tokens throw `ArgumentException` immediately. `HttpContentTypes.CreateMap` accepts
+bare or dotted single extensions such as `css` and `.css`; empty keys, extra dots
+and path separators throw during map creation. These are stricter construction
+rules than preview.1; see DESIGN for compatibility details.
+
+`HttpExchangeInterceptorRequestContext.Protocol` accepts null for absence or an
+RFC 9110 token, such as `websocket`. Invalid values throw during initialization;
+transport validation rejects malformed peer protocol names before creating the context.

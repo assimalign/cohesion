@@ -5576,6 +5576,13 @@ Recognition (`:protocol`), validation, and the `IsExtendedConnect` /
 
 ### Deterministic validation (RFC 8441 §4 / RFC 9220)
 
+`HttpFieldNormalization.ValidateExtendedConnect` now applies `HttpFieldName.IsValid` to
+every present protocol name (#1477). Internal spaces, slashes and every other non-token
+character are refused before context construction; the public context initializer also guards
+direct construction. HTTP/2 and HTTP/3 regressions verify stream-local refusal and continued
+service of sibling streams. Against 10.0.0-preview.1, accepting non-token protocol names is
+replaced by `PROTOCOL_ERROR` / `H3_MESSAGE_ERROR` stream rejection, a behavioral break.
+
 - A **present but empty** `:protocol` is malformed on every method. A
   protocol name is a token, `1*tchar` (RFC 9110 §5.6.2), so `""` names no
   protocol (#1369). Only an absent field means "not an extended CONNECT";

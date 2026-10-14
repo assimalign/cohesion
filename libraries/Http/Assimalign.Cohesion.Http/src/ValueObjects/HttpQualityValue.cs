@@ -16,10 +16,15 @@ public readonly struct HttpQualityValue : IEquatable<HttpQualityValue>
     /// </summary>
     /// <param name="value">The value token (e.g. a content-coding, charset, or language range).</param>
     /// <param name="quality">The quality weight.</param>
-    /// <exception cref="ArgumentException"><paramref name="value"/> is null or empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="value"/> is not an RFC 9110 token.</exception>
     public HttpQualityValue(string value, HttpQuality quality)
     {
         ArgumentException.ThrowIfNullOrEmpty(value);
+        if (!HttpFieldName.IsValid(value, out _))
+        {
+            throw new ArgumentException(ErrorMessages.PreferenceTokenInvalid, nameof(value));
+        }
+
         Value = value;
         Quality = quality;
     }

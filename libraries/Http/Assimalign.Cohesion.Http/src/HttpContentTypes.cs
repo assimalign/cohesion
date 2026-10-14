@@ -244,10 +244,11 @@ public static class HttpContentTypes
     /// A key is always an extension, so the leading dot is optional here and nowhere else: the
     /// key <c>gltf</c> maps the extension <c>.gltf</c>, and a file named <c>gltf</c> still maps
     /// to nothing. A lookup reads only a name's final extension, so a key with an interior dot,
-    /// such as <c>.tar.gz</c>, is never matched.
+    /// such as <c>.tar.gz</c>, or a path separator is refused during map creation.
     /// </remarks>
     /// <param name="additionalMappings">The extension-to-content-type overrides to overlay, or <see langword="null"/>.</param>
     /// <returns>A frozen table combining the defaults and the overrides.</returns>
+    /// <exception cref="ArgumentException">An override key is empty or is not a single extension.</exception>
     public static FrozenDictionary<string, string> CreateMap(
         IEnumerable<KeyValuePair<string, string>>? additionalMappings)
     {
@@ -261,11 +262,17 @@ public static class HttpContentTypes
         {
             foreach (KeyValuePair<string, string> mapping in additionalMappings)
             {
-                if (string.IsNullOrEmpty(mapping.Key) || string.IsNullOrEmpty(mapping.Value))
+                string extension = string.IsNullOrEmpty(mapping.Key) ? string.Empty : NormalizeKey(mapping.Key);
+                if (!IsExtension(extension))
+                {
+                    throw new ArgumentException(ErrorMessages.ContentTypeExtensionInvalid, nameof(additionalMappings));
+                }
+
+                if (string.IsNullOrEmpty(mapping.Value))
                 {
                     continue;
                 }
-                map[NormalizeKey(mapping.Key)] = mapping.Value;
+                map[extension] = mapping.Value;
             }
         }
 

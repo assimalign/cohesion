@@ -158,8 +158,8 @@ an `Items` value models nothing.
 
 Whether a request *is* a valid extended CONNECT is decided in the transport, using the shared
 `HttpFieldNormalization.ValidateExtendedConnect` rule (RFC 8441 §4 / RFC 9220 §3): a `:protocol` that
-is present must not be empty (a protocol name is a token, `1*tchar`, RFC 9110 §5.6.2; #1369), it is
-only valid on `CONNECT`, and an extended CONNECT MUST also carry `:scheme`, `:path`, and
+is present must be a token (`1*tchar`, RFC 9110 §5.6.2; #1369, #1477), excluding internal spaces
+and slashes. It is only valid on `CONNECT`, and an extended CONNECT MUST also carry `:scheme`, `:path`, and
 `:authority`. A malformed extended CONNECT is rejected at the wire layer and never reaches this
 package: only the offending stream is reset, with `RST_STREAM(PROTOCOL_ERROR)` on HTTP/2 and
 `H3_MESSAGE_ERROR` on HTTP/3, and the connection keeps serving. The transport sets `Protocol` on the
@@ -167,6 +167,10 @@ request context only after that check, so when `ExtendedConnect` is non-`null`, 
 non-empty and the request was well-formed. The interceptor still tests for a non-empty `Protocol` on a
 `CONNECT`, and the transport's exchange controls refuse a tunnel for anything else, so neither relies
 on the validator alone.
+
+The public request context also rejects empty and other non-token `Protocol` values during
+initialization (#1477), so direct construction cannot pass them to the interceptor. Core's
+construction regressions cover those inputs; interceptor tests cover absent or valid-token values.
 
 ## Non-goals
 
