@@ -91,8 +91,10 @@ QUERY with its original content and switches methods only on `303` — is
 
 Both redirect helpers take `HttpFieldValue` locations (#1476). Conversion applies
 the base field-content grammar, and a local composition check refuses empty and
-default locations, SP and HTAB. Every control character or space is therefore
-refused before the helper changes the status or Location header. Absolute and
+default locations, SP, HTAB and C1 controls (`U+0080-U+009F`). The C1 restriction
+belongs to this redirect boundary; generic field content permits those obs-text
+characters. Every control character or space is therefore refused before the
+helper changes the status or Location header. Absolute and
 relative references keep their case and escaped spelling; encode spaces as `%20`.
 
 Compared with 10.0.0-preview.1, `RedirectQuery(string, bool)` becomes

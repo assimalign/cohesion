@@ -103,7 +103,9 @@ reference (RFC 9110 §10.2.2).
 
 `LoginPath` and `AccessDeniedPath` are `HttpFieldValue` properties. The base type
 checks HTTP field content; the setters additionally refuse empty/default values,
-SP and HTAB, so a configured Location contains no control character or space.
+SP, HTAB and C1 controls (`U+0080-U+009F`), so a configured Location contains no
+control character or space. The C1 restriction belongs to this redirect boundary;
+generic field content permits those obs-text characters.
 This happens at assignment, including mutations after scheme registration. Paths
 retain their case and existing percent-encoded spelling; encode a space as `%20`.
 

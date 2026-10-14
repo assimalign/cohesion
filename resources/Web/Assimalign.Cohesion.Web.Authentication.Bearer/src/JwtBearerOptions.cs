@@ -109,8 +109,8 @@ public sealed class JwtBearerOptions
     /// <see langword="null"/> to omit the realm parameter.
     /// </summary>
     /// <remarks>
-    /// Field-value conversion rejects controls other than HTAB and boundary whitespace. The
-    /// setter additionally rejects HTAB because a realm must contain no control characters.
+    /// Field-value conversion rejects RFC CTLs other than HTAB and boundary SP/HTAB. The
+    /// setter additionally rejects HTAB and C1 controls because a realm must contain no control characters.
     /// Quotes and backslashes are escaped when the challenge is written. An absent or empty
     /// realm omits the parameter.
     /// </remarks>
@@ -120,7 +120,9 @@ public sealed class JwtBearerOptions
         get => _realm;
         set
         {
-            if (value is { } realm && realm.Value?.Contains('\t') == true)
+            if (value is { } realm
+                && (realm.Value.AsSpan().Contains('\t')
+                    || realm.Value.AsSpan().ContainsAnyInRange('\u0080', '\u009f')))
             {
                 throw new ArgumentException(ErrorMessages.BearerRealmInvalid, nameof(value));
             }

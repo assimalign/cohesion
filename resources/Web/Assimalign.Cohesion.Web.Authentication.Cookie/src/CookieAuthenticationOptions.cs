@@ -138,7 +138,9 @@ public sealed class CookieAuthenticationOptions
 
     private static void ValidateRedirectPath(HttpFieldValue path)
     {
-        if (string.IsNullOrEmpty(path.Value) || path.Value.AsSpan().ContainsAny(' ', '\t'))
+        if (string.IsNullOrEmpty(path.Value)
+            || path.Value.AsSpan().ContainsAny(' ', '\t')
+            || path.Value.AsSpan().ContainsAnyInRange('\u0080', '\u009f'))
         {
             throw new ArgumentException(ErrorMessages.RedirectPathInvalid, "value");
         }

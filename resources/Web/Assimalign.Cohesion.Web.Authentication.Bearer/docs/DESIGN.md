@@ -111,8 +111,10 @@ scheme name; `NameClaimType`/`RoleClaimType` are configurable (default
 `realm` when configured and, after a failed authenticate, `error="invalid_token"`
 with a sanitized `error_description`. `ForbidAsync` emits `403` with
 `Bearer error="insufficient_scope"`. A configured realm uses `HttpFieldValue?`:
-conversion refuses controls other than HTAB and boundary SP/HTAB, and its setter
-also refuses HTAB. Thus every control fails at configuration, before either
+conversion refuses RFC CTLs other than HTAB and boundary SP/HTAB, and its setter
+also refuses HTAB and C1 controls (`U+0080-U+009F`). The C1 restriction belongs to
+the realm boundary; generic field content permits those obs-text characters.
+Thus every control fails at configuration, before either
 challenge path runs. Quotes and backslashes are preserved through quoted-pair
 escaping. An absent (including a null string) or empty realm omits the parameter.
 Error descriptions keep their existing sanitization. The bearer scheme never

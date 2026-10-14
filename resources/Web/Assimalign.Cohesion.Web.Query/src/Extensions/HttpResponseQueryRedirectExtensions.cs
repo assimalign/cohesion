@@ -28,7 +28,9 @@ public static class HttpResponseQueryRedirectExtensions
 {
     private static void ValidateLocation(HttpFieldValue location)
     {
-        if (string.IsNullOrEmpty(location.Value) || location.Value.AsSpan().ContainsAny(' ', '\t'))
+        if (string.IsNullOrEmpty(location.Value)
+            || location.Value.AsSpan().ContainsAny(' ', '\t')
+            || location.Value.AsSpan().ContainsAnyInRange('\u0080', '\u009f'))
         {
             throw new ArgumentException(ErrorMessages.RedirectLocationInvalid, nameof(location));
         }
