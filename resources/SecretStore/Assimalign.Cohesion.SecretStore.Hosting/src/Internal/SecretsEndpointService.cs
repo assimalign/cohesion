@@ -221,7 +221,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         // disposes it after this service.
     }
 
-    private async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
+    internal async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
         string path = context.Request.Path.Value;
         bool isNamespaced = path == Route("/cohesion/v1") ||
@@ -756,7 +756,20 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
     {
         if (!_requireAuthentication)
         {
-            return new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, null, null);
+            // Only transport peer facts establish locality; forwarded headers are untrusted here.
+            if (context.ConnectionInfo.RemoteEndPoint is not IPEndPoint remote)
+            {
+                return new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, null, null);
+            }
+
+            IPAddress address = remote.Address.IsIPv4MappedToIPv6
+                ? remote.Address.MapToIPv4()
+                : remote.Address;
+            bool isLoopback = address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback);
+            return new ResourceCredentialVerification(
+                isLoopback ? ResourceCredentialStatus.Authorized : ResourceCredentialStatus.Forbidden,
+                null,
+                null);
         }
 
         ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(

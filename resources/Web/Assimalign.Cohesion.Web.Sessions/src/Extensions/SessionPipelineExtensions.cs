@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Sessions.Internal;
@@ -24,6 +25,13 @@ namespace Assimalign.Cohesion.Web.Sessions;
 /// <see cref="IHttpSessionStore"/> adapter through the store overload; nothing
 /// else in the pipeline changes.
 /// </para>
+/// <para>
+/// The session-id cookie carries <c>Secure</c> whenever the effective scheme
+/// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>) is HTTPS. Behind a
+/// TLS-terminating proxy, register <c>UseForwardedHeaders</c> ahead of
+/// <c>UseSessions</c> so the proxy's <c>https</c> is known when the cookie is
+/// established; without it the transport-derived scheme decides.
+/// </para>
 /// </remarks>
 public static class SessionPipelineExtensions
 {
@@ -35,7 +43,13 @@ public static class SessionPipelineExtensions
         /// <param name="configure">An optional callback to configure the cookie name/path/HttpOnly flag and the idle timeout.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive.</exception>
+        /// <exception cref="ArgumentException">
+        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive;
+        /// <paramref name="configure"/> assigns <see cref="HttpSessionOptions.CookieName"/> a
+        /// string outside RFC 6265 <c>token</c>, or <see cref="HttpSessionOptions.CookiePath"/>
+        /// one outside <c>path-value</c> (thrown by the conversion); or either cookie option is
+        /// <see langword="default"/> (with parameter name <c>configure</c>).
+        /// </exception>
         public IWebApplicationPipelineBuilder UseSessions(Action<HttpSessionOptions>? configure = null)
             => builder.UseSessions(new InMemoryHttpSessionStore(), configure);
 
@@ -46,7 +60,13 @@ public static class SessionPipelineExtensions
         /// <param name="configure">An optional callback to configure the cookie name/path/HttpOnly flag and the idle timeout.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="store"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive.</exception>
+        /// <exception cref="ArgumentException">
+        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive;
+        /// <paramref name="configure"/> assigns <see cref="HttpSessionOptions.CookieName"/> a
+        /// string outside RFC 6265 <c>token</c>, or <see cref="HttpSessionOptions.CookiePath"/>
+        /// one outside <c>path-value</c> (thrown by the conversion); or either cookie option is
+        /// <see langword="default"/> (with parameter name <c>configure</c>).
+        /// </exception>
         public IWebApplicationPipelineBuilder UseSessions(IHttpSessionStore store, Action<HttpSessionOptions>? configure = null)
         {
             ArgumentNullException.ThrowIfNull(builder);
@@ -58,8 +78,20 @@ public static class SessionPipelineExtensions
             if (options.IdleTimeout <= TimeSpan.Zero)
             {
                 throw new ArgumentException(
-                    $"HttpSessionOptions.IdleTimeout must be positive; got {options.IdleTimeout}.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.SessionIdleTimeoutInvalid, options.IdleTimeout),
                     nameof(configure));
+            }
+
+            // The value types reject out-of-grammar strings at assignment; default is the
+            // one value they cannot see. Refuse it before any middleware is registered.
+            if (options.CookieName.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.SessionCookieNameInvalid, nameof(configure));
+            }
+
+            if (options.CookiePath.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.SessionCookiePathInvalid, nameof(configure));
             }
 
             return builder.Use(new SessionMiddleware(store, options));

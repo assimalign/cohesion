@@ -18,6 +18,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<!-- Exercise the full Web path: annotated sample -> source-generated registry -> endpoint source. -->
-		<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.OpenApi" />
 	</ItemGroup>
 </Project>

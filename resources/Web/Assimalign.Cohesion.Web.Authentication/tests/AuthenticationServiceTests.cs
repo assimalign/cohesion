@@ -13,6 +13,21 @@ namespace Assimalign.Cohesion.Web.Authentication.Tests;
 
 public class AuthenticationServiceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - Create: returns the public concrete service implementing its contract")]
+    public void Create_WithOptions_ReturnsConcreteService()
+    {
+        // Arrange
+        AuthenticationOptions options = new() { DefaultScheme = "Cookies" };
+
+        // Act
+        AuthenticationService service = AuthenticationService.Create(options);
+        IAuthenticationService contract = service;
+
+        // Assert
+        contract.Name.ShouldBe(nameof(IAuthenticationService));
+        contract.DefaultAuthenticateScheme.ShouldBe("Cookies");
+    }
+
     private static (IAuthenticationService service, AuthenticationOptions options) CreateService(
         Action<AuthenticationOptions> configure)
     {

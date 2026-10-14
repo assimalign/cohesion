@@ -11,6 +11,8 @@ public sealed class RoutePattern
 {
     private const string SeparatorString = "/";
 
+    private string? _telemetryTemplate;
+
     public RoutePattern(
         string? rawText,
         IReadOnlyDictionary<string, object?> defaults,
@@ -145,6 +147,31 @@ public sealed class RoutePattern
     internal string DebuggerToString()
     {
         return RawText ?? string.Join(SeparatorString, PathSegments.Select(s => s.DebuggerToString()));
+    }
+
+    /// <summary>
+    /// Gets the template telemetry names the route by (<c>http.route</c>): the raw text with a leading
+    /// <c>/</c>, so <c>/users/{id}</c>, <c>users/{id}</c> and <c>~/users/{id}</c> report alike, and a
+    /// group's composed template (<c>api/users/{id}</c>) reads as a path.
+    /// </summary>
+    /// <remarks>Computed once per pattern, not per request.</remarks>
+    internal string TelemetryTemplate => _telemetryTemplate ??= FormatTelemetryTemplate(DebuggerToString());
+
+    private static string FormatTelemetryTemplate(string template)
+    {
+        ReadOnlySpan<char> text = template.AsSpan();
+
+        if (text.StartsWith("~/", StringComparison.Ordinal))
+        {
+            text = text[1..];
+        }
+
+        if (text.StartsWith('/'))
+        {
+            return text.Length == template.Length ? template : text.ToString();
+        }
+
+        return string.Concat(SeparatorString, text);
     }
 
     internal static bool IsRequiredValueAny(object? value)

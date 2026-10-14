@@ -60,7 +60,18 @@ internal sealed class HttpSessionStoreSession : IHttpStoredSession
     /// <inheritdoc />
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        byte[]? frame = await _store.GetAsync(_id, cancellationToken).ConfigureAwait(false);
+        byte[]? frame;
+        try
+        {
+            frame = await _store.GetAsync(_id, cancellationToken).ConfigureAwait(false);
+        }
+        // Store implementations define their own exception types. Observe and rethrow
+        // at this boundary; a caller-requested cancellation is not a store failure.
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            HttpSessionEventSource.Log.StoreLoadFailed(exception);
+            throw;
+        }
 
         _values.Clear();
         if (frame is not null && HttpSessionSerializer.TryDeserialize(frame, out Dictionary<string, byte[]>? loaded))
@@ -79,17 +90,24 @@ internal sealed class HttpSessionStoreSession : IHttpStoredSession
     /// <inheritdoc />
     public async Task CommitAsync(CancellationToken cancellationToken = default)
     {
-        if (_isModified)
+        try
         {
-            byte[] frame = HttpSessionSerializer.Serialize(_values);
-            await _store.SetAsync(_id, frame, _idleTimeout, cancellationToken).ConfigureAwait(false);
-            _isModified = false;
+            if (IsModified)
+            {
+                byte[] frame = HttpSessionSerializer.Serialize(_values);
+                await _store.SetAsync(_id, frame, _idleTimeout, cancellationToken).ConfigureAwait(false);
+                _isModified = false;
+            }
+            else if (_isLoaded)
+            {
+                // Skip the payload commit but retain renew-on-access for readers.
+                await _store.RefreshAsync(_id, _idleTimeout, cancellationToken).ConfigureAwait(false);
+            }
         }
-        else if (_isLoaded)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // Nothing changed, but the session was accessed: slide its idle window
-            // so an active reader keeps the session alive (renew-on-access).
-            await _store.RefreshAsync(_id, _idleTimeout, cancellationToken).ConfigureAwait(false);
+            HttpSessionEventSource.Log.StoreCommitFailed(exception);
+            throw;
         }
     }
 

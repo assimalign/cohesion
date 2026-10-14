@@ -11,6 +11,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// exchange owns its whole connection, so this is the one version whose control offers the full
 /// surface: interim (<c>1xx</c>) writes straight onto the connection stream (RFC 9110 §15.2) and
 /// the raw-stream takeover that protocol upgrades / <c>CONNECT</c> tunnels need (§7.8 / §9.3.6).
+/// The extended CONNECT stream tunnel is HTTP/2 and HTTP/3 only, so it reports unsupported here.
 /// Aborting is not a control mechanism — it is the application-owned
 /// <see cref="IHttpContext.Cancel"/>, which <see cref="Http1ConnectionContext.SendAsync"/> honors
 /// by writing no response and ending the connection after the exchange.
@@ -49,6 +50,21 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         _context.ResponseFinalized || _context.HasFinalResponseStarted;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The status <see cref="Http1Context.RequestBodyRejectedStatusCode"/> latched when a body read after
+    /// dispatch failed on the client's side: <c>400</c> for malformed chunked framing or a malformed
+    /// trailer section, <c>413</c> over the body-size cap, <c>408</c> below the minimum data rate,
+    /// or <c>431</c> for a trailer section over the header-section bounds.
+    /// <see cref="Http1ConnectionContext.SendAsync"/> answers the exchange with the same status.
+    /// A connection lost before the body completes instead throws <see cref="OperationCanceledException"/>
+    /// with the exchange token and reports no client-fault status (#1439).
+    /// </remarks>
+    public HttpStatusCode? ClientFaultStatusCode => _context.RequestBodyRejectedStatusCode;
+
+    /// <inheritdoc />
+    public bool ResponseAbortedByClient => _context.ResponseAbortedByClient;
+
+    /// <inheritdoc />
     public bool CanWriteInterimResponse => !HasResponseStarted && !_context.CancelRequested;
 
     /// <inheritdoc />
@@ -62,7 +78,7 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         if (!CanWriteInterimResponse)
         {
             throw new InvalidOperationException(
-                "An interim response cannot be sent after the final HTTP/1.1 response has started.");
+                ErrorMessages.Http1ResponseAlreadyStarted);
         }
 
         await Http1MessageWriter.WriteInterimResponseAsync(_stream, statusCode, headers, cancellationToken).ConfigureAwait(false);
@@ -81,13 +97,13 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         if (HasResponseStarted || _context.CancelRequested)
         {
             throw new InvalidOperationException(
-                "The exchange can no longer be taken over: the final response has started or the exchange was aborted.");
+                ErrorMessages.ExchangeTakeoverUnavailable);
         }
 
         if (Interlocked.Exchange(ref _takenOver, 1) == 1)
         {
             throw new InvalidOperationException(
-                "The connection has already been taken over for this exchange.");
+                ErrorMessages.ConnectionAlreadyTakenOver);
         }
 
         _context.ResponseFinalized = true;
@@ -95,4 +111,17 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         return _stream;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="false"/>: HTTP/1.1 has no extended CONNECT. Its <c>CONNECT</c> tunnels and
+    /// protocol upgrades take the whole connection over (<see cref="TakeOver"/>).
+    /// </remarks>
+    public bool CanAcceptTunnel => false;
+
+    /// <inheritdoc />
+    public ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromException<Stream>(new InvalidOperationException(
+            ErrorMessages.Http1TunnelNotSupported));
+    }
 }

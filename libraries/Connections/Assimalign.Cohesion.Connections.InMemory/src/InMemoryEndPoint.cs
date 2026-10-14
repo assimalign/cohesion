@@ -33,7 +33,7 @@ public sealed class InMemoryEndPoint : EndPoint, IEquatable<InMemoryEndPoint>
     {
         if (string.IsNullOrEmpty(name))
         {
-            throw new ArgumentException("The in-memory endpoint name must be a non-empty string.", nameof(name));
+            throw new ArgumentException(ErrorMessages.EndpointNameEmpty, nameof(name));
         }
 
         Name = name;

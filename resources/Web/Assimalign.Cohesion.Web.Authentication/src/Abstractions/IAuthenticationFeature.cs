@@ -19,12 +19,11 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// directly.
 /// </para>
 /// <para>
-/// Future iterations of this package may extend the contract with
-/// auth-flow methods (<c>AuthenticateAsync</c>, <c>SignInAsync</c>,
-/// <c>SignOutAsync</c>, <c>ChallengeAsync</c>, <c>ForbidAsync</c>) when
-/// authentication middleware lands; for now the surface is intentionally
-/// the smallest thing that lets the protocol core drop its
-/// <c>ClaimsPrincipal</c> dependency.
+/// The auth-flow verbs (<c>AuthenticateAsync</c>, <c>SignInAsync</c>,
+/// <c>SignOutAsync</c>, <c>ChallengeAsync</c>, <c>ForbidAsync</c>) live on
+/// <see cref="IAuthenticationService"/> and the context verb extensions, not
+/// on this feature, which stays the smallest thing that lets the protocol
+/// core drop its <c>ClaimsPrincipal</c> dependency.
 /// </para>
 /// </remarks>
 public interface IAuthenticationFeature : IHttpFeature

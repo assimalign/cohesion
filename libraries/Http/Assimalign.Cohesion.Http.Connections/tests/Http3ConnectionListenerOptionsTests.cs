@@ -46,4 +46,35 @@ public class Http3ConnectionListenerOptionsTests
 
         Should.Throw<ArgumentOutOfRangeException>(() => qpack.MaxBlockedStreams = -1);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3QPackOptions: Defaults the decoded field-section size to 16 KB")]
+    public void MaxFieldSectionSize_OnCreate_ShouldDefaultTo16KB()
+    {
+        Http3QPackOptions qpack = new();
+
+        qpack.MaxFieldSectionSize.ShouldBe(16 * 1024);
+        Http3QPackOptions.DefaultMaxFieldSectionSize.ShouldBe(16 * 1024);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3QPackOptions: Round-trips an assigned decoded field-section size")]
+    public void MaxFieldSectionSize_OnAssignment_ShouldRoundTrip()
+    {
+        Http3QPackOptions qpack = new()
+        {
+            MaxFieldSectionSize = 64 * 1024,
+        };
+
+        qpack.MaxFieldSectionSize.ShouldBe(64 * 1024);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3QPackOptions: Rejects a decoded field-section size no SETTINGS value can carry")]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    [InlineData(1L << 62)]
+    public void MaxFieldSectionSize_OnOutOfRangeValue_ShouldThrow(long value)
+    {
+        Http3QPackOptions qpack = new();
+
+        Should.Throw<ArgumentOutOfRangeException>(() => qpack.MaxFieldSectionSize = value);
+    }
 }

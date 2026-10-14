@@ -1,8 +1,12 @@
 using System;
+using System.Globalization;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -27,12 +31,58 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// The stream is single-reader by contract — it is handed to exactly one request
 /// handler. A peer <c>RST_STREAM</c> (or a local reset) fires
 /// <see cref="Http2Stream.RequestAborted"/>, which surfaces here as an
-/// <see cref="OperationCanceledException"/> so a handler blocked reading the body
-/// wakes up and unwinds.
+/// <see cref="OperationCanceledException"/> carrying the exchange's
+/// <see cref="IHttpContext.RequestCancelled"/> so a handler blocked reading the body
+/// wakes up and unwinds. The stream fires that abort before it fails the pipe with an
+/// <see cref="IOException"/>, so a body cut off by a reset or by the loss of the
+/// connection never reads as a clean end: only the peer's END_STREAM ends the body
+/// with a 0-octet read (RFC 9113 §8.1, #1327).
+/// </para>
+/// <para>
+/// <b><c>Expect: 100-continue</c> (#1385).</b> A request that declared the expectation and left its stream
+/// open has its content solicited at the first read, as HTTP/1.1 does: <c>100 Continue</c> goes out as an
+/// interim HEADERS block through the exchange's interim-response path, unless the final response has
+/// started, so a handler that answers without reading the body never invites it.
+/// </para>
+/// <para>
+/// <b>Client faults (#1378).</b> When the transport rejects the body for the client's fault — over the
+/// size cap, below the minimum data rate, or malformed — the stream latches the fault
+/// (<see cref="Http2Stream.LatchClientFault"/>) before it fails the pipe and before the stream is
+/// answered or reset. From then on every read throws the fault's <see cref="IOException"/>, never the
+/// cancellation the reset fires, so the exchange learns the client's fault however its read meets the
+/// end of the request, and its control reports the status
+/// (<see cref="Http2ExchangeControl.ClientFaultStatusCode"/>).
+/// </para>
+/// <para>
+/// Reaching the clean end of the body is also when the request's trailer section, if
+/// it carried one, appears on <c>Request.Trailers</c>: the frame pump decodes the
+/// section before it completes the pipe, and this stream publishes it at the end.
+/// </para>
+/// <para>
+/// <b>Minimum data rate (#1085).</b> Unless the stream is a CONNECT tunnel, the body is held to the
+/// listener's rate, or to the rate its request set for itself before the first read (#1383; the parse
+/// context's knob freezes then), as HTTP/1.1 holds its own: a <see cref="MinDataRateGate"/> started at
+/// the first read charges only the time this
+/// reader waits for DATA the pipe does not yet hold, and every octet delivered extends the
+/// allowance. The part of a wait during which the connection-level receive window was too low
+/// to carry a full frame is excused, since the peer may then be unable to send because other
+/// streams hold the window — but only up to the rate's grace period over the body's life, since
+/// a peer can pin the window itself by leaving one stream's body unread. A body that falls below
+/// the rate is answered by the connection — <c>408</c> while no response has started, a reset
+/// otherwise — and the read fails with an <see cref="IOException"/>.
 /// </para>
 /// </remarks>
-internal sealed class Http2RequestBodyStream : Stream
+internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
 {
+    // While the connection's receive window is low, a wait may run past the reader's allowance on its
+    // exemption, but no longer than this at a time, so a window that recovers mid-wait is noticed and the
+    // rest of the wait charged without spinning.
+    private static readonly TimeSpan _backpressureRecheckInterval = TimeSpan.FromSeconds(1);
+
+    // The stream this body belongs to: its abort token, its trailer section, which it publishes when the
+    // reader reaches the clean end of the body (RFC 9110 §6.5, as HTTP/1.1 and HTTP/3 do), and its
+    // client-fault latch (#1378).
+    private readonly Http2Stream _owner;
     private readonly ChannelReader<Http2DataChunk> _reader;
     // Invoked as each chunk is fully consumed to credit its flow-control cost
     // back to the peer — (streamId, flowControlLength, cancellationToken).
@@ -41,22 +91,89 @@ internal sealed class Http2RequestBodyStream : Stream
     // timeout-phase signals as delegates.
     private readonly Func<int, int, CancellationToken, ValueTask> _onConsumed;
     private readonly int _streamId;
-    private readonly CancellationToken _requestAborted;
+    // Starts with the stream's token, then uses the exchange's token once attached (#1439).
+    private CancellationToken _requestAborted;
+    // The connection's minimum request-body data rate policy, or null when the stream is a CONNECT tunnel.
+    // The rate the body is held to is resolved, and the gate that enforces it started, at the first read:
+    // the request's own (#1383) when a parse context is attached, else the listener's.
+    private readonly Http2RequestBodyDataRate? _dataRate;
+    // The request-parse context whose rate knob freezes at the first read, or null on the fast path.
+    private HttpExchangeInterceptorRequestContext? _interception;
+    // Whether the first read still has to solicit the content with 100 Continue (#1385), and the exchange
+    // whose interim-response path it goes out on.
+    private bool _solicitContinue;
+    private Http2Context? _exchange;
+    // Whether the first read resolved the rate (and froze the knob).
+    private bool _rateResolved;
+    // The rate the body is held to, resolved at the first read; null when it is held to none.
+    private HttpMinDataRate? _rate;
+    // The wait time the connection's low receive window may excuse for this body: the grace period of _rate.
+    private long _maxExemptionTicks;
 
     private ReadOnlyMemory<byte> _current;
     private int _currentFlowControlDebt;
     private bool _completed;
+    private MinDataRateGate? _gate;
+    private IOException? _rateFailure;
+    // The wait time the connection's low receive window has excused so far, in clock ticks; never more
+    // than _maxExemptionTicks.
+    private long _excusedTicks;
 
+    /// <summary>
+    /// Initializes the body over a stream's DATA pipe.
+    /// </summary>
+    /// <param name="owner">
+    /// The stream the body belongs to: its abort token fires when it is reset, it publishes the trailer
+    /// section at the clean end of the body, and it latches the client fault the body is rejected for.
+    /// </param>
+    /// <param name="reader">The pipe the frame pump writes the stream's DATA to.</param>
+    /// <param name="onConsumed">Credits a consumed chunk's flow-control cost back to the peer.</param>
+    /// <param name="dataRate">
+    /// The connection's minimum request-body data rate policy, or <see langword="null"/> to leave the body
+    /// unbounded in time (a CONNECT tunnel). With a policy, the body is held to the listener's rate unless
+    /// its request changed its own before the first read (<see cref="AttachInterception"/>).
+    /// </param>
+    /// <param name="solicitContinue">
+    /// Whether the request declared <c>Expect: 100-continue</c> and left its stream open for content, so the
+    /// first read solicits the content with <c>100 Continue</c> (RFC 9110 §10.1.1, #1385) through the
+    /// exchange attached with <see cref="AttachExchange"/>.
+    /// </param>
     public Http2RequestBodyStream(
+        Http2Stream owner,
         ChannelReader<Http2DataChunk> reader,
         Func<int, int, CancellationToken, ValueTask> onConsumed,
-        int streamId,
-        CancellationToken requestAborted)
+        Http2RequestBodyDataRate? dataRate = null,
+        bool solicitContinue = false)
     {
+        _owner = owner;
         _reader = reader;
         _onConsumed = onConsumed;
-        _streamId = streamId;
-        _requestAborted = requestAborted;
+        _streamId = owner.StreamId;
+        _requestAborted = owner.RequestAborted;
+        _dataRate = dataRate;
+        _solicitContinue = solicitContinue;
+    }
+
+    /// <summary>
+    /// Attaches the exchange this body belongs to, whose cancellation token every aborted read carries
+    /// (#1439) and whose interim-response path solicits the content (<c>100 Continue</c>, #1385).
+    /// Called once, when the exchange is built.
+    /// </summary>
+    /// <param name="exchange">The owning exchange.</param>
+    public void AttachExchange(Http2Context exchange)
+    {
+        _exchange = exchange;
+        _requestAborted = exchange.RequestCancelled;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Called by the request-parse pipeline after the head hooks, before the body is exposed. The knob
+    /// stays adjustable until the first read freezes it (<see cref="ResolveRate"/>).
+    /// </remarks>
+    public void AttachInterception(HttpExchangeInterceptorRequestContext interception)
+    {
+        _interception = interception;
     }
 
     /// <inheritdoc />
@@ -69,13 +186,13 @@ internal sealed class Http2RequestBodyStream : Stream
     public override bool CanWrite => false;
 
     /// <inheritdoc />
-    public override long Length => throw new NotSupportedException("The HTTP/2 request body length is not known in advance.");
+    public override long Length => throw new NotSupportedException(ErrorMessages.Http2RequestBodyLengthUnknown);
 
     /// <inheritdoc />
     public override long Position
     {
-        get => throw new NotSupportedException("The HTTP/2 request body stream is not seekable.");
-        set => throw new NotSupportedException("The HTTP/2 request body stream is not seekable.");
+        get => throw new NotSupportedException(ErrorMessages.Http2RequestBodySeekingNotSupported);
+        set => throw new NotSupportedException(ErrorMessages.Http2RequestBodySeekingNotSupported);
     }
 
     /// <inheritdoc />
@@ -86,13 +203,40 @@ internal sealed class Http2RequestBodyStream : Stream
             return 0;
         }
 
+        // The transport consumes the body from here on: the rate is resolved and enforced from the first
+        // read, as on HTTP/1.1, so a peer that holds its body back gets the grace period and no more.
+        if (!_rateResolved)
+        {
+            ResolveRate();
+        }
+
+        // RFC 9110 §10.1.1 — the client declared Expect: 100-continue and withholds the content until it is
+        // solicited. The first read solicits it, as HTTP/1.1 does (#1385), so a handler that answers without
+        // reading the body never invites it onto the wire.
+        if (_solicitContinue)
+        {
+            _solicitContinue = false;
+            await SolicitContinueAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         while (true)
         {
             // RFC 9113 §5.4.2 — a reset stream aborts the application's view of the
             // request. Surface it as cancellation before delivering any further
-            // bytes so a handler mid-read unwinds rather than seeing a clean EOF.
-            _requestAborted.ThrowIfCancellationRequested();
+            // bytes so a handler mid-read unwinds rather than seeing a clean EOF —
+            // unless the transport ended the exchange for the client's fault (#1378),
+            // whose failure the read reports instead.
+            if (_requestAborted.IsCancellationRequested)
+            {
+                throw CreateAbortFailure();
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (_rateFailure is not null)
+            {
+                throw _rateFailure;
+            }
 
             if (!_current.IsEmpty)
             {
@@ -144,13 +288,86 @@ internal sealed class Http2RequestBodyStream : Stream
     public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException("The HTTP/2 request body stream is not seekable.");
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.Http2RequestBodySeekingNotSupported);
 
     /// <inheritdoc />
-    public override void SetLength(long value) => throw new NotSupportedException("The HTTP/2 request body stream is read-only.");
+    public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.Http2RequestBodyWritingNotSupported);
 
     /// <inheritdoc />
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("The HTTP/2 request body stream is read-only.");
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.Http2RequestBodyWritingNotSupported);
+
+    /// <summary>
+    /// Sends <c>100 Continue</c> (RFC 9110 §10.1.1) on the exchange's interim-response path — a HEADERS
+    /// block without <c>END_STREAM</c> ahead of the final response (RFC 9113 §8.1) — unless an interim
+    /// response can no longer precede the final one: the final response has started, the exchange was
+    /// cancelled, or the stream was reset. The interim path discards the write itself when the stream's final
+    /// response is claimed, or it is reset, before the write gets the connection, so a response that wins the
+    /// race is never preceded by a <c>100</c>.
+    /// </summary>
+    private async ValueTask SolicitContinueAsync(CancellationToken cancellationToken)
+    {
+        if (_exchange is not { Connection: { } connection } exchange
+            || exchange.HasFinalResponseStarted
+            || exchange.CancelRequested
+            || _requestAborted.IsCancellationRequested)
+        {
+            return;
+        }
+
+        using CancellationTokenSource? linkedAbort = cancellationToken.CanBeCanceled && cancellationToken != _requestAborted
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _requestAborted)
+            : null;
+        CancellationToken writeToken = linkedAbort?.Token ?? _requestAborted;
+        try
+        {
+            await connection.WriteInterimResponseAsync(exchange, HttpStatusCode.Continue, headers: null, writeToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested)
+        {
+            throw CreateAbortFailure();
+        }
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested
+            && exception.CancellationToken != cancellationToken)
+        {
+            throw new OperationCanceledException(exception.Message, exception, cancellationToken);
+        }
+        catch (Exception exception) when (exception is ConnectionException or SocketException or IOException)
+        {
+            // A body rejection can race the interim flush. Keep its failure ahead of cancellation,
+            // otherwise normalize a transport failure even before the closure token fires (#1439).
+            if (_owner.ClientFaultFailure is { } bodyFailure)
+            {
+                throw bodyFailure;
+            }
+
+            throw exchange.AbortRequestForPeer(exception);
+        }
+    }
+
+    /// <summary>
+    /// Resolves, at the first read, the rate the body is held to and starts its gate: the request's own
+    /// (<see cref="HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/>, which is frozen here)
+    /// when a parse context is attached, else the listener's. A tunnel, and a request whose rate is
+    /// <see langword="null"/>, read ungated.
+    /// </summary>
+    private void ResolveRate()
+    {
+        _rateResolved = true;
+        _interception?.FreezeMinRequestBodyDataRate();
+
+        if (_dataRate is null)
+        {
+            return;
+        }
+
+        _rate = _interception is not null ? _interception.MinRequestBodyDataRate : _dataRate.Rate;
+
+        if (_rate is not null)
+        {
+            _gate = new MinDataRateGate(_rate, _dataRate.TimeProvider);
+            _maxExemptionTicks = _dataRate.GetMaxBackpressureExemptionTicks(_rate);
+        }
+    }
 
     /// <summary>
     /// Loads the next chunk from the channel, crediting any padding-only chunk
@@ -166,6 +383,9 @@ internal sealed class Http2RequestBodyStream : Stream
                 _current = chunk.Data;
                 _currentFlowControlDebt = chunk.FlowControlLength;
 
+                // Every octet the peer delivered extends its allowance, whenever it arrived.
+                _gate?.Record(ticksWaited: 0, bytesTransferred: chunk.Data.Length);
+
                 if (_current.IsEmpty)
                 {
                     // A padding-only DATA frame carries flow-control cost but no
@@ -179,7 +399,10 @@ internal sealed class Http2RequestBodyStream : Stream
 
             if (!await WaitToReadAsync(cancellationToken).ConfigureAwait(false))
             {
+                // The pipe completed cleanly. A trailer section, when the request carried one, was
+                // decoded and validated before the pump completed the pipe, so it is complete now.
                 _completed = true;
+                _owner.PublishTrailers();
                 return false;
             }
         }
@@ -191,6 +414,11 @@ internal sealed class Http2RequestBodyStream : Stream
     /// </summary>
     private async ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken)
     {
+        if (_gate is not null)
+        {
+            return await WaitToReadWithinRateAsync(_gate, cancellationToken).ConfigureAwait(false);
+        }
+
         if (!_requestAborted.CanBeCanceled)
         {
             return await _reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false);
@@ -201,12 +429,120 @@ internal sealed class Http2RequestBodyStream : Stream
         {
             return await _reader.WaitToReadAsync(linked.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (exception is OperationCanceledException or IOException
+            && _requestAborted.IsCancellationRequested)
         {
-            // The stream was reset while we waited — re-throw against the abort
-            // token so callers observe the request-abort, not a caller cancel.
-            throw new OperationCanceledException(_requestAborted);
+            // Either the abort or the failed DATA channel can win the pending wait. Both carry the
+            // exact exchange token, including when the caller supplied it, unless a latched body
+            // rejection already ended the exchange (#1378, #1439).
+            throw CreateAbortFailure();
         }
+    }
+
+    /// <summary>
+    /// The failure a read reports once the stream's abort has fired: the client fault the transport ended
+    /// the exchange for (#1378), when it did — a body over the cap, below the minimum data rate, or
+    /// malformed — so the read surfaces that fault, as HTTP/1.1 and HTTP/3 do, whichever of the fault and
+    /// the reset that followed it the read meets first; otherwise the request abort itself.
+    /// </summary>
+    private Exception CreateAbortFailure()
+    {
+        return (Exception?)_owner.ClientFaultFailure ?? new OperationCanceledException(_requestAborted);
+    }
+
+    /// <summary>
+    /// Awaits more data within the body's minimum data rate (#1085). Each wait is bounded by what is
+    /// left of the peer's allowance. While the connection's receive window is too low to carry a full
+    /// frame, a wait may run past the allowance on what is left of the reader's exemption, a re-check
+    /// interval at a time. A finished wait is charged less the part the low window excuses
+    /// (<see cref="Charge"/>). When the allowance is spent and no exemption applies, the connection
+    /// answers the stream and the read fails.
+    /// </summary>
+    private async ValueTask<bool> WaitToReadWithinRateAsync(MinDataRateGate gate, CancellationToken cancellationToken)
+    {
+        Http2RequestBodyDataRate dataRate = _dataRate!;
+        TimeProvider clock = gate.TimeProvider;
+        long recheckTicks = (long)(_backpressureRecheckInterval.TotalSeconds * clock.TimestampFrequency);
+
+        while (true)
+        {
+            long allowance = gate.GetRemainingTicks();
+            long exemption = _maxExemptionTicks - _excusedTicks;
+            bool backpressured = exemption > 0 && dataRate.IsConnectionReceiveBackpressured;
+
+            if (allowance <= 0 && !backpressured)
+            {
+                throw await RejectTooSlowAsync(dataRate).ConfigureAwait(false);
+            }
+
+            long waitTicks = Math.Max(allowance, 0);
+
+            if (backpressured)
+            {
+                // The window may hold the peer back, so the wait may outlast the allowance by the exemption
+                // left. A wait that draws on it ends within a re-check interval, so a window that recovers
+                // meanwhile stops excusing the reader soon after.
+                waitTicks = Math.Min(waitTicks + exemption, Math.Max(waitTicks, recheckTicks));
+            }
+
+            using CancellationTokenSource timeoutSource = new(gate.ToOperationTimeout(waitTicks), clock);
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _requestAborted, timeoutSource.Token);
+
+            long start = clock.GetTimestamp();
+            long backpressuredAtStart = dataRate.ConnectionReceiveBackpressuredTicks;
+
+            try
+            {
+                bool more = await _reader.WaitToReadAsync(linked.Token).ConfigureAwait(false);
+                Charge(gate, dataRate, start, backpressuredAtStart);
+                return more;
+            }
+            catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested
+                && !cancellationToken.IsCancellationRequested
+                && !_requestAborted.IsCancellationRequested)
+            {
+                // The allowance (or the exemption's re-check interval) ran out with no DATA. Charge the
+                // wait and look again: the next pass rejects the body if the allowance is spent.
+                Charge(gate, dataRate, start, backpressuredAtStart);
+            }
+            catch (Exception exception) when (exception is OperationCanceledException or IOException
+                && _requestAborted.IsCancellationRequested)
+            {
+                throw CreateAbortFailure();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Charges a finished wait against the rate, less the part of it the connection's low receive window
+    /// excuses: the time the window spent too low to carry a full frame while the wait ran, as far as the
+    /// reader's exemption still reaches. The peer may have had no window to send in then; it had at every
+    /// other moment of the wait, and once the exemption is spent it is charged for every moment.
+    /// </summary>
+    private void Charge(MinDataRateGate gate, Http2RequestBodyDataRate dataRate, long start, long backpressuredAtStart)
+    {
+        long waited = gate.TimeProvider.GetTimestamp() - start;
+        long backpressured = Math.Clamp(dataRate.ConnectionReceiveBackpressuredTicks - backpressuredAtStart, 0, Math.Max(waited, 0));
+        long excused = Math.Min(backpressured, Math.Max(_maxExemptionTicks - _excusedTicks, 0));
+
+        _excusedTicks += excused;
+        gate.Record(waited - excused, bytesTransferred: 0);
+    }
+
+    /// <summary>
+    /// Latches the rejection of a body that fell below the minimum data rate — as the client fault the
+    /// exchange reports (#1378), before the connection answers or resets the stream — has the connection
+    /// answer the stream (RFC 9110 §15.5.9 — <c>408</c> while no response has started), and returns the
+    /// failure the read throws. Every later read throws it too, the stream's reset notwithstanding.
+    /// </summary>
+    private async ValueTask<IOException> RejectTooSlowAsync(Http2RequestBodyDataRate dataRate)
+    {
+        _rateFailure = _owner.LatchClientFault(
+            HttpStatusCode.RequestTimeout,
+            new IOException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2RequestBodyDataRateTooLow, _streamId, _rate!.BytesPerSecond)));
+
+        await dataRate.RejectTooSlowAsync(_streamId).ConfigureAwait(false);
+        return _rateFailure;
     }
 
     private async ValueTask CreditCurrentAsync(CancellationToken cancellationToken)

@@ -11,6 +11,33 @@
 		<DisableTransitiveFrameworkReferenceDownloads Condition="'$(DisableTransitiveFrameworkReferenceDownloads)' == ''">true</DisableTransitiveFrameworkReferenceDownloads>
 	</PropertyGroup>
 
+	<!--
+		A resource executable references the App and App.<Area> shared frameworks, which ship as
+		NuGet runtime packs and are never installed under the dotnet root's shared/ folder. A
+		framework-dependent resource executable therefore cannot start: the host reports
+		"Framework: 'Assimalign.Cohesion.App' ... No frameworks were found." Resource executables
+		default to self-contained for the host runtime identifier in plain and orchestrated mode
+		alike (Sdk.ApplicationModel sets the same defaults for enabled projects before this
+		import). A project that sets SelfContained or RuntimeIdentifier keeps its own values.
+		These must precede Microsoft.NET.Sdk's Sdk.targets, which consumes them.
+	-->
+	<PropertyGroup Condition="'$(_CohesionResourceSdk)' == 'true' and '$(OutputType)' == 'Exe'">
+		<SelfContained Condition="'$(SelfContained)' == ''">true</SelfContained>
+		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(SelfContained)' == 'true'">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
+		<ValidateExecutableReferencesMatchSelfContained Condition="'$(ValidateExecutableReferencesMatchSelfContained)' == ''">false</ValidateExecutableReferencesMatchSelfContained>
+	</PropertyGroup>
+
+	<!--
+		The resource SDK props mark default None items for copy (appsettings*.json; wwwroot/** in
+		Sdk.Web). A project that also adds those files as Content, the ASP.NET habit
+		(<Content Include="wwwroot\**" />), would then copy each file twice, and publish rejects
+		duplicate output paths (NETSDK1152). The project's own Content item wins. This runs after
+		the project body, where those Content items are declared.
+	-->
+	<ItemGroup Condition="'$(_CohesionResourceSdk)' == 'true' and '$(OutputType)' == 'Exe'">
+		<None Remove="@(Content)" />
+	</ItemGroup>
+
     <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.PinValidation.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.StronglyTypedSettings.targets" />

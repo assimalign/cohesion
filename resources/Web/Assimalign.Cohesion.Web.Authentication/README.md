@@ -16,14 +16,14 @@ proxies, edge caches, observability layers, the DNS-over-HTTPS transport,
 Keeping authentication in a separate package means the protocol core stays
 small, AOT-friendly, and free of identity assumptions. The familiar
 property-style `context.User` access is restored here through a .NET 10
-extension property, backed by an `IHttpAuthenticationFeature` stored in
+extension property, backed by an `IAuthenticationFeature` stored in
 `IHttpContext.Features`.
 
 ## Surface
 
 | Type | Role |
 |------|------|
-| `IHttpAuthenticationFeature` | Per-exchange authentication state &mdash; just the current `ClaimsPrincipal` |
+| `IAuthenticationFeature` | Per-exchange authentication state &mdash; just the current `ClaimsPrincipal` |
 | `HttpAuthenticationFeature` | Default in-memory implementation (internal; constructed via the `User` setter) |
 | `HttpContextAuthenticationExtensions` | The `context.User` extension property |
 
@@ -57,7 +57,7 @@ need a null-check on the common path.
 
 `HttpAuthenticationFeature` is internal. Middleware that needs richer
 authentication state (e.g. authentication-result metadata, ticket
-properties) should implement `IHttpAuthenticationFeature` directly and
-attach it via `context.Features.Set<IHttpAuthenticationFeature>(...)`. The
+properties) should implement `IAuthenticationFeature` directly and
+attach it via `context.Features.Set<IAuthenticationFeature>(...)`. The
 `context.User` getter consults the feature collection for any
 implementation, not just the package's default.

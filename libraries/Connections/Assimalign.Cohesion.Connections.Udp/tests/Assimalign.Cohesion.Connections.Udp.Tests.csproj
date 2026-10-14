@@ -11,4 +11,7 @@
         <CohesionPackageReference Include="xunit.runner.visualstudio" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Udp" />
     </ItemGroup>
+    <ItemGroup>
+        <Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+    </ItemGroup>
 </Project>

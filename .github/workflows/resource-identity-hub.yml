@@ -2,6 +2,8 @@ name: Identity Hub
 on:
   push:
     paths:
+      - 'build/Tasks/**'
+      - 'build/Targets/Build.CodeGeneration.*'
       - 'resources/IdentityHub/**'
       - '!resources/IdentityHub/**/*.slnx'
       - '!resources/IdentityHub/**/*.md'
@@ -13,6 +15,7 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]

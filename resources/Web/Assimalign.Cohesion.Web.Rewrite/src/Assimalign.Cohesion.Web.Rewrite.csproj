@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Rewrite</RootNamespace>
+		<Description>URL rewriting and redirect rules for the Cohesion Web pipeline. UseRewrite(rules => ...) evaluates code-first rules in registration order ahead of routing: an internal rewrite hands the rest of the pipeline a request view whose path and query are the rewritten values (IWebRewriteFeature keeps the originals, and inside a Map branch the branch's effective path is rewritten), a redirect answers 301, 302, 307 or 308 with a Location and ends the pipeline, regex rules run interpreted, NonBacktracking or source-generated (never RegexOptions.Compiled), and predicate and delegate rules cover the rest. Canonicalization helpers redirect to HTTPS, to www or non-www, to a trailing slash or none, and to a lowercase path, reading the effective scheme and host a trusted proxy forwarded. Captures are percent-encoded for the part of the URL they land in, rule passes are bounded, and composition is dependency-free and AOT-safe.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<!-- Inside a Map(path) branch the rules see the branch's effective path, and a rewrite
+		     publishes a matching IWebPathBaseFeature. Both live in Web.Routing with the branching
+		     itself (owner decision 33, #1379). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+	</ItemGroup>
+</Project>

@@ -71,6 +71,7 @@ provider — is the effective gate.
 | `IFileSystemInfo.Attributes` | ✅ | ✅ | ❌ `NotSupportedException` | passes through to mount |
 | Quota / size limit | ✅ (`Size` option) | ❌ (uses partition free space) | ✅ (store quota) | sum of mounts |
 | Read-only mode | ✅ (`IsReadOnly`) | ✅ | ✅ | ✅ |
+| Root containment (`PathOutsideRoot`) | ✅ (lexical) | ✅ (host-normalized; links followed) | ❌ not yet | delegates to mount |
 | `IDisposable` cascading | n/a | n/a | n/a | ✅ when `ownsFileSystem: true` |
 
 ## Test counts

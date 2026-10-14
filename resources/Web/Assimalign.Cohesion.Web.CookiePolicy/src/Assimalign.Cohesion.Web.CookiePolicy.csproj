@@ -1,9 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Web</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Web.CookiePolicy</RootNamespace>
+		<Description>Cookie-policy enforcement for the Cohesion Web pipeline. UseCookiePolicy replaces the response cookie feature so every cookie appended through response.Cookies is judged before it reaches Set-Cookie: Secure, HttpOnly and minimum-SameSite floors (Secure follows the effective scheme, so a trusted TLS-terminating proxy counts), the RFC 6265bis requirements a user agent enforces (__Host-/__Secure- prefixes, SameSite=None requires Secure; upgrade or reject), the 400-day lifetime cap applied at emission, and consent gating that suppresses non-essential cookies until the application grants consent. Rejected cookies are dropped and reported through OnRejected. No DI, configuration binding or request-time service location.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 	</ItemGroup>
 </Project>

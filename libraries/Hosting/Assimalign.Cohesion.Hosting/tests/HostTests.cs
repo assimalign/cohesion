@@ -13,6 +13,88 @@ public class HostTests
 {
     public const string DisplayPrefix = $"Cohesion Test [Hosting] - Host: ";
 
+    [Theory(DisplayName = DisplayPrefix + "Rollback enumeration failures preserve the startup fault and allow a failing retry")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_WhenRollbackEnumerationThrows_ShouldFailAndRetry(bool failDuringServiceStart)
+    {
+        // Arrange
+        var startupFailure = new InvalidOperationException("startup failed");
+        var rollbackFailure = new InvalidOperationException("rollback enumeration failed");
+        int attempts = 0;
+        bool rollingBack = false;
+        IEnumerable<IHostService> Services()
+        {
+            if (rollingBack)
+            {
+                rollingBack = false;
+                throw rollbackFailure;
+            }
+            if (!failDuringServiceStart)
+            {
+                attempts++;
+                rollingBack = true;
+                throw startupFailure;
+            }
+            yield return new DelegateHostService(_ =>
+            {
+                attempts++;
+                rollingBack = true;
+                return Task.FromException(startupFailure);
+            }, _ => Task.CompletedTask);
+        }
+        await using IHost host = new TestHost(new TestHostOptions(), Services());
+
+        // Act / Assert: each attempt must execute and retain its original fault.
+        for (int attempt = 1; attempt <= 2; attempt++)
+        {
+            var failure = await Should.ThrowAsync<InvalidOperationException>(
+                () => host.StartAsync(CancellationToken.None));
+            failure.ShouldBeSameAs(startupFailure);
+            host.Context.State.ShouldBe(HostState.Failed);
+            attempts.ShouldBe(attempt);
+            await host.Context.WaitForShutdownAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Theory(DisplayName = DisplayPrefix + "Invalid startup or rollback budgets cannot leave the host Starting")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_WhenBudgetSetupThrows_ShouldFailAndRetry(bool invalidRollbackBudget)
+    {
+        // Arrange
+        var options = new TestHostOptions();
+        var startupFailure = new InvalidOperationException("startup failed");
+        if (invalidRollbackBudget)
+        {
+            options.ShutdownTimeout = TimeSpan.FromSeconds(-2);
+            options.HostedServices.Add(new DelegateHostService(
+                _ => Task.FromException(startupFailure), _ => Task.CompletedTask));
+        }
+        else
+        {
+            options.StartupTimeout = TimeSpan.FromSeconds(-2);
+        }
+        await using IHost host = new TestHost(options);
+
+        // Act / Assert
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            if (invalidRollbackBudget)
+            {
+                var failure = await Should.ThrowAsync<InvalidOperationException>(
+                    () => host.StartAsync(CancellationToken.None));
+                failure.ShouldBeSameAs(startupFailure);
+            }
+            else
+            {
+                await Should.ThrowAsync<ArgumentOutOfRangeException>(
+                    () => host.StartAsync(CancellationToken.None));
+            }
+            host.Context.State.ShouldBe(HostState.Failed);
+        }
+    }
+
     [Theory(DisplayName = DisplayPrefix + "Rejected startup hooks never enter the service lifecycle")]
     [InlineData(false)]
     [InlineData(true)]

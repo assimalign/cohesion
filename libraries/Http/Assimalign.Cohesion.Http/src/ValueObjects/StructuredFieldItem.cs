@@ -82,7 +82,7 @@ public readonly struct StructuredFieldItem : IEquatable<StructuredFieldItem>
     {
         if (!TryParse(input, out StructuredFieldItem result, out string? error))
         {
-            throw new HttpInvalidStructuredFieldException(error ?? "Malformed structured field item.");
+            throw new HttpInvalidStructuredFieldException(error ?? ErrorMessages.MalformedStructuredFieldItem);
         }
         return result;
     }

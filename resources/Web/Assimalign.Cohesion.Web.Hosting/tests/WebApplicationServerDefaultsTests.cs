@@ -5,15 +5,18 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
+using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 
 using Shouldly;
 
 using Xunit;
 
+using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 using HttpVersion = Assimalign.Cohesion.Http.HttpVersion;
 
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
@@ -117,7 +120,52 @@ public class WebApplicationServerDefaultsTests
         customServer.StopCount.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the max-request-body-size interceptor first")]
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: HTTP/3 request hooks should run inline with every default interceptor")]
+    [InlineData("GET", true)]
+    [InlineData("POST", false)]
+    public async Task ApplyDefaultInterceptors_OnBufferedHttp3Head_ShouldRunRequestHooksInline(string method, bool endStream)
+    {
+        // Arrange — queue the complete head before ReceiveAsync starts, so accepting the stream and
+        // parsing its head require no asynchronous I/O. Use the real hosting composition, including
+        // client-fault and response-starting hooks, rather than a copy of its interceptor list.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        CancellationToken cancellationToken = timeout.Token;
+        await using InMemoryMultiplexedConnectionListener transport = new();
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(transport);
+        await WebServerTestInterceptors.InstallAsync(options);
+        InlineRequestProbe probe = new();
+        options.Interceptors.Add(probe);
+        await using HttpConnectionListener listener = new(options);
+        await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
+        await client.OpenControlStreamAsync(cancellationToken);
+        await client.SendRequestAsync(method, "/inline", [], [], endStream, cancellationToken);
+        IHttpConnectionContext connection = await (await listener.AcceptAsync(cancellationToken)).OpenAsync(cancellationToken);
+        await using IAsyncEnumerator<IHttpContext> requests = connection.ReceiveAsync(cancellationToken).GetAsyncEnumerator();
+
+        // Act — record both the calling thread and this synchronous call's lifetime. A queued hook
+        // cannot satisfy both, even if the pool happens to finish it before MoveNextAsync returns.
+        ValueTask<bool> receive;
+        probe.EnterReceive();
+        try
+        {
+            receive = requests.MoveNextAsync();
+        }
+        finally
+        {
+            probe.ExitReceive();
+        }
+
+        (await receive).ShouldBeTrue();
+        await using IHttpContext context = requests.Current;
+
+        // Assert
+        probe.RanInline.ShouldBeTrue();
+        context.Request.Path.Value.ShouldBe("/inline");
+        await connection.SendAsync(context, cancellationToken);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the request-limits interceptor first")]
     public void ApplyDefaultInterceptors_ShouldInstallRequestLimitsFirst()
     {
         // The web host composes the listener options with the default interceptors ahead of any
@@ -127,10 +175,11 @@ public class WebApplicationServerDefaultsTests
 
         WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
 
-        options.Interceptors.Count.ShouldBe(1);
+        options.Interceptors.Count.ShouldBe(3);
 
         // Prove slot 0 is the RequestLimits interceptor by behavior: its head hook attaches the
         // typed feature as a write-through view over the context knob.
+        HttpMinDataRate rate = new(240, TimeSpan.FromSeconds(5));
         HttpExchangeInterceptorRequestContext context = new()
         {
             Version = HttpVersion.Http11,
@@ -142,6 +191,7 @@ public class WebApplicationServerDefaultsTests
             Features = new HttpFeatureCollection(),
             ConnectionInfo = HttpConnectionInfo.Empty,
             MaxRequestBodySize = 2048,
+            MinRequestBodyDataRate = rate,
         };
 
         options.Interceptors[0].AfterRequestHead(context);
@@ -149,6 +199,220 @@ public class WebApplicationServerDefaultsTests
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();
         feature!.MaxRequestBodySize.ShouldBe(2048);
+
+        // The same interceptor surfaces the per-request data rates (#1383, #1384), on the same feature object,
+        // so the host's feature count does not grow.
+        IHttpMinRequestBodyDataRateFeature? rateFeature = context.Features.Get<IHttpMinRequestBodyDataRateFeature>();
+        rateFeature.ShouldBeSameAs(feature);
+        rateFeature!.MinDataRate.ShouldBeSameAs(rate);
+        context.Features.Get<IHttpMinResponseDataRateFeature>().ShouldBeSameAs(feature);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the HTTP/1.1 protocol-upgrade interceptor after request limits")]
+    public void ApplyDefaultInterceptors_ShouldInstallProtocolUpgradeSecond()
+    {
+        // Decision 16 (Http ADR 1): the upgrade interceptor is on by default, so a WebSocket
+        // handshake reaches context.Upgrade without any listener configuration.
+        HttpConnectionListenerOptions options = new();
+        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+
+        HttpHeaderCollection requestHeaders = new();
+        requestHeaders[HttpHeaderKey.Connection] = "Upgrade";
+        requestHeaders[HttpHeaderKey.Upgrade] = "websocket";
+        HttpFeatureCollection features = new();
+
+        // Prove slot 1 is the upgrade interceptor by behavior: its head hook records the upgrade
+        // signal and its response hook installs the feature context.Upgrade reads.
+        options.Interceptors[1].AfterRequestHead(new HttpExchangeInterceptorRequestContext
+        {
+            Version = HttpVersion.Http11,
+            Method = HttpMethod.Get,
+            Path = new HttpPath("/socket"),
+            Scheme = HttpScheme.Http,
+            Host = new HttpHost("api.test"),
+            Headers = requestHeaders.AsReadOnly(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            MaxRequestBodySize = null,
+        });
+        options.Interceptors[1].BeforeResponse(new HttpExchangeInterceptorResponseContext
+        {
+            Version = HttpVersion.Http11,
+            Headers = new HttpHeaderCollection(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            ResponseBody = System.IO.Stream.Null,
+            Control = new TakeoverOnlyControl(),
+        });
+
+        IHttpProtocolUpgrade? upgrade = features.Get<IHttpProtocolUpgradeFeature>()?.Upgrade;
+        upgrade.ShouldNotBeNull();
+        upgrade!.Kind.ShouldBe(HttpProtocolUpgradeKind.Upgrade);
+        upgrade.Protocol.ShouldBe("websocket");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the extended CONNECT interceptor after the protocol-upgrade interceptor")]
+    public async Task ApplyDefaultInterceptors_ShouldInstallExtendedConnectThird()
+    {
+        // Arrange — #1368: the extended CONNECT feature is installed by an interceptor, so a WebSocket
+        // over HTTP/2 or HTTP/3 reaches context.ExtendedConnect only because the host registers it.
+        HttpConnectionListenerOptions options = new();
+        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+        HttpFeatureCollection features = new();
+        TunnelOnlyControl control = new();
+
+        // Act — prove slot 2 is the extended CONNECT interceptor by behavior: its head hook installs the
+        // feature for a validated :protocol, and its response hook binds it to the exchange control.
+        options.Interceptors[2].AfterRequestHead(new HttpExchangeInterceptorRequestContext
+        {
+            Version = HttpVersion.Http20,
+            Method = HttpMethod.Connect,
+            Path = new HttpPath("/socket"),
+            Scheme = HttpScheme.Https,
+            Host = new HttpHost("api.test"),
+            Protocol = "websocket",
+            Headers = new HttpHeaderCollection().AsReadOnly(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            MaxRequestBodySize = null,
+        });
+        options.Interceptors[2].BeforeResponse(new HttpExchangeInterceptorResponseContext
+        {
+            Version = HttpVersion.Http20,
+            Headers = new HttpHeaderCollection(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            ResponseBody = System.IO.Stream.Null,
+            Control = control,
+        });
+
+        IHttpExtendedConnectFeature? extendedConnect = features.Get<IHttpExtendedConnectFeature>();
+        System.IO.Stream? tunnel = extendedConnect is null ? null : await extendedConnect.AcceptAsync();
+
+        // Assert
+        extendedConnect.ShouldNotBeNull();
+        extendedConnect!.Protocol.ShouldBe("websocket");
+        tunnel.ShouldBeSameAs(System.IO.Stream.Null);
+        control.AcceptCount.ShouldBe(1);
+    }
+
+    private static HttpVersion ToVersion(string version) => version switch
+    {
+        "2" => HttpVersion.Http20,
+        "3" => HttpVersion.Http30,
+        _ => HttpVersion.Http11,
+    };
+
+    private static HttpExchangeInterceptorRequestContext CreateRequestContext(
+        HttpVersion version,
+        HttpHeaderCollection headers,
+        HttpFeatureCollection features,
+        bool canHaveBody = true)
+    {
+        return new HttpExchangeInterceptorRequestContext
+        {
+            Version = version,
+            Method = HttpMethod.Post,
+            Path = new HttpPath("/upload"),
+            Scheme = HttpScheme.Http,
+            Host = new HttpHost("api.test"),
+            CanHaveBody = canHaveBody,
+            Headers = headers.AsReadOnly(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            MaxRequestBodySize = null,
+        };
+    }
+
+    /// <summary>Records whether a request hook ran on the active receive call's synchronous stack.</summary>
+    private sealed class InlineRequestProbe : HttpExchangeInterceptor
+    {
+        private int _receiveThread;
+        private bool _isReceiving;
+
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+        public bool RanInline { get; private set; }
+
+        public void EnterReceive()
+        {
+            _receiveThread = Environment.CurrentManagedThreadId;
+            _isReceiving = true;
+        }
+
+        public void ExitReceive() => _isReceiving = false;
+
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
+        {
+            RanInline = Environment.CurrentManagedThreadId == _receiveThread && _isReceiving;
+        }
+    }
+
+    /// <summary>An exchange control that reports a client fault and offers no wire mechanism.</summary>
+    private sealed class ClientFaultControl : IHttpExchangeControl
+    {
+        public HttpStatusCode? ClientFaultStatusCode { get; set; }
+
+        public bool HasResponseStarted => false;
+
+        public bool CanWriteInterimResponse => false;
+
+        public ValueTask WriteInterimResponseAsync(HttpStatusCode statusCode, IHttpHeaderCollection? headers = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public bool CanTakeOver => false;
+
+        public System.IO.Stream TakeOver() => throw new NotSupportedException();
+
+        public bool CanAcceptTunnel => false;
+
+        public ValueTask<System.IO.Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+    }
+
+    /// <summary>An exchange control whose only capability is a takeover that was never exercised.</summary>
+    private sealed class TakeoverOnlyControl : IHttpExchangeControl
+    {
+        public bool HasResponseStarted => false;
+
+        public bool CanWriteInterimResponse => false;
+
+        public ValueTask WriteInterimResponseAsync(Assimalign.Cohesion.Http.HttpStatusCode statusCode, IHttpHeaderCollection? headers = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public bool CanTakeOver => true;
+
+        public System.IO.Stream TakeOver() => throw new NotSupportedException();
+
+        public bool CanAcceptTunnel => false;
+
+        public ValueTask<System.IO.Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+    }
+
+    /// <summary>An exchange control whose only capability is an extended CONNECT tunnel accept, counted.</summary>
+    private sealed class TunnelOnlyControl : IHttpExchangeControl
+    {
+        public int AcceptCount { get; private set; }
+
+        public bool HasResponseStarted => false;
+
+        public bool CanWriteInterimResponse => false;
+
+        public ValueTask WriteInterimResponseAsync(Assimalign.Cohesion.Http.HttpStatusCode statusCode, IHttpHeaderCollection? headers = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public bool CanTakeOver => false;
+
+        public System.IO.Stream TakeOver() => throw new NotSupportedException();
+
+        public bool CanAcceptTunnel => AcceptCount == 0;
+
+        public ValueTask<System.IO.Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+        {
+            AcceptCount++;
+            return ValueTask.FromResult(System.IO.Stream.Null);
+        }
     }
 
     private sealed class TrackingApplicationServer : IWebApplicationServer, IHostService

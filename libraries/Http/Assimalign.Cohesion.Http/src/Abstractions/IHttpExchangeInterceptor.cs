@@ -15,13 +15,16 @@ namespace Assimalign.Cohesion.Http;
 /// The hooks follow the exchange's lifecycle in order. Request phase (parse path):
 /// <see cref="AfterRequestHead"/> → <see cref="BeforeRequestBody"/> →
 /// <see cref="AfterRequestBody"/>; the body-size knob freezes when the transport begins consuming
-/// the body (HTTP/1.1: at the first read of the streamed body, after dispatch — so it is still
-/// adjustable in every parse-path hook; HTTP/2 / HTTP/3: before <see cref="BeforeRequestBody"/>,
-/// as the buffered body is about to be exposed). Response phase: <see cref="BeforeResponse"/> (exchange setup,
+/// the body (HTTP/1.1 and HTTP/3: at the first read of the lazily read body, after dispatch — so it
+/// is still adjustable in every parse-path hook; HTTP/2: before <see cref="BeforeRequestBody"/>, as
+/// the flow-controlled body is about to be exposed). Response phase: <see cref="BeforeResponse"/> (exchange setup,
 /// before the application handler) → <see cref="BeforeResponseHeadAsync"/> (the final head is
 /// about to commit) → <see cref="AfterResponseAsync"/> (the final response is fully written).
 /// <see cref="Scopes"/> declares which phases the interceptor participates in, so the transport
-/// invokes it only where it is needed and its zero-cost fast paths are preserved exactly.
+/// invokes it only where it is needed and its zero-cost fast paths are preserved exactly. A
+/// request-parse hook can also add an interceptor to the response phase of its own exchange only
+/// (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>), which keeps the fast
+/// path for every exchange that does not need it.
 /// </para>
 /// <para>
 /// <b>Implement by deriving from <see cref="HttpExchangeInterceptor"/></b> — the guided abstract
@@ -83,10 +86,11 @@ public interface IHttpExchangeInterceptor
     /// <see langword="false"/>.
     /// </para>
     /// <para>
-    /// Timing is protocol-dependent: on HTTP/1.1 the head hook runs before any body octet is
-    /// consumed from the wire, so body-size adjustments precede enforcement; HTTP/2 and HTTP/3
-    /// currently buffer a stream's body before the head is decoded, so the hook runs before the
-    /// body is <em>exposed</em> but not before it was <em>received</em>.
+    /// Timing is protocol-dependent: on HTTP/1.1 and HTTP/3 the head hook runs before any body
+    /// octet is read, so body-size adjustments precede enforcement; HTTP/2 dispatches at the end of
+    /// the header block, and DATA that already arrived sits in the stream's flow-control-bounded
+    /// buffer, so the hook runs before the body is <em>exposed</em> but not necessarily before all
+    /// of it was <em>received</em>.
     /// </para>
     /// </remarks>
     /// <param name="context">The parse-time view of the request being read.</param>
@@ -97,11 +101,11 @@ public interface IHttpExchangeInterceptor
 
     /// <summary>
     /// Called once per request, after every head hook has run, immediately before the transport
-    /// surfaces (HTTP/1.1: the lazily streamed body, no octet consumed yet) or exposes
-    /// (HTTP/2 / HTTP/3: the buffered body) the request body. On HTTP/1.1 this precedes any
+    /// surfaces (HTTP/1.1 and HTTP/3: the lazily read body, no octet consumed yet) or exposes
+    /// (HTTP/2: the flow-controlled body) the request body. On HTTP/1.1 this precedes any
     /// <c>Expect: 100-continue</c> solicitation — itself lazy, emitted at the first body read — so
-    /// a hook that rejects here does so before the body is solicited from the peer, and the
-    /// body-size knob is still adjustable (it freezes at the first body read); on HTTP/2 / HTTP/3
+    /// a hook that rejects here does so before the body is solicited from the peer. On HTTP/1.1 and
+    /// HTTP/3 the body-size knob is still adjustable (it freezes at the first body read); on HTTP/2
     /// the cap has already been frozen when this hook runs. Skipped for CONNECT tunnels, whose
     /// post-head octets are tunnel traffic rather than a message body. Requires
     /// <see cref="HttpInterceptorScopes.Request"/>.
@@ -146,7 +150,8 @@ public interface IHttpExchangeInterceptor
     /// exposed on the context, and may capture <see cref="HttpExchangeInterceptorResponseContext.Control"/>
     /// into a feature for later use; nothing has been written to the wire yet, so the response
     /// status and headers are still fully mutable by the application afterward. Requires
-    /// <see cref="HttpInterceptorScopes.Response"/>.
+    /// <see cref="HttpInterceptorScopes.Response"/>, or the interceptor being added to the exchange by
+    /// a request-parse hook (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).
     /// </summary>
     /// <remarks>
     /// Runs inline while the exchange is being set up — on HTTP/2 that is the connection's single
@@ -162,14 +167,18 @@ public interface IHttpExchangeInterceptor
     /// which the response status and <see cref="HttpExchangeInterceptorResponseContext.Headers"/> can be
     /// mutated (content negotiation, compression headers, security headers) or an interim
     /// (<c>1xx</c>) response emitted through <see cref="HttpExchangeInterceptorResponseContext.Control"/>.
-    /// Requires <see cref="HttpInterceptorScopes.Response"/>.
+    /// Requires <see cref="HttpInterceptorScopes.Response"/>, or the interceptor being added to the
+    /// exchange (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).
     /// </summary>
     /// <remarks>
     /// Runs on the exchange's send path (never the HTTP/2 frame pump), so awaiting is safe. Not
-    /// invoked when the exchange was aborted (<see cref="IHttpContext.Cancel"/>) or its connection
-    /// taken over before the head commit, nor for transport-generated error responses that never
-    /// became an exchange; the transport re-reads the exchange's state after the hooks run, so a
-    /// concurrent abort or a hook-driven takeover is honored instead of writing the head.
+    /// invoked when the exchange was aborted (<see cref="IHttpContext.Cancel"/>) or taken over
+    /// before the head commit — its HTTP/1.1 connection by a protocol upgrade, or its HTTP/2 or
+    /// HTTP/3 stream by an accepted extended CONNECT tunnel
+    /// (<see cref="IHttpExchangeControl.AcceptTunnelAsync"/>), each of which writes its own head —
+    /// nor for transport-generated error responses that never became an exchange; the transport
+    /// re-reads the exchange's state after the hooks run, so a concurrent abort or a hook-driven
+    /// takeover is honored instead of writing the head.
     /// </remarks>
     /// <param name="context">The response-lifecycle view of the exchange.</param>
     /// <param name="cancellationToken">A token to cancel the work.</param>
@@ -181,11 +190,15 @@ public interface IHttpExchangeInterceptor
     /// transport — the buffered response flushed, or the streamed response finalized with its wire
     /// terminator. Implementations observe the completed exchange (access logging, metrics,
     /// digests); the response is already on the wire, so mutations here have no effect on it.
-    /// Requires <see cref="HttpInterceptorScopes.Response"/>.
+    /// Requires <see cref="HttpInterceptorScopes.Response"/>, or the interceptor being added to the
+    /// exchange (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).
     /// </summary>
     /// <remarks>
     /// Runs on the exchange's send path, so awaiting is safe. Not invoked when the exchange was
-    /// aborted or taken over — there is no final response to observe in either case.
+    /// aborted or taken over (an HTTP/1.1 protocol upgrade through
+    /// <see cref="IHttpExchangeControl.TakeOver"/>, or an HTTP/2 or HTTP/3 extended CONNECT tunnel
+    /// accepted through <see cref="IHttpExchangeControl.AcceptTunnelAsync"/>) — there is no final
+    /// response for the transport to complete in either case.
     /// </remarks>
     /// <param name="context">The response-lifecycle view of the exchange.</param>
     /// <param name="cancellationToken">A token to cancel the work.</param>

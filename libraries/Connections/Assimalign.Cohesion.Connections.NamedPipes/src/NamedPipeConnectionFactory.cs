@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Net;
@@ -17,9 +18,9 @@ namespace Assimalign.Cohesion.Connections.NamedPipes;
 /// <remarks>
 /// Each call to <see cref="ConnectAsync(EndPoint, CancellationToken)"/> opens a fresh
 /// <see cref="NamedPipeClientStream"/> and waits for the server pipe to become available, then returns a
-/// live <see cref="Connection"/>.
+/// live <see cref="DuplexConnection"/>.
 /// </remarks>
-public sealed class NamedPipeConnectionFactory : ConnectionFactory
+public sealed class NamedPipeConnectionFactory : DuplexConnectionFactory
 {
     private readonly NamedPipeConnectionFactoryOptions _options;
 
@@ -55,14 +56,14 @@ public sealed class NamedPipeConnectionFactory : ConnectionFactory
     /// <inheritdoc />
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="endPoint"/> is <see langword="null"/>.</exception>
     /// <exception cref="NotSupportedException">Thrown when <paramref name="endPoint"/> is not a <see cref="NamedPipeEndPoint"/>.</exception>
-    public override async ValueTask<Connection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
 
         if (endPoint is not NamedPipeEndPoint namedPipeEndPoint)
         {
             throw new NotSupportedException(
-                $"The named-pipe factory can only connect to a {nameof(NamedPipeEndPoint)}.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointTypeUnsupported, nameof(NamedPipeEndPoint)));
         }
 
         PipeOptions pipeOptions = PipeOptions.Asynchronous;

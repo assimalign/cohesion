@@ -426,7 +426,7 @@ public class HostFilteringTests
         CancellationToken cancellationToken)
     {
         InMemoryConnectionFactory connectionFactory = listener.CreateFactory();
-        Connection connection = await connectionFactory.ConnectAsync(listener.EndPoint, cancellationToken);
+        IDuplexConnection connection = await connectionFactory.ConnectAsync(listener.EndPoint, cancellationToken);
 
         await using (connection.ConfigureAwait(false))
         {

@@ -15,8 +15,9 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Tests;
 /// <summary>
 /// Middleware-level coverage for <c>UseRequestTimeouts</c> over the pipeline harness: expiry
 /// translation (504 / problem payload / custom writer / started-response abort), endpoint-policy
-/// precedence at the route-match seam, the per-exchange feature (disable / re-arm), timeout
-/// attribution against client aborts, and the injected <see cref="TimeProvider"/>.
+/// precedence over the endpoint published ahead of the middleware (including the CORS-preflight
+/// skip), the per-exchange feature (disable / re-arm), timeout attribution against client aborts,
+/// and the injected <see cref="TimeProvider"/>.
 /// </summary>
 public class RequestTimeoutMiddlewareTests
 {
@@ -106,13 +107,8 @@ public class RequestTimeoutMiddlewareTests
 
         IWebApplicationPipeline pipeline = BuildPipeline(
             options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _neverInTestBudget },
-            async ctx =>
-            {
-                // What UseRouting does between matching and dispatching: publish the match (with
-                // its endpoint metadata) on the context's feature collection, then run the handler.
-                ctx.Features.Set<Routing.IRouteMatchFeature>(new FakeRouteMatchFeature(new RequestTimeoutMetadata(_armedTimeout)));
-                await Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled);
-            });
+            ctx => Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled),
+            endpoint: new FakeRouteMatchFeature(new RequestTimeoutMetadata(_armedTimeout)));
 
         // Act
         await pipeline.ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
@@ -134,10 +130,10 @@ public class RequestTimeoutMiddlewareTests
             options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
             async ctx =>
             {
-                ctx.Features.Set<Routing.IRouteMatchFeature>(new FakeRouteMatchFeature(RequestTimeoutMetadata.Disabled));
                 await Task.Delay(_pastArmedTimeout, ctx.RequestCancelled);
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
-            });
+            },
+            endpoint: new FakeRouteMatchFeature(RequestTimeoutMetadata.Disabled));
 
         // Act
         await pipeline.ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
@@ -159,10 +155,10 @@ public class RequestTimeoutMiddlewareTests
             options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
             async ctx =>
             {
-                ctx.Features.Set<Routing.IRouteMatchFeature>(new FakeRouteMatchFeature(new RequestTimeoutMetadata(_neverInTestBudget)));
                 await Task.Delay(_pastArmedTimeout, ctx.RequestCancelled);
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
-            });
+            },
+            endpoint: new FakeRouteMatchFeature(new RequestTimeoutMetadata(_neverInTestBudget)));
 
         // Act
         await pipeline.ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
@@ -401,11 +397,90 @@ public class RequestTimeoutMiddlewareTests
         context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - InvokeAsync: An endpoint policy should arm the timer when no global default exists")]
+    public async Task InvokeAsync_EndpointPolicyWithoutGlobalDefault_ShouldArmFromEndpoint()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using TimeoutTestContext context = new();
+
+        IWebApplicationPipeline pipeline = BuildPipeline(
+            configure: null,
+            ctx => Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled),
+            endpoint: new FakeRouteMatchFeature(new RequestTimeoutMetadata(_armedTimeout)));
+
+        // Act
+        await pipeline.ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.GatewayTimeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - InvokeAsync: An endpoint policy should replace the default's response as well as its interval")]
+    public async Task InvokeAsync_EndpointPolicy_ShouldAnswerWithEndpointResponse()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using TimeoutTestContext context = new();
+
+        IWebApplicationPipeline pipeline = BuildPipeline(
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _neverInTestBudget },
+            ctx => Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled),
+            endpoint: new FakeRouteMatchFeature(new RequestTimeoutMetadata(new RequestTimeoutPolicy
+            {
+                Timeout = _armedTimeout,
+                StatusCode = HttpStatusCode.ServiceUnavailable,
+            })));
+
+        // Act
+        await pipeline.ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+        // Assert — policies replace each other outright; nothing merges from the global default.
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - InvokeAsync: A CORS preflight should keep the global policy instead of its candidate endpoint's")]
+    public async Task InvokeAsync_PreflightCandidate_ShouldKeepGlobalPolicy()
+    {
+        // Arrange — the candidate disables the timeout; applied to the preflight, nothing would time out.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using TimeoutTestContext context = new(method: HttpMethod.Options);
+
+        IWebApplicationPipeline pipeline = BuildPipeline(
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
+            ctx => Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled),
+            endpoint: new FakeRouteMatchFeature(RequestTimeoutMetadata.Disabled) { IsPreflight = true });
+
+        // Act
+        await pipeline.ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.GatewayTimeout);
+    }
+
     private static IWebApplicationPipeline BuildPipeline(
         Action<RequestTimeoutOptions>? configure,
-        WebApplicationMiddleware terminal)
+        WebApplicationMiddleware terminal,
+        Routing.IRouteMatchFeature? endpoint = null)
     {
         TestPipelineBuilder builder = new();
+
+        if (endpoint is not null)
+        {
+            // What UseRouting does ahead of the middleware: publish the request's endpoint, then call next.
+            builder.Use(next => context =>
+            {
+                context.Features.Set<Routing.IRouteMatchFeature>(endpoint);
+                return next.Invoke(context);
+            });
+        }
+
         builder.UseRequestTimeouts(configure);
         builder.Use(next => context => terminal.Invoke(context));
 

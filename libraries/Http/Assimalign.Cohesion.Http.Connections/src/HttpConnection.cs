@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,7 +13,7 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// </summary>
 /// <remarks>
 /// The base intentionally holds no transport reference of its own: HTTP/1.1 and HTTP/2
-/// connections wrap an <see cref="IConnection"/> while HTTP/3 wraps an
+/// connections wrap an <see cref="IDuplexConnection"/> while HTTP/3 wraps an
 /// <see cref="IMultiplexedConnection"/>, and each derived type forwards the identity and
 /// lifecycle members to the connection it owns.
 /// </remarks>
@@ -31,6 +32,21 @@ public abstract class HttpConnection : IHttpConnection
 
     /// <inheritdoc />
     public abstract ConnectionId Id { get; }
+
+    /// <inheritdoc />
+    public abstract EndPoint? LocalEndPoint { get; }
+
+    /// <inheritdoc />
+    public abstract EndPoint? RemoteEndPoint { get; }
+
+    /// <inheritdoc />
+    public abstract ConnectionCapabilities Capabilities { get; }
+
+    /// <inheritdoc />
+    public abstract IConnectionFeatureCollection Features { get; }
+
+    /// <inheritdoc />
+    public abstract HttpProtocol Protocol { get; }
 
     /// <inheritdoc />
     public abstract ConnectionState State { get; }

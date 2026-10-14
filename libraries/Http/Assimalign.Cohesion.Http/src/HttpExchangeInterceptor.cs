@@ -23,7 +23,9 @@ namespace Assimalign.Cohesion.Http;
 /// (<see cref="HttpInterceptorScopes.Request"/> or <see cref="HttpInterceptorScopes.Response"/>)
 /// so the transport skips it entirely on the other phase and its zero-cost fast paths are
 /// preserved: a request-only interceptor must never be the reason a response sink and exchange
-/// control are constructed.
+/// control are constructed. One that needs its response hooks for some exchanges only declares
+/// <see cref="HttpInterceptorScopes.Request"/> and adds itself to those exchanges from a
+/// request-parse hook (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).
 /// </para>
 /// <para>
 /// The per-hook execution constraints are part of the inherited contract (see

@@ -8,12 +8,12 @@ namespace Assimalign.Cohesion.Http;
 public interface IHttpFormCollection : IEnumerable<KeyValuePair<string, HttpQueryValue>>
 {
     /// <summary>
-    /// Gets the number of parsed form values.
+    /// Gets the number of distinct scalar form keys.
     /// </summary>
     int Count { get; }
 
     /// <summary>
-    /// Gets the form value associated with the supplied key.
+    /// Gets all form values for a key in arrival order; their scalar value is the first occurrence.
     /// </summary>
     /// <param name="key">The key to retrieve.</param>
     /// <returns>The parsed form value if present; otherwise <see cref="HttpQueryValue.Empty"/>.</returns>
@@ -32,7 +32,7 @@ public interface IHttpFormCollection : IEnumerable<KeyValuePair<string, HttpQuer
     bool ContainsKey(string key);
 
     /// <summary>
-    /// Attempts to retrieve a parsed form value.
+    /// Attempts to retrieve all form values for a key; their scalar value is the first occurrence.
     /// </summary>
     /// <param name="key">The key to retrieve.</param>
     /// <param name="value">The resolved value when found.</param>

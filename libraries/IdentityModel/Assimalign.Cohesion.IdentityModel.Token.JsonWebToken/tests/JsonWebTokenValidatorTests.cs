@@ -50,9 +50,8 @@ public sealed class JsonWebTokenValidatorTests : IDisposable
         // Assert
         valid.ShouldBeTrue();
         token.ShouldNotBeNull().Issuer.ShouldBe(issuer);
-        JsonWebTokenValidator.HasAudience(token, audience).ShouldBeTrue();
-        JsonWebTokenValidator.HasAudience(token, "other").ShouldBeFalse();
-        JsonWebTokenValidator.HasAudience(token, null).ShouldBeFalse();
+        token.HasAudience(audience).ShouldBeTrue();
+        token.HasAudience("other").ShouldBeFalse();
     }
 
     [Fact(DisplayName = displayPrefix + "TryValidate: A lifetime exactly at the ceiling is accepted")]
@@ -274,7 +273,7 @@ public sealed class JsonWebTokenValidatorTests : IDisposable
         Should.Throw<ArgumentException>(blankIssuer);
     }
 
-    private IJsonWebTokenValidator CreateValidator(string? expectedSubject = null) =>
+    private JsonWebTokenValidator CreateValidator(string? expectedSubject = null) =>
         JsonWebTokenValidator.CreateEs256(new JsonWebTokenValidationProfile(
             issuer,
             new JsonWebKeySet(_publicKey),

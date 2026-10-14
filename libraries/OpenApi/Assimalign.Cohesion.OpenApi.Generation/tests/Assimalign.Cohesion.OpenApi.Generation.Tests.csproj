@@ -18,7 +18,7 @@
 	<ItemGroup>
 		<!-- Activate the source generator on this test project's own annotated sample so the
 		     generated OpenApiMetadataRegistry can be driven end-to-end through the pipeline. -->
-		<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.OpenApi" />
 	</ItemGroup>
 </Project>
 

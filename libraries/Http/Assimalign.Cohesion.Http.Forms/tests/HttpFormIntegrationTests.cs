@@ -158,7 +158,7 @@ public class HttpFormIntegrationTests
         {
             try
             {
-                await using IHttpConnection connection = await _listener.AcceptOrListenAsync(Token);
+                await using IHttpConnection connection = await _listener.AcceptAsync(Token);
                 IHttpConnectionContext connectionContext = await connection.OpenAsync(Token);
 
                 await foreach (IHttpContext context in connectionContext.ReceiveAsync(Token))

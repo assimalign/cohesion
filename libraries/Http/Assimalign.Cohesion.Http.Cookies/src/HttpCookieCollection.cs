@@ -38,14 +38,16 @@ namespace Assimalign.Cohesion.Http;
 /// whose individual attributes exceed the configured
 /// <see cref="HttpCookieLimits"/> are ignored (not truncated, not thrown),
 /// the retained attribute count per cookie is bounded, and cookies whose
-/// name or value falls outside the RFC 6265 &#167; 4.1.1 grammar are dropped
-/// rather than surfaced. This is wire-safety hardening, not cookie policy;
+/// name, value, <c>Path</c>, or <c>Domain</c> falls outside the RFC 6265
+/// &#167; 4.1.1 grammar are dropped rather than surfaced. This is wire-safety hardening, not cookie policy;
 /// prefix/pairing enforcement lives in
 /// <c>Assimalign.Cohesion.Web.CookiePolicy</c>.
 /// </para>
 /// </remarks>
 public sealed class HttpCookieCollection : IHttpCookieCollection
 {
+    private static readonly char[] _attributeWhitespace = [' ', '\t'];
+
     private readonly IHttpHeaderCollection _headers;
     private readonly HttpHeaderKey _headerKey;
     private readonly HttpCookieLimits _limits;
@@ -343,7 +345,8 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
         int attributes = 0;
         for (int i = 1; i < segments.Length; i++)
         {
-            string segment = segments[i].Trim();
+            // RFC 6265 trims WSP, not arbitrary Unicode whitespace or CR/LF.
+            string segment = segments[i].Trim(_attributeWhitespace);
             if (segment.Length == 0)
             {
                 continue;
@@ -364,8 +367,8 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                string attrName = segment[..attrEq].Trim();
-                string attrValue = segment[(attrEq + 1)..].Trim();
+                string attrName = segment[..attrEq].Trim(_attributeWhitespace);
+                string attrValue = segment[(attrEq + 1)..].Trim(_attributeWhitespace);
 
                 // RFC 6265bis attribute-value size guard — an oversized
                 // attribute value is dropped while the rest of the cookie
@@ -375,7 +378,14 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
                     continue;
                 }
 
-                ApplyValueAttribute(attrName, attrValue, options);
+                // RFC 6265 §4.1.1 attribute grammar guard — a Path or Domain the
+                // options refuse makes the cookie unrepresentable, so it is dropped
+                // like an out-of-grammar name or value, rather than kept without
+                // the attribute and re-emitted with a different scope.
+                if (!ApplyValueAttribute(attrName, attrValue, options))
+                {
+                    return null;
+                }
             }
         }
 
@@ -398,18 +408,37 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             // back on the wire (RFC 6265 §5.3 says unknown attributes are
             // ignored by the user agent, but a proxy / middleware that
             // re-emits the header should not silently drop them).
-            options.Extensions.Add(segment);
+            AddExtension(segment, options);
         }
     }
 
-    private static void ApplyValueAttribute(string name, string value, HttpCookieOptions options)
+    /// <summary>
+    /// Applies one <c>name=value</c> attribute to <paramref name="options"/>.
+    /// </summary>
+    /// <returns>
+    /// <see langword="false"/> when the attribute is a <c>Domain</c> or <c>Path</c>
+    /// outside the RFC 6265 &#167; 4.1.1 grammar, which the options setters refuse;
+    /// otherwise <see langword="true"/>.
+    /// </returns>
+    private static bool ApplyValueAttribute(string name, string value, HttpCookieOptions options)
     {
         if (string.Equals(name, "Domain", StringComparison.OrdinalIgnoreCase))
         {
+            // An empty Domain is ignored (RFC 6265 §5.2.3); the options read it as absent.
+            if (value.Length > 0 && !HttpCookieGrammar.IsValidDomain(value))
+            {
+                return false;
+            }
+
             options.Domain = value;
         }
         else if (string.Equals(name, "Path", StringComparison.OrdinalIgnoreCase))
         {
+            if (!HttpCookieGrammar.IsValidPath(value))
+            {
+                return false;
+            }
+
             options.Path = value;
         }
         else if (string.Equals(name, "Expires", StringComparison.OrdinalIgnoreCase))
@@ -428,7 +457,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                options.Extensions.Add(name + "=" + value);
+                AddExtension(name + "=" + value, options);
             }
         }
         else if (string.Equals(name, "Max-Age", StringComparison.OrdinalIgnoreCase))
@@ -439,7 +468,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                options.Extensions.Add(name + "=" + value);
+                AddExtension(name + "=" + value, options);
             }
         }
         else if (string.Equals(name, "SameSite", StringComparison.OrdinalIgnoreCase))
@@ -450,12 +479,24 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                options.Extensions.Add(name + "=" + value);
+                AddExtension(name + "=" + value, options);
             }
         }
         else
         {
-            options.Extensions.Add(name + "=" + value);
+            AddExtension(name + "=" + value, options);
+        }
+
+        return true;
+    }
+
+    private static void AddExtension(string value, HttpCookieOptions options)
+    {
+        // Malformed received attributes are dropped without throwing; valid
+        // unknown attributes (including unrecognized known values) round-trip.
+        if (HttpCookieExtension.TryCreate(value, out HttpCookieExtension extension))
+        {
+            options.Extensions.Add(extension);
         }
     }
 }

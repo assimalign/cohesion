@@ -25,7 +25,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnection httpConnection = await listener.AcceptAsync();
         IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
@@ -75,7 +75,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // The body is streamed and dispatched at head, so the trailer section is only available once
@@ -99,7 +99,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // A non-chunked request cannot carry a trailer section (RFC 9112 §7.1.2).
@@ -111,15 +111,19 @@ public class Http1TransportTests
     public async Task Http1_OnAbsoluteFormRequest_ShouldParsePathAndQuery()
     {
         // RFC 9112 §3.2.2 — absolute-form, used when a proxy forwards a request.
-        // The authority component of the target supersedes any Host header.
+        // The authority component of the target supersedes any Host header. An https target is
+        // served only over a secured connection (RFC 9110 §4.2.2); over cleartext it is answered
+        // with 421 (HttpRequestSchemeTests).
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET https://upstream.example.com:8443/widgets?id=42 HTTP/1.1\r\nHost: lying-host-header.test\r\n\r\n");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(
+            TestConnection.DefaultCapabilities with { Security = Assimalign.Cohesion.Connections.ConnectionSecurity.Tls },
+            connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -144,7 +148,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -166,7 +170,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -184,6 +188,8 @@ public class Http1TransportTests
     [InlineData("GET example.com:80 HTTP/1.1\r\nHost: api.test\r\n\r\n")]     // authority-form on non-CONNECT
     [InlineData("GET  HTTP/1.1\r\nHost: api.test\r\n\r\n")]                   // empty target (collapses to 2 parts after Split)
     [InlineData("GET ftp://example.com/p HTTP/1.1\r\nHost: api.test\r\n\r\n")] // unsupported scheme
+    [InlineData("connect api.test:443 HTTP/1.1\r\nHost: api.test\r\n\r\n")]  // RFC 9110 §9.1: 'connect' is not CONNECT, so no tunnel
+    [InlineData("options * HTTP/1.1\r\nHost: api.test\r\n\r\n")]              // asterisk-form is for OPTIONS only, matched exactly
     public async Task Http1_OnMalformedRequestTarget_ShouldDropConnection(string payloadText)
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(payloadText);
@@ -204,7 +210,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
@@ -228,7 +234,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
@@ -257,7 +263,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -279,6 +285,50 @@ public class Http1TransportTests
         using StreamReader reader = new(httpContext.Request.Body);
         string body = await reader.ReadToEndAsync();
         body.ShouldBe(bodyText);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: A standard method in another case should be an unknown method (RFC 9110 §9.1)")]
+    [InlineData("get", "GET")]
+    [InlineData("post", "POST")]
+    [InlineData("Head", "HEAD")]
+    [InlineData("options", "OPTIONS")]
+    public async Task Http1_OnMethodInAnotherCase_ShouldParseAnUnknownMethod(string method, string standard)
+    {
+        // Arrange
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request($"{method} /widgets HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        // Assert
+        httpContext.Request.Method.Value.ShouldBe(method);
+        httpContext.Request.Method.ShouldNotBe(HttpMethod.GetCanonicalizedValue(standard));
+        httpContext.Request.Path.Value.ShouldBe("/widgets");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: A lower-case 'head' should get its response body, because it is not HEAD")]
+    public async Task Http1_OnLowerCaseHead_ShouldSendTheResponseBody()
+    {
+        // Arrange — an intermediary that forwards 'head' as an unknown method expects a body; suppressing it
+        // would leave the next response on a shared connection misframed.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request("head /widgets HTTP/1.1\r\nHost: api.test\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Act
+        httpContext.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("widgets"));
+        await httpConnectionContext.SendAsync(httpContext);
+        string responseText = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
+
+        // Assert
+        responseText.ShouldStartWith("HTTP/1.1 200");
+        responseText.ShouldContain("Content-Length: 7");
+        responseText.ShouldEndWith("\r\n\r\nwidgets");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should parse a QUERY request line and deliver its content body (RFC 10008)")]
@@ -428,6 +478,43 @@ public class Http1TransportTests
         await AssertBodyReadThrowsAsync<InvalidDataException>(payload);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject a trailer field the shared trailer rules exclude on the body read")]
+    [InlineData("Authorization", "Bearer secret")]   // RFC 9110 §6.5.1: authentication
+    [InlineData("Content-Type", "text/plain")]       // RFC 9110 §6.5.1: content processing
+    [InlineData("Trailer", "X-Checksum")]            // RFC 9110 §6.5.1: the declaration itself
+    [InlineData("Keep-Alive", "timeout=5")]          // connection-specific
+    [InlineData("Proxy-Connection", "keep-alive")]   // connection-specific
+    [InlineData("Upgrade", "h2c")]                   // connection-specific
+    public async Task Http1_OnChunkedBodyWithExcludedTrailer_ShouldThrow(string name, string value)
+    {
+        // RFC 9110 §6.5.1 — a chunked trailer section is held to the rules HTTP/2 and HTTP/3 apply
+        // (#1319): no field RFC 9110 excludes from trailers and no connection-specific field. The
+        // rejection surfaces on the body read, like the framing fields above.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n"
+            + $"0\r\n{name}: {value}\r\n\r\n");
+
+        await AssertBodyReadThrowsAsync<InvalidDataException>(payload);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should surface a trailer field the shared trailer rules allow")]
+    public async Task Http1_OnChunkedBodyWithAllowedTrailer_ShouldSurfaceTrailer()
+    {
+        // RFC 9530 §2 — a representation digest is computed as the content is sent, so it is the
+        // field trailers exist for. HTTP/1.1 field names are case-insensitive: the lowercase rule of
+        // HTTP/2 and HTTP/3 field sections does not apply.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n"
+            + "0\r\nRepr-Digest: sha-256=:abc=:\r\n\r\n");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe("hello");
+        httpContext.Request.Trailers[new HttpHeaderKey("repr-digest")].Value.ShouldBe("sha-256=:abc=:");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject malformed chunk sizes on the body read")]
     [InlineData("xyz")]    // non-hex
     [InlineData("-1")]     // signed
@@ -454,7 +541,7 @@ public class Http1TransportTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "5\r\nhello\r\n");
 
-        await AssertBodyReadThrowsAsync<EndOfStreamException>(payload);
+        await AssertBodyReadThrowsAsync<OperationCanceledException>(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject a chunk that ends before its declared size is reached")]
@@ -466,7 +553,7 @@ public class Http1TransportTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "10\r\nshort");
 
-        await AssertBodyReadThrowsAsync<EndOfStreamException>(payload);
+        await AssertBodyReadThrowsAsync<OperationCanceledException>(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject Content-Length declarations exceeding the body size cap on the body read")]
@@ -517,7 +604,7 @@ public class Http1TransportTests
         // First connection: malformed. ReceiveAsync yields nothing and
         // exits cleanly. The exception is absorbed inside the receive
         // loop, never reaching the application.
-        IHttpConnection conn1 = await listener.AcceptOrListenAsync();
+        IHttpConnection conn1 = await listener.AcceptAsync();
         IHttpConnectionContext ctx1 = await conn1.OpenAsync();
         await using (IAsyncEnumerator<IHttpContext> enum1 = ctx1.ReceiveAsync().GetAsyncEnumerator())
         {
@@ -527,7 +614,7 @@ public class Http1TransportTests
 
         // Second connection: well-formed. Listener is alive; the request
         // parses normally and the application sees a valid context.
-        IHttpConnection conn2 = await listener.AcceptOrListenAsync();
+        IHttpConnection conn2 = await listener.AcceptAsync();
         IHttpConnectionContext ctx2 = await conn2.OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(ctx2);
 
@@ -563,7 +650,7 @@ public class Http1TransportTests
 
         await using HttpConnectionListener listener = new(options);
 
-        IHttpConnection conn1 = await listener.AcceptOrListenAsync();
+        IHttpConnection conn1 = await listener.AcceptAsync();
         IHttpConnectionContext ctx1 = await conn1.OpenAsync();
         await using (IAsyncEnumerator<IHttpContext> enum1 = ctx1.ReceiveAsync().GetAsyncEnumerator())
         {
@@ -571,7 +658,7 @@ public class Http1TransportTests
         }
         await conn1.DisposeAsync();
 
-        IHttpConnection conn2 = await listener.AcceptOrListenAsync();
+        IHttpConnection conn2 = await listener.AcceptAsync();
         IHttpConnectionContext ctx2 = await conn2.OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(ctx2);
 
@@ -602,7 +689,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         IHttpProtocolUpgrade? upgrade = httpContext.Upgrade;
@@ -620,7 +707,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // Regression guard: this used to throw NotImplementedException on every access.
@@ -639,7 +726,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Upgrade.ShouldBeNull();
@@ -656,7 +743,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Upgrade.ShouldBeNull();
@@ -673,13 +760,13 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // Act — accept the upgrade and take ownership of the raw duplex stream.
         Stream tunnel = await httpContext.Upgrade!.AcceptAsync();
 
-        // Exactly one 101 with the connection-specific headers and no body framing (RFC 9112 §9.9).
+        // Exactly one 101 with the connection-specific headers and no body framing (RFC 9112 §6.3, RFC 9110 §15.2.2).
         string handshake = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
         handshake.ShouldContain("HTTP/1.1 101 Switching Protocols");
         handshake.ShouldContain("Connection: Upgrade");
@@ -708,7 +795,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
 
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
@@ -738,7 +825,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         IHttpProtocolUpgrade? upgrade = httpContext.Upgrade;
@@ -749,7 +836,8 @@ public class Http1TransportTests
         Stream tunnel = await upgrade.AcceptAsync();
 
         string response = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
-        response.ShouldContain("HTTP/1.1 200 Ok");
+        // The RFC 9110 §15.3.1 reason phrase, compared case-sensitively (#1204: it was "Ok").
+        response.ShouldStartWith("HTTP/1.1 200 OK\r\n", Case.Sensitive);
         response.ShouldNotContain("Content-Length");
         response.ShouldNotContain("Transfer-Encoding");
 
@@ -768,7 +856,7 @@ public class Http1TransportTests
         HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         Stream tunnel = await httpContext.Upgrade!.AcceptAsync();
@@ -793,7 +881,7 @@ public class Http1TransportTests
     {
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+        options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
         return options;
     }
 
@@ -816,7 +904,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         return await ReadSingleContextAsync(httpConnectionContext);
     }
 
@@ -843,7 +931,7 @@ public class Http1TransportTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();

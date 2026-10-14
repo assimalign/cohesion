@@ -101,6 +101,24 @@ public class RouteHostConstraintTests
         constraint.IsMatch(new HttpHost(requestHost)).ShouldBe(expected);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Routing] - IsMatch: Only SP and HTAB are trimmed from the request host, as HttpHost trims it")]
+    [InlineData("api.example.com", " \tapi.example.com\t ", true)]
+    [InlineData("api.example.com", "api.example.com\u00A0", false)]   // a no-break space is not whitespace here
+    [InlineData("api.example.com", "\u0085api.example.com", false)]   // nor is a next-line character
+    [InlineData("*.example.com", "api.example.com\u00A0", false)]
+    [InlineData("*", "api.example.com\u00A0", true)]                 // any host still matches any value
+    public void IsMatch_OnSurroundingWhitespace_ShouldTrimOnlySpaceAndTab(string pattern, string requestHost, bool expected)
+    {
+        // Arrange — HttpHostMatcher reads the same value the same way, so selection and validation agree.
+        RouteHostConstraint constraint = RouteHostConstraint.Parse(pattern);
+
+        // Act
+        bool isMatch = constraint.IsMatch(new HttpHost(requestHost));
+
+        // Assert
+        isMatch.ShouldBe(expected);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.Routing] - IsMatch: Wildcard requires a subdomain label")]
     [InlineData("*.example.com", "api.example.com", true)]
     [InlineData("*.example.com", "API.Example.COM", true)]

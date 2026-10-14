@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 
 /// <summary>
 /// End-to-end integration: HTTP/1.1 served over a Unix domain socket listener via
-/// <see cref="HttpConnectionListenerOptions.UseHttp1(IConnectionListener)"/>, with a client dialing the
+/// <see cref="HttpConnectionListenerOptions.UseHttp1(IDuplexConnectionListener)"/>, with a client dialing the
 /// same socket through the driver factory. Proves the hardened UDS path composes with the HTTP stack with
 /// no Http-layer changes — the capability-selected listener seam accepts any reliable, ordered stream.
 /// </summary>
@@ -46,7 +46,7 @@ public class HttpOverUnixDomainSocketTests
             TcpConnectionFactory factory = new();
 
             // Act — dial the socket (retrying until the server has lazily bound) and speak a raw request.
-            await using Connection client = await ConnectWithRetryAsync(factory, path, cancellationToken);
+            await using IDuplexConnection client = await ConnectWithRetryAsync(factory, path, cancellationToken);
 
             byte[] request = Encoding.ASCII.GetBytes(
                 "GET /hello?name=uds HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
@@ -68,7 +68,7 @@ public class HttpOverUnixDomainSocketTests
         }
     }
 
-    private static async Task<Connection> ConnectWithRetryAsync(
+    private static async Task<IDuplexConnection> ConnectWithRetryAsync(
         TcpConnectionFactory factory,
         string path,
         CancellationToken cancellationToken)
@@ -93,7 +93,7 @@ public class HttpOverUnixDomainSocketTests
 
     private static async Task RunServerAsync(HttpConnectionListener httpListener, CancellationToken cancellationToken)
     {
-        await using IHttpConnection connection = await httpListener.AcceptOrListenAsync(cancellationToken);
+        await using IHttpConnection connection = await httpListener.AcceptAsync(cancellationToken);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(cancellationToken);
 
         await foreach (IHttpContext context in connectionContext.ReceiveAsync(cancellationToken))

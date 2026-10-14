@@ -22,10 +22,10 @@ older plan in `#830` that assigned all keyed token cryptography to a future Secu
 The boundary is now:
 
 - **This package executes format-specific BCL primitives.** `JsonWebTokenWriter.CreateEs256`
-  returns an `IJsonWebTokenWriter` backed by an internal implementation that writes compact JWS
+  returns a public sealed `JsonWebTokenWriter` implementing `IJsonWebTokenWriter` that writes compact JWS
   and calls `ECDsa.SignData` with SHA-256 and the IEEE P1363 fixed-field `r||s` format.
-  `JsonWebTokenSignatureVerifier.CreateEcdsa/CreateRsa` return
-  `IJsonWebTokenSignatureVerifier` instances backed by internal ECDSA/RSA implementations.
+  `EcdsaJsonWebTokenSignatureVerifier.Create` and `RsaJsonWebTokenSignatureVerifier.Create`
+  return their public sealed implementations of `IJsonWebTokenSignatureVerifier`.
 - **Callers own keys and trust policy.** Writers and verifiers borrow key instances; they never
   generate, persist, rotate, dispose, or publish keys. Public JWK parsing, RFC 7638 thumbprints,
   and the ES256 validator (below) are format execution and live here; JWKS retrieval,
@@ -42,8 +42,8 @@ XML-DSig/XML encryption, and key-resolution suites, but not these moved RSA/ECDS
 
 ## Compact writing
 
-The writer is interface-first: the public `IJsonWebTokenWriter` contract and static
-`JsonWebTokenWriter` factory expose an internal ES256 implementation. The factory requires a
+The public sealed `JsonWebTokenWriter` implements `IJsonWebTokenWriter`; its private constructor
+is reached through `CreateEs256`, which returns the concrete writer. Creation requires a
 NIST P-256 ECDSA key and a non-empty `kid`; the writer owns both `alg=ES256` and `kid`, rejects those
 parameters if the descriptor also supplies them, and never mutates the descriptor.
 
@@ -128,10 +128,20 @@ profile requires `iss`, `sub`, `aud`, `exp`, `nbf`, `iat`, and `jti`, a non-blan
 later than now plus the skew, `exp` after both `iat` and `nbf`, and `exp - iat` within the ceiling.
 Audience is deliberately **not** part of the profile: resources distinguish an unauthenticated token
 (401) from an authentic token for another audience (403), so they call
-`JsonWebTokenValidator.HasAudience` after validation, and LogSpace applies its `scope=telemetry`
+`token.HasAudience(...)` from IdentityModel.Token after validation, and LogSpace applies its `scope=telemetry`
 rules between the two. The ECDSA key is created per validation and disposed before the call
 returns, so `JsonWebKey` and the validator hold no disposable state; an unusable trusted key
 rejects the token instead of throwing.
+
+The stateless `Es256JsonWebTokenValidation` helper in this project's `shared/` folder holds these
+rules in one source location (#1412). The public validator compiles that helper with its existing
+per-call key ownership. Web.Hosting also compiles it and supplies an
+`IJsonWebTokenSignatureVerifier` over a middleware-owned ECDSA handle while an explicit lifetime
+owner is present. The helper still resolves the issuer, selects the trusted `kid`, enforces ES256,
+and applies the same document and profile rules before accepting a token. Its caller must bind a
+borrowed verifier to the selected trusted key and coordinate verification with disposal. The helper
+has no mutable static state, no handle ownership, and no public API. Public validators retain their
+existing contract and token acceptance relative to 10.0.0-preview.1.
 
 The Cohesion claim names and ceilings (`cohesion_token_use`, `scope=telemetry`, `cohesion-export`,
 24 hours, 8 hours) are not here: they belong to the resource credential seam, so they live in
@@ -202,3 +212,26 @@ credentials, and a general multi-algorithm validator would reopen algorithm-conf
 this package does not need to answer. This package owns the
 compact JWT/JWS document and its reusable asymmetric format primitives, not the surrounding trust
 system.
+
+## Preview.1 compatibility — public implementations (#1465)
+
+On owner decisions 59 and 15's preview terms, the factory facades shipped in
+10.0.0-preview.1 become public sealed implementations with private constructors:
+
+- `JsonWebTokenWriter.CreateEs256(key, kid)` returns `JsonWebTokenWriter` and
+  `JsonWebTokenValidator.CreateEs256(profile)` returns `JsonWebTokenValidator`. These calls keep
+  their spelling and are source-compatible, including Database's unchanged writer calls.
+- `JsonWebTokenSignatureVerifier` is removed. Replace `CreateRsa` and `CreateEcdsa` calls with
+  `RsaJsonWebTokenSignatureVerifier.Create` and `EcdsaJsonWebTokenSignatureVerifier.Create`.
+- `JsonWebTokenValidator.HasAudience` is removed. Import IdentityModel.Token and use
+  `token.HasAudience(audience)`. That extension rejects null and whitespace audiences; callers
+  that previously accepted them retain ordinal matching locally before using the extension for
+  nonblank values. The Web, IdentityHub, Scheduler and LogSpace verifiers use an ordinal audience
+  list match for null/blank inputs, preserving false for null and exact blank-string matches.
+  SecretStore and ConfigurationStore already reject blank inputs; the gateway uses a nonblank
+  constant.
+
+All these conversions are binary-breaking: creation return types change and the old signature
+verifier facade and audience method disappear. Recompile consumers, applying the renamed calls
+above. Existing interface contracts, key ownership, argument validation and token acceptance are
+unchanged. No compatibility facade remains. Advisory: not applicable: API shape.

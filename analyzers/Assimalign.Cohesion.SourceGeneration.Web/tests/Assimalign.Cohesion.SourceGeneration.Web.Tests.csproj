@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.SourceGeneration.Web.Tests</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- The CohesionProjectReference resolver only searches libraries/ and resources/, so the
+		     generator under test is referenced directly. This is a test host, not a shipped component. -->
+		<ProjectReference Include="..\src\Assimalign.Cohesion.SourceGeneration.Web.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- The metadata/model assemblies the sample source and reference set need for the generator's
+		     semantic model to resolve the typed Map* surface. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- The antiforgery requirement a form-bound endpoint carries; cases add or withhold it to model an
+		     application with or without the package. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
+		<!-- The content-serialization registry that body binding and returned values use; cases withhold it
+		     to model an application without the package (COHWEB0007). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+		<!-- The request-validation entry point a bound body model is validated through; cases add it to
+		     model an application that references the package. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
+	</ItemGroup>
+</Project>

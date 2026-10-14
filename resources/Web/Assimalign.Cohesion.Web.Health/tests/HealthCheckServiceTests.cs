@@ -38,7 +38,45 @@ public class HealthCheckServiceTests
         HealthReportEntry entry = report.Entries["db"];
         entry.Status.ShouldBe(HealthStatus.Unhealthy);
         entry.Exception.ShouldBeSameAs(exception);
-        entry.Description.ShouldBe("db unreachable");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Health] - Service: a thrown check gets a fixed description, not the exception message")]
+    public async Task CheckHealthAsync_WhenCheckThrows_ShouldDescribeWithoutExceptionMessage()
+    {
+        // Arrange
+        var exception = new InvalidOperationException("Failed to connect to db-primary.corp.internal:5432 as svc_orders.");
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck("db", StubCheck.Throwing(exception))
+            .Build();
+
+        // Act
+        HealthReport report = await service.CheckHealthAsync();
+
+        // Assert
+        HealthReportEntry entry = report.Entries["db"];
+        entry.Description.ShouldBe(Internal.HealthCheckService.ThrewDescription);
+        entry.Exception.ShouldBeSameAs(exception);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Health] - Service: a timed-out check gets a fixed description and keeps its cancellation exception")]
+    public async Task CheckHealthAsync_WhenCheckTimesOut_ShouldDescribeWithoutExceptionMessageAndKeepException()
+    {
+        // Arrange
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck(
+                "db",
+                StubCheck.BlockingThenCancelledWith("Connect to db-primary.corp.internal:5432 timed out."),
+                timeout: TimeSpan.FromMilliseconds(50))
+            .Build();
+
+        // Act
+        HealthReport report = await service.CheckHealthAsync();
+
+        // Assert
+        HealthReportEntry entry = report.Entries["db"];
+        entry.Description.ShouldBe(Internal.HealthCheckService.TimedOutDescription);
+        OperationCanceledException exception = entry.Exception.ShouldBeOfType<OperationCanceledException>();
+        exception.Message.ShouldBe("Connect to db-primary.corp.internal:5432 timed out.");
     }
 
     [Fact(DisplayName = "Cohesion Test [Health] - Service: a thrown check honors a custom failure status")]

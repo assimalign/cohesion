@@ -16,7 +16,11 @@ internal sealed class HttpAntiforgeryFeature : IHttpAntiforgeryFeature
     }
 
     /// <inheritdoc />
-    public string Name => nameof(HttpAntiforgeryFeature);
+    /// <remarks>
+    /// The slot is named for the contract (see <see cref="IHttpAntiforgeryFeature"/>), so assigning a
+    /// service replaces one an application registered instead of adding a second feature.
+    /// </remarks>
+    public string Name => nameof(IHttpAntiforgeryFeature);
 
     /// <inheritdoc />
     public IHttpAntiforgery Antiforgery { get; }

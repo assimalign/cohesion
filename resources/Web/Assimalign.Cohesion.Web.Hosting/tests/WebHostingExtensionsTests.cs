@@ -106,12 +106,12 @@ public class WebHostingExtensionsTests
         await using HttpConnectionListener listener = new(options);
 
         // Act
-        // The compatibility AcceptOrListenAsync path binds before it starts its transport accept
+        // The compatibility AcceptAsync path binds before it starts its transport accept
         // loop; hosted servers call the same bind explicitly from StartAsync.
-        Task<HttpConnection> acceptTask = listener.AcceptOrListenAsync(cancellation.Token);
+        Task<IHttpConnection> acceptTask = listener.AcceptAsync(cancellation.Token).AsTask();
 
         using Socket client = await ConnectWithRetryAsync(endPoint, cancellation.Token);
-        await using HttpConnection accepted = await acceptTask;
+        await using IHttpConnection accepted = await acceptTask;
 
         // Assert
         accepted.ShouldNotBeNull();

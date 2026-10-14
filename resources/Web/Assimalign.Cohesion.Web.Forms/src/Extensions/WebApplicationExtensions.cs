@@ -1,6 +1,7 @@
 namespace Assimalign.Cohesion.Web;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Internal;
 
 /// <summary>
 /// Pipeline-builder extensions that wire HTTP form parsing into the Web
@@ -18,28 +19,24 @@ public static class WebApplicationExtensions
         /// </summary>
         /// <returns>The same <see cref="IWebApplicationPipelineBuilder"/> for chaining.</returns>
         /// <remarks>
+        /// <para>
         /// The parse runs for every request regardless of Content-Type; bodies
         /// that are neither <c>application/x-www-form-urlencoded</c> nor
         /// <c>multipart/form-data</c> yield an empty collection. Middleware that
         /// only needs the form on specific routes can skip this and call
         /// <c>context.ReadFormAsync(...)</c> lazily instead.
+        /// </para>
+        /// <para>
+        /// A form the parse rejects is answered here and the rest of the pipeline
+        /// does not run: <c>413 Content Too Large</c> when the body exceeds a
+        /// configured <see cref="HttpFormOptions"/> limit, and <c>400 Bad Request</c>
+        /// when it is malformed, both as <c>application/problem+json</c> with the
+        /// payload a form-bound endpoint writes for the same failure.
+        /// </para>
         /// </remarks>
         public IWebApplicationPipelineBuilder UseForms()
         {
-            return builder.Use(async (context, next) =>
-            {
-                IHttpFeatureCollection features = context.Features;
-                IHttpFormFeature? feature = features.Get<IHttpFormFeature>();
-
-                if (feature is null)
-                {
-                    feature = new HttpFormFeature(context.Request);
-                    features.Set<IHttpFormFeature>(feature);
-                }
-
-                await feature.ReadFormAsync(context.RequestCancelled);
-                await next.Invoke(context);
-            });
+            return builder.Use(new FormsMiddleware());
         }
     }
 }

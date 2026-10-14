@@ -1,5 +1,4 @@
-﻿using Assimalign.Cohesion.DependencyInjection.Properties;
-using System;
+﻿using System;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
@@ -32,7 +31,7 @@ internal abstract class CallSiteVisitor<TArgument, TResult>
             CallSiteKind.Constructor => VisitConstructor((ConstructorCallSite)callSite, argument),
             CallSiteKind.Constant => VisitConstant((ConstantCallSite)callSite, argument),
             CallSiteKind.ServiceProvider => VisitServiceProvider((ServiceProviderCallSite)callSite, argument),
-            _ => throw new NotSupportedException(Resources.GetCallSiteTypeNotSupportedExceptionMessage(callSite.GetType()))
+            _ => throw new NotSupportedException(ErrorMessageFormatter.GetCallSiteTypeNotSupportedExceptionMessage(callSite.GetType()))
 
            
         };

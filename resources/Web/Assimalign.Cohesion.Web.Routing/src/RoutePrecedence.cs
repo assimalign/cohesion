@@ -125,7 +125,7 @@ public static class RoutePrecedence
         if (length > 28)
         {
             // An OverflowException will be thrown by Math.Pow when greater than 28
-            throw new InvalidOperationException("Route exceeds the maximum number of allowed segments of 28 and is unable to be processed.");
+            throw new InvalidOperationException(ErrorMessages.RouteSegmentLimitExceeded);
         }
     }
 

@@ -12,7 +12,12 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.HttpsPolicy" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<!-- The end-to-end tests write raw HTTP/1.1 (absolute-form targets) over an in-memory connection. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
 </Project>

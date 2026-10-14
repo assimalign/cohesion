@@ -259,8 +259,8 @@ internal static class ResourceSourceWriter
         builder.AppendLine("        /// <summary>Creates a connection factory for this endpoint's declared transport.</summary>");
         builder.AppendLine("        /// <returns>A connection factory for the endpoint transport.</returns>");
         builder.AppendLine("        /// <exception cref=\"global::System.NotSupportedException\">Thrown when the endpoint transport is not a stream connection.</exception>");
-        builder.AppendLine("        public global::Assimalign.Cohesion.Connections.IConnectionFactory ConnectionFactory() =>");
-        builder.AppendLine("            global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetConnectionFactory<global::Assimalign.Cohesion.Connections.IConnectionFactory>(_resource, _endpoint, _protocol);");
+        builder.AppendLine("        public global::Assimalign.Cohesion.Connections.IDuplexConnectionFactory ConnectionFactory() =>");
+        builder.AppendLine("            global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetConnectionFactory<global::Assimalign.Cohesion.Connections.IDuplexConnectionFactory>(_resource, _endpoint, _protocol);");
         builder.AppendLine("    }");
         builder.AppendLine();
     }

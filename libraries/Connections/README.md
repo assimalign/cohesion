@@ -18,7 +18,19 @@ flowchart LR
     P4["Connections.Security"]
     P5["Connections.Tcp"]
     P6["Connections.Udp"]
+    TLS["Connections.Tls"]
+    ABORT["Connections.StreamAbort"]
+    LIMITS["Connections.StreamLimits"]
     CORE["Assimalign.Cohesion.Core — L1"]
+    TLS --> P0
+    ABORT --> P0
+    LIMITS --> P0
+    P1 --> ABORT
+    P3 --> TLS
+    P3 --> ABORT
+    P3 --> LIMITS
+    P4 --> TLS
+    P4 --> ABORT
     P0 --> CORE
     P1 --> P0
     P1 --> CORE
@@ -44,7 +56,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 Everything that produces or consumes a network byte channel goes through this area. The
 contracts live in one library; protocol drivers implement them; application protocols (HTTP,
-AMQP) and connection transformations (TLS in `libraries/Security`) consume them. There is
+AMQP) and connection transformations (TLS in `Connections.Security`) consume them. There is
 deliberately no transport abstraction — see the naming rule and full design rationale in
 [Assimalign.Cohesion.Connections/docs/DESIGN.md](Assimalign.Cohesion.Connections/docs/DESIGN.md).
 
@@ -52,11 +64,15 @@ deliberately no transport abstraction — see the naming rule and full design ra
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Connections` | The contracts: `IConnection` (a live duplex pipe), `IConnectionListener` / `IConnectionFactory`, `IMultiplexedConnection` (+ listener/factory), `IDatagramConnection`, the `IConnectionLayer` composition arrow, `ConnectionCapabilities`, and the guided abstract bases. Also carries `ListenerId` and the `shared/` driver source (pipe-pair wiring, pooled pipe options) that the drivers compile in. |
+| `Assimalign.Cohesion.Connections` | The contracts: `IConnection` (shared identity/lifecycle), `IDuplexConnection` (a live duplex pipe), `IConnectionListener` / `IConnectionFactory`, `IMultiplexedConnection` (+ listener/factory), `IDatagramConnection`, the `IConnectionLayer` composition arrow, `ConnectionCapabilities`, the named `IConnectionFeatureCollection`, `IMultiplexedConnectionStream` (whole-stream reset and input completion), coded multiplexed connection close, and the guided abstract bases. Also carries `ListenerId` and the `shared/` driver source (pipe-pair wiring, pooled pipe options) that the drivers compile in. |
+| [Assimalign.Cohesion.Connections.Tls](Assimalign.Cohesion.Connections.Tls/docs/OVERVIEW.md) | TLS handshake facts (`ITlsConnectionInfo`), discovered through `connection.Tls`. |
+| [Assimalign.Cohesion.Connections.StreamAbort](Assimalign.Cohesion.Connections.StreamAbort/docs/OVERVIEW.md) | Optional coded per-direction aborts (`IMultiplexedStreamAbort`), discovered through `stream.DirectionalAbort`. |
+| [Assimalign.Cohesion.Connections.StreamLimits](Assimalign.Cohesion.Connections.StreamLimits/docs/OVERVIEW.md) | Optional cumulative inbound stream allowance (`IMultiplexedConnectionStreamLimits`), discovered through `connection.StreamLimits`. |
+| `Assimalign.Cohesion.Connections.Security` | TLS layer; registers TLS facts and passes the wrapped connection's features through except directional abort, which cannot govern TLS's buffered plaintext. |
 | `Assimalign.Cohesion.Connections.Tcp` | Reliable, ordered, single-stream socket driver (`TcpConnectionListener` / `TcpConnectionFactory`). Serves both TCP over IP and Unix domain sockets (with socket-file lifecycle and honest protocol stamping), plus socket-activation descriptor hand-off. |
 | `Assimalign.Cohesion.Connections.NamedPipes` | Reliable, ordered, single-stream named-pipe driver (`NamedPipeConnectionListener` / `NamedPipeConnectionFactory`) for Windows-native local IPC with ACL/filesystem access control; the peer of the `Tcp` driver's Unix domain socket path. |
 | `Assimalign.Cohesion.Connections.Udp` | Message-oriented UDP datagram driver (`UdpConnectionFactory` → `IDatagramConnection`). |
-| `Assimalign.Cohesion.Connections.Quic` | Reliable, ordered, multiplexed QUIC driver (`QuicConnectionListener` / `QuicConnectionFactory`); each stream is itself an `IConnection` with a `ConnectionDirection`. |
+| `Assimalign.Cohesion.Connections.Quic` | Reliable, ordered, multiplexed QUIC driver (`QuicConnectionListener` / `QuicConnectionFactory`); each stream is an `IMultiplexedConnectionStream : IDuplexConnection` with a `ConnectionDirection`. |
 | `Assimalign.Cohesion.Connections.InMemory` | Socketless in-memory driver: cross-wired duplex-pipe connection pairs (`InMemoryConnectionListener` / `InMemoryConnectionFactory`, plus a multiplexed variant) for deterministic, live transport testing. |
 
 ## Layering
@@ -77,6 +93,8 @@ instance. A later host start creates and binds a new listener rather than reusin
 - `Assimalign.Cohesion.Core` (all projects)
 - Drivers additionally depend on `Assimalign.Cohesion.Connections` (the contracts) and compile its
   `shared/` pipe-plumbing source through `CohesionSharedSource`.
+- Feature packages reference the core contracts; each driver and consumer explicitly references the
+  packages whose capabilities it offers or reads. Layers pass features through with `InnerFeatures`.
 
 ## Diagnostics
 
@@ -85,12 +103,14 @@ Each driver reports its own lifecycle through an internal event source named for
 (`current-connections` and friends). None of it is public API. Enable a driver by name in
 `dotnet-trace` or `dotnet-counters`, or forward every driver into an application's logging with
 `Assimalign.Cohesion.Logging.EventSource`, under the category prefix `Assimalign.Cohesion.Connections`.
-The contracts library, `Security`, and `InMemory` raise no events of their own. The convention is
-`.claude/rules/event-source.md`; the consumer reference is [docs/EVENT_SOURCES.md](../../docs/EVENT_SOURCES.md).
+The contracts library raises one event of its own, under its assembly name: a layered listener (for
+example a TLS listener) reporting a connection it closed because the connection's upgrade failed.
+`Security` and `InMemory` raise none. The convention is `.claude/rules/event-source.md`; the consumer
+reference is [docs/EVENT_SOURCES.md](../../docs/EVENT_SOURCES.md).
 
 ## Further Reading
 
 - [Assimalign.Cohesion.Connections/docs/OVERVIEW.md](Assimalign.Cohesion.Connections/docs/OVERVIEW.md)
 - [Assimalign.Cohesion.Connections/docs/DESIGN.md](Assimalign.Cohesion.Connections/docs/DESIGN.md) —
   includes the consolidated design rationale (why the old transport abstraction dissolved, the
-  layer algebra, the flattened `IConnection : IDuplexPipe` data plane, capability gating).
+  layer algebra, the flattened `IDuplexConnection : IDuplexPipe` data plane, capability gating).

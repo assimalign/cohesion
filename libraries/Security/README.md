@@ -7,7 +7,7 @@ connection transformation, and certificate management.
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Security` | TLS as a connection upgrade: `UseTls(...)` on listeners/factories (via `TlsConnectionLayer : IConnectionLayer`) and `UpgradeToTlsAsync(...)` on individual connections. Returns a new secured `IConnection` whose duplex pipe is encrypted and whose `Capabilities.Security` reports `Tls`. |
+| `Assimalign.Cohesion.Security` | TLS as a connection upgrade: `UseTls(...)` on listeners/factories (via `TlsConnectionLayer : IConnectionLayer`) and `UpgradeToTlsAsync(...)` on individual connections. Returns a new secured `IDuplexConnection` whose duplex pipe is encrypted and whose `Capabilities.Security` reports `Tls`. |
 | `Assimalign.Cohesion.Security.Cryptography` | Certificate store management abstractions and OS-specific certificate providers. |
 | `Assimalign.Cohesion.Security.DataProtection` | Purpose-bound data protection with a rotating key ring: interface-first protector contracts (`IDataProtectionProvider`/`IDataProtector`), AES-256-GCM payloads with versioned key-id headers, HKDF-SHA256 subkey derivation, and an `IKeyRepository` persistence seam with a file-system default. BCL crypto only; the shared primitive that consumers (antiforgery, auth cookies, sessions) protect blobs with instead of hand-rolling key management. |
 

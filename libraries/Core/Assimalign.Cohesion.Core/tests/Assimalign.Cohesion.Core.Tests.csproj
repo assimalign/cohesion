@@ -10,9 +10,34 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="NUlid" />
 		<CohesionPackageReference Include="Shouldly"/>
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<!-- Build tasks are outside the name-only library/resource project index. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Build.Tasks" ProjectPath="$(CohesionRepositoryDirectory)build\Tasks\Assimalign.Cohesion.Build.Tasks.csproj" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="System\SumTypes\" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedPublicString.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="Public" ObjectKind="Struct" ObjectComparison="Ordinal" ObjectHasIsValidMethod="false" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedNoneAccessInt.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="None" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedDefaultAccessInt.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedInt.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedShort.cs" ObjectRuntimeType="Short" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedLong.cs" ObjectRuntimeType="Long" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedUInt.cs" ObjectRuntimeType="UInt" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedUShort.cs" ObjectRuntimeType="UShort" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedULong.cs" ObjectRuntimeType="ULong" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedDouble.cs" ObjectRuntimeType="Double" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedDecimal.cs" ObjectRuntimeType="Decimal" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedString.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedGuid.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedUlid.cs" ObjectRuntimeType="Ulid" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedValidatedString.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedRangeInt.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedIgnoreCaseString.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" ObjectComparison="OrdinalIgnoreCase" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedStringClass.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" ObjectKind="Class" ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedIntClass.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" ObjectKind="Class" ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedExplicitInt.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="false" />
 	</ItemGroup>
 </Project>

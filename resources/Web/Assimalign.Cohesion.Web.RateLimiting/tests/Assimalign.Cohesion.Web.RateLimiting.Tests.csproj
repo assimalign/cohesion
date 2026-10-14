@@ -4,6 +4,7 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.RateLimiting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
@@ -13,6 +14,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionPackageReference Include="System.Threading.RateLimiting" />
+		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

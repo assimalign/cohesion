@@ -31,14 +31,14 @@ package removes that coupling, mirroring the streaming/upgrade split:
   that installs it, and the ergonomic accessors. It depends only on the core.
 
 Interim responses are therefore **opt-in**: a host enables them by registering
-`HttpInterimResponses.CreateInterceptor()` on the transport's response
+`HttpInterimResponseInterceptor.Create()` on the transport's response
 interceptors. Where it is not registered, the transport uses its normal response
 path with zero interim overhead (the exchange control is created only when at
 least one response interceptor is registered).
 
 ## How it works
 
-1. A host adds `HttpInterimResponses.CreateInterceptor()` to
+1. A host adds `HttpInterimResponseInterceptor.Create()` to
    `HttpConnectionListenerOptions.Interceptors`.
 2. Per exchange, the transport creates its per-protocol exchange control and runs
    the registered response interceptors, exposing it as
@@ -69,9 +69,10 @@ least one response interceptor is registered).
 ## Not in scope here
 
 - **The automatic `Expect: 100-continue` handshake.** That is a wire-level interop
-  concern the HTTP/1.1 transport handles unconditionally (it solicits the body with
-  `100 Continue` before reading it, so a withholding client does not deadlock),
-  independent of this package. See the transport's `docs/DESIGN.md`.
+  concern the transport handles unconditionally on HTTP/1.1, HTTP/2 and HTTP/3 (it
+  solicits the body with `100 Continue` at its first read, so a withholding client does
+  not deadlock; HTTP/2 and HTTP/3 since #1385), independent of this package. See the
+  transport's `docs/DESIGN.md`.
 - **The `1xx`-as-final-status guard.** Rejecting a `1xx` set as the final
   `Response.StatusCode` is enforced in the transport's response write paths, not
   here.
@@ -82,3 +83,20 @@ least one response interceptor is registered).
 No reflection or runtime code generation. The feature is a thin forwarder over the
 exchange control; the extensions build a small `HttpHeaderCollection` for the
 `Link` fields. Builds clean under the trim/AOT analyzers.
+
+## Public interceptor and breaking changes since 10.0.0-preview.1 (#1465)
+
+`HttpInterimResponseInterceptor` is the public sealed implementation of the existing
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its constructor is private;
+`HttpInterimResponseInterceptor.Create()` creates a new stateless instance and returns its concrete type.
+The interface remains the contract for listener registration and custom interceptors. Feature
+implementations remain internal. This is the factory-to-implementation convention approved by
+owner decision 59.
+
+The `v10.0.0-preview.1` tag shipped `HttpInterimResponses.CreateInterceptor()` returning
+`IHttpExchangeInterceptor`. That static factory class is removed. Consumers must replace the call
+with `HttpInterimResponseInterceptor.Create()` and rebuild. Removing the old type and method is a
+**source- and binary-breaking change**, accepted during previews on decision 15's terms.
+Assignments to `IHttpExchangeInterceptor` continue to work after the call is renamed. The
+interceptor's registration order, scopes, feature installation, and request/response behavior
+are unchanged.

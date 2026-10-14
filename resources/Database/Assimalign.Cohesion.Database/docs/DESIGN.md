@@ -199,9 +199,12 @@ classDiagram
   service instances and context factories; those services start before servers and
   stop after them in reverse order. The root references no hosting library and
   exposes no service-registration verb (O34). Multiple `AddServer` registrations are
-  allowed — servers are per-model. This mirrors the Web area exactly
-  (`IWebApplicationBuilder` in the `Web` root, `WebApplication.CreateBuilder()`
-  in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`) — and the
+  allowed — servers are per-model. This mirrors the Web area's placement
+  (the root seam `IWebApplicationBuilder` in the `Web` root, the creation entry
+  point `WebApplication.CreateBuilder()` in `Web.Hosting`, and registration
+  verbs with the feature package, `AddAuthentication` in `Web.Authentication`;
+  Web's are `builder.Services` component integrations since #1380, while
+  Database's stay `extension(IDatabaseApplicationBuilder)` members) — and the
   pattern is the **cross-area expectation**: every area root provides
   `I<Area>ApplicationBuilder`, and feature/model registration verbs ship with
   their feature package (see `.claude/rules/resource-areas.md`). The rejected

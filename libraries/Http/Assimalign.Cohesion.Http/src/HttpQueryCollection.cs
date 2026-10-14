@@ -39,7 +39,7 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     }
 
     /// <summary>
-    /// Gets or sets the value associated with the supplied query key.
+    /// Gets the ordered values for a key, or replaces all of its values.
     /// </summary>
     /// <param name="key">The query key.</param>
     public HttpQueryValue this[HttpQueryKey key]
@@ -71,24 +71,25 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     public bool IsReadOnly { get; set; }
 
     /// <summary>
-    /// Adds a query entry to the collection.
+    /// Appends query values, preserving existing occurrences and their order.
     /// </summary>
     /// <param name="key">The query key to add.</param>
     /// <param name="value">The query value to add.</param>
     public void Add(HttpQueryKey key, HttpQueryValue value)
     {
         ThrowIfReadOnly();
-        _store.Add(key, value);
+        _store[key] = _store.TryGetValue(key, out HttpQueryValue existing)
+            ? HttpQueryValue.Concat(existing, value)
+            : value;
     }
 
     /// <summary>
-    /// Adds a query entry to the collection.
+    /// Appends query values, preserving existing occurrences and their order.
     /// </summary>
     /// <param name="item">The query entry to add.</param>
     public void Add(KeyValuePair<HttpQueryKey, HttpQueryValue> item)
     {
-        ThrowIfReadOnly();
-        _store.Add(item.Key, item.Value);
+        Add(item.Key, item.Value);
     }
 
     /// <summary>
@@ -167,7 +168,7 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     {
         if (IsReadOnly)
         {
-            throw new InvalidOperationException("The query collection cannot be modified because it is read-only.");
+            throw new InvalidOperationException(ErrorMessages.QueryCollectionReadOnly);
         }
     }
 }

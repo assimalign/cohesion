@@ -62,48 +62,47 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
             return;
         }
 
-        Init(callerCancellationToken);
-
-        CancellationTokenSource runCancellationTokenSource = _cancellationTokenSource!;
-        Action shutdownCallback = () =>
-        {
-            try
-            {
-                runCancellationTokenSource.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-                // The host already stopped and reset this run's state.
-            }
-        };
-
-        // Publish the shutdown callback and the Starting state atomically. Once callers can
-        // observe Starting, Shutdown must be accepted for this run and must not be erased by
-        // a later state transition.
-        Context.BeginStart(shutdownCallback);
-
         using var startupTimeoutSource = new CancellationTokenSource();
-
-        if (_options.StartupTimeout != Timeout.InfiniteTimeSpan)
-        {
-            startupTimeoutSource.CancelAfter(_options.StartupTimeout);
-        }
-
-        using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
-            runCancellationTokenSource.Token,
-            startupTimeoutSource.Token);
-
-        CancellationToken cancellationToken = cancellationTokenSource.Token;
-
-        // A cancelled start (caller token or StartupTimeout) signals shutdown so a parked
-        // RunAsync can unwind. Init has always run by this point, so the shutdown callback
-        // is set; the registration dies with the startup token source.
-        using CancellationTokenRegistration startupCancellationRegistration =
-            cancellationToken.Register(Context.Shutdown);
-
         bool serviceStartupEntered = false;
         try
         {
+            Init(callerCancellationToken);
+
+            CancellationTokenSource runCancellationTokenSource = _cancellationTokenSource!;
+            Action shutdownCallback = () =>
+            {
+                try
+                {
+                    runCancellationTokenSource.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The host already stopped and reset this run's state.
+                }
+            };
+
+            // Publish the shutdown callback and the Starting state atomically. Once callers can
+            // observe Starting, Shutdown must be accepted for this run and must not be erased by
+            // a later state transition.
+            Context.BeginStart(shutdownCallback);
+
+            if (_options.StartupTimeout != Timeout.InfiniteTimeSpan)
+            {
+                startupTimeoutSource.CancelAfter(_options.StartupTimeout);
+            }
+
+            using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+                runCancellationTokenSource.Token,
+                startupTimeoutSource.Token);
+
+            CancellationToken cancellationToken = cancellationTokenSource.Token;
+
+            // A cancelled start (caller token or StartupTimeout) signals shutdown so a parked
+            // RunAsync can unwind. Init has always run by this point, so the shutdown callback
+            // is set; the registration dies with the startup token source.
+            using CancellationTokenRegistration startupCancellationRegistration =
+                cancellationToken.Register(Context.Shutdown);
+
             await OnStartingAsync(cancellationToken).ConfigureAwait(false);
             serviceStartupEntered = true;
 
@@ -573,31 +572,39 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// </summary>
     private async Task RollbackStartAsync(bool serviceStartupEntered)
     {
-        using var cancellationTokenSource = new CancellationTokenSource(_options.ShutdownTimeout);
-
-        // A rejected OnStarting hook has not entered any service lifecycle. In
-        // particular, a terminal host guard must not stop last run's services again.
-        if (serviceStartupEntered)
+        try
         {
-            foreach (IHostService service in Context.HostedServices.Reverse())
+            using var cancellationTokenSource = new CancellationTokenSource(_options.ShutdownTimeout);
+
+            // A rejected OnStarting hook has not entered any service lifecycle. In
+            // particular, a terminal host guard must not stop last run's services again.
+            if (serviceStartupEntered)
             {
-                try
+                foreach (IHostService service in Context.HostedServices.Reverse())
                 {
-                    await service.StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Best-effort teardown on the failure path; the original start fault is
-                    // what the caller must observe.
+                    try
+                    {
+                        await service.StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Best-effort teardown on the failure path; the original start fault is
+                        // what the caller must observe.
+                    }
                 }
             }
         }
-
-        _taskCompletionSource?.TrySetResult(this);
-
-        Reset();
-
-        SetState(HostState.Failed);
+        catch
+        {
+            // Resolving/enumerating services and creating the rollback budget are also
+            // best-effort. Neither may replace the original startup exception.
+        }
+        finally
+        {
+            _taskCompletionSource?.TrySetResult(this);
+            Reset();
+            SetState(HostState.Failed);
+        }
     }
 
     /// <summary>

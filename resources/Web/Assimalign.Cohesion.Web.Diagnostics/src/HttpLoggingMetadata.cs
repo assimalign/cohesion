@@ -9,9 +9,12 @@ namespace Assimalign.Cohesion.Web.Diagnostics;
 /// <remarks>
 /// <para>
 /// The middleware resolves this metadata with last-wins semantics
-/// (<c>IRouterRouteMetadataCollection.GetMetadata&lt;HttpLoggingMetadata&gt;()</c>) after the
-/// downstream pipeline has completed, so a group-level override is superseded by an
-/// endpoint-level one, and the lookup costs nothing on routes that carry no override.
+/// (<c>IRouterRouteMetadataCollection.GetMetadata&lt;HttpLoggingMetadata&gt;()</c>) from the
+/// endpoint <c>UseRouting</c> published, after the downstream pipeline has completed, so a
+/// group-level override is superseded by an endpoint-level one, and the lookup costs nothing on
+/// routes that carry no override. The override applies only to exchanges the endpoint handles: a
+/// CORS preflight that names the endpoint's method is logged with the configured fields, because
+/// the endpoint never runs for it.
 /// </para>
 /// <para>
 /// Because the override is only observable <em>after</em> routing has run, it can freely turn

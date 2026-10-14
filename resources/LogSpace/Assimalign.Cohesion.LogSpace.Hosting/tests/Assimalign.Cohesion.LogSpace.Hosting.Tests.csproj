@@ -13,6 +13,8 @@
 	</ItemGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web" />
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
   </ItemGroup>
 </Project>

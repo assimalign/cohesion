@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Diagnostics;
 using System.Security.Cryptography;
 
@@ -125,7 +126,7 @@ public readonly struct HttpDigestAlgorithm : IEquatable<HttpDigestAlgorithm>
         if (!_supported)
         {
             throw new NotSupportedException(
-                $"The digest algorithm '{_key ?? "(unregistered)"}' is not supported for computation or validation (RFC 9530 §5).");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DigestAlgorithmNotSupported, _key ?? ErrorMessages.UnregisteredDigestAlgorithm));
         }
 
         return IncrementalHash.CreateHash(_hashName);

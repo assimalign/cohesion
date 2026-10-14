@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 internal sealed class RequestDecompressionFormatException : Exception
 {
     public RequestDecompressionFormatException(Exception innerException)
-        : base("The request body could not be decompressed; the coded content is malformed.", innerException)
+        : base(ErrorMessages.RequestDecompressionMalformed, innerException)
     {
     }
 }

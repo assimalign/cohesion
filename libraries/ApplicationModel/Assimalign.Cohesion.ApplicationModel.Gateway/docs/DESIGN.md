@@ -932,3 +932,13 @@ gateway can continue validating the same invariants at run entry. It remains non
 platform extensions cannot weaken common credential, readiness, path, or controller checks.
 This inherited validation requirement was exposed by the final direct InProcess rebuild after
 the initial helper-type errors had been resolved.
+
+## Factory implementation migration (#1465)
+
+Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
+owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
+where the caller previously accepted null or blank audiences, an ordinal audience-list match
+preserves those inputs locally. Existing validation guards remain in place. This package's
+public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
+signatures require rebuilding; the source and binary breaks are recorded in the JWT and
+DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

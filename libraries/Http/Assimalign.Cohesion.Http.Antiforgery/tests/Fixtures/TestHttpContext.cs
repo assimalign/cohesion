@@ -48,6 +48,12 @@ internal sealed class TestHttpContext : IHttpContext
         Request.Headers[name] = value;
     }
 
+    /// <summary>Sets the scheme the request arrived with on the transport.</summary>
+    public void SetScheme(HttpScheme scheme)
+    {
+        ((TestHttpRequest)Request).Scheme = scheme;
+    }
+
     /// <summary>Installs a parsed form feature carrying a single field.</summary>
     public void SetFormField(string name, string value)
     {
@@ -77,7 +83,7 @@ internal sealed class TestHttpContext : IHttpContext
         public HttpHost Host => HttpHost.Empty;
         public HttpPath Path => HttpPath.Root;
         public HttpMethod Method { get; set; }
-        public HttpScheme Scheme => HttpScheme.Http;
+        public HttpScheme Scheme { get; set; } = HttpScheme.Http;
         public IHttpQueryCollection Query { get; } = new HttpQueryCollection();
         public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
         public IHttpContext HttpContext { get; }

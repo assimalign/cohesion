@@ -22,3 +22,5 @@ resolution, validation, and listener ownership behavior. Referencing this packag
 is the source migration; no SQL engine API chooses a transport. The existing SQL
 server-options tests exercise the moved extension unchanged. No DNS lookup,
 reflection, Microsoft.Extensions dependencies, or runtime code generation is used.
+
+The constructed `TcpConnectionListener` implements `IDuplexConnectionListener`, matching the SQL server option. Port-0 binding exposes the actual assigned port through its `EndPoint` after `BindAsync` completes.

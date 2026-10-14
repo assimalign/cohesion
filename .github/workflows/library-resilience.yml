@@ -2,6 +2,8 @@ name: Resilience
 on:
   push:
     paths:
+      - 'build/Tasks/**'
+      - 'build/Targets/Build.CodeGeneration.*'
       - 'libraries/Resilience/**'
       - '!libraries/Resilience/**/*.slnx'
       - '!libraries/Resilience/**/*.md'
@@ -13,6 +15,7 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]

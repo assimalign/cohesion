@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -38,6 +39,45 @@ public class HttpResponseProblemDetailsExtensionsTests
         document.RootElement.GetProperty("status").GetInt32().ShouldBe(404);
         document.RootElement.GetProperty("title").GetString().ShouldBe("Not Found");
         document.RootElement.GetProperty("detail").GetString().ShouldBe("missing");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.ProblemDetails] - WriteProblemDetailsAsync: unregistered codes retain their status and default title")]
+    [InlineData(499, "Error")]
+    [InlineData(599, "Internal Server Error")]
+    public async Task WriteProblemDetailsAsync_UnregisteredCode_ShouldWriteStatusAndGenericTitle(int status, string expectedTitle)
+    {
+        // Arrange
+        TestHttpContext context = new();
+        ProblemDetails problem = ProblemDetails.FromStatus(new HttpStatusCode(status));
+
+        // Act
+        await context.Response.WriteProblemDetailsAsync(problem, CancellationToken.None);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(status);
+        context.Response.Headers[HttpHeaderKey.ContentType].Value.ShouldBe("application/problem+json");
+        using JsonDocument document = JsonDocument.Parse(context.ResponseBodyText());
+        document.RootElement.GetProperty("status").GetInt32().ShouldBe(status);
+        document.RootElement.GetProperty("title").GetString().ShouldBe(expectedTitle);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.ProblemDetails] - WriteProblemDetailsAsync: unregistered codes preserve an application title")]
+    [InlineData(499)]
+    [InlineData(599)]
+    public async Task WriteProblemDetailsAsync_UnregisteredCodeWithTitle_ShouldPreserveTitle(int status)
+    {
+        // Arrange
+        TestHttpContext context = new();
+        ProblemDetails problem = new() { Status = status, Title = "Application-defined failure" };
+
+        // Act
+        await context.Response.WriteProblemDetailsAsync(problem, CancellationToken.None);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(status);
+        using JsonDocument document = JsonDocument.Parse(context.ResponseBodyText());
+        document.RootElement.GetProperty("status").GetInt32().ShouldBe(status);
+        document.RootElement.GetProperty("title").GetString().ShouldBe("Application-defined failure");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ProblemDetails] - WriteProblemDetailsAsync: a status-less problem leaves the response status untouched")]

@@ -33,6 +33,29 @@ public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
         options.AuthenticationOptions.ShouldNotBeNull();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Security] - TlsServerOptions: MaxConcurrentHandshakes should default to 512")]
+    public void MaxConcurrentHandshakes_ByDefault_ShouldBe512()
+    {
+        // Arrange & Act
+        TlsServerOptions options = new();
+
+        // Assert
+        options.MaxConcurrentHandshakes.ShouldBe(512);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Security] - TlsServerOptions: MaxConcurrentHandshakes should reject a value below one")]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void MaxConcurrentHandshakes_WithNonPositiveValue_ShouldThrowArgumentOutOfRangeException(int value)
+    {
+        // Arrange
+        TlsServerOptions options = new();
+
+        // Act / Assert
+        Should.Throw<ArgumentOutOfRangeException>(() => options.MaxConcurrentHandshakes = value);
+        options.MaxConcurrentHandshakes.ShouldBe(512);
+    }
+
     [Fact]
     public void Ctor_OnTlsClientOptions_ShouldDefaultToTenSecondTimeoutAndAuthenticationOptions()
     {
@@ -48,7 +71,7 @@ public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_AsClientAgainstSilentPeer_ShouldCancelAfterHandshakeTimeout()
     {
         // Arrange: the server end never participates, so the client handshake can only time out.
-        (Connection client, Connection _) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, DuplexConnection _) = InMemoryConnectionPair.Create();
         TlsClientOptions options = new()
         {
             HandshakeTimeout = TimeSpan.FromMilliseconds(100),
@@ -71,7 +94,7 @@ public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_AsServerAgainstSilentPeer_ShouldCancelAfterHandshakeTimeout()
     {
         // Arrange: no client hello ever arrives, so the server handshake can only time out.
-        (Connection _, Connection server) = InMemoryConnectionPair.Create();
+        (DuplexConnection _, IDuplexConnection server) = InMemoryConnectionPair.Create();
         TlsServerOptions options = new()
         {
             HandshakeTimeout = TimeSpan.FromMilliseconds(100),
@@ -93,7 +116,7 @@ public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_WithAlreadyCanceledToken_ShouldThrowOperationCanceledException()
     {
         // Arrange
-        (Connection client, Connection _) = InMemoryConnectionPair.Create();
+        (IDuplexConnection client, DuplexConnection _) = InMemoryConnectionPair.Create();
         TlsClientOptions options = new()
         {
             AuthenticationOptions =

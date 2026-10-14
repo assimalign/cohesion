@@ -23,9 +23,9 @@ internal struct KeyValueAccumulator
         List<string>values;
         if (_accumulator.TryGetValue(key, out values))
         {
-            if (values.Count == 0)
+            if (values is null)
             {
-                // Marker entry for this key to indicate entry already in expanding list dictionary
+                // A null marker means this key already has an expanding value list.
                 _expandingAccumulator[key].Add(value);
             }
             else if (values.Count == 1)
@@ -36,7 +36,7 @@ internal struct KeyValueAccumulator
             else
             {
                 // Third value for this key
-                // Add zero count entry and move to data to expanding list dictionary
+                // Use a null marker and move the data to the expanding list dictionary.
                 _accumulator[key] = default(List<string>);
 
                 if (_expandingAccumulator == null)

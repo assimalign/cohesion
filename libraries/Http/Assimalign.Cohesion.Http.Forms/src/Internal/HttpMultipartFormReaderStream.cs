@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -129,7 +130,8 @@ internal sealed class HttpMultipartFormReaderStream : Stream
 
         if (LengthLimit is long cap && _observedLength > cap)
         {
-            throw new InvalidDataException($"Multipart section body exceeded the {cap}-byte limit.");
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionBodyTooLarge, cap);
+            throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartBodyLength, message));
         }
 
         return take;

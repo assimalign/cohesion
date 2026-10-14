@@ -131,7 +131,7 @@ internal class SocketPipeSender : SocketPipeAsyncArgs
     {
         if (!MemoryMarshal.TryGetArray(memory, out var result))
         {
-            throw new InvalidOperationException("Buffer backed by array was expected");
+            throw new InvalidOperationException(ErrorMessages.BufferNotArrayBacked);
         }
         return result;
     }

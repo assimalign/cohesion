@@ -91,7 +91,7 @@ internal readonly struct QPackFieldSectionPrefix
         {
             throw new QPackException(
                 Http3ErrorCode.QPackDecompressionFailed,
-                "The QPACK encoded Required Insert Count is out of range for the advertised table capacity.");
+                ErrorMessages.QpackEncodedInsertCountInvalid);
         }
 
         long maxValue = totalNumberOfInserts + maxEntries;
@@ -104,7 +104,7 @@ internal readonly struct QPackFieldSectionPrefix
             {
                 throw new QPackException(
                     Http3ErrorCode.QPackDecompressionFailed,
-                    "The QPACK Required Insert Count could not be reconstructed.");
+                    ErrorMessages.QpackInsertCountInvalid);
             }
 
             requiredInsertCount -= fullRange;
@@ -114,7 +114,7 @@ internal readonly struct QPackFieldSectionPrefix
         {
             throw new QPackException(
                 Http3ErrorCode.QPackDecompressionFailed,
-                "The QPACK Required Insert Count reconstructed to zero.");
+                ErrorMessages.QpackInsertCountZero);
         }
 
         return requiredInsertCount;

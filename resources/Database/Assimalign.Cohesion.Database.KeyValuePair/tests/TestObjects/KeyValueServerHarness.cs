@@ -53,7 +53,7 @@ internal sealed class KeyValueServerHarness : IAsyncDisposable
     /// </summary>
     public async Task<KeyValueProtocolClient> DialAsync()
     {
-        Connection connection = await Listener.CreateFactory().ConnectAsync(Listener.EndPoint, TestTimeout.Token());
+        IDuplexConnection connection = await Listener.CreateFactory().ConnectAsync(Listener.EndPoint, TestTimeout.Token());
         return new KeyValueProtocolClient(connection);
     }
 

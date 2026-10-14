@@ -7,6 +7,11 @@ and context for the AOT-safe OpenID Connect issuer runtime. Issuer services rema
 
 The host serves discovery, persisted ES256 JWKS, client-credentials tokens, public health probes, and the bootstrap-authenticated Cohesion resource control plane. Configuration is code-first through `AddAudience` and `AddClient`; the generated resource manifest supplies the `https` endpoint and `data` volume. Only `openid` and an empty scope are accepted.
 
+Without a gateway identity, the `/cohesion/v1` control plane accepts only transport peers at
+`127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other callers receive `403 Forbidden`. Forwarded
+headers do not change this decision. Bare health probes remain open. This tightens standalone
+behavior from 10.0.0-preview.1.
+
 Device authorization and its fixed-subject browser approval page are exposed only by a loopback Local endpoint. Applications needing account login, subject selection, consent, recovery, or federation compose an authenticated user-facing flow separately.
 
 HTTPS reads a PEM certificate, private key, and optional chain from a materialized `tls` mount. Without that mount, self-signed TLS is limited to loopback Local; non-Local HTTPS fails closed rather than generating production TLS material.

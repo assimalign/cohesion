@@ -1,0 +1,312 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently not
+    extensible. For a given mimetype the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format
+    that the ResXResourceWriter will generate, however the reader can
+    read any of the formats listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AbsoluteUriHostRequired" xml:space="preserve">
+    <value>An absolute URI requires a non-empty host.</value>
+  </data>
+  <data name="AbsoluteUriSchemeInvalid" xml:space="preserve">
+    <value>An absolute URI requires the http or https scheme.</value>
+  </data>
+  <data name="OptionalCatchAllParameterNotSupported" xml:space="preserve">
+    <value>The catch-all parameter &apos;{0}&apos; cannot be optional: a catch-all already matches when the rest of the path is empty. Remove the &apos;?&apos;.</value>
+  </data>
+  <data name="CatchAllParameterPositionInvalid" xml:space="preserve">
+    <value>The catch-all parameter &apos;{0}&apos; must be the last segment of the template, but more segments follow it. Move the catch-all to the end, or remove the segments after it.</value>
+  </data>
+  <data name="CatchAllParameterSegmentInvalid" xml:space="preserve">
+    <value>The segment &apos;{0}&apos; combines the catch-all parameter &apos;{1}&apos; with other text. A catch-all parameter must be the only content of its segment.</value>
+  </data>
+  <data name="ComplexRouteDelimiterRequired" xml:space="preserve">
+    <value>Complex route segments must contain a literal or separator delimiter after parameter parts.</value>
+  </data>
+  <data name="EndpointMetadataNull" xml:space="preserve">
+    <value>Endpoint metadata items must not be null.</value>
+  </data>
+  <data name="EndpointPolicyMiddlewareMissing" xml:space="preserve">
+    <value>The endpoint &apos;{0}&apos; declares {1}, which only {2}() applies, but {3}() did not process this request. Register {4}() after UseRouting() so it runs before the endpoint.</value>
+  </data>
+  <data name="GroupParameterPoliciesFrozen" xml:space="preserve">
+    <value>The route group&apos;s parameter policies are frozen because a child route or nested group has already been registered, and child templates resolve their inline policies when they are mapped. Declare group-level parameter policies before mapping children so they apply to all child routes.</value>
+  </data>
+  <data name="HostConstraintNotInitialized" xml:space="preserve">
+    <value>Host constraints must be created through RouteHostConstraint.Parse or TryParse; a default-initialized constraint matches nothing.</value>
+  </data>
+  <data name="HostPatternNull" xml:space="preserve">
+    <value>Host patterns must not be null.</value>
+  </data>
+  <data name="LengthPolicyArgumentInvalid" xml:space="preserve">
+    <value>The &apos;length&apos; route parameter policy argument &apos;{0}&apos; is invalid.</value>
+  </data>
+  <data name="LengthPolicyArgumentRequired" xml:space="preserve">
+    <value>The &apos;length&apos; route parameter policy requires an &apos;n&apos; or &apos;min,max&apos; argument.</value>
+  </data>
+  <data name="LinkGenerationRoutingNotRegistered" xml:space="preserve">
+    <value>Routing has not been registered. Call builder.Services.AddRouting() before generating links.</value>
+  </data>
+  <data name="LiteralRouteClosingBraceUnmatched" xml:space="preserve">
+    <value>The literal text &apos;{0}&apos; contains an unmatched &apos;}}&apos;. Write a literal &apos;}}&apos; as &apos;}}}}&apos;, or open a parameter with &apos;{{&apos;.</value>
+  </data>
+  <data name="LiteralRouteSegmentInvalid" xml:space="preserve">
+    <value>The literal route segment &apos;{0}&apos; is invalid.</value>
+  </data>
+  <data name="MaximumLengthBelowMinimum" xml:space="preserve">
+    <value>The maximum length must be greater than or equal to the minimum length.</value>
+  </data>
+  <data name="MaximumLengthPolicyArgumentInvalid" xml:space="preserve">
+    <value>The &apos;maxlength&apos; route parameter policy requires a non-negative integer argument, but was &apos;{0}&apos;.</value>
+  </data>
+  <data name="MaximumPolicyArgumentInvalid" xml:space="preserve">
+    <value>The &apos;max&apos; route parameter policy requires an integer argument, but was &apos;{0}&apos;.</value>
+  </data>
+  <data name="MinimumAboveMaximum" xml:space="preserve">
+    <value>The minimum value must be less than or equal to the maximum value.</value>
+  </data>
+  <data name="MinimumLengthPolicyArgumentInvalid" xml:space="preserve">
+    <value>The &apos;minlength&apos; route parameter policy requires a non-negative integer argument, but was &apos;{0}&apos;.</value>
+  </data>
+  <data name="MinimumPolicyArgumentInvalid" xml:space="preserve">
+    <value>The &apos;min&apos; route parameter policy requires an integer argument, but was &apos;{0}&apos;.</value>
+  </data>
+  <data name="NamedRoutePatternRequired" xml:space="preserve">
+    <value>The route named &apos;{0}&apos; does not expose a route pattern and cannot participate in URL generation.</value>
+  </data>
+  <data name="OptionalParameterDefaultNotAllowed" xml:space="preserve">
+    <value>The parameter &apos;{0}&apos; is both optional (&apos;?&apos;) and has a default value (&apos;=&apos;). Use one or the other: a parameter with a default value can already be left out of the path.</value>
+  </data>
+  <data name="OptionalParameterDelimiterMissing" xml:space="preserve">
+    <value>In the segment &apos;{0}&apos;, the optional parameter &apos;{1}&apos; directly follows &apos;{2}&apos;. {3}</value>
+  </data>
+  <data name="OptionalParameterSeparatorInvalid" xml:space="preserve">
+    <value>In the segment &apos;{0}&apos;, the optional parameter &apos;{1}&apos; follows &apos;{2}&apos;. {3}</value>
+  </data>
+  <data name="OptionalParameterPositionInvalid" xml:space="preserve">
+    <value>In the segment &apos;{0}&apos;, the optional parameter &apos;{1}&apos; is followed by &apos;{2}&apos;. An optional parameter must be the last part of its segment.</value>
+  </data>
+  <data name="OptionalParameterDelimiterInvalid" xml:space="preserve">
+    <value>In a segment with several parts, only a period (&apos;.&apos;) may come directly before an optional parameter, for example &apos;{name}.{ext?}&apos;.</value>
+  </data>
+  <data name="OptionalRouteParameterDefaultNotAllowed" xml:space="preserve">
+    <value>Route parameter &apos;{0}&apos; cannot be optional and also define an explicit default value.</value>
+  </data>
+  <data name="PathBranchPrefixInvalid" xml:space="preserve">
+    <value>A path branch needs an origin-form prefix below the root, such as &apos;/static&apos;: &apos;{0}&apos;.</value>
+  </data>
+  <data name="RangePolicyArgumentInvalid" xml:space="preserve">
+    <value>The &apos;range&apos; route parameter policy argument &apos;{0}&apos; is invalid.</value>
+  </data>
+  <data name="RangePolicyArgumentRequired" xml:space="preserve">
+    <value>The &apos;range&apos; route parameter policy requires a &apos;min,max&apos; argument.</value>
+  </data>
+  <data name="RegexPolicyPatternRequired" xml:space="preserve">
+    <value>The &apos;regex&apos; route parameter policy requires a regular expression pattern.</value>
+  </data>
+  <data name="RequiredRouteValueNotFound" xml:space="preserve">
+    <value>No corresponding parameter or default value could be found for the required value &apos;{0}={1}&apos;.</value>
+  </data>
+  <data name="RouteClosingBraceUnmatched" xml:space="preserve">
+    <value>It ends with an unmatched &apos;}&apos;. Write a literal &apos;}&apos; as &apos;}}&apos;.</value>
+  </data>
+  <data name="RouteConstraintUnsupported" xml:space="preserve">
+    <value>The supplied route constraint reference &apos;{0}&apos; is not supported.</value>
+  </data>
+  <data name="RouteHostConstraintInvalid" xml:space="preserve">
+    <value>The value is not a valid route host constraint: &apos;{0}&apos;. Expected &apos;host&apos;, &apos;*.host&apos;, or &apos;*&apos;, optionally followed by &apos;:port&apos; (1-65535).</value>
+  </data>
+  <data name="RouteLiteralQueryMarkerNotAllowed" xml:space="preserve">
+    <value>The literal text &apos;{0}&apos; contains &apos;?&apos;. A &apos;?&apos; may only end a parameter to make it optional (for example &apos;{{id?}}&apos;); a route template never includes a query string.</value>
+  </data>
+  <data name="RouteNameAlreadyRegistered" xml:space="preserve">
+    <value>The route name &apos;{0}&apos; is registered more than once (&apos;{1}&apos; and &apos;{2}&apos;). Route names must be unique.</value>
+  </data>
+  <data name="RouteNameNotRegistered" xml:space="preserve">
+    <value>No route named &apos;{0}&apos; has been registered.</value>
+  </data>
+  <data name="RouteParameterClosingBraceMissing" xml:space="preserve">
+    <value>The parameter &apos;{0}&apos; is not closed: the template ends before its closing &apos;}}&apos;. End the parameter with &apos;}}&apos;.</value>
+  </data>
+  <data name="RouteParameterDefaultsConflict" xml:space="preserve">
+    <value>Route parameter &apos;{0}&apos; cannot define both an inline default and a conflicting explicit default value.</value>
+  </data>
+  <data name="RouteParameterEmpty" xml:space="preserve">
+    <value>It contains an empty parameter &apos;{}&apos;. Name the parameter, for example &apos;{id}&apos;.</value>
+  </data>
+  <data name="RouteParameterTrailingBraceUnclosed" xml:space="preserve">
+    <value>The parameter &apos;{0}&apos; is not closed: the template ends after an unescaped &apos;{{&apos;. Close the parameter with &apos;}}&apos;, and write a literal &apos;{{&apos; inside it as &apos;{{{{&apos;.</value>
+  </data>
+  <data name="RouteParameterNameInvalid" xml:space="preserve">
+    <value>The parameter name &apos;{0}&apos; contains &apos;{1}&apos;. A parameter name cannot contain &apos;/&apos;, &apos;{{&apos;, &apos;}}&apos;, &apos;?&apos; or &apos;*&apos;.</value>
+  </data>
+  <data name="RouteParameterNameMissing" xml:space="preserve">
+    <value>The parameter &apos;{0}&apos; has no name. Name the parameter, for example &apos;{{id}}&apos;.</value>
+  </data>
+  <data name="RouteParameterNameRepeated" xml:space="preserve">
+    <value>The parameter name &apos;{0}&apos; is used more than once. Parameter names must be unique within a template, ignoring case.</value>
+  </data>
+  <data name="RouteParameterOpeningBraceUnescaped" xml:space="preserve">
+    <value>The parameter &apos;{0}&apos; contains an unescaped &apos;{{&apos;. Inside a parameter, write a literal &apos;{{&apos; as &apos;{{{{&apos;.</value>
+  </data>
+  <data name="RouteParameterOpeningBraceUnmatched" xml:space="preserve">
+    <value>It ends with an unmatched &apos;{&apos;. Close the parameter with &apos;}&apos;, or write a literal &apos;{&apos; as &apos;{{&apos;.</value>
+  </data>
+  <data name="RouteParameterPolicyUnknown" xml:space="preserve">
+    <value>Route parameter &apos;{0}&apos; references an unknown route policy &apos;{1}&apos;.</value>
+  </data>
+  <data name="RouteParametersAdjacent" xml:space="preserve">
+    <value>The segment &apos;{0}&apos; places the parameters &apos;{1}&apos; and &apos;{2}&apos; next to each other, so the boundary between their values is ambiguous. Separate them with literal text, for example &apos;{3}-{4}&apos;.</value>
+  </data>
+  <data name="RouteParserInfiniteLoop" xml:space="preserve">
+    <value>Infinite loop detected in the parser. Please open an issue.</value>
+  </data>
+  <data name="RoutePathGenerationFailed" xml:space="preserve">
+    <value>A path could not be generated for the route named &apos;{0}&apos; (&apos;{1}&apos;) from the supplied route values.</value>
+  </data>
+  <data name="RoutePrefixInvalid" xml:space="preserve">
+    <value>It starts with &apos;~&apos; but not &apos;~/&apos;. Begin the template with &apos;~/&apos;, with &apos;/&apos;, or with its first path segment.</value>
+  </data>
+  <data name="RouterAlreadyBuilt" xml:space="preserve">
+    <value>{0} cannot be mapped: the router has already been built from this builder, and its route table is fixed. A web application builds its router when its request pipeline is built at startup, so map every route before the application starts.</value>
+  </data>
+  <data name="RouteSegmentEmpty" xml:space="preserve">
+    <value>It contains an empty segment (&apos;//&apos;). Separate path segments with a single &apos;/&apos;.</value>
+  </data>
+  <data name="RouteSegmentLimitExceeded" xml:space="preserve">
+    <value>Route exceeds the maximum number of allowed segments of 28 and is unable to be processed.</value>
+  </data>
+  <data name="RouteTableAlreadyBuilt" xml:space="preserve">
+    <value>Endpoint metadata cannot be added: the route table has already been built, so it would not apply. A web application builds its router when its request pipeline is built at startup, so attach metadata to routes and groups before the application starts.</value>
+  </data>
+  <data name="RouteTemplateInvalid" xml:space="preserve">
+    <value>The route template &apos;{0}&apos; is invalid. {1}</value>
+  </data>
+  <data name="RouteTemplateParseFailed" xml:space="preserve">
+    <value>It could not be parsed.</value>
+  </data>
+  <data name="RouteValueKeyAlreadyExists" xml:space="preserve">
+    <value>An element with the key &apos;{0}&apos; already exists in the RouteValueDictionary.</value>
+  </data>
+  <data name="RoutingNotRegistered" xml:space="preserve">
+    <value>Routing has not been registered. Call builder.Services.AddRouting() before UseRouting().</value>
+  </data>
+  <data name="WhenPolicyArgumentInvalid" xml:space="preserve">
+    <value>The &apos;when&apos; route parameter policy argument &apos;{0}&apos; is invalid.</value>
+  </data>
+  <data name="WhenPolicyArgumentRequired" xml:space="preserve">
+    <value>The &apos;when&apos; route parameter policy requires a &apos;key=value&apos; argument.</value>
+  </data>
+</root>

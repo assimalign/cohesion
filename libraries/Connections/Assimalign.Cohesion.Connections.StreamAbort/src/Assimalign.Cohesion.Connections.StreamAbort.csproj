@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Connections</RootNamespace>
+        <Description>Optional StreamAbort connection feature contract and accessor.</Description>
+    </PropertyGroup>
+    <ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+    </ItemGroup>
+</Project>

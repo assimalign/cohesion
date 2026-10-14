@@ -40,11 +40,11 @@ public class UdpConnectionFactoryTests
         await using IDatagramConnection server = factory.Bind(new IPEndPoint(IPAddress.Loopback, 0));
 
         // Act
-        await using IDatagramConnection client = factory.Connect(server.LocalEndPoint);
+        await using IDatagramConnection client = factory.Connect(server.LocalEndPoint.ShouldNotBeNull());
 
         // Assert
         client.RemoteEndPoint.ShouldBe(server.LocalEndPoint);
-        ((IPEndPoint)client.LocalEndPoint).Port.ShouldNotBe(0);
+        client.LocalEndPoint.ShouldBeOfType<IPEndPoint>().Port.ShouldNotBe(0);
     }
 
     [Fact]

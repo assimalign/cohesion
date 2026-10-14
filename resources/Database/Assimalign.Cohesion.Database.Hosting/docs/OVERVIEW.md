@@ -33,3 +33,10 @@ Instance engines and services remain caller-owned. Factory products belong to th
 Configuration loads optional base/environment JSON, `COHESION_CONFIG__` environment variables, captured args and explicit providers. Services use the Cohesion interpreted resolver (`EnableDynamicCode = false`) on both JIT and NativeAOT, with scope validation and explicit closed factories/instances. See [DESIGN.md](DESIGN.md) for ordering, rollback, isolation and ownership details.
 
 The runtime references the area root and non-area infrastructure, never Database model packages. Existing enabled-resource runner/admin/telemetry integration is preserved; this implementation adds no ApplicationModel functionality.
+
+An enabled resource's standalone `admin` control plane accepts `/cohesion/v1` only from transport
+peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other peers receive 403 regardless of
+forwarded headers. This restricts remote standalone access supported by 10.0.0-preview.1 (#1431).
+Bare `/healthz`, `/readyz`, and `/livez` stay open, and gateway-managed behavior is unchanged.
+
+The model server options take `IDuplexConnectionListener`; client composition supplies an `IDuplexConnectionFactory` for the shared database pool.

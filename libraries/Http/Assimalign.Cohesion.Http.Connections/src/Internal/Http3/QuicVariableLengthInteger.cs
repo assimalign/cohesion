@@ -8,6 +8,49 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal static class QuicVariableLengthInteger
 {
+    /// <summary>The longest encoding of a variable-length integer, in octets (RFC 9000 §16).</summary>
+    public const int MaxLength = 8;
+
+    /// <summary>
+    /// Encodes <paramref name="value"/> into <paramref name="destination"/> in its shortest form
+    /// (RFC 9000 §16), the span counterpart of <see cref="Write(Stream, long)"/>.
+    /// </summary>
+    /// <param name="destination">The buffer to encode into; at least <see cref="MaxLength"/> octets fit any value.</param>
+    /// <param name="value">The value to encode, from 0 to 2^62-1.</param>
+    /// <returns>The number of octets written.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="value"/> is negative.</exception>
+    public static int Write(Span<byte> destination, long value)
+    {
+        if (value < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(value));
+        }
+
+        int length = value switch
+        {
+            < 64 => 1,
+            < 16384 => 2,
+            < 1073741824 => 4,
+            _ => 8,
+        };
+
+        ulong encoded = (ulong)value | (length switch
+        {
+            1 => 0UL,
+            2 => 0x4000UL,
+            4 => 0x80000000UL,
+            _ => 0xC000000000000000UL,
+        });
+
+        for (int index = length - 1; index >= 0; index--)
+        {
+            destination[index] = (byte)encoded;
+            encoded >>= 8;
+        }
+
+        return length;
+    }
+
     public static async ValueTask<long?> ReadAsync(Stream stream, CancellationToken cancellationToken)
     {
         byte[] buffer = new byte[1];
@@ -34,7 +77,7 @@ internal static class QuicVariableLengthInteger
 
             if (bytesRead == 0)
             {
-                throw new EndOfStreamException("The QUIC variable-length integer was incomplete.");
+                throw new EndOfStreamException(ErrorMessages.QuicVariableIntegerTruncated);
             }
 
             value = (value << 8) | buffer[0];
@@ -59,7 +102,7 @@ internal static class QuicVariableLengthInteger
         {
             if (index >= buffer.Length)
             {
-                throw new InvalidDataException("The QUIC variable-length integer was incomplete.");
+                throw new InvalidDataException(ErrorMessages.QuicVariableIntegerTruncated);
             }
 
             value = (value << 8) | buffer[index++];

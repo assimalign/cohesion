@@ -4,7 +4,9 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Compression" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />

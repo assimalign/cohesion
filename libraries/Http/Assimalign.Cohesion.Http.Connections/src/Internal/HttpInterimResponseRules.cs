@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -27,6 +28,48 @@ internal static class HttpInterimResponseRules
     private const int SwitchingProtocolsStatus = 101;
 
     /// <summary>
+    /// The one expectation RFC 9110 defines (§10.1.1): the client withholds the request's content until
+    /// the server solicits it with <c>100 Continue</c>.
+    /// </summary>
+    private const string ContinueExpectation = "100-continue";
+
+    /// <summary>
+    /// Returns whether the request carries <c>Expect: 100-continue</c> (RFC 9110 §10.1.1): an element of
+    /// its <c>Expect</c> list, compared case-insensitively, with only SP and HTAB trimmed from it
+    /// (RFC 9110 §5.6.1). Every version reads the expectation the same way; whether the request's framing
+    /// leaves content to solicit is the caller's to decide.
+    /// </summary>
+    /// <param name="headers">The request's header section.</param>
+    /// <returns><see langword="true"/> when the client expects <c>100 Continue</c> before sending content.</returns>
+    public static bool ExpectsContinue(HttpHeaderCollection headers)
+    {
+        if (!headers.TryGetValue(HttpHeaderKey.Expect, out HttpHeaderValue value))
+        {
+            return false;
+        }
+
+        foreach (string? entry in value)
+        {
+            if (entry is null)
+            {
+                continue;
+            }
+
+            ReadOnlySpan<char> list = entry.AsSpan();
+            foreach (Range range in list.Split(','))
+            {
+                // RFC 9110 §5.6.1 / §5.6.3 — a list element loses SP and HTAB only (#1341).
+                if (list[range].Trim(Http1FieldLine.OptionalWhitespace).Equals(ContinueExpectation, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Returns whether <paramref name="statusCode"/> is an informational (<c>1xx</c>) status.
     /// </summary>
     /// <param name="statusCode">The status code to classify.</param>
@@ -49,7 +92,7 @@ internal static class HttpInterimResponseRules
             throw new ArgumentOutOfRangeException(
                 nameof(statusCode),
                 statusCode.Value,
-                "An interim response requires a 1xx status code (RFC 9110 §15.2).");
+                ErrorMessages.InterimResponseStatusInvalid);
         }
 
         if ((int)statusCode == SwitchingProtocolsStatus)
@@ -57,7 +100,7 @@ internal static class HttpInterimResponseRules
             throw new ArgumentOutOfRangeException(
                 nameof(statusCode),
                 statusCode.Value,
-                "101 Switching Protocols is a connection transition owned by Assimalign.Cohesion.Http.ProtocolUpgrade, not an interim response.");
+                ErrorMessages.InterimProtocolSwitchNotSupported);
         }
     }
 
@@ -77,7 +120,7 @@ internal static class HttpInterimResponseRules
         if (IsInformational(statusCode))
         {
             throw new InvalidOperationException(
-                $"A 1xx status code ({statusCode}) cannot be used as the final response status; emit interim responses through IHttpInterimResponseFeature instead.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.FinalResponseStatusInvalid, statusCode));
         }
     }
 }

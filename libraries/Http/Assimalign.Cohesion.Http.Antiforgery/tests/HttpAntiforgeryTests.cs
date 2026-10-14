@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -8,6 +9,35 @@ namespace Assimalign.Cohesion.Http.Antiforgery.Tests;
 
 public class HttpAntiforgeryTests
 {
+    [Theory(DisplayName = "Cohesion Test [Http.Antiforgery] - Create: Should return a concrete service usable through IHttpAntiforgery")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Create_OnEitherOverload_ShouldReturnHttpAntiforgeryUsableThroughInterface(bool useOptionsOverload)
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        TestHttpContext mint = new(HttpMethod.Get);
+        TestHttpContext post = new(HttpMethod.Post);
+
+        // Act
+        HttpAntiforgery service = useOptionsOverload
+            ? HttpAntiforgery.Create(options)
+            : HttpAntiforgery.Create(configure =>
+            {
+                configure.CookieName = options.CookieName;
+                configure.HeaderName = options.HeaderName;
+            });
+        IHttpAntiforgery antiforgery = service;
+        HttpAntiforgeryTokenSet tokens = antiforgery.GetAndStoreTokens(mint);
+        post.SetRequestCookie(options.CookieName, tokens.CookieToken!);
+        post.SetRequestHeader(options.HeaderName, tokens.RequestToken!);
+        bool valid = await antiforgery.IsRequestValidAsync(post);
+
+        // Assert
+        service.ShouldBeOfType<HttpAntiforgery>();
+        valid.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: Should accept a freshly minted cookie + header token pair")]
     public async Task ValidateRequest_OnValidPairViaHeader_ShouldPass()
     {
@@ -45,6 +75,51 @@ public class HttpAntiforgeryTests
         valid.ShouldBeTrue();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: Repeated form tokens use the first value")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ValidateRequest_OnRepeatedFormToken_ShouldValidateOnlyFirstValue(bool firstIsValid)
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        HttpAntiforgeryTokenSet tokens = antiforgery.GetTokens(new TestHttpContext(HttpMethod.Get));
+        TestHttpContext post = new(HttpMethod.Post);
+        post.SetRequestCookie(options.CookieName, tokens.CookieToken!);
+        HttpFormCollection form = new();
+        form.Add(options.FormFieldName, firstIsValid ? tokens.RequestToken! : "invalid-token");
+        form.Add(options.FormFieldName, firstIsValid ? "invalid-token" : tokens.RequestToken!);
+        post.Request.Form = form;
+
+        // Act
+        bool valid = await antiforgery.IsRequestValidAsync(post);
+
+        // Assert
+        valid.ShouldBe(firstIsValid);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: An empty first form token falls back to the header")]
+    public async Task ValidateRequest_OnEmptyFirstFormToken_ShouldUseHeaderToken()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        HttpAntiforgeryTokenSet tokens = antiforgery.GetTokens(new TestHttpContext(HttpMethod.Get));
+        TestHttpContext post = new(HttpMethod.Post);
+        post.SetRequestCookie(options.CookieName, tokens.CookieToken!);
+        post.SetRequestHeader(options.HeaderName, tokens.RequestToken!);
+        HttpFormCollection form = new();
+        form.Add(options.FormFieldName, string.Empty);
+        form.Add(options.FormFieldName, "invalid-token");
+        post.Request.Form = form;
+
+        // Act
+        bool valid = await antiforgery.IsRequestValidAsync(post);
+
+        // Assert
+        valid.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: Should skip validation for safe methods")]
     public async Task ValidateRequest_OnSafeMethod_ShouldPassWithoutTokens()
     {
@@ -62,7 +137,7 @@ public class HttpAntiforgeryTests
     {
         // RFC 10008 registers QUERY as safe + idempotent, but it carries a request body, so its
         // CSRF exposure parallels POST. Antiforgery deliberately does NOT exempt QUERY: a QUERY
-        // request with no token is rejected (the decision recorded in HttpAntiforgeryService.IsSafeMethod).
+        // request with no token is rejected (the decision recorded in HttpAntiforgery.IsSafeMethod).
         IHttpAntiforgery antiforgery = HttpAntiforgery.Create();
         TestHttpContext queryWithoutToken = new(HttpMethod.Query);
 
@@ -198,6 +273,93 @@ public class HttpAntiforgeryTests
         await Should.NotThrowAsync(async () => await antiforgery.ValidateRequestAsync(post));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: A non-essential cookie token is not marked essential")]
+    public void GetAndStoreTokens_WhenCookieNotEssential_ShouldNotMarkCookieEssential()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new() { CookieIsEssential = false };
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        bool cookieStored = false;
+        foreach (HttpCookie cookie in context.Response.Cookies)
+        {
+            if (cookie.Name == options.CookieName)
+            {
+                cookie.Options.IsEssential.ShouldBeFalse();
+                cookieStored = true;
+            }
+        }
+
+        cookieStored.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: A plaintext request's cookie token is not marked Secure by default")]
+    public void GetAndStoreTokens_HttpRequestByDefault_ShouldNotMarkCookieSecure()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Secure.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: An HTTPS request's cookie token is marked Secure by default")]
+    public void GetAndStoreTokens_HttpsRequestByDefault_ShouldMarkCookieSecure()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+        context.SetScheme(HttpScheme.Https);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Secure.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: A trusted proxy's forwarded https marks the cookie token Secure")]
+    public void GetAndStoreTokens_ForwardedHttpsOverPlaintextHop_ShouldMarkCookieSecure()
+    {
+        // Arrange — the proxy-to-application hop is plaintext; the forwarded feature carries the client's https.
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+        context.Features.Set<IHttpForwardedFeature>(new TestForwardedFeature(HttpScheme.Https));
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Secure.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: CookieSecure marks the cookie token Secure on plaintext requests too")]
+    public void GetAndStoreTokens_CookieSecureOnHttpRequest_ShouldMarkCookieSecure()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new() { CookieSecure = true };
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Secure.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: Should set the cookie token and anti-caching headers")]
     public void GetAndStoreTokens_OnNewExchange_ShouldSetCookieAndSecurityHeaders()
     {
@@ -214,6 +376,7 @@ public class HttpAntiforgeryTests
             if (cookie.Name == options.CookieName && cookie.Value == tokens.CookieToken)
             {
                 cookie.Options.HttpOnly.ShouldBeTrue();
+                cookie.Options.IsEssential.ShouldBeTrue(); // a consent policy must not drop it
                 cookieStored = true;
             }
         }
@@ -242,6 +405,72 @@ public class HttpAntiforgeryTests
         TestHttpContext post = new(HttpMethod.Post);
         post.SetRequestCookie(options.CookieName, reused.CookieToken!);
         post.SetRequestHeader(options.HeaderName, reused.RequestToken!);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Antiforgery] - Create: A CookiePath outside path-value fails when the service is created, not when a token is stored")]
+    [InlineData("/tenant;x")] // ';' would add an attribute to the Set-Cookie line
+    [InlineData("/café")] // not a US-ASCII CHAR
+    [InlineData("/a\r\nb")] // CR LF
+    public void Create_CookiePathOutsideGrammar_ShouldThrowAtCreation(string cookiePath)
+    {
+        // Act — the HttpCookiePath conversion refuses the string when it is assigned, so an explicit
+        // options instance cannot even be initialized with it.
+        ArgumentException fromOptions = Should.Throw<ArgumentException>(
+            () => HttpAntiforgery.Create(new HttpAntiforgeryOptions { CookiePath = cookiePath }));
+        ArgumentException fromConfigure = Should.Throw<ArgumentException>(
+            () => HttpAntiforgery.Create(configure => configure.CookiePath = cookiePath));
+
+        // Assert
+        fromOptions.ParamName.ShouldBe("value");
+        fromOptions.Message.ShouldContain("Path", Case.Sensitive);
+        fromOptions.Message.ShouldNotContain(cookiePath, Case.Sensitive);
+        fromConfigure.ParamName.ShouldBe("value");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Create: A default CookiePath, which holds no path, fails when the service is created")]
+    public void Create_DefaultCookiePath_ShouldThrowAtCreation()
+    {
+        // Act
+        ArgumentException fromOptions = Should.Throw<ArgumentException>(
+            () => HttpAntiforgery.Create(new HttpAntiforgeryOptions { CookiePath = default }));
+        ArgumentException fromConfigure = Should.Throw<ArgumentException>(
+            () => HttpAntiforgery.Create(configure => configure.CookiePath = default));
+
+        // Assert
+        fromOptions.ParamName.ShouldBe("options");
+        fromOptions.Message.ShouldContain("HttpAntiforgeryOptions.CookiePath", Case.Sensitive);
+        fromConfigure.ParamName.ShouldBe("options");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Antiforgery] - Create: A CookiePath in path-value is accepted and reaches the cookie token")]
+    [InlineData("/")]
+    [InlineData("/app/v1")]
+    [InlineData("/caf%C3%A9")] // the percent-encoded form of the refused '/café'
+    public void Create_CookiePathInGrammar_ShouldStoreCookieTokenUnderPath(string cookiePath)
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new() { CookiePath = cookiePath };
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Path.ShouldBe<HttpCookiePath?>(cookiePath);
+    }
+
+    private static HttpCookie StoredCookie(TestHttpContext context, string name)
+    {
+        foreach (HttpCookie cookie in context.Response.Cookies)
+        {
+            if (cookie.Name == name)
+            {
+                return cookie;
+            }
+        }
+
+        throw new ShouldAssertException($"No '{name}' cookie was stored on the response.");
     }
 
     private static string Tamper(string token)

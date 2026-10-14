@@ -6,11 +6,11 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections.Tests;
 
 /// <summary>
-/// A <see cref="ConnectionListener"/> double that yields pre-queued connections.
+/// A <see cref="DuplexConnectionListener"/> double that yields pre-queued connections.
 /// </summary>
-internal sealed class TestConnectionListener : ConnectionListener
+internal sealed class TestConnectionListener : DuplexConnectionListener
 {
-    private readonly Queue<Connection> _pending = new();
+    private readonly Queue<DuplexConnection> _pending = new();
     private readonly ConnectionCapabilities _capabilities;
 
     public TestConnectionListener(ConnectionCapabilities? capabilities = null)
@@ -22,11 +22,13 @@ internal sealed class TestConnectionListener : ConnectionListener
 
     public int BindCount { get; private set; }
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 15000);
 
     public override ConnectionCapabilities Capabilities => _capabilities;
 
-    public void Enqueue(Connection connection) => _pending.Enqueue(connection);
+    public void Enqueue(DuplexConnection connection) => _pending.Enqueue(connection);
 
     public override ValueTask BindAsync(CancellationToken cancellationToken = default)
     {
@@ -35,8 +37,8 @@ internal sealed class TestConnectionListener : ConnectionListener
         return ValueTask.CompletedTask;
     }
 
-    public override ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
-        => ValueTask.FromResult(_pending.Dequeue());
+    protected override ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
+        => ValueTask.FromResult<IDuplexConnection>(_pending.Dequeue());
 
     public override ValueTask DisposeAsync()
     {

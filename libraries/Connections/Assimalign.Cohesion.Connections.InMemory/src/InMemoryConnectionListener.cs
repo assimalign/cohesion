@@ -16,9 +16,12 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// connection is pending, <see cref="AcceptAsync(CancellationToken)"/> waits (like a real listener)
 /// until one is dialed, the accept is cancelled, or the listener is disposed.
 /// </remarks>
-public sealed class InMemoryConnectionListener : ConnectionListener
+public sealed class InMemoryConnectionListener : DuplexConnectionListener
 {
-    private readonly Channel<Connection> _inbound = Channel.CreateUnbounded<Connection>(
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _listenerDisposedMessage = ErrorMessages.ListenerDisposed;
+
+    private readonly Channel<DuplexConnection> _inbound = Channel.CreateUnbounded<DuplexConnection>(
         new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
 
     private readonly InMemoryEndPoint _endPoint;
@@ -39,6 +42,9 @@ public sealed class InMemoryConnectionListener : ConnectionListener
         _endPoint = endPoint ?? new InMemoryEndPoint(InMemoryEndPoint.DefaultName);
         _capabilities = capabilities ?? InMemoryConnectionPair.DefaultCapabilities;
     }
+
+    /// <inheritdoc />
+    public override ListenerId Id { get; } = ListenerId.New();
 
     /// <inheritdoc />
     public override EndPoint EndPoint => _endPoint;
@@ -62,7 +68,7 @@ public sealed class InMemoryConnectionListener : ConnectionListener
     }
 
     /// <inheritdoc />
-    public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -71,7 +77,7 @@ public sealed class InMemoryConnectionListener : ConnectionListener
         catch (ChannelClosedException)
         {
             // The listener was disposed while an accept was pending or before one arrived.
-            throw new OperationCanceledException("The in-memory listener has been disposed.", cancellationToken);
+            throw new OperationCanceledException(_listenerDisposedMessage, cancellationToken);
         }
     }
 
@@ -96,7 +102,7 @@ public sealed class InMemoryConnectionListener : ConnectionListener
         }
 
         // Tear down any server ends that were dialed but never accepted.
-        while (_inbound.Reader.TryRead(out Connection? pending))
+        while (_inbound.Reader.TryRead(out DuplexConnection? pending))
         {
             _ = pending.DisposeAsync();
         }
@@ -110,11 +116,11 @@ public sealed class InMemoryConnectionListener : ConnectionListener
     /// </summary>
     /// <returns>The client end of the newly created connection.</returns>
     /// <exception cref="ConnectionAbortedException">Thrown when the listener has been disposed.</exception>
-    internal Connection Connect()
+    internal DuplexConnection Connect()
     {
         InMemoryEndPoint clientEndPoint = InMemoryEndPoint.CreateEphemeral();
 
-        (Connection client, Connection server) = InMemoryConnectionPair.Create(_capabilities, clientEndPoint, _endPoint);
+        (DuplexConnection client, DuplexConnection server) = InMemoryConnectionPair.Create(_capabilities, clientEndPoint, _endPoint);
 
         lock (_gate)
         {
@@ -127,6 +133,6 @@ public sealed class InMemoryConnectionListener : ConnectionListener
         _ = client.DisposeAsync();
         _ = server.DisposeAsync();
 
-        throw new ConnectionAbortedException("The in-memory listener has been disposed and is no longer accepting connections.");
+        throw new ConnectionAbortedException(ErrorMessages.ListenerNoLongerAcceptingConnections);
     }
 }

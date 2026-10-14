@@ -8,11 +8,11 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts;
 /// Pipeline-builder members that add request-timeout enforcement to a web application.
 /// </summary>
 /// <remarks>
-/// Register <c>UseRequestTimeouts</c> <b>before</b> <c>UseRouting</c> (and before any other
-/// long-running middleware it should govern): the middleware wraps everything downstream of it,
-/// and it applies per-endpoint policies by observing the router publish its match — which only
-/// works when routing runs inside the timeout scope. Composition is dependency-free: the options
-/// are captured at builder time and no request-time service location occurs.
+/// Register <c>UseRequestTimeouts</c> <b>after</b> <c>UseRouting</c> and before the long-running
+/// middleware it should govern: the middleware reads the endpoint <c>UseRouting</c> published to pick
+/// the endpoint's policy, then governs everything downstream of it, the endpoint included.
+/// Composition is dependency-free: the options are captured at builder time and no request-time
+/// service location occurs.
 /// </remarks>
 public static class WebApplicationExtensions
 {
@@ -24,6 +24,20 @@ public static class WebApplicationExtensions
         /// <see cref="RequestTimeoutMetadata"/> (or handlers arming
         /// <see cref="IRequestTimeoutFeature.SetTimeout"/>) are governed.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Register it after <c>UseRouting</c>. The timer starts when the exchange reaches the
+        /// middleware, armed with the published endpoint's <see cref="RequestTimeoutMetadata"/> policy
+        /// when it carries one, which replaces the global default, and with the global default
+        /// otherwise (including for requests no route matched).
+        /// </para>
+        /// <para>
+        /// Registered ahead of <c>UseRouting</c>, the global default still governs every request, but no
+        /// endpoint is known yet: an endpoint whose metadata carries a timeout then fails with an
+        /// <see cref="InvalidOperationException"/> when it is dispatched instead of running unbounded,
+        /// and an endpoint that disables the timeout runs under the global default.
+        /// </para>
+        /// </remarks>
         /// <param name="configure">An optional callback to configure the middleware.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
@@ -41,6 +55,11 @@ public static class WebApplicationExtensions
         /// Adds the request-timeout middleware with a global default timeout, answered with the
         /// default 504 status when it fires.
         /// </summary>
+        /// <remarks>
+        /// Register it after <c>UseRouting</c>, so endpoints carrying
+        /// <see cref="RequestTimeoutMetadata"/> replace the default with their own policy (see the
+        /// configurable overload).
+        /// </remarks>
         /// <param name="defaultTimeout">The time any request may execute before it is timed out.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>

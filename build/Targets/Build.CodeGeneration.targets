@@ -1,28 +1,40 @@
 <Project>
+    <PropertyGroup>
+        <!-- Configuration has its SDK default by the time targets are imported. -->
+        <_CohesionBuildTasksAssembly>$(MSBuildThisFileDirectory)..\Tasks\bin\$(Configuration)\netstandard2.0\Assimalign.Cohesion.Build.Tasks.dll</_CohesionBuildTasksAssembly>
+    </PropertyGroup>
+    <!--
+        The task assembly targets netstandard2.0 and loads in-process under both Framework MSBuild
+        (Visual Studio) and Core MSBuild (dotnet). Do NOT add Runtime="NET" here: that forces a
+        .NET task host and reintroduces MSB4216/MSB4027 under Visual Studio.
+    -->
+    <UsingTask
+        TaskName="Assimalign.Cohesion.Build.Tasks.CodeGenerationCreateValueTypeTask"
+        AssemblyFile="$(_CohesionBuildTasksAssembly)" />
     <ItemGroup>
-		<CohesionValueType
-			Update="@(CohesionValueType)"
-			ObjectFilePath="$(_CohesionCodeGenPath)%(Identity)"
-			ObjectRelativePath="%(Identity)" />
-	</ItemGroup>
-	<Target Name="CohesionCreateValueType"
-		BeforeTargets="CoreCompile"
-		Inputs="$(MSBuildProjectFile)"
-		Outputs="@(CohesionValueType->'%(ObjectFilePath)')">
-		<CodeGenerationCreateValueTypeTask ValueTypes="@(CohesionValueType)" CodeGenOutputPath="$(_CohesionCodeGenPath)">
-			<Output TaskParameter="ValueTypesCreated" ItemName="ValueTypesGenerated" />
-		</CodeGenerationCreateValueTypeTask>
-		<Message Text="Generated: @(CohesionValueType->'%(ObjectFilePath)')" Importance="High" />
-	</Target>
-	<ItemGroup>
-		<Compile Include="@(CohesionValueType->'%(ObjectFilePath)')" Link="/%(ObjectRelativePath)" />
-	</ItemGroup>
-	<PropertyGroup>
-		<CleanDependsOn>$(CleanDependsOn);CohesionCleanCodeGeneration</CleanDependsOn>
-	</PropertyGroup>
-
-	<Target Name="CohesionCleanCodeGeneration">
-		<Delete Files="@(CohesionValueType->'%(ObjectFilePath)')" />
-	</Target>
-	
+        <CohesionValueType
+            Update="@(CohesionValueType)"
+            ObjectFilePath="$(_CohesionCodeGenPath)%(RelativeDir)%(Filename).generated.cs"
+            ObjectRelativePath="%(RelativeDir)%(Filename).generated.cs" />
+    </ItemGroup>
+    <!-- Always inspect content; the task preserves the timestamp of unchanged files. -->
+    <Target Name="CohesionCreateValueType"
+        BeforeTargets="CoreCompile"
+        Condition="'@(CohesionValueType)' != ''">
+        <CodeGenerationCreateValueTypeTask ValueTypes="@(CohesionValueType)" CodeGenOutputPath="$(_CohesionCodeGenPath)">
+            <Output TaskParameter="ValueTypesCreated" ItemName="ValueTypesGenerated" />
+        </CodeGenerationCreateValueTypeTask>
+    </Target>
+    <ItemGroup>
+        <Compile Include="@(CohesionValueType->'%(ObjectFilePath)')" Link="/%(ObjectRelativePath)" />
+    </ItemGroup>
+    <PropertyGroup>
+        <CleanDependsOn>$(CleanDependsOn);CohesionCleanCodeGeneration</CleanDependsOn>
+    </PropertyGroup>
+    <Target Name="CohesionCleanCodeGeneration">
+        <ItemGroup>
+            <_CohesionGeneratedFilesToClean Include="$(_CohesionCodeGenPath)**\*.generated.cs" />
+        </ItemGroup>
+        <Delete Files="@(_CohesionGeneratedFilesToClean)" />
+    </Target>
 </Project>

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 namespace Assimalign.Cohesion.Web.Testing;
 
@@ -24,4 +25,11 @@ public sealed class WebApplicationTestFactoryOptions
     /// factory's in-memory listener regardless of host or port.
     /// </remarks>
     public Uri BaseAddress { get; set; } = new Uri("http://localhost/");
+
+    /// <summary>
+    /// Gets or sets the content root of the application under test, or <see langword="null"/> for
+    /// the test assembly's base directory. The web root (<c>wwwroot</c> by default) is resolved
+    /// against it.
+    /// </summary>
+    public FileSystemPath? ContentRootPath { get; set; }
 }

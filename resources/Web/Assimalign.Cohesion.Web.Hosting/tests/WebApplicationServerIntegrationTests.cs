@@ -1,9 +1,15 @@
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Web.Hosting.Internal;
+using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Testing;
 
 using Shouldly;
@@ -17,10 +23,12 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 /// <summary>
 /// Full-pipeline integration coverage for the <c>WebApplicationServer</c> dispatch and stop
-/// semantics (issue #762), driven end to end over the in-memory transport through
+/// semantics (issues #762 and #1049), driven end to end over the in-memory transport through
 /// <see cref="WebApplicationTestFactory"/>. The unit suite pins the same properties against
 /// instrumented doubles; this suite proves them with a real client, real HTTP/1.1 exchanges,
-/// and the real accept loop.
+/// and the real accept loop. The pipelining test writes raw bytes instead, because a real client
+/// never pipelines — and pipelining is what shows the server asks for the next request only after
+/// the previous response.
 /// </summary>
 public class WebApplicationServerIntegrationTests
 {
@@ -175,5 +183,25 @@ public class WebApplicationServerIntegrationTests
 
         // Assert — a new request cannot dial the disposed listener.
         await Should.ThrowAsync<HttpRequestException>(() => client.GetAsync("/after", cancellationToken));
+    }
+
+    private static async Task<string> ReadUntilAsync(Stream stream, Func<string, bool> isComplete, CancellationToken cancellationToken)
+    {
+        StringBuilder received = new();
+        byte[] buffer = new byte[1024];
+
+        while (!isComplete(received.ToString()))
+        {
+            int read = await stream.ReadAsync(buffer, cancellationToken);
+
+            if (read == 0)
+            {
+                break;
+            }
+
+            received.Append(Encoding.ASCII.GetString(buffer, 0, read));
+        }
+
+        return received.ToString();
     }
 }

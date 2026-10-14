@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ApplicationModel;
@@ -16,6 +17,19 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
 internal static class ConfigurationStoreTestHost
 {
+    // Wraps the default control plane a builder created in this asynchronous flow, so a test can stand a
+    // custom IResourceControlPlane in for it; the registration is per assembly and made once.
+    private static readonly AsyncLocal<Func<IResourceControlPlane, IResourceControlPlane>?> _controlPlaneDecorator = new();
+
+    /// <summary>
+    /// Makes builders created in the current asynchronous flow use the control plane
+    /// <paramref name="decorate"/> returns for the default one.
+    /// </summary>
+    internal static void DecorateControlPlane(Func<IResourceControlPlane, IResourceControlPlane> decorate)
+    {
+        _controlPlaneDecorator.Value = decorate;
+    }
+
     internal static Uri GetEndpoint()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -63,6 +77,8 @@ internal static class ConfigurationStoreTestHost
         ResourceRuntime.RegisterEntry(assembly);
         ResourceRuntime.RegisterControlPlane(
             assembly,
-            static () => ConfigurationStoreResourceControlPlane.Create());
+            static () => _controlPlaneDecorator.Value is { } decorate
+                ? decorate(ConfigurationStoreResourceControlPlane.Create())
+                : ConfigurationStoreResourceControlPlane.Create());
     }
 }

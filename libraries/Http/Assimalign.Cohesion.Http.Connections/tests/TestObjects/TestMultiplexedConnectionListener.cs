@@ -15,20 +15,20 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// </summary>
 internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionListener
 {
-    private readonly Queue<MultiplexedConnection> _connections = new();
-    private readonly Queue<TaskCompletionSource<MultiplexedConnection>> _waiters = new();
+    private readonly Queue<IMultiplexedConnection> _connections = new();
+    private readonly Queue<TaskCompletionSource<IMultiplexedConnection>> _waiters = new();
     private readonly Lock _lock = new();
     private readonly TaskCompletionSource<object?> _waitingForConnection = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConnectionCapabilities _capabilities;
     private EndPoint _endPoint = new IPEndPoint(IPAddress.Loopback, 16000);
     private int _acceptCount;
 
-    public TestMultiplexedConnectionListener(params MultiplexedConnection[] connections)
+    public TestMultiplexedConnectionListener(params IMultiplexedConnection[] connections)
         : this(capabilities: null, connections)
     {
     }
 
-    public TestMultiplexedConnectionListener(ConnectionCapabilities? capabilities, params MultiplexedConnection[] connections)
+    public TestMultiplexedConnectionListener(ConnectionCapabilities? capabilities, params IMultiplexedConnection[] connections)
     {
         _capabilities = capabilities ?? TestConnection.DefaultCapabilities with
         {
@@ -36,7 +36,7 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
             Security = ConnectionSecurity.Tls
         };
 
-        foreach (MultiplexedConnection connection in connections)
+        foreach (IMultiplexedConnection connection in connections)
         {
             _connections.Enqueue(connection);
         }
@@ -52,6 +52,8 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
 
     public EndPoint? EndPointAfterBind { get; set; }
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
     public override EndPoint EndPoint => _endPoint;
 
     public override ConnectionCapabilities Capabilities => _capabilities;
@@ -63,7 +65,7 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
         return ValueTask.CompletedTask;
     }
 
-    public void Enqueue(MultiplexedConnection connection)
+    public void Enqueue(IMultiplexedConnection connection)
     {
         lock (_lock)
         {
@@ -79,7 +81,7 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
         }
     }
 
-    public override ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken)
     {
         lock (_lock)
         {
@@ -90,13 +92,13 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
                 return ValueTask.FromResult(_connections.Dequeue());
             }
 
-            TaskCompletionSource<MultiplexedConnection> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<IMultiplexedConnection> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             if (cancellationToken.CanBeCanceled)
             {
                 cancellationToken.Register(static state =>
                 {
-                    TaskCompletionSource<MultiplexedConnection> completion = (TaskCompletionSource<MultiplexedConnection>)state!;
+                    TaskCompletionSource<IMultiplexedConnection> completion = (TaskCompletionSource<IMultiplexedConnection>)state!;
                     completion.TrySetCanceled();
                 }, waiter);
             }
@@ -104,7 +106,7 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
             _waiters.Enqueue(waiter);
             _waitingForConnection.TrySetResult(null);
 
-            return new ValueTask<MultiplexedConnection>(waiter.Task);
+            return new ValueTask<IMultiplexedConnection>(waiter.Task);
         }
     }
 

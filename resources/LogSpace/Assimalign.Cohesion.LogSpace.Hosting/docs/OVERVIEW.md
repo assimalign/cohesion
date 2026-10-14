@@ -4,6 +4,11 @@ LogSpaceApplication.CreateBuilder(args).Build() composes the ambient resource. A
 
 POST /v1/logs requires application/json and a signed ES256 telemetry token. Query accepts resource, since (ISO-8601), limit (default 100/max 1000), and cursor, returning application/x-ndjson and X-Cohesion-Next-Cursor when more scanning is possible. Query pages are bounded to four million characters (plus at most one bounded record). Query and management require the sink's ordinary bootstrap/dev credential; telemetry scope is rejected.
 
+Without a gateway identity, query and management under `/cohesion/v1` accept only transport peers
+at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other callers receive `403 Forbidden`. Forwarded
+headers do not change this decision. Bare health probes remain open. This tightens standalone
+behavior from 10.0.0-preview.1.
+
 ## Concrete composition (T10 / O34)
 
 `LogSpaceApplication.CreateBuilder(args)` returns the public concrete `LogSpaceApplicationBuilder`; its `Build()` returns the public `LogSpaceApplication : Host<LogSpaceApplicationContext>`. The public `LogSpaceApplicationContext` implements `ILogSpaceApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.

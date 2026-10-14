@@ -47,7 +47,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Layering and dependencies
 
-As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; Hosting privately composes Web.Hosting.Resources, Web.Hosting, HTTP, and TCP for its resource listener.
+As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; Hosting privately composes Web.Hosting, HTTP, and TCP for its resource listener.
 
 ## Project documentation
 

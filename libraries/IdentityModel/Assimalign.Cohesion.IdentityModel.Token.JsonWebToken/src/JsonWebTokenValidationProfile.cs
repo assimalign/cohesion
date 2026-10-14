@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// <see cref="ClockSkew"/>, <c>exp</c> after both <c>iat</c> and <c>nbf</c>, and <c>exp</c> minus
 /// <c>iat</c> within <see cref="MaximumLifetime"/>. Audience membership is deliberately not part of the
 /// profile: callers distinguish an unauthenticated token from an authenticated token issued for a
-/// different audience with <see cref="JsonWebTokenValidator.HasAudience(IJsonWebToken, string?)"/>.
+/// different audience with <c>token.HasAudience(audience)</c> from IdentityModel.Token.
 /// </para>
 /// <para>
 /// The issuer resolver is consulted once per validation with the token's non-blank <c>iss</c>, so a

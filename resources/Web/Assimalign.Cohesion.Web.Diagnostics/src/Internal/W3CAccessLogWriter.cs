@@ -28,6 +28,7 @@ internal sealed class W3CAccessLogWriter : IDisposable
     private readonly long? _fileSizeLimit;
     private readonly int? _retainedFileCountLimit;
     private readonly Timer? _flushTimer;
+    private readonly Func<string, Stream>? _streamFactory;
 
     private StreamWriter? _writer;
     private string? _currentPath;
@@ -43,13 +44,15 @@ internal sealed class W3CAccessLogWriter : IDisposable
         AccessLogFormat format,
         long? fileSizeLimit,
         int? retainedFileCountLimit,
-        TimeSpan flushInterval)
+        TimeSpan flushInterval,
+        Func<string, Stream>? streamFactory = null)
     {
         _directory = directory;
         _prefix = prefix;
         _format = format;
         _fileSizeLimit = fileSizeLimit;
         _retainedFileCountLimit = retainedFileCountLimit;
+        _streamFactory = streamFactory;
 
         if (flushInterval > TimeSpan.Zero)
         {
@@ -59,54 +62,81 @@ internal sealed class W3CAccessLogWriter : IDisposable
 
     public void Write(ILoggerEntry entry)
     {
-        lock (_lock)
+        var diagnostics = new PendingDiagnostics();
+        Exception? failure = null;
+        try
         {
-            if (_disposed)
+            lock (_lock)
             {
-                return;
+                if (_disposed)
+                {
+                    return;
+                }
+
+                DateOnly date = DateOnly.FromDateTime(entry.Timestamp.UtcDateTime);
+
+                if (_writer is null || date != _currentDate)
+                {
+                    Open(date, startSequence: 0, entry.Timestamp, ref diagnostics);
+                }
+                else if (_fileSizeLimit is { } limit && _approximateSize >= limit)
+                {
+                    Open(date, _sequence + 1, entry.Timestamp, ref diagnostics);
+                }
+
+                _buffer.Clear();
+                W3CAccessLogFormatter.AppendLine(_buffer, entry, _format);
+                _writer!.Write(_buffer);
+
+                // Char count approximates bytes (the line is ASCII-dominant); the size limit is
+                // documented as approximate.
+                _approximateSize += _buffer.Length;
+
+                if (_flushTimer is null)
+                {
+                    _writer.Flush();
+                }
+                else
+                {
+                    _dirty = true;
+                }
             }
-
-            DateOnly date = DateOnly.FromDateTime(entry.Timestamp.UtcDateTime);
-
-            if (_writer is null || date != _currentDate)
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+            throw;
+        }
+        finally
+        {
+            // EventListener callbacks are synchronous. Never invoke them while holding _lock.
+            diagnostics.Report();
+            if (failure is not null)
             {
-                Open(date, startSequence: 0, entry.Timestamp);
-            }
-            else if (_fileSizeLimit is { } limit && _approximateSize >= limit)
-            {
-                Open(date, _sequence + 1, entry.Timestamp);
-            }
-
-            _buffer.Clear();
-            W3CAccessLogFormatter.AppendLine(_buffer, entry, _format);
-            _writer!.Write(_buffer);
-
-            // Char count approximates bytes (the line is ASCII-dominant); the size limit is
-            // documented as approximate.
-            _approximateSize += _buffer.Length;
-
-            if (_flushTimer is null)
-            {
-                _writer.Flush();
-            }
-            else
-            {
-                _dirty = true;
+                HttpLoggingEventSource.Log.WriteFailed("Write", failure);
             }
         }
     }
 
     public void Flush()
     {
-        lock (_lock)
+        try
         {
-            if (_disposed || _writer is null)
+            lock (_lock)
             {
-                return;
-            }
+                if (_disposed || _writer is null)
+                {
+                    return;
+                }
 
-            _writer.Flush();
-            _dirty = false;
+                _writer.Flush();
+                _dirty = false;
+            }
+        }
+        catch (Exception exception)
+        {
+            HttpLoggingEventSource.Log.WriteFailed("Flush", exception);
+            throw;
         }
     }
 
@@ -116,43 +146,52 @@ internal sealed class W3CAccessLogWriter : IDisposable
         // lock or observes _disposed afterwards.
         _flushTimer?.Dispose();
 
-        lock (_lock)
+        var diagnostics = new PendingDiagnostics();
+        try
         {
-            if (_disposed)
+            lock (_lock)
             {
-                return;
-            }
+                if (_disposed)
+                {
+                    return;
+                }
 
-            _disposed = true;
-            CloseWriter();
+                _disposed = true;
+                CloseWriter(ref diagnostics);
+            }
+        }
+        finally
+        {
+            diagnostics.Report();
         }
     }
 
     private void TimerFlush()
     {
-        lock (_lock)
+        try
         {
-            if (_disposed || !_dirty || _writer is null)
+            lock (_lock)
             {
-                return;
-            }
+                if (_disposed || !_dirty || _writer is null)
+                {
+                    return;
+                }
 
-            try
-            {
                 _writer.Flush();
                 _dirty = false;
             }
-            catch
-            {
-                // A transient flush failure (disk pressure, ...) must not take down the timer;
-                // the next write or flush retries.
-            }
+        }
+        catch (Exception exception)
+        {
+            // Keep the timer alive, but report data loss: StreamWriter may already have
+            // discarded the failed buffer. A later flush cannot recover those entries.
+            HttpLoggingEventSource.Log.WriteFailed("Flush", exception);
         }
     }
 
-    private void Open(DateOnly date, int startSequence, DateTimeOffset timestamp)
+    private void Open(DateOnly date, int startSequence, DateTimeOffset timestamp, ref PendingDiagnostics diagnostics)
     {
-        CloseWriter();
+        CloseWriter(ref diagnostics);
 
         _currentDate = date;
         _sequence = startSequence;
@@ -172,10 +211,15 @@ internal sealed class W3CAccessLogWriter : IDisposable
                 continue;
             }
 
-            var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+            Stream stream = _streamFactory is null
+                ? new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read)
+                : _streamFactory(path);
             _writer = new StreamWriter(stream, _utf8NoBom, bufferSize: 64 * 1024) { AutoFlush = false };
             _currentPath = path;
             _approximateSize = existingLength;
+            diagnostics.OpenedPath = path;
+            diagnostics.Sequence = _sequence;
+            diagnostics.ExistingBytes = existingLength;
 
             if (_format == AccessLogFormat.W3CExtended && existingLength == 0)
             {
@@ -189,10 +233,10 @@ internal sealed class W3CAccessLogWriter : IDisposable
             break;
         }
 
-        ApplyRetention();
+        ApplyRetention(ref diagnostics);
     }
 
-    private void ApplyRetention()
+    private void ApplyRetention(ref PendingDiagnostics diagnostics)
     {
         if (_retainedFileCountLimit is not { } keep)
         {
@@ -226,21 +270,23 @@ internal sealed class W3CAccessLogWriter : IDisposable
                 {
                     files[i].Delete();
                 }
-                catch
+                catch (Exception exception)
                 {
                     // A file locked by an external reader is skipped; the next roll retries.
+                    (diagnostics.RetentionFailures ??= new()).Add(exception);
                 }
 
                 excess--;
             }
         }
-        catch
+        catch (Exception exception)
         {
             // Retention is best-effort: enumeration failures must never block logging.
+            (diagnostics.RetentionFailures ??= new()).Add(exception);
         }
     }
 
-    private void CloseWriter()
+    private void CloseWriter(ref PendingDiagnostics diagnostics)
     {
         if (_writer is null)
         {
@@ -251,15 +297,62 @@ internal sealed class W3CAccessLogWriter : IDisposable
         {
             _writer.Flush();
         }
-        catch
+        catch (Exception exception)
         {
             // Flush-on-close is best-effort; disposal below still releases the handle.
+            diagnostics.CloseFlushFailure = exception;
         }
 
-        _writer.Dispose();
-        _writer = null;
-        _currentPath = null;
-        _dirty = false;
+        try
+        {
+            _writer.Dispose();
+        }
+        catch (Exception exception)
+        {
+            diagnostics.CloseDisposeFailure = exception;
+            throw;
+        }
+        finally
+        {
+            _writer = null;
+            _currentPath = null;
+            _dirty = false;
+        }
+    }
+
+    // Operation-local storage keeps callbacks outside the writer lock, including when a
+    // nested open/retention/close operation fails. Ordinary writes allocate no diagnostic list.
+    private struct PendingDiagnostics
+    {
+        public string? OpenedPath;
+        public int Sequence;
+        public long ExistingBytes;
+        public Exception? CloseFlushFailure;
+        public Exception? CloseDisposeFailure;
+        public List<Exception>? RetentionFailures;
+
+        public readonly void Report()
+        {
+            if (CloseFlushFailure is not null)
+            {
+                HttpLoggingEventSource.Log.WriteFailed("Close", CloseFlushFailure);
+            }
+            if (CloseDisposeFailure is not null)
+            {
+                HttpLoggingEventSource.Log.WriteFailed("Close", CloseDisposeFailure);
+            }
+            if (OpenedPath is not null)
+            {
+                HttpLoggingEventSource.Log.FileOpened(OpenedPath, Sequence, ExistingBytes);
+            }
+            if (RetentionFailures is not null)
+            {
+                foreach (Exception exception in RetentionFailures)
+                {
+                    HttpLoggingEventSource.Log.RetentionFailed(exception);
+                }
+            }
+        }
     }
 
     private string BuildPath(DateOnly date, int sequence)

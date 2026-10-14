@@ -55,7 +55,7 @@ public sealed class WebQueryValidationOptions
                 throw new ArgumentOutOfRangeException(
                     nameof(value),
                     value.Value,
-                    "A missing or malformed QUERY Content-Type is rejected with 400 Bad Request or 415 Unsupported Media Type.");
+                    ErrorMessages.QueryContentTypeRejectionStatusInvalid);
             }
             _invalidContentTypeStatusCode = value;
         }

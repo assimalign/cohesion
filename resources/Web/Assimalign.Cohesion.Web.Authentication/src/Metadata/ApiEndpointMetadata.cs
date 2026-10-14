@@ -1,12 +1,12 @@
 namespace Assimalign.Cohesion.Web.Authentication;
 
 /// <summary>
-/// The default, shareable <see cref="IApiEndpointMetadata"/> instance. Attach
+/// The shareable marker declaring that an endpoint is an API endpoint. Attach
 /// <see cref="Instance"/> to an endpoint's metadata to opt it into non-redirecting
 /// challenge/forbid behavior (bare <c>401</c>/<c>403</c> instead of a login/access-denied
 /// redirect).
 /// </summary>
-public sealed class ApiEndpointMetadata : IApiEndpointMetadata
+public sealed class ApiEndpointMetadata
 {
     private ApiEndpointMetadata()
     {

@@ -70,7 +70,7 @@ public class AmqpTransportCapabilityTests
     public void Constructor_OnNullListener_ShouldThrowArgumentNullException()
     {
         // Act + Assert
-        Should.Throw<ArgumentNullException>(() => new AmqpServerTransport((IConnectionListener)null!));
+        Should.Throw<ArgumentNullException>(() => new AmqpServerTransport((IDuplexConnectionListener)null!));
         Should.Throw<ArgumentNullException>(() => new AmqpServerTransport((IMultiplexedConnectionListener)null!));
     }
 
@@ -133,7 +133,7 @@ public class AmqpTransportCapabilityTests
         TestConnectionFactory factory = new();
 
         // Act + Assert
-        Should.Throw<ArgumentNullException>(() => new AmqpClientTransport((IConnectionFactory)null!, _testEndPoint));
+        Should.Throw<ArgumentNullException>(() => new AmqpClientTransport((IDuplexConnectionFactory)null!, _testEndPoint));
         Should.Throw<ArgumentNullException>(() => new AmqpClientTransport((IMultiplexedConnectionFactory)null!, _testEndPoint));
         Should.Throw<ArgumentNullException>(() => new AmqpClientTransport(factory, null!));
     }

@@ -22,21 +22,51 @@ public sealed class JwtBearerOptions
     public string? DisplayName { get; set; }
 
     /// <summary>
-    /// Gets the issuers the token's <c>iss</c> must match (any-of). Empty skips issuer validation.
+    /// Gets the issuers the token's <c>iss</c> must match (any-of).
     /// </summary>
+    /// <remarks>
+    /// At least one issuer is required while <see cref="ValidateIssuer"/> is <see langword="true"/>
+    /// (the default): registering or creating the scheme fails otherwise, rather than silently
+    /// accepting a token from any issuer that holds a trusted key.
+    /// </remarks>
     public IList<string> ValidIssuers { get; } = new List<string>();
 
     /// <summary>
-    /// Gets the audiences the token's <c>aud</c> must include (any-of). Empty skips audience
-    /// validation.
+    /// Gets or sets whether the token's <c>iss</c> must match one of <see cref="ValidIssuers"/>.
+    /// Defaults to <see langword="true"/>.
     /// </summary>
+    /// <remarks>
+    /// Set it to <see langword="false"/> only when a trusted key identifies the issuer on its own
+    /// (a key shared with exactly one issuer); the opt-out is deliberate and visible here.
+    /// </remarks>
+    public bool ValidateIssuer { get; set; } = true;
+
+    /// <summary>
+    /// Gets the audiences the token's <c>aud</c> must include (any-of).
+    /// </summary>
+    /// <remarks>
+    /// At least one audience is required while <see cref="ValidateAudience"/> is
+    /// <see langword="true"/> (the default): registering or creating the scheme fails otherwise,
+    /// rather than silently accepting a token minted for another service (RFC 8725 §3.9).
+    /// </remarks>
     public IList<string> ValidAudiences { get; } = new List<string>();
 
     /// <summary>
-    /// Gets the algorithms the token's <c>alg</c> must be among. Empty accepts any algorithm one
-    /// of the <see cref="SigningKeys"/> can verify (the unsecured <c>none</c> algorithm is always
-    /// rejected).
+    /// Gets or sets whether the token's <c>aud</c> must include one of <see cref="ValidAudiences"/>.
+    /// Defaults to <see langword="true"/>.
     /// </summary>
+    public bool ValidateAudience { get; set; } = true;
+
+    /// <summary>
+    /// Gets the algorithms the token's <c>alg</c> must be among.
+    /// </summary>
+    /// <remarks>
+    /// When empty, the accepted algorithms are exactly those the configured
+    /// <see cref="SigningKeys"/> accept: every verifier is bound to its key type, so an HMAC key
+    /// accepts only <c>HS256</c>/<c>HS384</c>/<c>HS512</c> and an RSA or ECDSA key only its
+    /// asymmetric family, which is the algorithm-confusion defense of RFC 8725 §3.1. The unsecured
+    /// <c>none</c> algorithm is always rejected. Add entries to narrow the set further.
+    /// </remarks>
     public IList<string> AllowedAlgorithms { get; } = new List<string>();
 
     /// <summary>

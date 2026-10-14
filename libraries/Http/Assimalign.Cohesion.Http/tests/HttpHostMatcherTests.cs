@@ -191,6 +191,23 @@ public class HttpHostMatcherTests
         matcher.IsMatch(new HttpHost("example.com")).ShouldBeFalse();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpHostMatcher: A request host padded with obs-text whitespace should not match the allowlist")]
+    [InlineData("api.test\u00A0")]      // a trailing no-break space
+    [InlineData("\u0085api.test")]      // a leading next-line character
+    [InlineData("\u00A0api.test:8080")]
+    [InlineData("a.api.test\u00A0")]    // the wildcard entry
+    public void IsMatch_OnHostWithObsTextWhitespace_ShouldNotMatch(string requestHost)
+    {
+        // Arrange — a front end routing on the raw value sees another host than api.test.
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "api.test", "*.api.test" });
+
+        // Act
+        bool isMatch = matcher.IsMatch(new HttpHost(requestHost));
+
+        // Assert
+        isMatch.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - HttpHostMatcher: Patterns should be trimmed before compiling")]
     public void Create_PatternWithSurroundingWhitespace_ShouldTrim()
     {

@@ -29,7 +29,7 @@ internal static class QPackPrefixedInteger
     {
         if (index >= buffer.Length)
         {
-            throw new InvalidDataException("The QPACK prefixed integer is truncated.");
+            throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerTruncated);
         }
 
         int prefixMax = (1 << prefixBits) - 1;
@@ -46,7 +46,7 @@ internal static class QPackPrefixedInteger
         {
             if (index >= buffer.Length)
             {
-                throw new InvalidDataException("The QPACK prefixed integer is truncated.");
+                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerTruncated);
             }
 
             byte continuation = buffer[index++];
@@ -56,7 +56,7 @@ internal static class QPackPrefixedInteger
             // cannot drive an unbounded shift / overflow.
             if (shift > 62 || value < 0)
             {
-                throw new InvalidDataException("The QPACK prefixed integer overflowed.");
+                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflow);
             }
 
             if ((continuation & 0x80) == 0)
@@ -65,6 +65,75 @@ internal static class QPackPrefixedInteger
             }
 
             shift += 7;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to decode a prefixed integer beginning at <paramref name="index"/> from octets that may end
+    /// inside it, as an instruction stream read incrementally does. An integer takes at most ten octets, so
+    /// ten buffered octets always decide it.
+    /// </summary>
+    /// <param name="buffer">The buffered octets.</param>
+    /// <param name="index">
+    /// On entry, the position of the prefix byte; on a successful return, the position immediately after the
+    /// integer; otherwise unchanged.
+    /// </param>
+    /// <param name="prefixBits">The prefix width in bits (1..8).</param>
+    /// <param name="value">The decoded value, or zero when the integer is incomplete.</param>
+    /// <returns><see langword="true"/> when the integer is complete; <see langword="false"/> when more octets are needed.</returns>
+    /// <exception cref="InvalidDataException">Thrown when the integer overflows.</exception>
+    public static bool TryDecode(ReadOnlySpan<byte> buffer, ref int index, int prefixBits, out long value)
+    {
+        int position = index;
+        value = 0;
+
+        if (position >= buffer.Length)
+        {
+            return false;
+        }
+
+        int prefixMax = (1 << prefixBits) - 1;
+        long result = buffer[position++] & prefixMax;
+
+        if (result < prefixMax)
+        {
+            index = position;
+            value = result;
+            return true;
+        }
+
+        int shift = 0;
+
+        while (true)
+        {
+            if (position >= buffer.Length)
+            {
+                return false;
+            }
+
+            byte continuation = buffer[position++];
+            result += (long)(continuation & 0x7F) << shift;
+
+            if (result < 0)
+            {
+                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflow);
+            }
+
+            if ((continuation & 0x80) == 0)
+            {
+                index = position;
+                value = result;
+                return true;
+            }
+
+            // RFC 9204 §4.1.1 — checked before waiting for another octet, so a continuation that can only
+            // overflow is refused at once instead of buffered.
+            shift += 7;
+
+            if (shift > 62)
+            {
+                throw new InvalidDataException(ErrorMessages.QpackPrefixedIntegerOverflow);
+            }
         }
     }
 

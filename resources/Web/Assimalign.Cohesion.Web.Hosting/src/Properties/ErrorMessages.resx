@@ -1,0 +1,258 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently not
+    extensible. For a given mimetype the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format
+    that the ResXResourceWriter will generate, however the reader can
+    read any of the formats listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AmbientEndpointHostInvalid" xml:space="preserve">
+    <value>The ambient Web endpoint host &apos;{0}&apos; is not a bindable IP address.</value>
+  </data>
+  <data name="AmbientEndpointSchemeInvalid" xml:space="preserve">
+    <value>The ambient Web endpoint &apos;{0}&apos; must use http or https, not &apos;{1}&apos;.</value>
+  </data>
+  <data name="AmbientHttpsCertificateRequired" xml:space="preserve">
+    <value>The ambient Web https endpoint &apos;{0}&apos; requires its certificate Secret mount (default &apos;tls&apos;).</value>
+  </data>
+  <data name="ApplicationFeatureDisposable" xml:space="preserve">
+    <value>The application feature &apos;{0}&apos; ({1}) is disposable. The host stamps the same feature instance onto every exchange, and an exchange disposes the disposable features it carries when it ends, so this instance would be disposed after its first request. Keep disposable per-request state in a feature that middleware installs on each exchange.</value>
+  </data>
+  <data name="ApplicationFeatureFactoryResultNull" xml:space="preserve">
+    <value>The web application feature factory returned null.</value>
+  </data>
+  <data name="ApplicationResourceDisposalFailed" xml:space="preserve">
+    <value>One or more application resources failed to dispose.</value>
+  </data>
+  <data name="ApplicationServerBindFailed" xml:space="preserve">
+    <value>The web application server failed to bind its configured listener.</value>
+  </data>
+  <data name="ApplicationServerFactoryResultNull" xml:space="preserve">
+    <value>The web application server factory returned null.</value>
+  </data>
+  <data name="ApplicationServiceFactoryResultNull" xml:space="preserve">
+    <value>The web application service factory returned null.</value>
+  </data>
+  <data name="ApplicationTeardownFailed" xml:space="preserve">
+    <value>One or more application teardown operations failed.</value>
+  </data>
+  <data name="ApplicationTrustKeyInvalid" xml:space="preserve">
+    <value>The application trust key is not a valid EC P-256 JWK. {0}</value>
+  </data>
+  <data name="ClientCertificateTlsRequired" xml:space="preserve">
+    <value>The HTTP endpoint &apos;{0}&apos; declares a &apos;ClientCertificateMode&apos;, but client certificates need TLS: use Protocol Https, Http1s, Http2s, or Http3.</value>
+  </data>
+  <data name="CommandPayloadEncodingInvalid" xml:space="preserve">
+    <value>The command payload must be a base64 string.</value>
+  </data>
+  <data name="CommandPropertyRequired" xml:space="preserve">
+    <value>The command property &apos;{0}&apos; is required.</value>
+  </data>
+  <data name="ConcurrentConnectionCountInvalid" xml:space="preserve">
+    <value>The maximum concurrent connection count must be greater than zero.</value>
+  </data>
+  <data name="ConfiguredBooleanInvalid" xml:space="preserve">
+    <value>The configured value at &apos;{0}&apos; (&apos;{1}&apos;) is not a valid boolean.</value>
+  </data>
+  <data name="ConfiguredBytesPerSecondInvalid" xml:space="preserve">
+    <value>The configured value at &apos;{0}&apos; (&apos;{1}&apos;) is not a positive number of octets per second.</value>
+  </data>
+  <data name="ConfiguredConnectionCountInvalid" xml:space="preserve">
+    <value>The configured value at &apos;{0}&apos; (&apos;{1}&apos;) must be greater than zero.</value>
+  </data>
+  <data name="ConfiguredDataRateInvalid" xml:space="preserve">
+    <value>The configured data rate at &apos;{0}&apos; (&apos;{1}&apos;) is not &apos;none&apos; or a section with BytesPerSecond and GracePeriod.</value>
+  </data>
+  <data name="ConfiguredGracePeriodInvalid" xml:space="preserve">
+    <value>The configured grace period at &apos;{0}&apos; (&apos;{1}&apos;) is not a positive TimeSpan.</value>
+  </data>
+  <data name="ConfiguredIntegerInvalid" xml:space="preserve">
+    <value>The configured value at &apos;{0}&apos; (&apos;{1}&apos;) is not a valid integer.</value>
+  </data>
+  <data name="ConfiguredRequestBodySizeInvalid" xml:space="preserve">
+    <value>The configured MaxRequestBodySize value &apos;{0}&apos; is not a non-negative integer or &apos;unbounded&apos;.</value>
+  </data>
+  <data name="ConfiguredTimeoutInvalid" xml:space="preserve">
+    <value>The configured timeout at &apos;{0}&apos; (&apos;{1}&apos;) is not a valid TimeSpan, a whole number of seconds, or &apos;infinite&apos;.</value>
+  </data>
+  <data name="ControlPlaneFactoryResultNull" xml:space="preserve">
+    <value>The registered Web resource control-plane factory returned null.</value>
+  </data>
+  <data name="EndpointCertificateInvalid" xml:space="preserve">
+    <value>The HTTPS endpoint &apos;{0}&apos; certificate &apos;{1}&apos; requires a currently valid leaf and its private key.</value>
+  </data>
+  <data name="EndpointCertificateLoadFailed" xml:space="preserve">
+    <value>The HTTPS endpoint &apos;{0}&apos; could not load its certificate from &apos;{1}&apos;: {2}</value>
+  </data>
+  <data name="EndpointCertificatePathRequired" xml:space="preserve">
+    <value>The HTTPS endpoint &apos;{0}&apos; declares a &apos;Certificate&apos; section without a &apos;Path&apos;.</value>
+  </data>
+  <data name="EndpointCertificateRequired" xml:space="preserve">
+    <value>The HTTPS endpoint &apos;{0}&apos; requires its Certificate Secret mount (default &apos;tls&apos;) or a &apos;Certificate:Path&apos; file.</value>
+  </data>
+  <data name="EndpointClientCertificateModeUnsupported" xml:space="preserve">
+    <value>The HTTP endpoint &apos;{0}&apos; declares an unsupported &apos;ClientCertificateMode&apos; (&apos;{1}&apos;). Supported values: NoCertificate, AllowCertificate, RequireCertificate.</value>
+  </data>
+  <data name="EndpointHandshakeTimeoutInvalid" xml:space="preserve">
+    <value>The HTTP endpoint &apos;{0}&apos; declares an invalid &apos;HandshakeTimeout&apos; (&apos;{1}&apos;). Expected a TimeSpan, a whole number of seconds, or &apos;infinite&apos;.</value>
+  </data>
+  <data name="EndpointHostInvalid" xml:space="preserve">
+    <value>The HTTP endpoint &apos;Host&apos; value &apos;{0}&apos; is not a literal IP address, &apos;localhost&apos;, or a wildcard. DNS resolution is not performed at bind time.</value>
+  </data>
+  <data name="EndpointPortInvalid" xml:space="preserve">
+    <value>The HTTP endpoint &apos;{0}&apos; declares an invalid or missing &apos;Port&apos; (&apos;{1}&apos;).</value>
+  </data>
+  <data name="EndpointProtocolUnsupported" xml:space="preserve">
+    <value>The HTTP endpoint &apos;{0}&apos; declares an unsupported &apos;Protocol&apos; (&apos;{1}&apos;). Supported values: Http1, Http2, Https, Http1s, Http2s, Http3.</value>
+  </data>
+  <data name="HealthContributorStatusUnsupported" xml:space="preserve">
+    <value>The contributor returned an unsupported health status.</value>
+  </data>
+  <data name="Http3QuicRequired" xml:space="preserve">
+    <value>The HTTP endpoint &apos;{0}&apos; declares &apos;Protocol&apos; Http3, which requires QUIC (Windows, Linux, or macOS).</value>
+  </data>
+  <data name="ControlPlaneHostingContextRequired" xml:space="preserve">
+    <value>Managed control-plane middleware requires a Web.Hosting application context. Manual hosts can own ResourceControlPlaneMiddleware.CreateLifetime and compose InvokeAsync.</value>
+  </data>
+  <data name="ManagedResourceApplicationNameRequired" xml:space="preserve">
+    <value>A gateway-managed resource requires an application name.</value>
+  </data>
+  <data name="ManagedResourceGatewayNameRequired" xml:space="preserve">
+    <value>A gateway-managed resource requires a gateway name.</value>
+  </data>
+  <data name="ManagedResourceNameRequired" xml:space="preserve">
+    <value>A gateway-managed resource requires an ambient resource name.</value>
+  </data>
+  <data name="ManagedResourceTrustKeyRequired" xml:space="preserve">
+    <value>A gateway-managed resource requires a public application trust key.</value>
+  </data>
+  <data name="Pkcs12PrivateKeyRequired" xml:space="preserve">
+    <value>The PKCS#12 file contains no certificate with a private key.</value>
+  </data>
+  <data name="RequestFeatureLifetimeInvalid" xml:space="preserve">
+    <value>The request feature registration {0} is {1}. A Web application feature must be a singleton: the host stamps the same feature instances onto every exchange, and middleware such as UseRouting reads them while the pipeline is composed. Register it with AddSingleton&lt;IHttpFeature&gt;, IWebApplicationBuilder.AddFeature, or the feature package&apos;s builder.Services.Add&lt;Feature&gt; verb.</value>
+  </data>
+  <data name="RequestFeatureRegistrationDisposable" xml:space="preserve">
+    <value>The request feature registration{0} {1} is disposable. The host stamps the same feature instance onto every exchange, and an exchange disposes the disposable features it carries when it ends, so this instance would be disposed after its first request. Keep disposable per-request state in a feature that middleware installs on each exchange.</value>
+  </data>
+  <data name="RequestFeatureServiceTypeInvalid" xml:space="preserve">
+    <value>The registration {0} uses the service type {1}, which derives from IHttpFeature but is not IHttpFeature. The host stamps only IHttpFeature registrations onto exchanges, so this feature would never reach a request. Register it as IHttpFeature, with AddSingleton&lt;IHttpFeature&gt; or IWebApplicationBuilder.AddFeature.</value>
+  </data>
+  <data name="ResourceCommandTypeInvalid" xml:space="preserve">
+    <value>A resource command must be a JSON object.</value>
+  </data>
+  <data name="ServiceProviderNotCreated" xml:space="preserve">
+    <value>The service provider is created when the web application is built.</value>
+  </data>
+</root>

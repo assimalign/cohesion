@@ -139,7 +139,7 @@ Each area framework's member list is written by hand, once, beside the producer 
 - **An area framework's list lives in its Runtime producer:** `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`. The file imports the area's own `..\Directory.Build.props`, then declares one unconditioned `<ItemGroup>` whose first entry is the umbrella assembly, `Assimalign.Cohesion.App.<Area>`.
 - **The Refs producer reads the same list.** `resources/<Area>/Assimalign.Cohesion.<Area>.Refs/Directory.Build.props` is a one-line import of `..\Assimalign.Cohesion.<Area>.Runtime\Directory.Build.props`, so both producers see one list and the area chain is imported once.
 - **The list takes no condition.** MSBuild reads `Directory.Build.props` before the csproj body sets `$(CohesionFrameworkName)`, so a condition on it would never match there; the file's location already scopes the list to the area's two producers.
-- **App's group and the producer defaults stay in `libraries/App/Assimalign.Cohesion.App.props`**, which every producer imports from its body. App's group (kernel roots, umbrella, ComponentModel analyzer) is conditioned on `$(CohesionFrameworkName)` so it lights up only in App's producers. The condition is property-based, not `%(Framework)` metadata, because MSBuild forbids item-metadata references in top-level `ItemGroup` conditions (MSB4190).
+- **App's group and the producer defaults stay in `libraries/App/Assimalign.Cohesion.App.props`**, which every producer imports from its body. App's group (kernel roots, umbrella, root Core generator) is conditioned on `$(CohesionFrameworkName)` so it lights up only in App's producers. The condition is property-based, not `%(Framework)` metadata, because MSBuild forbids item-metadata references in top-level `ItemGroup` conditions (MSB4190).
 
 An area list uses three items:
 
@@ -201,7 +201,9 @@ A library sometimes needs another library as an internal implementation detail w
 
 Privacy is enforced at the package boundary, not the type system — keep cross-library uses of the private dep `internal`, and expose proxy types publicly if hosts need to configure the underlying piece. Forgetting the `Private` variants either leaks the dep into the `.nupkg` (used `CohesionProjectReference`) or crashes the host at run time (missing `CohesionFrameworkPrivateAssembly`). A leak surfaces downstream as a `CS0012` for the consumer, because the private assembly isn't in their reference graph.
 
-Also available: `CohesionCodeGenValueType` for generating strongly typed value objects.
+Also available: `CohesionValueType` for generating strongly typed value objects. See
+[`MSBUILD_COHESION_PROPS.md`](../../docs/build/MSBUILD_COHESION_PROPS.md#value-types) for metadata,
+generated contracts, default-value semantics, diagnostics, and write-on-change generation.
 
 ## Resource orchestration dependency guards
 
@@ -228,7 +230,11 @@ orchestration gateway:
   family is classified case-insensitively.
   COHRES001 separately rejects an area's exact runtime module and rejects hosting-family
   integrations from roots/features. Each assembly is filtered against the project's named
-  exemptions independently. COHRES002 still checks only the exact runtime module and excludes the module's own hosting family.
+  exemptions independently. COHRES002 checks only the exact runtime module; since owner decision
+  2026-10-09 it rejects only the same-area `Testing`, `ApplicationModel`,
+  `ApplicationModel.Orchestration`, framework-producer, and harness projects among its direct
+  references, and `<Area>.ApplicationModel` or `<Area>.ApplicationModel.Orchestration` anywhere in
+  its resolved closure (`resource-areas.md`).
 - **COHAM002** requires `<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>` for
   every non-harness `resources/**` assembly whose name ends in `.ApplicationModel` or
   `.ApplicationModel.Orchestration`. One `using` then composes every area's verbs and every opt-in
@@ -404,6 +410,34 @@ Per-area CI and the publish-less SDK consumer smoke prove the branch; **the rele
 
 Path-filtered on push, each a thin matrix over project names calling the shared composite action at `.github/actions/build/action.yml` across ubuntu/windows/macos. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.
 
+The shared test step uses a five-minute blame hang timeout and mini dumps. Recent healthy runs
+completed the Http.Connections test step in at most 78 seconds and Web.Hosting's in 41 seconds
+(runs `38563034652` and `38558592445`).
+
+Job limits are sized from whole jobs, not from test steps, because restore and build dominate.
+Across the last six successful runs of each per-area workflow, the slowest job took 6.0 minutes
+(IdentityHub), so non-Database per-area test jobs have `timeout-minutes: 30`. That leaves room
+for restore, builds, dump collection and upload.
+
+Templates is the exception. Its job packs the local feed, and the slowest successful job took
+32m30s (run `38563045950`), so it has `timeout-minutes: 75` under the rule below. The first 30-minute
+limit cut off a healthy macOS job.
+Database workflow timeouts are deferred to #1470 while the owner rewrites that workflow.
+On failure, the action uploads `TestResults/<project>/**/Sequence_*.xml` and dumps as a
+project/OS/architecture/job/attempt-specific artifact retained for seven days. Ordinary failures
+without blame output do not create an artifact. The hang timeout diagnoses a stuck test; the job
+limit also bounds a stuck restore or build.
+
+SDK smoke and release test-job limits use completed successful job durations (`started_at` to
+`completed_at`), taking the maximum across all matrix legs in the latest five successful runs on
+any branch (or all successful runs when fewer exist). Double the maximum, round up to a multiple
+of 15 minutes, and use at least 45 minutes. A job without measurements gets 120 minutes and a YAML
+comment explaining the missing evidence. The SDK sample (`38567999606`, `38567990958`,
+`38546428166`, `38534939095`, `38534930255`) gives `consumer-smoke` 33m35s (75-minute limit) and
+`gateway-smoke` 9m19s (45-minute limit). Release runs `36659700651` (preview.1) and `32994864088`
+(beta.1), including every page of matrix jobs, give `validate-release` 11m34s and `validate-consumer`
+1m17s (45-minute limits). SDK task builds and package-feed preparation do not run tests.
+
 ### Release — `.github/workflows/release.yml`
 
 There are two entry paths. A **published GitHub Release** whose tag is `v$(CohesionVersion)`, prerelease suffix included, always validates, packs, and stages. Public promotion is a separate `workflow_dispatch` from the default branch that names the already-published tag and explicitly sets the Boolean `promote` input to `true`; its default is `false`. Both paths run the same six jobs:
@@ -422,7 +456,7 @@ Both publish jobs re-verify `checksums.sha256` before pushing, so "what we publi
 A package ships only if **(1)** a per-area CI workflow builds it, **(2)** it is not `IsPackable=false`, and **(3)** it has at least one source file. `Assert-CohesionReleaseInventory` enforces all three in both directions — a package CI never built cannot ship, and a packable project CI does build cannot be silently omitted — plus three guards that the build itself cannot provide:
 
 - **Dependency closure.** A public `CohesionProjectReference` becomes a `<dependency>` in the `.nuspec`. If the target is not itself shipped, the package publishes green and then restores to NU1101 for every consumer — permanently, since nuget.org unlists but never deletes. A name that resolves to no project at all is dropped silently by the reference resolver, so that case warns rather than fails.
-- **No empty packages.** Six projects under `libraries/` and `resources/` currently compile to an empty assembly: Amqp, the three Dns.Client transports, Web.Authorization, and Web.Cors (`Assert-CohesionReleaseInventory` prints the live set). They stay in CI, and the two Web ones still reach consumers inside the App.Web packs, but the release publishes no standalone package for them; `$script:CohesionReleaseSourcelessPackage` is the deliberate opt-in for reserving such an id anyway.
+- **No empty packages.** Four projects under `libraries/` currently compile to an empty assembly: Amqp and the three Dns.Client transports (`Assert-CohesionReleaseInventory` prints the live set). They stay in CI, but the release publishes no standalone package for them; `$script:CohesionReleaseSourcelessPackage` is the deliberate opt-in for reserving such an id anyway.
 - **No matrix blind spots.** Every packable project with source under `libraries/`, `resources/`, `sdks/`, `analyzers/`, `tooling/`, or `extensions/` must appear in a workflow's static `projects` matrix or have an exact-path entry with a non-empty reason in `$script:CohesionCiMatrixExclusion`. This catches a project omitted from both the inventory and CI, which the two-way set comparison cannot see. Existing gaps are recorded individually rather than hidden by path or name wildcards.
 
 Note what (1) does *not* claim: 12 shipping entries have no tests csproj beside them, so "CI builds it" is the guarantee and "CI tests it" is true of most, not all.

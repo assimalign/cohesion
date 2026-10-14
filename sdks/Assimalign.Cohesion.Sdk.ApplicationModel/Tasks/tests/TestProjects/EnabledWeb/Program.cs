@@ -31,12 +31,12 @@ builder.Services.AddSingleton(orders);
 // exist yet. The real bearer API accepts explicit issuer URLs, so this build-only
 // acceptance fixture uses its own endpoint as the nearest available composition.
 Uri authority = Resource.Endpoints.Http;
-builder.AddAuthentication().AddJwtBearer(options =>
-    options.ValidIssuers.Add(authority.AbsoluteUri));
+builder.Services.AddAuthentication(authentication => authentication.AddJwtBearer(options =>
+    options.ValidIssuers.Add(authority.AbsoluteUri)));
 builder.AddHealthCheck(
     "orders",
     _ => ValueTask.FromResult(HealthContribution.Healthy()));
-builder.AddRouting();
+builder.Services.AddRouting();
 
 int pageSize = Resource.Settings.OrdersPageSize.Get<int>();
 WebApplication app = builder.Build();

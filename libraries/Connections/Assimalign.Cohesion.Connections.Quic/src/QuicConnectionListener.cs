@@ -27,6 +27,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
 
     private QuicListener? _listener;
+    private int _boundMaxInboundBidirectionalStreams;
     private bool _isDisposed;
 
     /// <summary>
@@ -40,6 +41,9 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
 
         _options = options;
     }
+
+    /// <inheritdoc />
+    public override ListenerId Id => _listenerId;
 
     /// <inheritdoc />
     /// <remarks>
@@ -78,25 +82,21 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
 
             if (!QuicListener.IsSupported)
             {
-                throw new PlatformNotSupportedException("QUIC is not supported on the current platform.");
+                throw new PlatformNotSupportedException(ErrorMessages.QuicUnsupported);
             }
 
             ValidateServerAuthenticationOptions(_options);
+            int maxInboundBidirectionalStreams = _options.MaxBidirectionalStreamCount;
 
             _listener = await QuicListener.ListenAsync(new QuicListenerOptions
             {
                 ListenEndPoint = _options.EndPoint,
                 ApplicationProtocols = _options.ServerAuthenticationOptions.ApplicationProtocols!,
                 ListenBacklog = _options.Backlog,
-                ConnectionOptionsCallback = (connection, sslClientHelloInfo, token) => ValueTask.FromResult(new QuicServerConnectionOptions
-                {
-                    ServerAuthenticationOptions = _options.ServerAuthenticationOptions,
-                    MaxInboundBidirectionalStreams = _options.MaxBidirectionalStreamCount,
-                    MaxInboundUnidirectionalStreams = _options.MaxUnidirectionalStreamCount,
-                    DefaultCloseErrorCode = _options.DefaultCloseErrorCode,
-                    DefaultStreamErrorCode = _options.DefaultStreamErrorCode
-                })
+                ConnectionOptionsCallback = (connection, sslClientHelloInfo, token) =>
+                    ValueTask.FromResult(_options.CreateConnectionOptions(maxInboundBidirectionalStreams))
             }, cancellationToken).ConfigureAwait(false);
+            _boundMaxInboundBidirectionalStreams = maxInboundBidirectionalStreams;
 
             QuicConnectionEventSource.Log.ListenerBound(_listenerId, _listener.LocalEndPoint);
         }
@@ -148,8 +148,16 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <c>System.Net.Quic</c> runs each inbound connection's handshake in the background and reports a
+    /// handshake that fails (a client certificate the policy refuses, a handshake that times out, an
+    /// error from the connection-options callback) from the next accept, while the listener stays usable.
+    /// Such a failure belongs to that one connection, which <c>System.Net.Quic</c> has already disposed: it
+    /// is reported through the <c>Assimalign.Cohesion.Connections.Quic</c> event source and this method
+    /// goes on to the next connection, so one client can never stop the listener.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
-    public override async ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         await BindAsync(cancellationToken).ConfigureAwait(false);
 
@@ -167,7 +175,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
             _lifecycleLock.Release();
         }
 
-        QuicConnection connection = await listener.AcceptConnectionAsync(cancellationToken).ConfigureAwait(false);
+        QuicConnection connection = await AcceptEstablishedConnectionAsync(listener, cancellationToken).ConfigureAwait(false);
         StreamPipeOptionsContext streamOptions = _options.CreateStreamOptions();
 
         try
@@ -177,13 +185,48 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
                 _listenerId,
                 _options.DefaultStreamErrorCode,
                 _options.DefaultCloseErrorCode,
-                streamOptions);
+                _options.CloseDeliveryTimeout,
+                streamOptions,
+                _boundMaxInboundBidirectionalStreams);
         }
         catch
         {
             streamOptions.Dispose();
             await connection.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private async ValueTask<QuicConnection> AcceptEstablishedConnectionAsync(QuicListener listener, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            try
+            {
+                return await listener.AcceptConnectionAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (ObjectDisposedException)
+            {
+                // The QUIC listener reports its own disposal this way and only this way; every later
+                // accept would throw it again, so it ends the accept rather than being skipped.
+                throw;
+            }
+            catch (Exception exception)
+            {
+                // Anything else is one inbound connection's failed handshake (AuthenticationException or
+                // QuicException, per QuicListener.AcceptConnectionAsync), and System.Net.Quic has already
+                // disposed that connection while the listener keeps listening. It must not end this
+                // listener's accept (#1304): report it and accept the next connection. A handshake that
+                // disposal aborted is not reported; the next accept observes the disposal and ends.
+                if (!Volatile.Read(ref _isDisposed))
+                {
+                    QuicConnectionEventSource.Log.HandshakeFailed(_listenerId, exception);
+                }
+            }
         }
     }
 
@@ -224,13 +267,13 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
             options.ServerAuthenticationOptions.ServerCertificateContext is null &&
             options.ServerAuthenticationOptions.ServerCertificateSelectionCallback is null)
         {
-            throw new InvalidOperationException("A server certificate is required for QUIC server authentication.");
+            throw new InvalidOperationException(ErrorMessages.ServerCertificateRequired);
         }
 
         if (options.ServerAuthenticationOptions.ApplicationProtocols is null ||
             options.ServerAuthenticationOptions.ApplicationProtocols.Count == 0)
         {
-            throw new InvalidOperationException("At least one application protocol is required for QUIC server authentication.");
+            throw new InvalidOperationException(ErrorMessages.ApplicationProtocolRequired);
         }
     }
 }

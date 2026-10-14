@@ -184,7 +184,7 @@ The existing federation path retains its authorization boundary: ConfigurationSt
 `owner` to equal the authenticated caller's application (the issuer, for an application-key
 credential). A peer forwarding its provider-issued bootstrap token with a foreign owner's envelope
 receives 403; an owner-preserving delegated credential contract is still required for that remote
-mutation path. The commands route of `Web.Hosting.Resources`, the shared control-plane terminal
+mutation path. The commands route of `Web.Hosting`, the shared control-plane terminal
 that Web, Database, and most other area hosts serve, admits only the resource's own gateway but does
 not yet require `owner` to equal the caller's application; the
 [developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md) records it as open follow-up O43.

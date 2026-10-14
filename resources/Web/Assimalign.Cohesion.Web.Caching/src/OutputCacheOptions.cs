@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.Caching;
 
@@ -50,7 +51,7 @@ public sealed class OutputCacheOptions
         {
             if (value <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "The maximum body size must be positive.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.CacheBodySizeInvalid);
             }
 
             _maximumBodySize = value;
@@ -69,7 +70,7 @@ public sealed class OutputCacheOptions
         {
             if (value <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "The size limit must be positive.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.CacheSizeLimitInvalid);
             }
 
             _sizeLimit = value;
@@ -117,7 +118,7 @@ public sealed class OutputCacheOptions
 
         if (!_policies.TryAdd(name, policy))
         {
-            throw new InvalidOperationException($"An output cache policy named '{name}' is already registered.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.OutputCachePolicyAlreadyRegistered, name));
         }
 
         return this;

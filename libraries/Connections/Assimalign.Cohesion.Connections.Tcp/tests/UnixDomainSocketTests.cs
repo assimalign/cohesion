@@ -32,12 +32,12 @@ public class UnixDomainSocketTests
             await using TcpConnectionListener listener = TcpConnectionListener.Create(
                 options => options.EndPoint = new UnixDomainSocketEndPoint(path));
 
-            ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+            ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
             TcpConnectionFactory factory = new();
 
-            await using Connection client = await factory.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellation.Token);
-            await using Connection server = await acceptTask;
+            await using IDuplexConnection client = await factory.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellation.Token);
+            await using IDuplexConnection server = await acceptTask;
 
             // Act / Assert — client -> server
             await client.Output.WriteAsync(Encoding.UTF8.GetBytes("ping"), cancellation.Token);
@@ -93,13 +93,13 @@ public class UnixDomainSocketTests
             await using TcpConnectionListener listener = TcpConnectionListener.Create(
                 options => options.EndPoint = new UnixDomainSocketEndPoint(path));
 
-            ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+            ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
             TcpConnectionFactory factory = new();
 
             // Act
-            await using Connection client = await factory.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellation.Token);
-            await using Connection server = await acceptTask;
+            await using IDuplexConnection client = await factory.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellation.Token);
+            await using IDuplexConnection server = await acceptTask;
 
             // Assert — both the dialed and the accepted connection stamp the honest protocol.
             client.Capabilities.Protocol.ShouldBe(ConnectionProtocol.UnixDomainSocket);
@@ -132,12 +132,12 @@ public class UnixDomainSocketTests
             await using TcpConnectionListener listener = TcpConnectionListener.Create(
                 options => options.EndPoint = new UnixDomainSocketEndPoint(path));
 
-            ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+            ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
             TcpConnectionFactory factory = new();
 
-            await using Connection client = await factory.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellation.Token);
-            await using Connection server = await acceptTask;
+            await using IDuplexConnection client = await factory.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellation.Token);
+            await using IDuplexConnection server = await acceptTask;
 
             // Assert — the rebind succeeded and the connection is live.
             server.ShouldNotBeNull();
@@ -161,12 +161,12 @@ public class UnixDomainSocketTests
             TcpConnectionListener listener = TcpConnectionListener.Create(
                 options => options.EndPoint = new UnixDomainSocketEndPoint(path));
 
-            ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+            ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
             TcpConnectionFactory factory = new();
 
-            await using (Connection client = await factory.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellation.Token))
-            await using (Connection server = await acceptTask)
+            await using (IDuplexConnection client = await factory.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellation.Token))
+            await using (IDuplexConnection server = await acceptTask)
             {
                 // The bind created the socket file.
                 File.Exists(path).ShouldBeTrue("binding a Unix domain socket creates its socket file");

@@ -34,7 +34,7 @@ internal static class Program
         // the root (ALPN "h2"), then registered with the HTTP listener. The
         // layered listener reports Security = Tls on its capabilities, so the
         // HTTP layer derives the https scheme without a separate hint.
-        IConnectionListener securedListener = TcpConnectionListener
+        IDuplexConnectionListener securedListener = TcpConnectionListener
             .Create(transport =>
             {
                 transport.EndPoint = new IPEndPoint(IPAddress.Loopback, port);
@@ -104,7 +104,7 @@ internal static class Program
     {
         try
         {
-            await using IHttpConnection connection = await listener.AcceptOrListenAsync(cancellationToken).ConfigureAwait(false);
+            await using IHttpConnection connection = await listener.AcceptAsync(cancellationToken).ConfigureAwait(false);
             IHttpConnectionContext connectionContext = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             await foreach (IHttpContext context in connectionContext.ReceiveAsync(cancellationToken).ConfigureAwait(false))

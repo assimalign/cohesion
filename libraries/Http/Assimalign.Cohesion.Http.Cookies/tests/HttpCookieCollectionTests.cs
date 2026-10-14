@@ -46,10 +46,10 @@ public class HttpCookieCollectionTests
 
         cookies.Count.ShouldBe(2);
         HttpCookie[] arr = cookies.ToArray();
-        arr[0].Name.ShouldBe("session");
-        arr[0].Value.ShouldBe("abc");
-        arr[1].Name.ShouldBe("theme");
-        arr[1].Value.ShouldBe("light");
+        arr[0].Name.ShouldBe<HttpCookieName>("session");
+        arr[0].Value.ShouldBe<HttpCookieValue>("abc");
+        arr[1].Name.ShouldBe<HttpCookieName>("theme");
+        arr[1].Value.ShouldBe<HttpCookieValue>("light");
     }
 
     [Fact]
@@ -131,10 +131,10 @@ public class HttpCookieCollectionTests
 
         reparsed.Count.ShouldBe(1);
         HttpCookie roundTripped = reparsed.Single();
-        roundTripped.Name.ShouldBe("session");
-        roundTripped.Value.ShouldBe("abc123");
-        roundTripped.Options.Domain.ShouldBe("example.com");
-        roundTripped.Options.Path.ShouldBe("/app");
+        roundTripped.Name.ShouldBe<HttpCookieName>("session");
+        roundTripped.Value.ShouldBe<HttpCookieValue>("abc123");
+        roundTripped.Options.Domain.ShouldBe<HttpCookieDomain?>("example.com");
+        roundTripped.Options.Path.ShouldBe<HttpCookiePath?>("/app");
         roundTripped.Options.Expires.ShouldBe(expires);
         roundTripped.Options.MaxAge.ShouldBe(TimeSpan.FromHours(1));
         roundTripped.Options.Secure.ShouldBeTrue();
@@ -217,8 +217,8 @@ public class HttpCookieCollectionTests
         HttpCookieCollection cookies = new(headers, HttpHeaderKey.SetCookie);
 
         HttpCookie cookie = cookies.Single();
-        cookie.Name.ShouldBe("id");
-        cookie.Value.ShouldBe("42");
+        cookie.Name.ShouldBe<HttpCookieName>("id");
+        cookie.Value.ShouldBe<HttpCookieValue>("42");
         cookie.Options.Expires.ShouldBe(new DateTimeOffset(2021, 6, 9, 10, 18, 14, TimeSpan.Zero));
     }
 }

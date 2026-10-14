@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -327,7 +328,7 @@ public sealed class UdpConnectionFactory
     {
         if (addressFamily is not AddressFamily.InterNetwork and not AddressFamily.InterNetworkV6)
         {
-            throw new NotSupportedException($"The UDP transport only supports IPv4 and IPv6 endpoints; address family '{addressFamily}' is not supported.");
+            throw new NotSupportedException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointAddressFamilyUnsupported, addressFamily));
         }
 
         return new Socket(addressFamily, SocketType.Dgram, ProtocolType.Udp);

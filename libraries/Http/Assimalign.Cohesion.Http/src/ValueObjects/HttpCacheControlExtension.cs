@@ -43,9 +43,9 @@ public readonly struct HttpCacheControlExtension : IEquatable<HttpCacheControlEx
     /// <inheritdoc />
     public override int GetHashCode()
         => HashCode.Combine(
-            StringComparer.OrdinalIgnoreCase.GetHashCode(Name),
+            Name is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Name),
             Value is null ? 0 : string.GetHashCode(Value, StringComparison.Ordinal));
 
     /// <inheritdoc />
-    public override string ToString() => Value is null ? Name : $"{Name}={Value}";
+    public override string ToString() => Value is null ? Name ?? string.Empty : $"{Name}={Value}";
 }

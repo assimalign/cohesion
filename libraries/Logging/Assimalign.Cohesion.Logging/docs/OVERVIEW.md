@@ -57,7 +57,8 @@ own packages and depend on the foundation.
 - `ILoggerFactory` / `LoggerFactory` - root cache + fan-out with per-provider rule gating. Exposes
   its composition as read-only views: `Providers`, `Enrichers`, `Rules`, `Forwarders`.
   `LoggerFactory.Create(string)` returns the concrete `Logger` via covariant return.
-- `ILoggerFactoryBuilder` / `LoggerFactoryBuilder` - fluent registration.
+- `ILoggerFactoryBuilder` / `LoggerFactoryBuilder` - fluent registration; `HasForwarders` reports
+  whether an application already registered forwarding so hosting defaults can preserve it.
 - `LoggerFactoryOptions` - mutable configuration shape consumed by the factory.
 - `ILoggerEnricher` - attribute pipeline.
 - `ILoggerForwarder` - a component that writes entries into the factory from an outside source

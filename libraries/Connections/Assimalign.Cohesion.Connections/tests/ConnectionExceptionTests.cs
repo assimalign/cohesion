@@ -49,4 +49,17 @@ public class ConnectionExceptionTests
         reset.Message.ShouldBe("reset");
         reset.InnerException.ShouldBeSameAs(inner);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Connections] - ConnectionResetException: Should carry the peer's application error code when it gave one")]
+    public void Ctor_OnConnectionResetExceptionWithApplicationErrorCode_ShouldCarryTheCode()
+    {
+        // Arrange & Act
+        ConnectionResetException withCode = new("stopped", 0x10c);
+        ConnectionResetException withoutCode = new("reset");
+
+        // Assert
+        withCode.Message.ShouldBe("stopped");
+        withCode.ApplicationErrorCode.ShouldBe(0x10c);
+        withoutCode.ApplicationErrorCode.ShouldBeNull();
+    }
 }

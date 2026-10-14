@@ -9,16 +9,16 @@ using Assimalign.Cohesion.Connections.InMemory;
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 /// <summary>
-/// A <see cref="ConnectionFactory"/> double that yields pre-queued connections.
+/// A <see cref="DuplexConnectionFactory"/> double that yields pre-queued connections.
 /// </summary>
-internal sealed class TestConnectionFactory : ConnectionFactory
+internal sealed class TestConnectionFactory : DuplexConnectionFactory
 {
-    private readonly Queue<Connection> _pending = new();
+    private readonly Queue<IDuplexConnection> _pending = new();
 
     public override ConnectionCapabilities Capabilities => InMemoryConnectionPair.DefaultCapabilities;
 
-    public void Enqueue(Connection connection) => _pending.Enqueue(connection);
+    public void Enqueue(IDuplexConnection connection) => _pending.Enqueue(connection);
 
-    public override ValueTask<Connection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override ValueTask<IDuplexConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
         => ValueTask.FromResult(_pending.Dequeue());
 }

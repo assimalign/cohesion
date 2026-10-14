@@ -43,7 +43,7 @@ internal sealed class RouterLinkGenerator : ILinkGenerator
                 if (name is not null)
                 {
                     throw new InvalidOperationException(
-                        $"The route named '{name}' does not expose a route pattern and cannot participate in URL generation.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamedRoutePatternRequired, name));
                 }
 
                 // A fully custom matcher without a pattern is not addressable for generation.
@@ -59,7 +59,7 @@ internal sealed class RouterLinkGenerator : ILinkGenerator
             if (name is not null && !candidatesByName.TryAdd(name, candidate))
             {
                 throw new InvalidOperationException(
-                    $"The route name '{name}' is registered more than once ('{candidatesByName[name].Pattern.DebuggerToString()}' and '{pattern.DebuggerToString()}'). Route names must be unique.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteNameAlreadyRegistered, name, candidatesByName[name].Pattern.DebuggerToString(), pattern.DebuggerToString()));
             }
 
             candidates.Add(candidate);
@@ -94,13 +94,13 @@ internal sealed class RouterLinkGenerator : ILinkGenerator
 
         if (!_candidatesByName.TryGetValue(routeName, out OutboundCandidate candidate))
         {
-            throw new InvalidOperationException($"No route named '{routeName}' has been registered.");
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteNameNotRegistered, routeName));
         }
 
         if (!TryBuildLink(candidate, values, out string? path))
         {
             throw new InvalidOperationException(
-                $"A path could not be generated for the route named '{routeName}' ('{candidate.Pattern.DebuggerToString()}') from the supplied route values.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RoutePathGenerationFailed, routeName, candidate.Pattern.DebuggerToString()));
         }
 
         return path;
@@ -170,7 +170,7 @@ internal sealed class RouterLinkGenerator : ILinkGenerator
         {
             HttpScheme.Http => "http",
             HttpScheme.Https => "https",
-            _ => throw new ArgumentException("An absolute URI requires the http or https scheme.", nameof(scheme)),
+            _ => throw new ArgumentException(ErrorMessages.AbsoluteUriSchemeInvalid, nameof(scheme)),
         };
     }
 
@@ -178,7 +178,7 @@ internal sealed class RouterLinkGenerator : ILinkGenerator
     {
         if (string.IsNullOrEmpty(host.Value))
         {
-            throw new ArgumentException("An absolute URI requires a non-empty host.", nameof(host));
+            throw new ArgumentException(ErrorMessages.AbsoluteUriHostRequired, nameof(host));
         }
     }
 

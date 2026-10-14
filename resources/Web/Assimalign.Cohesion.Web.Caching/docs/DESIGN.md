@@ -16,28 +16,55 @@ The package is a dependency-free feature library composed against the Web root. 
 `Web.Hosting` (the resource hosting-isolation rule, `COHRES001`); options and the store are captured at
 builder time and no request-time service location occurs.
 
-## Endpoint resolution — pre-flight match, not the reactive decorator (why-this-not-that)
+## Endpoint resolution — the published endpoint (why-this-not-that)
 
 Per-endpoint policy lives in a sealed `OutputCacheMetadata` carrier on the route, resolved last-wins with
 `IRouterRouteMetadataCollection.GetMetadata<OutputCacheMetadata>()` — the same endpoint-metadata seam
-`Web.RateLimiting` and `Web.RequestTimeouts` read. The **mechanism** for reaching it differs, and
-deliberately so.
+`Web.RateLimiting` and `Web.RequestTimeouts` read.
 
-`Web.RateLimiting` observes the router publishing its match (`IRouteMatchFeature`) through a feature-collection
-decorator and acts **synchronously** at that seam. Output caching cannot: Cohesion's router matches **and
-dispatches** in one step (`RouteAsync` publishes the match, then immediately invokes the handler), so there
-is no pipeline slot between "matched" and "handler runs" for an **async** concern that must **skip the
-handler on a hit**. The reactive seam is synchronous, and a store lookup is asynchronous; and even if the
-lookup blocked, a *miss* discovered at that seam could no longer let the handler run (it was about to be
-invoked).
+`UseRouting` selects the endpoint, publishes it as an `IRouteMatchFeature` and calls `next`; the
+pipeline's terminal runs it (#1054). Registered after `UseRouting`, the middleware reads the published
+match (`context.GetRouteMatch()`) for the endpoint's metadata and route values, decides, and on a hit
+answers without calling `next`, so the endpoint never runs. On a miss it tees the response body and calls
+`next`, the terminal runs the endpoint, and a cacheable result is stored after successful response
+completion. It never runs the matcher
+itself; with no published endpoint (no route matched, or routing not registered) the base policy alone
+governs. A CORS preflight's candidate endpoint is ignored, though a preflight is an `OPTIONS` request,
+which the method gate passes through before the endpoint is read.
 
-So the middleware runs **ahead of `UseRouting`** and performs the router's own **side-effect-free**
-`IRouter.Match(context)` itself (reachable via the per-application `IRouterFeature`) to discover the
-endpoint and read its metadata *before* deciding. The match is a pure function over an immutable route
-table, so this pre-flight is deterministic and identical to the match `UseRouting` computes moments later —
-it publishes nothing and dispatches nothing. When routing is not registered the base policy alone governs.
-This is the async-correct adaptation of the shipped metadata precedent, reading the same carrier at the
-same seam, resolved proactively rather than reactively.
+```mermaid
+flowchart TD
+    Routing["UseRouting: publish the endpoint"] --> Decide["UseOutputCache: the endpoint's policy, else the base policy"]
+    Decide -->|"hit"| Serve["Serve the stored response; the endpoint does not run"]
+    Decide -->|"miss"| Tee["Tee the response body; call next"]
+    Tee --> Terminal["Pipeline terminal runs the endpoint"]
+    Terminal --> Complete["Starting callbacks succeed; response transmission completes"]
+    Complete --> Store["Evaluate the final head; store a cacheable response"]
+```
+
+Before #1054 the router matched **and** dispatched in one step, so there was no pipeline slot between
+"matched" and "handler runs" for an **async** concern that must **skip the handler on a hit**; the
+feature-collection seam `Web.RateLimiting` used then was synchronous, and a store lookup is not. The
+middleware therefore ran ahead of `UseRouting` and performed the router's own side-effect-free
+`IRouter.Match(context)` itself, reached through the per-application `IRouterFeature` — a second match per
+cacheable request. Splitting match from dispatch removed the need for it: routing matches once and every
+consumer reads the result.
+
+### Registered ahead of `UseRouting`
+
+The middleware then decides before any endpoint is known: the base policy governs, and endpoint metadata
+cannot opt anything in. Output caching is optional behavior, so `OutputCacheMetadata` does not implement
+`IRouteMiddlewareMetadata` (the fail-closed check rate limits and timeouts use): an endpoint dispatched
+without the middleware simply is not cached, which loses nothing a caller relies on.
+
+Ignoring the metadata would not be safe in one case, though: under a **base policy**, an endpoint marked
+**`Disabled`** (per-user data, say) would be cached anyway. So when no endpoint was published as the
+middleware decided and routing has published one carrying `OutputCacheMetadata` by the time `next`
+returns, the response is **not stored**. That metadata may disable caching, or name a policy whose keys,
+tags or duration differ from those the entry would be stored under; not storing is the only answer that is
+right for all of them. Lookups still happen, but nothing is ever stored under a key such an endpoint maps
+to, so no hit can serve one. An endpoint's opt-out is therefore honored in either position; opting in
+requires `UseOutputCache` after `UseRouting`.
 
 ## Policy model
 
@@ -47,6 +74,11 @@ same seam, resolved proactively rather than reactively.
   `RateLimitingOptions`), the middleware-wide `MaximumBodySize` and store `SizeLimit`, and the `TimeProvider`.
 - **`OutputCacheMetadata`** — the sealed per-endpoint carrier: a named policy, an inline policy,
   `Enabled` (opt in under the base/default policy), or `Disabled` (opt out).
+- **Convention verbs (#1055)** — `CacheOutput()`, `CacheOutput(name)`, `CacheOutput(policy)` and
+  `DisableOutputCache()` append those four shapes. They are generic extension members over routing's
+  `IRouterConventionBuilder`, so one verb serves a mapped route and a route group; routing composes the
+  metadata when the route table is built, outer group first, which the last-wins resolution below relies
+  on.
 
 **Resolution** (in the middleware): a matched endpoint's metadata wins last-wins over the base policy —
 inline policy → named policy → `Enabled` (base/default) → `Disabled` (no caching). With no metadata the
@@ -55,13 +87,54 @@ inline policy → named policy → `Enabled` (base/default) → `Disabled` (no c
 
 ## Cache key — primary key plus a Vary variant
 
-The **primary key** is built before the endpoint runs from the request method, scheme, host, and path,
-plus the policy's `VaryBy*` rules: `VaryByHeaders` (request-header values), `VaryByRouteValues` (matched
-route values from the pre-flight match), and `VaryByQueryKeys` (empty folds the *entire*, sorted query
-string; non-empty selects listed keys). Components are fenced with the ASCII unit separator so boundaries
-are unambiguous without hashing; a distributed adapter may hash the string.
+The **primary key** is built before the endpoint runs from the request method, the effective scheme and
+host (below), and the path, plus the policy's `VaryBy*` rules: `VaryByHeaders` (request-header values),
+`VaryByRouteValues` (the route values of the published endpoint), and `VaryByQueryKeys` (empty folds
+the *entire* query with distinct names sorted; non-empty selects listed keys). Every repeated value is
+included in encounter order, including empty values. Query names and values are percent-escaped before
+components are fenced with the ASCII unit separator, so decoded separator characters cannot imitate
+another query entry. A distributed adapter may hash the string.
 
 The **variant key** folds in the stored response's own `Vary` header (see below).
+
+### Repeated query values (#1335)
+
+The endpoint can now receive every value of a repeated query key. Both the default query policy and
+`VaryByQuery` therefore include every value in order: `tag=one&tag=two` and `tag=one&tag=three` must
+never share a stored response merely because their scalar reads both return `one`. Sorting the values
+would also conflate collections whose order differs, so only distinct names are sorted.
+An absent selected key contributes no entry. A present key with zero occurrences contributes its escaped
+name followed by `#0`, while one empty occurrence contributes `name=`. The literal `#` is reserved here:
+query names and values escape it, so neither can imitate the zero-occurrence marker. A rewrite projection
+such as `query["tag"] = context.Query["tag"]` can produce a present zero-occurrence key from `/list`,
+while `/list?tag=` produces one empty occurrence. Collection binding distinguishes `[]` from `[""]`,
+so both query policies keep separate entries for these states and for an absent key.
+
+This is a behavioral breaking change from 10.0.0-preview.1 on decision 15's terms: that parser retained
+only the last value, and cache keys consequently included only that value. Repeated query values now
+produce separate entries, and escaping reserved characters changes those private cache keys. The Stage 13
+review also gives projected zero-occurrence keys their own encoding; preview.1 had no sequence-valued
+query model. Ordinary single values made solely of unreserved URL characters keep their key encoding. No public policy or
+store contract changes.
+
+### Scheme and host are the effective values (#1050)
+
+The scheme and host components are `context.EffectiveScheme` and `context.EffectiveHost` from
+`Assimalign.Cohesion.Http.Forwarded` — what a trusted proxy forwarded when `UseForwardedHeaders` ran
+first, otherwise the wire values (owner decision 3 in `docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4:
+consumers read the effective values; nothing rewrites the request). The rest of the pipeline builds
+responses from those values: HTTPS redirection and HSTS judge the effective scheme, redirects and absolute
+links use the effective host, and host-bound content follows the host the client addressed. Keyed on the
+wire values behind a TLS-terminating, host-rewriting proxy, every client-facing scheme and host would
+collapse onto one wire scheme and upstream authority, so one could be served another's stored response —
+for example a representation meant for `https://tenant-a.example` replayed to `tenant-b.example`, or a
+response cached for an `https` request replayed to a plaintext one that HTTPS redirection would otherwise
+have upgraded. That is the unkeyed-input shape of web cache poisoning, so the key follows the effective
+values.
+
+The package never reads forwarding headers: without the forwarded-headers middleware (or from a peer
+outside its trust model) the effective values are the wire values and the key is unchanged from before, so
+a client-asserted `X-Forwarded-Host` neither splits nor poisons the cache.
 
 ## THE VARY DECISION — honor the response `Vary` header (RFC-faithful), with ordering
 
@@ -95,15 +168,23 @@ wrong-variant serve).
 
 ### Ordering (load-bearing)
 
-Register `UseOutputCache` **outside** (before) `UseResponseCompression` and any content-negotiated write.
-The buffered tee then captures the **fully-encoded** bytes, and the captured `Vary` already carries
-`Accept-Encoding`/`Accept`. On a hit the compression/negotiation middleware (inner) never runs; the cache
+`UseRouting` → `UseOutputCache` → `UseResponseCompression` → … → endpoint.
+
+Register `UseOutputCache` **after** `UseRouting` (see "Endpoint resolution" above) and **outside**
+(before) `UseResponseCompression` and any content-negotiated write. The buffered tee then captures the
+**fully-encoded** bytes, and the captured `Vary` already carries `Accept-Encoding`/`Accept`. On a hit the compression/negotiation middleware (inner) never runs; the cache
 replays the stored encoded bytes with their `Content-Encoding`, and because the variant key folds in the
 client's `Accept-Encoding`, a `gzip`-only client computes a different key than the stored `br` variant and
 misses rather than mis-decoding. Registering it *inside* compression would cache the pre-compression bytes
 against a `Vary` compression is about to stamp — the mis-serve this design exists to prevent. A test
 (`UseOutputCache_ResponseVary_ShouldNotServeForeignVariant`) proves the cross-client case over a generic
 `Vary` header.
+
+Both constraints together put compression after `UseRouting` in an application that uses output caching.
+Before #1054 the cache itself sat ahead of `UseRouting`, so `UseOutputCache` → `UseResponseCompression` →
+`UseRouting` satisfied everything. Compression needs nothing from routing, but a middleware that answers
+requests ahead of `UseRouting` (static files, for example) is then outside its reach; such responses rely on
+their own encoding (precompressed static assets) or move behind compression too.
 
 ## Bypass matrix
 
@@ -112,12 +193,14 @@ against a `Vary` compression is about to stamp — the mis-serve this design exi
 | Condition | Behavior |
 | --- | --- |
 | Method not `GET`/`HEAD` | passthrough (no caching) |
+| Request carries `Upgrade` (asks to switch protocols, RFC 9110 §7.8) | passthrough |
 | No applicable/enabled policy | passthrough |
 | Endpoint metadata `Disabled` | passthrough |
 | Request `Cache-Control: no-store` or `no-cache` | passthrough (conservative) |
 | `Authorization` header present, policy `CacheAuthenticated == false` | passthrough |
 
-**Response-side** (decided after the endpoint runs — the response is not stored):
+**Response-side** (decided after successful response completion, including starting callbacks — the
+response is not stored):
 
 | Condition | Behavior |
 | --- | --- |
@@ -128,6 +211,19 @@ against a `Vary` compression is about to stamp — the mis-serve this design exi
 | Body exceeds the per-entry cap | not stored (streamed through untouched) |
 | Effective time-to-live ≤ 0 | not stored |
 | Entry larger than the store's whole `SizeLimit` | declined by the store |
+| Starting callback or transmission fails, or the exchange is cancelled | not stored |
+| Custom server omits `IWebResponseCompletionFeature` | misses pass through without storage |
+
+**Protocol switches are never cached.** A WebSocket handshake is a `GET` on HTTP/1.1 (an upgrade,
+RFC 6455) and a `CONNECT` on HTTP/2 and HTTP/3 (an extended CONNECT, RFC 8441 and RFC 9220), and it
+often shares its URL with a cacheable page. A `CONNECT` is excluded by method. A `GET` carrying an
+`Upgrade` field is excluded before the lookup and before the buffering: answered from the cache, the
+handshake would get the page's `200` instead of the `101` its endpoint gives, and the socket would fail
+to open; stored, the exchange an endpoint took over would leave only the default status it never set,
+an empty `200` that every later request for the URL would receive. The field alone decides: HTTP/2 and
+HTTP/3 prohibit it, and an HTTP/1.1 request with an `Upgrade` but no `upgrade` connection option, which
+a server may serve as an ordinary request, loses only its caching. The suites pin both directions, the
+cache-first and the socket-first order, over HTTP/1.1 and (for the cache-first order) HTTP/2.
 
 **Why only `200`:** the conservative default caches exactly `200 OK`. Other 2xx (`204`/`206`) and the
 "heuristically cacheable" statuses (`203`, `300`, `301`, `308`, `404`, `410`, …) are deliberately excluded —
@@ -174,7 +270,7 @@ data object (value types, strings, one `byte[]`), so the in-memory store holds i
 - **Size accounting.** The store sets `MemoryCacheOptions.SizeLimit` and declares each entry's `Size`
   (`OutputCacheEntry.Size` = body bytes + captured header text + a floor). The foundation enforces the
   cumulative limit with its priority/LRU capacity eviction; an entry larger than the whole limit is
-  declined and the store drops it silently rather than surfacing a fault to the request path. This is the
+  declined and the store reports a throttled diagnostic without surfacing a fault to the request path. This is the
   **total** cap; the **per-entry** cap (`OutputCacheOptions.MaximumBodySize`) is enforced earlier by the
   buffering middleware.
 - **Time-to-live.** Entries use absolute expiration (`AbsoluteExpirationRelativeToNow`), not a sliding
@@ -192,7 +288,23 @@ served) while capturing a copy up to the per-entry cap. Crossing the cap **aband
 buffer is released and writes continue to flow through untouched, so an over-large response streams normally
 and is simply not cached. This mirrors the `Web.Compression` `CompressionBodyStream` discipline: caching is
 a strictly additive side effect that can never corrupt or withhold the response. The original body is always
-restored in a `finally`, and storage runs only after the endpoint returns normally (an exception skips it).
+restored in a `finally`. Only after downstream returns normally does the middleware register storage
+with `IWebResponseCompletionFeature` from `Web.Server`. Eligibility, final status and headers, freshness
+and `Vary` are read in that callback, after all starting callbacks succeed and transmission completes.
+A callback-added `no-store`, `private`, `Set-Cookie`, non-200 status or `Vary` therefore governs storage
+just as an endpoint-written value does. Starting failure, cancellation or transport failure never runs
+storage; a refused head replaced with a server 500 never runs storage. Store failures
+are reported through the server's isolated completion-callback error path after the response is sent.
+
+Custom servers may omit the completion feature. A cache miss then passes through without a tee or new
+storage, since normal middleware return alone cannot establish a successful final response. Existing
+stored responses can still be served. This uses the existing feature-owned seam without adding a public
+contract or referencing `Web.Hosting`.
+
+**Behavioral breaking change from 10.0.0-preview.1 (decision 15, #1156 review):** storage moves from
+middleware unwind to successful response completion, and custom servers without completion notification
+no longer populate the cache. The released preview stored before transmission and had no response-starting
+hook; callback-added policy violations arise with the new hook. The policy and store contracts are unchanged.
 
 ## QUERY posture (RFC 10008 §2.7) — GET/HEAD only, QUERY a documented follow-up
 
@@ -222,9 +334,85 @@ explicit `EvictByTagAsync` surface is simpler and sufficient; a token bridge can
 ## AOT posture
 
 No reflection, no dynamic serialization, no runtime code generation. The stored entry is plain data held
-directly by the in-memory store; keys are built with a `StringBuilder`; the pre-flight match and metadata
-resolution are the router's own reflection-free `is`-test seam. Registration is dependency-free — options
-and the store are captured at builder time.
+directly by the in-memory store; keys are built with a `StringBuilder`; the endpoint is a typed feature
+read from the exchange, and metadata resolution is the router's reflection-free `is`-test seam.
+Registration is dependency-free — options and the store are captured at builder time.
+
+## Diagnostics
+
+The internal `OutputCacheEventSource` uses the assembly name
+`Assimalign.Cohesion.Web.Caching`. It has no logger dependency, public diagnostics API or Meter.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `ResponseNotStored` | Verbose | `reason`, `routeTemplate`, `requestId` |
+| 2 | `EntryDeclined` | Warning | `entryBytes:long`, `sizeLimitBytes:long`, `suppressedCount:int` |
+
+Reasons are `BodyOverCap`, `StatusNotCacheable`, `SetCookie`, `CacheControlForbids`, `VaryStar`,
+`NoFreshness` and `DecidedBeforeRouting`. `IsResponseCacheable` returns the response eligibility
+reason. Except for the late-routing decision, these events run inside the successful-completion
+callback, so the final head after response-starting callbacks decides the reason. Failed callbacks,
+cancelled exchanges and failed transmission never run that callback and emit no cache decision.
+There is no successful-response event. Request ids come from `IWebRequestIdFeature`, including
+when an unrelated ambient activity exists. A custom server without that feature reports an empty id.
+Routes come only from `IWebEndpointFeature.RouteTemplate`, never the request path.
+
+`EntryDeclined` reports at most once per second across the process. Its next report carries the
+number suppressed while listening; the `declined-entries` PollingCounter counts every decline even
+when no listener is attached. No cache key, query, tag name, header, body or exception message is
+written. Counters are created lazily when a listener enables the source.
+
+The opt-in `OutputCacheCounterBenchmarkTests` measures hit/miss attribution counters against a
+conservative **1% median throughput cost and zero extra allocated bytes per operation** budget for
+both serial and four-worker cacheable GET workloads. The issue did not specify a numeric budget;
+this is the implementation assumption. The harness exercises the real output-cache middleware,
+including key construction, a 64-byte response, Age on hits, and successful-completion storage on
+misses. A deterministic in-memory store returns a representation or a miss to keep paths separate;
+it isolates middleware attribution costs from backend variability. Each batch warms up first,
+then takes nine samples of 100,000 operations per worker. Dedicated workers synchronize before
+timing; context creation, worker startup and the barrier are outside timing. Per-thread allocation
+measurements include every operation. No listener is enabled. `DOTNET_TieredCompilation=0` removes
+tiered-JIT promotion from the measurement; initial exploratory runs with it enabled were discarded.
+
+The repeatable runner measures baseline/candidate/baseline/candidate, builds the real production
+variants, and restores both source files byte-for-byte in `finally`:
+
+```powershell
+pwsh -NoProfile -File resources/Web/Assimalign.Cohesion.Web.Caching/tests/Measure-OutputCacheCounters.ps1
+```
+
+The baseline removes only the two middleware calls to `OutputCacheEventSource.Log.CacheHit()` and
+`CacheMiss()`; the candidate invokes them on the serve and no-servable-entry branches respectively.
+Each method increments its own shared `long` with `Interlocked.Increment`, without a listener guard.
+Both variants use the same harness and completion path. The opt-in test can also be run directly in
+Release with `COHESION_CACHE_COUNTER_BENCHMARK=1`, a descriptive
+`COHESION_CACHE_COUNTER_VARIANT`, and the filter `FullyQualifiedName~OutputCacheCounterBenchmarkTests`.
+Ordinary test runs leave the benchmark disabled.
+
+**Measured 2026-10-12:** Windows ARM64, Snapdragon X2 Elite (12 logical processors), SDK 10.0.401,
+.NET 10.0.12, Release. Two repeated runs per variant gave these median nanoseconds per operation;
+the sequence was candidate/baseline/candidate/baseline. Lower is better.
+
+| Path | Workers | Baseline 1 | Candidate 1 | Baseline 2 | Candidate 2 | Bytes/op, both |
+| --- | --- | --- | --- | --- | --- | --- |
+| Hit | 1 | 983.753 | 1008.088 | 1007.944 | 862.867 | 424 |
+| Miss | 1 | 1629.712 | 1539.301 | 1584.049 | 1100.369 | 1208 |
+| Hit | 4 | 284.771 | 359.140 | 336.739 | 288.867 | 424 |
+| Miss | 4 | 562.299 | 563.002 | 585.665 | 542.712 | 1208 |
+
+The four-worker hit's median of the two run medians rose from 310.755 to 324.004 ns/op (**4.26%**),
+above the 1% budget, with no allocation change. Unrelated builds on the shared machine cause visible
+run-to-run noise (including reversed differences); this is not a claim of a precise 4.26% production
+regression. The measurements do not establish that the pair fits the budget, so the conservative
+decision is to **drop both `cache-hits` and `cache-misses`**. Neither their fields nor their hot-path
+increments ship. `declined-entries` remains exact. The runner reconstructs the measured prototype
+for future evaluation without adding a shipped switch or public API.
+
+**Preview.1 compatibility and advisory triage (#1405):** diagnostics are additive; caching decisions
+and public contracts are unchanged. The released tag already swallowed oversized-entry failures and
+had no rejection diagnostics. An unauthenticated client can reach cacheable endpoints configured by
+the application, but the missing events are an observability gap with no independent security impact;
+no advisory, CWE or severity applies. No cache key or tag payload is introduced by this change.
 
 ## Non-goals
 
@@ -251,10 +439,48 @@ and the store are captured at builder time.
 ## Testing
 
 Unit tests cover the in-memory store (round-trip, miss, absolute time-to-live over a manual clock, tag
-eviction and the re-tag safety, oversized decline), the key builder (query order-independence, `VaryBy`
+eviction and the re-tag safety, oversized decline), the key builder (distinct query-name order independence,
+repeated values including their order and empty entries, zero occurrences versus absent keys and single
+empty occurrences under both query policies, separator escaping, `VaryBy`
 partitioning, the response-`Vary` variant partition), and the middleware bypass matrix over an in-memory
 context double (hit skips downstream + stamps `Age`, authenticated/`Set-Cookie`/`no-store`/non-200/over-cap
-bypass, non-cacheable method). End-to-end tests over `WebApplicationTestFactory` (in-memory HTTP/1.1) prove
-a hit skips the endpoint (downstream-invocation counting), a differing query misses, the response `Vary`
-keeps a client from a foreign variant, an authenticated request bypasses, tag eviction forces a re-fetch,
-and per-endpoint opt-in through routing metadata caches only the marked endpoint.
+bypass, non-cacheable method, a WebSocket handshake never served from the cache, a taken-over exchange
+never stored, an extended CONNECT neither). Middleware tests exercise projected zero and single empty
+query occurrences in both arrival orders under both query policies, and verify that repeats hit only
+their own cached response. `tests/OutputCacheWebSocketTests.cs` runs a cached page and a
+WebSocket echo on one URL end to end (the test project references `Http.WebSockets`). Middleware tests also publish a fake route match ahead of the middleware,
+as `UseRouting` does: the published endpoint's metadata decides while the exchange's router feature throws
+on access (so a second match would fail the test), a published `Disabled` bypasses the base policy, and
+published route values partition `VaryByRouteValue`. End-to-end tests over `WebApplicationTestFactory`
+(in-memory HTTP/1.1) prove a hit skips the endpoint (downstream-invocation counting), a differing query
+misses (including a later repeated value under either query policy), the response `Vary` keeps a client
+from a foreign variant, an authenticated request bypasses, tag
+eviction forces a re-fetch, per-endpoint opt-in through the real router caches only the marked endpoint,
+and, registered ahead of `UseRouting`, a `Disabled` endpoint is never stored while a plain one still is.
+
+`OutputCacheStartingTests` exercises starting-callback `no-store`, `private`, `no-cache`, zero freshness,
+`Set-Cookie`, non-200 status and `Vary: *` bypasses, final header capture and response-`Vary` partitioning.
+Callback failure over HTTP/1.1 and HTTP/2 cannot publish the captured response. Unit tests prove an entry
+is invisible before successful completion and a custom server without completion notification stores
+nothing. Each new regression fails when immediate storage is restored.
+
+`tests/OutputCacheForwardedTests.cs` covers the effective key with the real forwarded-headers middleware
+(the test project references `Web.ForwardedHeaders`): end to end, behind the factory's trusted local
+transport, each forwarded host and each forwarded scheme gets its own entry while repeats still hit, and
+without the middleware a spoofed `X-Forwarded-Host` does not partition the cache; at the unit level, keys
+built for plaintext requests from a trusted proxy address follow the forwarded host rather than the wire
+host.
+
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

@@ -12,7 +12,8 @@ the middleware runs unchanged over any `IHttpSessionStore`, defaulting to the in
   `InMemoryHttpSessionStore`; a store overload accepts any `IHttpSessionStore` (a distributed adapter)
   so a multi-instance deployment gets sticky-session-free affinity with no other pipeline change.
 - **Session-id cookie establishment** through the hardened `Http.Cookies` model — `HttpOnly` (from
-  options), `SameSite=Lax`, `Secure` only over HTTPS (the transport-derived typed scheme), session-scoped
+  options), `SameSite=Lax`, `Secure` whenever the effective scheme is HTTPS (the transport-derived typed
+  scheme, or a trusted proxy's forwarded scheme when `UseForwardedHeaders` runs first), session-scoped
   (no `Max-Age`/`Expires`). Cookie name/path/HttpOnly come from `HttpSessionOptions`.
 - **Lazy lifecycle** — no store I/O and no cookie until the application first touches the session.
   `context.LoadSessionAsync()` materializes, establishes the cookie for a new id, and loads; the
@@ -26,8 +27,12 @@ the middleware runs unchanged over any `IHttpSessionStore`, defaulting to the in
 
 ## Dependencies
 
+- `Assimalign.Cohesion.Web.Server` — request-id correlation for orphan diagnostics.
+
 - `Assimalign.Cohesion.Web` — the pipeline builder and middleware abstractions the verb and middleware build on.
 - `Assimalign.Cohesion.Http` — the HTTP context, feature collection, and transport-derived scheme.
+- `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveScheme` read behind the `Secure` decision, which
+  falls back to the transport-derived scheme when no forwarded-headers middleware ran.
 - `Assimalign.Cohesion.Http.Sessions` — the `IHttpSession` surface, the `IHttpSessionStore` seam, the
   in-memory store, and the frame serializer this middleware composes.
 - `Assimalign.Cohesion.Http.Cookies` — the hardened cookie model used to establish the session-id cookie.
@@ -44,7 +49,8 @@ using Assimalign.Cohesion.Web.Sessions;
 
 app.UseSessions(options =>
 {
-    options.CookieName = ".Cohesion.Session"; // default
+    options.CookieName = ".Cohesion.Session"; // HttpCookieName; default value
+    options.CookiePath = "/"; // HttpCookiePath; default value
     options.IdleTimeout = TimeSpan.FromMinutes(20);
 });
 
@@ -62,8 +68,28 @@ app.Use(async (context, next) =>
 await context.RegenerateSessionIdAsync(context.RequestCancelled);
 ```
 
+`CookieName` and `CookiePath` use `HttpCookieName` and `HttpCookiePath`. Valid strings convert
+implicitly; an out-of-grammar string throws `ArgumentException` at assignment with parameter `value`.
+Both `UseSessions` overloads reject `default` with an option-specific message and parameter `configure`.
+The empty path is valid. These property types replace `string` from 10.0.0-preview.1 (#1473);
+use `.Value` when a caller needs a string-specific member.
+
 For an out-of-process deployment, pass a distributed store adapter — everything else is identical:
 
 ```csharp
 app.UseSessions(new MyDistributedSessionStore(...), options => options.IdleTimeout = TimeSpan.FromMinutes(30));
 ```
+
+## Stored-session modification tracking
+
+`IHttpStoredSession.IsModified` reports whether the built-in session needs a payload write.
+It returns `true` by default for custom implementations that do not track changes, so existing
+stores keep committing. Read-only built-in sessions still refresh their idle timeout.
+Store failures can be observed through the `Assimalign.Cohesion.Http.Sessions` EventSource;
+see the [design](DESIGN.md#store-failure-ownership-1436) for payload and ownership details.
+
+Establish a new session before starting the response so its cookie can be delivered. If first
+access occurs after the head starts, the session is discarded after the request. The
+`Assimalign.Cohesion.Web.Sessions` EventSource reports a modified orphan with the throttled
+Warning `SessionStateLost` and the exact `lost-sessions` counter; a read-only orphan emits only
+Verbose `SessionOrphaned`. See [diagnostics](DESIGN.md#diagnostics) for event payloads and counters.

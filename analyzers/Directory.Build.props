@@ -16,4 +16,12 @@
 		<EnablePreviewFeatures>false</EnablePreviewFeatures>
 		<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	</PropertyGroup>
+	<!-- Test hosts execute on the repository runtime; compiler-loaded components keep the exception above. -->
+	<PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<IsRoslynComponent>false</IsRoslynComponent>
+		<EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+		<IncludeBuildOutput>true</IncludeBuildOutput>
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+	</PropertyGroup>
 </Project>

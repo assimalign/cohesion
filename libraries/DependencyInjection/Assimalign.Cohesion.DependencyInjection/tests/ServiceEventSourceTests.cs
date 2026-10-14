@@ -12,6 +12,8 @@ using Assimalign.Cohesion.DependencyInjection.Internal;
 
 using static Assimalign.Cohesion.DependencyInjection.Tests.EventSourceFixtures;
 
+using Assimalign.Cohesion.Testing;
+
 namespace Assimalign.Cohesion.DependencyInjection.Tests;
 
 /// <summary>

@@ -22,7 +22,7 @@ public class UdpDatagramConnectionTests
         UdpConnectionFactory factory = new();
 
         await using IDatagramConnection server = factory.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        await using IDatagramConnection client = factory.Connect(server.LocalEndPoint);
+        await using IDatagramConnection client = factory.Connect(server.LocalEndPoint.ShouldNotBeNull());
 
         byte[] payload = [1, 2, 3, 4, 5];
         byte[] buffer = new byte[64];
@@ -47,7 +47,7 @@ public class UdpDatagramConnectionTests
         UdpConnectionFactory factory = new();
 
         await using IDatagramConnection server = factory.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        await using IDatagramConnection client = factory.Connect(server.LocalEndPoint);
+        await using IDatagramConnection client = factory.Connect(server.LocalEndPoint.ShouldNotBeNull());
 
         byte[] request = [42];
         byte[] reply = [7, 8, 9];
@@ -77,7 +77,7 @@ public class UdpDatagramConnectionTests
         UdpConnectionFactory factory = new();
 
         await using IDatagramConnection server = factory.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        await using IDatagramConnection client = factory.Connect(server.LocalEndPoint);
+        await using IDatagramConnection client = factory.Connect(server.LocalEndPoint.ShouldNotBeNull());
 
         byte[] first = [1, 2, 3];
         byte[] second = [4, 5, 6, 7];
@@ -149,7 +149,7 @@ public class UdpDatagramConnectionTests
 
         IDatagramConnection connection = factory.Bind(new IPEndPoint(IPAddress.Loopback, 0));
 
-        EndPoint target = connection.LocalEndPoint;
+        EndPoint target = connection.LocalEndPoint.ShouldNotBeNull();
 
         await connection.DisposeAsync();
 

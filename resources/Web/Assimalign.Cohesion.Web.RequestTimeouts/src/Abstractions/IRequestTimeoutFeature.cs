@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts;
 /// <para>
 /// Extensibility stays on the feature-collection seam rather than attributes or reflection: the
 /// middleware attaches this feature to every exchange it governs, and downstream code resolves it
-/// with <c>context.Features.Get&lt;IHttpRequestTimeoutFeature&gt;()</c>. When the middleware is
+/// with <c>context.Features.Get&lt;IRequestTimeoutFeature&gt;()</c>. When the middleware is
 /// not registered (or is suspended for a debugger), no feature is present and the lookup returns
 /// <see langword="null"/>.
 /// </para>

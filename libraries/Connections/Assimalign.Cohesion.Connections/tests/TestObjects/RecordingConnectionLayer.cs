@@ -32,7 +32,7 @@ internal sealed class RecordingConnectionLayer : IConnectionLayer
 
     public ConnectionCapabilities Describe(ConnectionCapabilities capabilities) => _describe(capabilities);
 
-    public ValueTask<IConnection> UpgradeAsync(IConnection connection, CancellationToken cancellationToken = default)
+    public ValueTask<IDuplexConnection> UpgradeAsync(IDuplexConnection connection, CancellationToken cancellationToken = default)
     {
         _upgrades.Add(_name);
 

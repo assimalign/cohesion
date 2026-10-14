@@ -105,8 +105,10 @@ public static class HttpContextFormExtensions
         /// <paramref name="cancellationToken"/> was cancelled.
         /// </exception>
         /// <exception cref="System.IO.InvalidDataException">
-        /// The body violates one of the configured <see cref="HttpFormOptions"/>
-        /// limits.
+        /// The body is not a well-formed form of its declared media type, or it
+        /// exceeds one of the configured <see cref="HttpFormOptions"/> limits; for a
+        /// limit, the exception's <see cref="Exception.InnerException"/> is an
+        /// <see cref="HttpFormLimitExceededException"/>.
         /// </exception>
         public Task<IHttpFormCollection> ReadFormAsync(CancellationToken cancellationToken = default)
         {

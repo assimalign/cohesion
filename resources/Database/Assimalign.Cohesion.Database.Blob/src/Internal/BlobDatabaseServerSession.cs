@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
 {
     private readonly BlobDatabaseServer _server;
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
     private readonly BlobDatabaseServerOptions _options;
     private readonly IDatabaseEngine _engine;
     private readonly IDatabaseAuthenticator _authenticator;
@@ -32,7 +32,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
 
     internal BlobDatabaseServerSession(
         BlobDatabaseServer server,
-        IConnection connection,
+        IDuplexConnection connection,
         BlobDatabaseServerOptions options,
         IDatabaseEngine engine,
         IDatabaseAuthenticator authenticator)

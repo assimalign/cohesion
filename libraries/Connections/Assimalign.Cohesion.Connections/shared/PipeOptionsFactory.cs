@@ -53,6 +53,12 @@ internal static partial class PipeOptionsFactory
     }
 
     /// <summary>Creates stream adapter options backed by one owned adaptive memory pool.</summary>
+    /// <remarks>
+    /// The adapters leave the stream open when they are completed: completing a reader or writer ends only
+    /// that pipe. A driver that holds a duplex stream ends each direction itself — for QUIC, completing the
+    /// writer sends the FIN and leaves the stream readable (#1330) — and disposes the stream once both are
+    /// done.
+    /// </remarks>
     /// <param name="readBufferSize">Reader buffer size in bytes; null, nonpositive, or values above <see cref="int.MaxValue"/> use the default.</param>
     /// <param name="writeBufferSize">Writer buffer size in bytes; null, nonpositive, or values above <see cref="int.MaxValue"/> use the default.</param>
     /// <returns>A context that must outlive all stream adapters created from its options.</returns>
@@ -68,11 +74,11 @@ internal static partial class PipeOptionsFactory
                 memoryPool,
                 configuredReadBufferSize,
                 Math.Min(configuredReadBufferSize, MinimumSegmentSize),
-                leaveOpen: false),
+                leaveOpen: true),
             new StreamPipeWriterOptions(
                 memoryPool,
                 configuredWriteBufferSize,
-                leaveOpen: false));
+                leaveOpen: true));
     }
 
     private static PipeScheduler GetApplicationScheduler(bool unsafePreferInLineScheduling)

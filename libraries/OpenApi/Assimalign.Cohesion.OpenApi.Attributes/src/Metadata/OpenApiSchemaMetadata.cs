@@ -25,4 +25,13 @@ public sealed class OpenApiSchemaMetadata
 
     /// <summary>Gets the schema properties.</summary>
     public IReadOnlyList<OpenApiSchemaPropertyMetadata> Properties { get; init; } = [];
+
+    /// <summary>
+    /// Gets the complete component schema, supplied by a producer that already holds one (the Web OpenAPI
+    /// adapter, which derives schemas from the application's serialization contracts). When set,
+    /// generation registers it under <see cref="Name"/> as it is and ignores <see cref="Title"/>,
+    /// <see cref="Description"/>, <see cref="Type"/>, <see cref="Deprecated"/> and
+    /// <see cref="Properties"/>. The attribute mapper and the source generator never set it.
+    /// </summary>
+    public OpenApiSchema? Schema { get; init; }
 }

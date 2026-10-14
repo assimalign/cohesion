@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Web.ForwardedHeaders — Overview
 
-Forwarded-headers resolution for Cohesion web applications: the first-position
+Forwarded-headers resolution for Cohesion web applications: the front-of-pipeline
 middleware that resolves the effective client address/scheme/host behind proxies under
 an explicit trust model, and the builder verb that composes it.
 

@@ -117,16 +117,19 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="ArgumentExceptionOnEmptySpan" xml:space="preserve">
+  <data name="SpanEmpty" xml:space="preserve">
     <value>The provided span {0} cannot be empty.</value>
   </data>
-  <data name="ArgumentExceptionOnEnumNotDefined" xml:space="preserve">
+  <data name="EnumValueUndefined" xml:space="preserve">
     <value>The integral value does not exist in the given enum {0}.</value>
   </data>
-  <data name="ArgumentExceptionOnNotOfType" xml:space="preserve">
+  <data name="ArgumentTypeInvalid" xml:space="preserve">
     <value>The provided argument for parameter `{0}` expected type of `{1}`.</value>
   </data>
-  <data name="FileSystePathError" xml:space="preserve">
+  <data name="FileSystemPathError" xml:space="preserve">
     <value>Test</value>
+  </data>
+  <data name="UlidTextInvalid" xml:space="preserve">
+    <value>The ULID must contain exactly 26 Crockford base32 characters with a leading digit from 0 through 7.</value>
   </data>
 </root>

@@ -93,7 +93,7 @@ public class HttpTrailerCollectionTests
     {
         // The abstract HttpRequest/HttpResponse bases default Trailers to the
         // shared unsupported collection.
-        TestHttpContext context = new(HttpVersion.Http11, new TestHttpRequest(), new TestHttpResponse());
+        TestHttpContext context = new(HttpVersion.Http11);
 
         ((IHttpRequest)context.Request).Trailers.IsSupported.ShouldBeFalse();
         ((IHttpResponse)context.Response).Trailers.IsSupported.ShouldBeFalse();

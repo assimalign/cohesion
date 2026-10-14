@@ -589,4 +589,16 @@
   <Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Tcp/src/">
     <Project Path="Assimalign.Cohesion.Database.Sql.Tcp/src/Assimalign.Cohesion.Database.Sql.Tcp.csproj" />
   </Folder>
+	<Folder Name="/Database/analyzers/Assimalign.Cohesion.CodeFixes.Database/src/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.CodeFixes.Database/src/Assimalign.Cohesion.CodeFixes.Database.csproj" />
+	</Folder>
+	<Folder Name="/Database/analyzers/Assimalign.Cohesion.CodeFixes.Database/tests/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.CodeFixes.Database/tests/Assimalign.Cohesion.CodeFixes.Database.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Database/analyzers/Assimalign.Cohesion.SourceGeneration.Database/src/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.Database/src/Assimalign.Cohesion.SourceGeneration.Database.csproj" />
+	</Folder>
+	<Folder Name="/Database/analyzers/Assimalign.Cohesion.SourceGeneration.Database/tests/">
+		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.Database/tests/Assimalign.Cohesion.SourceGeneration.Database.Tests.csproj" />
+	</Folder>
 </Solution>

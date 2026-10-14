@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -13,6 +15,7 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Web.Hosting.Internal;
+using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
@@ -38,22 +41,66 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     /// <inheritdoc />
     protected override async ValueTask DisposeAsync(bool disposing)
     {
-        await base.DisposeAsync(disposing).ConfigureAwait(false);
+        List<Exception>? failures = null;
+        try
+        {
+            await base.DisposeAsync(disposing).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failures = new List<Exception> { exception };
+        }
+
         if (disposing)
         {
-            // The application owns its service provider: disposing it releases every service a
-            // registered factory created, after the host has stopped them. Instance registrations
-            // stay with their callers.
-            await _context.DisposeServiceProviderAsync().ConfigureAwait(false);
+            // Stop failures are reported after the host has attempted every service. Final teardown
+            // must still release factory-owned services, middleware lifetimes and endpoint keys.
+            try
+            {
+                await _context.DisposeServiceProviderAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= new List<Exception>()).Add(exception);
+            }
 
             foreach (X509Certificate2 certificate in _context.EndpointCertificates)
             {
-                certificate.Dispose();
+                try
+                {
+                    certificate.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    (failures ??= new List<Exception>()).Add(exception);
+                }
             }
             _context.EndpointCertificates.Clear();
         }
+
+        // A failed StopAsync leaves the base disposal flag unset. All final releases have now
+        // been attempted, so seal the host without retrying stop or allowing a later restart.
+        await base.DisposeAsync(disposing: false).ConfigureAwait(false);
+
+        if (failures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        }
+        if (failures is not null)
+        {
+            throw new AggregateException(ErrorMessages.ApplicationTeardownFailed, failures);
+        }
     }
 
+    /// <summary>
+    /// Adds a middleware component to the pipeline.
+    /// </summary>
+    /// <param name="middleware">The middleware invoked for each request.</param>
+    /// <returns>The same application for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="middleware"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Middleware cannot be registered after the pipeline is built.
+    /// </exception>
     public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
@@ -69,7 +116,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The web host is already built.");
 
-        var middleware = new WebApplicationMiddleware(TerminalAsync);
+        var middleware = new WebApplicationMiddleware(WebApplicationTerminal.InvokeAsync);
 
         for (int i = _middleware.Count - 1; i >= 0; i--)
         {
@@ -82,6 +129,24 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         // the hosting philosophy, DI integration is builder-time only, so no service is
         // resolved per request.
         IHttpFeature[] features = Context.ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>().ToArray();
+
+        // Owner decision 35 (#1380): an exchange disposes every disposable feature it carries when it
+        // ends, so a disposable application feature, stamped as one shared instance, would be disposed
+        // after its first request and handed to every later one. WebApplicationBuilder.Build already
+        // rejected the registrations that carry their product's type (an instance or an implementation
+        // type); a factory's product is known only once it is resolved, which is here.
+        foreach (IHttpFeature feature in features)
+        {
+            if (feature is IDisposable or IAsyncDisposable)
+            {
+                throw new InvalidOperationException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ApplicationFeatureDisposable, feature.Name, feature.GetType().FullName));
+            }
+        }
+
+        // The default server sizes each exchange's feature collection for these, so stamping them
+        // never grows it.
+        _context.StampedFeatureCount = features.Length;
 
         if (features.Length > 0)
         {
@@ -102,34 +167,6 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         return new WebApplicationPipeline(middleware);
     }
 
-    /// <summary>
-    /// The pipeline terminal. Reaching it means every registered middleware chained to <c>next</c>
-    /// and none produced a terminal response, so the request went unhandled — set a bodyless
-    /// <c>404 Not Found</c> rather than completing silently, which would hand the transport an empty
-    /// <c>200</c>. A middleware that already chose a non-<c>200</c> status, set a redirect
-    /// <c>Location</c>, or wrote a body/content type is left untouched.
-    /// </summary>
-    /// <remarks>
-    /// The 404 is deliberately payload-free. The resource hosting-isolation rule (COHRES002) forbids
-    /// this runtime module from referencing the Web feature libraries — including
-    /// <c>Web.ProblemDetails</c> — so the terminal cannot render problem+json here. The opt-in
-    /// status-code-pages middleware (<c>UseStatusCodePages</c> in <c>Web.ErrorHandling</c>) is what
-    /// upgrades a bodyless <c>4xx</c>/<c>5xx</c> into an RFC 9457 problem+json body.
-    /// </remarks>
-    private static Task TerminalAsync(IHttpContext context)
-    {
-        IHttpResponse response = context.Response;
-
-        if (response.StatusCode.Value == HttpStatusCode.Ok.Value &&
-            !response.Headers.ContainsKey(HttpHeaderKey.Location) &&
-            !response.Headers.ContainsKey(HttpHeaderKey.ContentType) &&
-            !(response.Body.CanSeek && response.Body.Length > 0))
-        {
-            response.StatusCode = HttpStatusCode.NotFound;
-        }
-
-        return Task.CompletedTask;
-    }
     IWebApplicationPipelineBuilder IWebApplicationPipelineBuilder.Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
         return ((IWebApplicationPipelineBuilder)this).Use((WebApplicationMiddleware next) =>
@@ -140,6 +177,8 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     IWebApplicationPipelineBuilder IWebApplicationPipelineBuilder.Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
+
+        InvalidOperationException.ThrowIf(_isBuilt, "Middleware cannot be added because the web pipeline has already been built.");
 
         _middleware.Add(middleware);
 

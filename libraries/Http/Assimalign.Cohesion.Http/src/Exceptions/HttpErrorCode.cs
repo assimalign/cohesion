@@ -46,6 +46,8 @@ public enum HttpErrorCode
     /// A media type or media range (RFC 9110 &#167; 8.3.1) could not be parsed.
     /// </summary>
     InvalidMediaType,
+
+    /// <summary>
     /// A field value could not be parsed or serialized as an RFC 9651 Structured
     /// Field Value (Item, List, or Dictionary). Includes bare items that violate
     /// their range or syntax rules and fields that fail strict fail-parsing.
@@ -94,4 +96,17 @@ public enum HttpErrorCode
     /// <c>X-Forwarded-*</c> list could not be parsed.
     /// </summary>
     InvalidForwarded,
+
+    /// <summary>
+    /// A response field cannot be sent: its name is not a token (RFC 9110 &#167; 5.1), or its value
+    /// holds a control character other than HTAB, CR, LF and NUL among them (RFC 9110 &#167; 5.5).
+    /// </summary>
+    /// <remarks>
+    /// A server transport usually refuses such a field before it writes any of the head, so the response
+    /// has not started and can be replaced. The exception is a streamed response's trailer section,
+    /// refused after its head and body went out: the transport then resets the stream, and the response
+    /// can no longer be replaced. Check <see cref="IHttpExchangeControl.HasResponseStarted"/> before
+    /// replacing a refused response; the code alone does not say which case occurred.
+    /// </remarks>
+    InvalidResponseField,
 }

@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
@@ -42,20 +41,20 @@ internal sealed class CallSiteFactory : IServiceLookup
                 if (implementationType == null || !implementationType.IsGenericTypeDefinition)
                 {
                     throw new ArgumentException(
-                        Resources.GetOpenGenericServiceRequiresOpenGenericImplementationExceptionMessage(serviceType),
+                        ErrorMessageFormatter.GetOpenGenericServiceRequiresOpenGenericImplementationExceptionMessage(serviceType),
                         "descriptors");
                 }
                 if (implementationType.IsAbstract || implementationType.IsInterface)
                 {
                     throw new ArgumentException(
-                        Resources.GetTypeCannotBeActivatedExceptionMessage(implementationType, serviceType));
+                        ErrorMessageFormatter.GetTypeCannotBeActivatedExceptionMessage(implementationType, serviceType));
                 }
                 Type[] serviceTypeGenericArguments = serviceType.GetGenericArguments();
                 Type[] implementationTypeGenericArguments = implementationType.GetGenericArguments();
                 if (serviceTypeGenericArguments.Length != implementationTypeGenericArguments.Length)
                 {
                     throw new ArgumentException(
-                        Resources.GetArityOfOpenGenericServiceNotEqualArityOfOpenGenericImplementationExceptionMessage(serviceType, implementationType), "descriptors");
+                        ErrorMessageFormatter.GetArityOfOpenGenericServiceNotEqualArityOfOpenGenericImplementationExceptionMessage(serviceType, implementationType), "descriptors");
                 }
                 if (ServiceProvider.VerifyOpenGenericServiceTrimmability)
                 {
@@ -72,7 +71,7 @@ internal sealed class CallSiteFactory : IServiceLookup
                     implementationType.IsInterface)
                 {
                     throw new ArgumentException(
-                         Resources.GetTypeCannotBeActivatedExceptionMessage(implementationType, serviceType));
+                         ErrorMessageFormatter.GetTypeCannotBeActivatedExceptionMessage(implementationType, serviceType));
                 }
             }
 
@@ -111,7 +110,7 @@ internal sealed class CallSiteFactory : IServiceLookup
             if (!AreCompatible(serviceDynamicallyAccessedMembers, implementationDynamicallyAccessedMembers))
             {
                 throw new ArgumentException(
-                    Resources.GetTrimmingAnnotationsDoNotMatchExceptionMessage(implementationType, serviceType));
+                    ErrorMessageFormatter.GetTrimmingAnnotationsDoNotMatchExceptionMessage(implementationType, serviceType));
             }
 
             bool serviceHasNewConstraint = serviceGenericType.GenericParameterAttributes.HasFlag(GenericParameterAttributes.DefaultConstructorConstraint);
@@ -119,7 +118,7 @@ internal sealed class CallSiteFactory : IServiceLookup
             if (implementationHasNewConstraint && !serviceHasNewConstraint)
             {
                 throw new ArgumentException(
-                    Resources.GetTrimmingAnnotationsDoNotMatch_NewConstraintExceptionMessage(implementationType, serviceType));
+                    ErrorMessageFormatter.GetTrimmingAnnotationsDoNotMatch_NewConstraintExceptionMessage(implementationType, serviceType));
             }
         }
     }
@@ -245,6 +244,15 @@ internal sealed class CallSiteFactory : IServiceLookup
             }
 
             Type itemType = serviceType.GenericTypeArguments[0];
+            if (ServiceProvider.VerifyAotCompatibility && itemType.IsValueType)
+            {
+                // Without dynamic code there is no guarantee the code for ValueType[] (and the
+                // IEnumerable<ValueType> over it) was generated, so fail here, at call-site
+                // construction, rather than at an arbitrary resolution later.
+                throw new InvalidOperationException(
+                    $"Unable to create an enumerable of '{itemType}' because it is a value type. Native code for enumerables of value-type services might not be available with NativeAOT.");
+            }
+
             CallSiteResultCacheLocation cacheLocation = CallSiteResultCacheLocation.Root;
             CallSiteService[] callSites;
 
@@ -372,7 +380,7 @@ internal sealed class CallSiteFactory : IServiceLookup
         }
         else
         {
-            throw new InvalidOperationException(Resources.InvalidServiceDescriptor);
+            throw new InvalidOperationException(ErrorMessages.InvalidServiceDescriptor);
         }
 
         return _callSiteCache[callSiteKey] = callSite;
@@ -391,6 +399,10 @@ internal sealed class CallSiteFactory : IServiceLookup
         Justification = "MakeGenericType here is used to create a closed generic implementation type given the closed service type. " +
         "Trimming annotations on the generic types are verified when 'Assimalign.Cohesion.DependencyInjection.VerifyOpenGenericServiceTrimmability' is set, which is set by default when PublishTrimmed=true. " +
         "That check informs developers when these generic types don't have compatible trimming annotations.")]
+    [UnconditionalSuppressMessage("AotAnalysis", "IL3050:RequiresDynamicCode",
+        Justification = "When ServiceProvider.VerifyAotCompatibility is true, which it is whenever dynamic code is unsupported (NativeAOT), " +
+        "VerifyOpenGenericAotCompatibility throws before MakeGenericType if any generic argument is a value type, so only " +
+        "reference-type instantiations, which share canonical code, are ever created.")]
     private CallSiteService CreateOpenGeneric(ServiceDescriptor descriptor, Type serviceType, CallSiteChain callSiteChain, int slot, bool throwOnConstraintViolation)
     {
         CallSiteServiceCacheKey callSiteKey = new CallSiteServiceCacheKey(serviceType, slot);
@@ -404,7 +416,13 @@ internal sealed class CallSiteFactory : IServiceLookup
         Type closedType;
         try
         {
-            closedType = descriptor.ImplementationType.MakeGenericType(serviceType.GenericTypeArguments);
+            Type[] genericTypeArguments = serviceType.GenericTypeArguments;
+            if (ServiceProvider.VerifyAotCompatibility)
+            {
+                VerifyOpenGenericAotCompatibility(serviceType, genericTypeArguments);
+            }
+
+            closedType = descriptor.ImplementationType.MakeGenericType(genericTypeArguments);
         }
         catch (ArgumentException)
         {
@@ -417,6 +435,18 @@ internal sealed class CallSiteFactory : IServiceLookup
         }
 
         return _callSiteCache[callSiteKey] = CreateConstructorCallSite(lifetime, serviceType, closedType, callSiteChain);
+    }
+
+    private static void VerifyOpenGenericAotCompatibility(Type serviceType, Type[] genericTypeArguments)
+    {
+        foreach (Type typeArgument in genericTypeArguments)
+        {
+            if (typeArgument.IsValueType)
+            {
+                throw new InvalidOperationException(
+                    $"Unable to create a generic service for type '{serviceType}' because '{typeArgument}' is a value type. Native code to support creating generic services over value types might not be available with NativeAOT.");
+            }
+        }
     }
 
     private CallSiteService CreateConstructorCallSite(
@@ -434,7 +464,7 @@ internal sealed class CallSiteFactory : IServiceLookup
 
             if (constructors.Length == 0)
             {
-                throw new InvalidOperationException(Resources.GetNoConstructorMatchExceptionMessage(implementationType));
+                throw new InvalidOperationException(ErrorMessageFormatter.GetNoConstructorMatchExceptionMessage(implementationType));
             }
             else if (constructors.Length == 1)
             {
@@ -497,7 +527,7 @@ internal sealed class CallSiteFactory : IServiceLookup
                                 // Ambiguous match exception
                                 throw new InvalidOperationException(string.Join(
                                     Environment.NewLine,
-                                    Resources.GetAmbiguousConstructorExceptionMessage(implementationType),
+                                    ErrorMessageFormatter.GetAmbiguousConstructorExceptionMessage(implementationType),
                                     bestConstructor,
                                     constructors[i]));
                             }
@@ -509,7 +539,7 @@ internal sealed class CallSiteFactory : IServiceLookup
             if (bestConstructor == null)
             {
                 throw new InvalidOperationException(
-                    Resources.GetUnableToActivateTypeExceptionMessage(implementationType));
+                    ErrorMessageFormatter.GetUnableToActivateTypeExceptionMessage(implementationType));
             }
             else
             {
@@ -544,7 +574,7 @@ internal sealed class CallSiteFactory : IServiceLookup
             {
                 if (throwIfCallSiteNotFound)
                 {
-                    throw new InvalidOperationException(Resources.GetCannotResolveServiceExceptionMessage(
+                    throw new InvalidOperationException(ErrorMessageFormatter.GetCannotResolveServiceExceptionMessage(
                         parameterType,
                         implementationType));
                 }
@@ -664,7 +694,7 @@ internal sealed class CallSiteFactory : IServiceLookup
                 }
             }
 
-            throw new InvalidOperationException(Resources.ServiceDescriptorNotExist);
+            throw new InvalidOperationException(ErrorMessages.ServiceDescriptorMissing);
         }
 
         public ServiceDescriptorCacheItem Add(ServiceDescriptor descriptor)

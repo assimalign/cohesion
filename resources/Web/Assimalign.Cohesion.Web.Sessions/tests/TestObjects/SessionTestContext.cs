@@ -14,7 +14,9 @@ namespace Assimalign.Cohesion.Web.Sessions.Tests.TestObjects;
 /// cookie — cases the plaintext in-memory HTTP/1.1 test factory cannot express
 /// (an <c>https</c> request in particular). Request and response cookies work
 /// through the real <c>Http.Cookies</c> extensions because both header
-/// collections are genuine <see cref="HttpHeaderCollection"/> instances.
+/// collections are genuine <see cref="HttpHeaderCollection"/> instances. The
+/// connection is settable so a test can model a request arriving from a specific
+/// peer, such as a trusted proxy the forwarded-headers middleware evaluates.
 /// </summary>
 internal sealed class SessionTestContext : IHttpContext
 {
@@ -39,7 +41,7 @@ internal sealed class SessionTestContext : IHttpContext
 
     IHttpResponse IHttpContext.Response => Response;
 
-    public IHttpConnectionInfo ConnectionInfo => null!;
+    public IHttpConnectionInfo ConnectionInfo { get; set; } = HttpConnectionInfo.Empty;
 
     public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
 

@@ -2,6 +2,8 @@ name: Logging
 on:
   push:
     paths:
+      - "build/Tasks/**"
+      - "build/Targets/Build.CodeGeneration.*"
       - "libraries/Logging/**"
       - "!libraries/Logging/**/*.slnx"
       - "!libraries/Logging/**/*.md"
@@ -13,6 +15,7 @@ jobs:
   build:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     continue-on-error: false
     strategy:
       matrix:

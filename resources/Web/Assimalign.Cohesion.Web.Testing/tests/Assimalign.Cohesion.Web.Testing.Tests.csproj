@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Testing.Tests</RootNamespace>
 		<IsPackable>false</IsPackable>
@@ -13,6 +13,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

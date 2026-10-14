@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Per-connection abuse detector for the frame-rate HTTP/2 attack classes: rapid stream reset
-/// (CVE-2023-44487), SETTINGS floods, and PING floods. Each detector is an independent
+/// (CVE-2023-44487) and its server-reset variant (CVE-2025-8671), SETTINGS floods, and PING floods. Each detector is an independent
 /// <see cref="Http2SlidingWindowCounter"/> sharing the operator-configured
 /// <see cref="Http2ConnectionListenerOptions.Http2Limits.FloodDetectionWindow"/>.
 /// </summary>
@@ -34,8 +34,10 @@ internal sealed class Http2FloodGuard
     }
 
     /// <summary>
-    /// Records an inbound stream reset (a create-then-reset cycle) and returns whether the
-    /// rapid-reset budget for the current window has been exceeded.
+    /// Records a stream reset the peer caused — its own <c>RST_STREAM</c> (a create-then-reset cycle,
+    /// CVE-2023-44487), or a reset the server sent for a stream error the peer's frame raised
+    /// (CVE-2025-8671, MadeYouReset) — and returns whether the reset budget for the current window
+    /// has been exceeded.
     /// </summary>
     public bool TrackStreamReset() => _resetStreams.RecordAndCheckExceeded(Environment.TickCount64);
 

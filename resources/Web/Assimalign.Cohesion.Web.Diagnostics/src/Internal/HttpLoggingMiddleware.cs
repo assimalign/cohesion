@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -20,6 +21,27 @@ using Assimalign.Cohesion.Web.Routing;
 /// (<see cref="HttpLoggingSnapshot"/>); the middleware performs no service location and no
 /// reflection.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The scheme, host, and client address it logs are the <em>effective</em> values from
+/// <see cref="HttpContextForwardedExtensions"/>: what a trusted proxy chain vouched for when the
+/// forwarded-headers middleware ran, otherwise the transport's. They are read when the entry is
+/// emitted, after the pipeline unwinds, so the forwarded identity is logged even though this
+/// middleware is registered ahead of <c>UseForwardedHeaders</c>. When the logged client differs from
+/// the transport peer, the peer (the nearest proxy) is logged beside it.
+/// </para>
+/// <para>
+/// An exchange whose downstream pipeline throws is an application fault, logged at
+/// <see cref="LogLevel.Error"/> with the exception, unless the server reports a client fault
+/// (<see cref="IWebClientFaultFeature"/>): reading a request body that broke its framing or a
+/// configured limit failed, and the transport answers the exchange itself (#1340). A client fault is
+/// logged at the configured level with the status the transport sends, marked with
+/// <see cref="HttpLoggingAttributes.ClientFault"/>, and carries no exception, whether or not the
+/// exception reached this middleware.
+/// An <see cref="OperationCanceledException"/> after the exchange's cancellation token fires also
+/// stays at the configured level without an exception; cancellation alone adds no client-fault marker.
+/// </para>
+/// </remarks>
 internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 {
     private const HttpLoggingFields CaptureFields =
@@ -50,20 +72,17 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         // bytes only - the body itself streams through, so h2 flow-control backpressure and the
         // transport's request-size limits are untouched.
         RequestBodyCaptureStream? requestCapture = null;
-        Stream? originalRequestBody = null;
-        HttpRequest? concreteRequest = context.Request as HttpRequest;
+        IHttpContext downstreamContext = context;
 
         bool wantBytes = (configured & HttpLoggingFields.BytesTransferred) != 0;
         bool captureRequestBody = (configured & HttpLoggingFields.RequestBody) != 0
-            && concreteRequest is not null
             && _snapshot.RequestBodyLimit > 0
             && _snapshot.IsBodyContentTypeLoggable(context.Request.Headers[HttpHeaderKey.ContentType].Value);
 
-        if (concreteRequest is not null && (captureRequestBody || wantBytes))
+        if (captureRequestBody || wantBytes)
         {
-            originalRequestBody = concreteRequest.Body;
-            requestCapture = new RequestBodyCaptureStream(originalRequestBody, captureRequestBody ? _snapshot.RequestBodyLimit : 0);
-            concreteRequest.Body = requestCapture;
+            requestCapture = new RequestBodyCaptureStream(context.Request.Body, captureRequestBody ? _snapshot.RequestBodyLimit : 0);
+            downstreamContext = new HttpLoggingHttpContext(context, requestCapture);
         }
 
         ResponseBodyCaptureStream? responseCapture = null;
@@ -96,7 +115,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         Exception? exception = null;
         try
         {
-            await next.Invoke(context).ConfigureAwait(false);
+            await next.Invoke(downstreamContext).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -105,14 +124,8 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         }
         finally
         {
-            // Restore the streams we installed - but only when they are still the installed
-            // ones. A downstream middleware that swapped in its own wrapper (compression, ...)
-            // owns its restoration; clobbering it here would detach that wrapper mid-chain.
-            if (requestCapture is not null && ReferenceEquals(concreteRequest!.Body, requestCapture))
-            {
-                concreteRequest.Body = originalRequestBody!;
-            }
-
+            // The request view never mutates the incoming request. Restore the response stream only
+            // if it is still ours; a downstream wrapper owns its own restoration.
             if (responseCapture is not null && ReferenceEquals(context.Response.Body, responseCapture))
             {
                 context.Response.Body = originalResponseBody!;
@@ -127,11 +140,12 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
                 {
                     Emit(exchangeLogger, context, effective, elapsed, requestCapture, responseCapture, exception);
                 }
-                catch
+                catch (Exception failure)
                 {
                     // The access log must never fail an exchange (or mask the application's own
                     // exception while it unwinds). Sink failures are already isolated by the
                     // logging pipeline; this guards the attribute-building path itself.
+                    HttpLoggingEventSource.Log.EntryDropped(failure);
                 }
             }
 
@@ -141,13 +155,19 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 
     /// <summary>
     /// Resolves the field set for the completed exchange: the configured fields unless the
-    /// matched endpoint carries an <see cref="HttpLoggingMetadata"/> override (last-wins via the
-    /// endpoint metadata bag). Capture fields can only narrow — they were armed (or not) before
-    /// routing decided the endpoint.
+    /// endpoint that handled it carries an <see cref="HttpLoggingMetadata"/> override (last-wins
+    /// via the endpoint metadata bag). The endpoint <c>UseRouting</c> published is still on the
+    /// exchange after the pipeline unwinds, so this works with logging registered ahead of routing.
+    /// A CORS preflight's candidate endpoint never handles the preflight, so its override does not
+    /// apply to it. Capture fields can only narrow — they were armed (or not) from the configured
+    /// fields before the downstream pipeline ran.
     /// </summary>
     private static HttpLoggingFields ResolveEffectiveFields(IHttpContext context, HttpLoggingFields configured)
     {
-        HttpLoggingMetadata? metadata = context.GetEndpointMetadata<HttpLoggingMetadata>();
+        HttpLoggingMetadata? metadata = context.GetRouteMatch() is { IsPreflight: false } endpoint
+            ? endpoint.Metadata.GetMetadata<HttpLoggingMetadata>()
+            : null;
+
         if (metadata is null)
         {
             return configured;
@@ -179,7 +199,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         return new LoggerEntry(
             _snapshot.Level,
             _snapshot.Category,
-            BuildMessage(context, fields, status: null, duration: null, faulted: false, started: true),
+            BuildMessage(context, fields, status: null, duration: null, faulted: false, clientFault: false, started: true),
             attributes: attributes,
             timestamp: _snapshot.TimeProvider.GetUtcNow());
     }
@@ -206,14 +226,25 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
             attributes[HttpLoggingAttributes.RequestMethod] = request.Method.Value;
         }
 
-        if ((fields & HttpLoggingFields.RequestScheme) != 0 && request.Scheme != HttpScheme.None)
+        // Scheme and host are the effective values: the client-facing ones a trusted proxy forwarded,
+        // otherwise the wire values. The wire values behind a proxy describe the internal hop, which is
+        // deployment configuration rather than per-exchange evidence, so only the client view is logged.
+        if ((fields & HttpLoggingFields.RequestScheme) != 0)
         {
-            attributes[HttpLoggingAttributes.RequestScheme] = request.Scheme == HttpScheme.Https ? "https" : "http";
+            HttpScheme scheme = context.EffectiveScheme;
+            if (scheme != HttpScheme.None)
+            {
+                attributes[HttpLoggingAttributes.RequestScheme] = scheme == HttpScheme.Https ? "https" : "http";
+            }
         }
 
-        if ((fields & HttpLoggingFields.RequestHost) != 0 && !string.IsNullOrEmpty(request.Host.Value))
+        if ((fields & HttpLoggingFields.RequestHost) != 0)
         {
-            attributes[HttpLoggingAttributes.RequestHost] = request.Host.Value;
+            string host = context.EffectiveHost.Value;
+            if (!string.IsNullOrEmpty(host))
+            {
+                attributes[HttpLoggingAttributes.RequestHost] = host;
+            }
         }
 
         if ((fields & HttpLoggingFields.RequestPath) != 0)
@@ -241,9 +272,23 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
             attributes[HttpLoggingAttributes.RequestBody] = Encoding.UTF8.GetString(requestCapture.Captured);
         }
 
+        // The server reports that the client's request was at fault: reading its body failed on the
+        // client's side, and the transport answers the exchange itself (#1340). Any client can cause
+        // that at will, so it is logged at the configured level, not escalated to Error, and with the
+        // status the transport sends in place of a response that has not started.
+        HttpStatusCode? clientFault = context.Features.Get<IWebClientFaultFeature>()?.StatusCode;
+        int status = clientFault is { } faultStatus && context.Features.Get<IHttpResponseStreamingFeature>() is not { HasStarted: true }
+            ? faultStatus.Value
+            : response.StatusCode.Value;
+
+        if (clientFault is not null)
+        {
+            attributes[HttpLoggingAttributes.ClientFault] = true;
+        }
+
         if ((fields & HttpLoggingFields.ResponseStatusCode) != 0)
         {
-            attributes[HttpLoggingAttributes.ResponseStatusCode] = response.StatusCode.Value;
+            attributes[HttpLoggingAttributes.ResponseStatusCode] = status;
         }
 
         if ((fields & HttpLoggingFields.ResponseHeaders) != 0)
@@ -276,30 +321,38 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 
         if ((fields & HttpLoggingFields.ClientAddress) != 0)
         {
-            if (ResolveClientAddress(context) is { } address)
-            {
-                attributes[HttpLoggingAttributes.ClientAddress] = address.ToString();
-            }
-
-            if (context.ConnectionInfo.RemotePort > 0)
-            {
-                attributes[HttpLoggingAttributes.ClientPort] = context.ConnectionInfo.RemotePort;
-            }
+            AddClientAttributes(attributes, context);
         }
 
         if ((fields & HttpLoggingFields.TraceContext) != 0
-            && request.Headers.TryGetValue(HttpHeaderKey.TraceParent, out HttpHeaderValue traceParent)
-            && TraceParent.TryParse(traceParent.Value, out string traceId, out string spanId))
+            && context.Features.Get<IWebRequestIdFeature>() is { } requestIdFeature)
         {
-            attributes[HttpLoggingAttributes.TraceId] = traceId;
-            attributes[HttpLoggingAttributes.SpanId] = spanId;
+            ActivityTraceId traceId = requestIdFeature.RequestId;
+            attributes[HttpLoggingAttributes.TraceId] = traceId.ToHexString();
+
+            // The feature identifies this exchange's server span. Activity.Current can instead be
+            // an ambient activity inherited by an untraced server, or middleware's child span.
+            if (context.Features.Get<IWebRequestActivityFeature>()?.Activity is
+                { IdFormat: ActivityIdFormat.W3C, Kind: ActivityKind.Server } activity
+                && activity.TraceId == traceId)
+            {
+                attributes[HttpLoggingAttributes.SpanId] = activity.SpanId.ToHexString();
+            }
         }
 
+        // A client fault carries no exception: the exception is the transport's answer to the client's
+        // bytes, not an application defect, and the status and the client-fault attribute record it.
+        // Match the server's cancellation boundary. A dependency's unrelated cancellation on
+        // a live exchange is still an application fault; the exception's own token is not proof
+        // that this request was canceled.
+        bool requestCanceled = exception is OperationCanceledException && context.RequestCancelled.IsCancellationRequested;
+        bool applicationFault = exception is not null && clientFault is null && !requestCanceled;
+
         var entry = new LoggerEntry(
-            exception is null ? _snapshot.Level : LogLevel.Error,
+            applicationFault ? LogLevel.Error : _snapshot.Level,
             _snapshot.Category,
-            BuildMessage(context, fields, response.StatusCode.Value, elapsed, faulted: exception is not null, started: false),
-            exception,
+            BuildMessage(context, fields, status, elapsed, faulted: applicationFault, clientFault: clientFault is not null, started: false),
+            applicationFault ? exception : null,
             attributes,
             timestamp: _snapshot.TimeProvider.GetUtcNow());
 
@@ -319,6 +372,41 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         }
     }
 
+    /// <summary>
+    /// Adds the client attributes: the effective client address and port, and — when the transport
+    /// peer is not that client — the peer's address and port, so the hop that delivered the exchange
+    /// stays auditable behind a proxy.
+    /// </summary>
+    private void AddClientAttributes(Dictionary<string, object?> attributes, IHttpContext context)
+    {
+        IPAddress? client = ResolveClientAddress(context);
+        if (client is not null)
+        {
+            attributes[HttpLoggingAttributes.ClientAddress] = client.ToString();
+        }
+
+        // The client port is the effective endpoint's: the forwarded node's port when a trusted hop
+        // resolved one (0 when it carried none), otherwise the transport's.
+        IHttpForwardedFeature? forwarded = context.Features.Get<IHttpForwardedFeature>();
+        int clientPort = forwarded is null ? context.ConnectionInfo.RemotePort : forwarded.RemotePort;
+        if (clientPort > 0)
+        {
+            attributes[HttpLoggingAttributes.ClientPort] = clientPort;
+        }
+
+        IPAddress? peer = context.ConnectionInfo.RemoteIp;
+        if (peer is not null && !peer.Equals(client))
+        {
+            attributes[HttpLoggingAttributes.PeerAddress] = peer.ToString();
+
+            int peerPort = context.ConnectionInfo.RemotePort;
+            if (peerPort > 0)
+            {
+                attributes[HttpLoggingAttributes.PeerPort] = peerPort;
+            }
+        }
+    }
+
     private IPAddress? ResolveClientAddress(IHttpContext context)
     {
         if (_snapshot.ClientAddressResolver is { } resolver)
@@ -327,13 +415,16 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
             {
                 return resolver(context);
             }
-            catch
+            catch (Exception exception)
             {
-                // A faulting resolver must not fail the exchange; fall back to the socket peer.
+                // A faulting resolver must not fail the exchange; fall back to the effective client.
+                HttpLoggingEventSource.Log.AddressResolverFailed(exception);
             }
         }
 
-        return context.ConnectionInfo.RemoteIp;
+        // The client a trusted proxy chain vouched for when the forwarded-headers middleware ran,
+        // otherwise the transport peer. Forwarding headers are never parsed here.
+        return context.EffectiveRemoteIp;
     }
 
     private static string BuildMessage(
@@ -342,6 +433,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         int? status,
         TimeSpan? duration,
         bool faulted,
+        bool clientFault,
         bool started)
     {
         string method = (fields & HttpLoggingFields.RequestMethod) != 0 ? context.Request.Method.Value : "-";
@@ -358,7 +450,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         string durationText = duration is { } d && (fields & HttpLoggingFields.Duration) != 0
             ? string.Create(CultureInfo.InvariantCulture, $" in {d.TotalMilliseconds:F3} ms")
             : string.Empty;
-        string faultText = faulted ? " (faulted)" : string.Empty;
+        string faultText = faulted ? " (faulted)" : clientFault ? " (client fault)" : string.Empty;
 
         return string.Create(CultureInfo.InvariantCulture, $"{method} {path} -> {statusText}{durationText}{faultText}");
     }

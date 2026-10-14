@@ -20,14 +20,15 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// protected without explicit configuration.
 /// </para>
 /// <para>
-/// Enforcement is per version: the HTTP/1.1 read/write path enforces the body-size cap, the
-/// connection timeouts, and the request-body / response data rates today; HTTP/2 bounds
-/// request-body buffering through flow-control backpressure (a hard body-size cap, the connection
-/// timeouts, and the data rates are tracked follow-up work); HTTP/3's equivalents are delegated to
-/// the QUIC transport. On every version <see cref="MaxRequestBodySize"/> additionally seeds each
-/// request's parse context, so request-parse interceptors observe and adjust the same knob no
-/// matter which protocol served the request. Each property documents where it is enforced so an
-/// operator never has to guess.
+/// Enforcement is per version. Every version enforces the body-size cap, the keep-alive and
+/// request-headers timeouts, and the minimum request-body data rate: HTTP/1.1 in its read path and
+/// connection loop, HTTP/2 in its frame pump and request-body pipe, and HTTP/3 in its accept loop,
+/// request-head read and lazily read request body. Every version enforces the minimum response data
+/// rate on its response writes too (#1384). On every version <see cref="MaxRequestBodySize"/>,
+/// <see cref="MinRequestBodyDataRate"/> and <see cref="MinResponseDataRate"/> additionally seed each
+/// request's parse context, so request-parse interceptors observe and adjust the same knobs no matter
+/// which protocol served the request. Each property documents where, and with what signal, it is enforced so an operator never
+/// has to guess.
 /// </para>
 /// </remarks>
 public abstract class HttpConnectionListenerLimits
@@ -47,8 +48,13 @@ public abstract class HttpConnectionListenerLimits
     /// <see cref="Assimalign.Cohesion.Http.IHttpExchangeInterceptor"/> may raise or lower the cap
     /// per request before the body is read (the <c>Assimalign.Cohesion.Http.RequestLimits</c>
     /// package surfaces it as a typed <c>IHttpMaxRequestBodySizeFeature</c>). Enforced by the
-    /// HTTP/1.1 read path today; HTTP/2 bounds body buffering via flow-control backpressure, with
-    /// the hard cap tracked as follow-up work.
+    /// HTTP/1.1 and HTTP/3 request-body reads, where the per-request value freezes at the first body
+    /// read (both answer <c>413</c> while the response head is uncommitted; HTTP/1.1 then closes
+    /// the connection, and HTTP/3 resets a stream whose streamed response had already started with
+    /// <c>H3_REQUEST_CANCELLED</c>), and by HTTP/2, which
+    /// freezes the value when the request is dispatched, rejects a larger declared
+    /// <c>content-length</c> before reading the body, and answers a body that grows past it on
+    /// receipt with <c>413</c> (a stream reset when the response has already started).
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is negative.</exception>
     public long? MaxRequestBodySize
@@ -58,7 +64,7 @@ public abstract class HttpConnectionListenerLimits
         {
             if (value is < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "The maximum request body size must be non-negative or null (unbounded).");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.RequestBodySizeLimitInvalid);
             }
 
             _maxRequestBodySize = value;
@@ -66,11 +72,32 @@ public abstract class HttpConnectionListenerLimits
     }
 
     /// <summary>
-    /// Gets or sets how long an idle keep-alive connection is held open while waiting for the
-    /// next request to begin before the transport reclaims it. Set to
-    /// <see cref="Timeout.InfiniteTimeSpan"/> to disable the timeout. Defaults to 130 seconds.
-    /// Enforced by the HTTP/1.1 connection loop today.
+    /// Gets or sets how long an idle connection is held open while waiting for the next request to
+    /// begin before the transport reclaims it. Set to <see cref="Timeout.InfiniteTimeSpan"/> to disable
+    /// the timeout. Defaults to 130 seconds.
     /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><description><b>HTTP/1.1</b> — the connection loop waits for the first octet of each request,
+    /// the first included, under this deadline, and closes a connection that sends none without a
+    /// response.</description></item>
+    /// <item><description><b>HTTP/2</b> — the connection is idle while it carries no stream, and the
+    /// deadline runs from its acceptance (the connection preface and the client's SETTINGS arrive under
+    /// it) or from the end of its last exchange, whichever is later. Frames such as PING do not move the
+    /// deadline, and neither does a stream that never became an exchange (refused, reset as malformed,
+    /// or rejected by a request-parse interceptor). An idle connection is closed with
+    /// <c>GOAWAY(NO_ERROR)</c> (RFC 9113 §9.1); one that never sent its preface is closed without a
+    /// frame.</description></item>
+    /// <item><description><b>HTTP/3</b> — the connection is idle while no request stream is in flight, and
+    /// the deadline runs from the start of its receive loop or from the end of its last exchange,
+    /// whichever is later; a request stream whose head yields no exchange does not move it. An idle
+    /// connection is closed gracefully: <c>GOAWAY</c>, then the QUIC connection closes with
+    /// <c>H3_NO_ERROR</c> (RFC 9114 §5.2). QUIC's own idle timeout, which any packet resets, still
+    /// applies beneath it.</description></item>
+    /// </list>
+    /// Either way the connection's receive enumeration ends, so a host releases its connection
+    /// slot.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when the assigned value is not <see cref="Timeout.InfiniteTimeSpan"/> and is less than
     /// or equal to <see cref="TimeSpan.Zero"/>.
@@ -87,10 +114,23 @@ public abstract class HttpConnectionListenerLimits
 
     /// <summary>
     /// Gets or sets how long the transport waits for a request's header section to arrive in full
-    /// once the first request byte has been received, before reclaiming the connection. This is
-    /// the primary Slowloris defence. Set to <see cref="Timeout.InfiniteTimeSpan"/> to disable the
-    /// timeout. Defaults to 30 seconds. Enforced by the HTTP/1.1 connection loop today.
+    /// once the first request byte has been received. This is the primary Slowloris defence. Set to
+    /// <see cref="Timeout.InfiniteTimeSpan"/> to disable the timeout. Defaults to 30 seconds.
     /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><description><b>HTTP/1.1</b> — from the first octet of the request line to the end of the
+    /// header section; the request is answered <c>408 Request Timeout</c> and the connection
+    /// closed.</description></item>
+    /// <item><description><b>HTTP/2</b> — from the header of a HEADERS frame to END_HEADERS, for a
+    /// request head and a trailer section alike. A field block holds the whole connection until it ends
+    /// (RFC 9113 §6.10), so the connection is closed with <c>GOAWAY(ENHANCE_YOUR_CALM)</c>
+    /// (RFC 9113 §10.5); requests already received in full stay answerable.</description></item>
+    /// <item><description><b>HTTP/3</b> — from a request stream's acceptance until its HEADERS frame has
+    /// arrived and decoded; the stream alone is reset with <c>H3_REQUEST_REJECTED</c> (RFC 9114
+    /// §4.1.1), so the client may retry it, and the connection keeps serving.</description></item>
+    /// </list>
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when the assigned value is not <see cref="Timeout.InfiniteTimeSpan"/> and is less than
     /// or equal to <see cref="TimeSpan.Zero"/>.
@@ -109,16 +149,46 @@ public abstract class HttpConnectionListenerLimits
     /// Gets or sets the minimum rate, in octets per second (with a grace period), at which the
     /// request body must be received once the grace period elapses, or <see langword="null"/> to
     /// disable the check. A peer that trickles its body below this rate is reclaimed: the read
-    /// fails with <c>408 Request Timeout</c> (RFC 9110 §15.5.9) semantics. Defaults to 240 octets
-    /// per second over a 5-second grace period (Kestrel's <c>MinRequestBodyDataRate</c> parity).
-    /// Enforced by the HTTP/1.1 streaming request-body read today; HTTP/2 paces the body through
-    /// flow-control backpressure and HTTP/3 through QUIC flow control, so this rate is a
-    /// tracked follow-up on those versions.
+    /// fails, and the exchange is answered <c>408 Request Timeout</c> (RFC 9110 §15.5.9) when its
+    /// response has not started. Defaults to 240 octets per second over a 5-second grace period
+    /// (Kestrel's <c>MinRequestBodyDataRate</c> parity).
     /// </summary>
     /// <remarks>
-    /// The rate is an <em>average</em> measured only over time the transport actually spent waiting
-    /// for the peer, so a slow application consuming a healthy body never trips it; see
-    /// <see cref="HttpMinDataRate"/>.
+    /// <para>
+    /// The rate is an <em>average</em> measured from the first read, only over time the transport
+    /// actually spent waiting for the peer, so a slow application consuming a healthy body never trips
+    /// it; see <see cref="HttpMinDataRate"/>. A CONNECT tunnel's octets are not a request body and are
+    /// never held to it.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description><b>HTTP/1.1</b> — the streaming request-body read; the connection closes after
+    /// the exchange.</description></item>
+    /// <item><description><b>HTTP/2</b> — the stream's request-body read. The part of a wait during which
+    /// the connection-level receive window cannot carry a full frame is not charged, since other streams
+    /// may then be what holds the peer back, but each body is excused for at most the grace period in
+    /// total, so a peer cannot switch the rate off by pinning the window with one unread stream. Before
+    /// the response starts the transport answers <c>408</c> and resets the stream with
+    /// <c>NO_ERROR</c> (RFC 9113 §8.1); after, it resets it with <c>CANCEL</c>. The connection keeps
+    /// serving its other streams.</description></item>
+    /// <item><description><b>HTTP/3</b> — the lazily read request body. The request stream is stopped
+    /// with <c>STOP_SENDING(H3_NO_ERROR)</c> (RFC 9114 §4.1) and the exchange answered <c>408</c> when
+    /// its response head is uncommitted, or the stream reset with <c>H3_REQUEST_CANCELLED</c> when a
+    /// streamed response head is already on the wire.</description></item>
+    /// </list>
+    /// <para>
+    /// This is the listener-wide default, seeded into each request's parse context
+    /// (<see cref="Assimalign.Cohesion.Http.HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/>),
+    /// where a registered <see cref="Assimalign.Cohesion.Http.IHttpExchangeInterceptor"/>, middleware or an
+    /// endpoint may lower, raise or disable it for one request until the first read of its body freezes it
+    /// on every protocol (the <c>Assimalign.Cohesion.Http.RequestLimits</c> package surfaces it as a typed
+    /// <c>IHttpMinRequestBodyDataRateFeature</c>, #1383). A request body that legitimately idles — a
+    /// client-streaming or duplex call, a long-lived upload that sends a message every few seconds —
+    /// otherwise fails once an idle gap outlasts what is left of its allowance, about the grace period plus
+    /// the octets received so far over the rate (5 seconds plus 1 second per 240 octets by default), so the
+    /// endpoint that serves it disables the rate for its own requests, and every other request on the
+    /// listener keeps the slow-body defence. On HTTP/2 and HTTP/3 the rate applies from this release on;
+    /// earlier releases did not enforce it there.
+    /// </para>
     /// </remarks>
     public HttpMinDataRate? MinRequestBodyDataRate
     {
@@ -127,18 +197,60 @@ public abstract class HttpConnectionListenerLimits
     }
 
     /// <summary>
-    /// Gets or sets the minimum rate, in octets per second (with a grace period), at which the
-    /// response body must be written to the peer once the grace period elapses, or
-    /// <see langword="null"/> to disable the check. A reader that fails to drain the response below
-    /// this rate stops blocking the server: the write fails and the exchange is aborted. Defaults to
-    /// 240 octets per second over a 5-second grace period (Kestrel's <c>MinResponseDataRate</c>
-    /// parity). Enforced by the HTTP/1.1 streaming response write path today (the incremental
-    /// chunked sink); the buffered response path and the HTTP/2 / HTTP/3 send paths do not enforce
-    /// it yet.
+    /// Gets or sets the minimum rate, in octets per second (with a grace period), at which the peer
+    /// must accept the response once the grace period elapses, or <see langword="null"/> to disable the
+    /// check. A peer that withholds flow-control credit or reads below this rate stops holding the
+    /// response writer: the transport releases the exchange's slot with its version's signal, the
+    /// exchange's <c>RequestCancelled</c> fires, and the stalled write throws an
+    /// <see cref="OperationCanceledException"/>. Defaults to 240 octets per second over a 5-second grace
+    /// period (Kestrel's <c>MinResponseDataRate</c> parity). Enforced on every version, for the buffered
+    /// and the streamed response alike (#1384).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// As with <see cref="MinRequestBodyDataRate"/>, the rate is an average measured only over time
-    /// spent waiting on the peer to accept bytes; see <see cref="HttpMinDataRate"/>.
+    /// spent waiting on the peer to accept octets; see <see cref="HttpMinDataRate"/>. The octets a write
+    /// hands to the transport count toward the allowance as they are handed over, so a reader draining a
+    /// large response at a healthy pace is never mistaken for a slow one. Every write is handed over in
+    /// pieces of at most 16 KB (on HTTP/2, DATA frames capped at 16 KB whatever frame size the peer
+    /// advertises), buffered and streamed alike, so a peer that reads none of it is reclaimed within the
+    /// grace period plus, over the rate, the octets the transport buffers and one piece (about 73 seconds
+    /// by default for the piece), not plus the whole write.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description><b>HTTP/1.1</b> — every write and flush of the head, the body and the chunked
+    /// terminator. HTTP/1.1 has no reset finer than the connection, so the connection is closed.</description></item>
+    /// <item><description><b>HTTP/2</b> — the response's wait for send-window credit, and every write to
+    /// the connection's output, whoever makes it: the response frames of every stream, and the
+    /// connection's own control frames and answers, measured together against this rate over the whole
+    /// output. A stream whose own window the peer leaves empty is reset with <c>RST_STREAM(CANCEL)</c>,
+    /// and the connection keeps serving its other streams; when the connection-level window is empty and
+    /// the peer has not credited it for a grace period, the whole connection is stalled, so it ends with
+    /// <c>GOAWAY(ENHANCE_YOUR_CALM)</c>; and when the connection's output stops draining it is
+    /// aborted.</description></item>
+    /// <item><description><b>HTTP/3</b> — every write and flush of the response's frames to the request
+    /// stream, which QUIC stream and connection credit (<c>MAX_STREAM_DATA</c>, <c>MAX_DATA</c>) pace.
+    /// The request stream is reset with <c>H3_REQUEST_CANCELLED</c>, and the connection keeps serving its
+    /// other streams.</description></item>
+    /// </list>
+    /// <para>
+    /// This is the listener-wide default, seeded into each request's parse context
+    /// (<see cref="Assimalign.Cohesion.Http.HttpExchangeInterceptorRequestContext.MinResponseDataRate"/>),
+    /// where a request-parse interceptor, middleware or an endpoint may lower, raise or disable it until
+    /// the response's first write freezes it (the <c>Assimalign.Cohesion.Http.RequestLimits</c> package
+    /// surfaces it as a typed <c>IHttpMinResponseDataRateFeature</c>). On HTTP/2 the request's rate bounds
+    /// its response's wait for flow-control credit; the connection's output is shared, so it stays held to
+    /// this listener-wide rate. A tunnel (an accepted HTTP/1.1 upgrade or <c>CONNECT</c>, or an extended
+    /// <c>CONNECT</c>) is not a response body and is never held to it, and neither are interim
+    /// (<c>1xx</c>) responses, except that on HTTP/2 their writes to the shared output are, and on HTTP/3
+    /// the automatic <c>100 Continue</c> a request body's first read sends is, under the request's rate as
+    /// it stands then, without freezing it.
+    /// </para>
+    /// <para>
+    /// On HTTP/2, HTTP/3 and the HTTP/1.1 buffered path the rate applies from this release on; earlier
+    /// releases enforced it on the HTTP/1.1 streaming path only, where a reader below it failed the write
+    /// with an <see cref="System.IO.IOException"/> instead.
+    /// </para>
     /// </remarks>
     public HttpMinDataRate? MinResponseDataRate
     {
@@ -155,7 +267,7 @@ public abstract class HttpConnectionListenerLimits
 
         if (value <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(value), value, "The timeout must be positive or Timeout.InfiniteTimeSpan.");
+            throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.TimeoutInvalid);
         }
     }
 }

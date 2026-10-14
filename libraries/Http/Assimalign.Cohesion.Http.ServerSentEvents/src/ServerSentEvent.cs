@@ -17,9 +17,12 @@ namespace Assimalign.Cohesion.Http;
 /// them to the wire format.
 /// </para>
 /// <para>
-/// <see cref="EventType"/>, <see cref="Id"/>, and <see cref="Comment"/> are
-/// single-line field values and MUST NOT contain a line break — the wire format
-/// terminates a field at the first newline. <see cref="Data"/> MAY contain
+/// <see cref="EventType"/> and <see cref="Comment"/> are checked single-line
+/// <see cref="ServerSentEventFieldValue"/> values; <see cref="Id"/> uses
+/// <see cref="ServerSentEventId"/>. CR and LF throw <see cref="ArgumentException"/>
+/// during implicit conversion, before assignment. Only ids also reject NUL;
+/// event types and comments preserve it. Null and default values omit the
+/// field; an empty string remains a present value. <see cref="Data"/> MAY contain
 /// newlines: each line is emitted as its own <c>data:</c> field and the client
 /// rejoins them with <c>\n</c>.
 /// </para>
@@ -41,17 +44,17 @@ public readonly struct ServerSentEvent
     /// <summary>
     /// Gets the event type (the <c>event</c> field). When <see langword="null"/>
     /// or empty the client dispatches the message as a generic <c>message</c>
-    /// event. Must be single-line.
+    /// event. CR and LF are refused by the value type; NUL is allowed.
     /// </summary>
-    public string? EventType { get; init; }
+    public ServerSentEventFieldValue? EventType { get; init; }
 
     /// <summary>
     /// Gets the last-event-id (the <c>id</c> field). The client echoes the most
     /// recent id back in the <c>Last-Event-ID</c> request header on reconnect.
-    /// Must be single-line. An empty (non-null) value resets the client's stored
+    /// CR, LF, and NUL are refused by the value type. An empty value resets the client's stored
     /// id.
     /// </summary>
-    public string? Id { get; init; }
+    public ServerSentEventId? Id { get; init; }
 
     /// <summary>
     /// Gets the event data (the <c>data</c> field). May contain newlines; each
@@ -69,9 +72,9 @@ public readonly struct ServerSentEvent
     /// <summary>
     /// Gets an optional comment (a line beginning with <c>:</c>). Comments are
     /// ignored by clients and are the mechanism used for keep-alive heartbeats.
-    /// Must be single-line.
+    /// CR and LF are refused by the value type; NUL is allowed.
     /// </summary>
-    public string? Comment { get; init; }
+    public ServerSentEventFieldValue? Comment { get; init; }
 
     /// <summary>
     /// Creates a generic <c>message</c> event carrying <paramref name="data"/>.
@@ -87,5 +90,6 @@ public readonly struct ServerSentEvent
     /// </summary>
     /// <param name="comment">The comment text. Defaults to <c>keep-alive</c>.</param>
     /// <returns>An event with only its <see cref="Comment"/> set.</returns>
+    /// <exception cref="ArgumentException"><paramref name="comment"/> contains CR or LF.</exception>
     public static ServerSentEvent KeepAlive(string comment = "keep-alive") => new() { Comment = comment };
 }

@@ -11,7 +11,7 @@ Pick the SDK that matches what you're building:
 | --- | --- |
 | `Assimalign.Cohesion.Sdk`          | Cohesion library, or an explicitly configured executable with no resource-area behavior. |
 | `Assimalign.Cohesion.Sdk.ApplicationModel` | Resource manifest, generated resource surface, and image tooling for area-SDK authors. |
-| `Assimalign.Cohesion.Sdk.Web`      | HTTP / web-surface application. |
+| `Assimalign.Cohesion.Sdk.Web`      | HTTP / web-surface application. [Design and NativeAOT diagnostics](Assimalign.Cohesion.Sdk.Web/Tasks/docs/DESIGN.md). |
 | `Assimalign.Cohesion.Sdk.Database` | Database-resident application (migrations, seeded schemas, etc.). |
 | `Assimalign.Cohesion.Sdk.Gateway`  | Application gateway generated from resource manifests and contributed providers. |
 
@@ -197,7 +197,7 @@ areas' frameworks.
 `Assimalign.Cohesion.App` is the hosting kernel, not the general library catalog.
 Its single root list names Hosting and its Health, Resources, and Telemetry siblings;
 the CommandLine, EnvironmentVariables, FileSystem, and Json configuration providers;
-Logging.Console; OpenTelemetry; DependencyInjection; FileSystem.Physical; and
+Logging.Console and Logging.EventSource; OpenTelemetry; DependencyInjection; FileSystem.Physical; and
 Connections. Generated resource accessors and every area hosting module depend on
 Connections, so the shared kernel carries it once. The
 pack manifest is derived from their transitive Assimalign project-reference closure

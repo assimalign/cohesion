@@ -111,6 +111,51 @@ public class HttpHeaderKeyTests
         value.Value.ShouldBe("max-age=0");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - HeaderKey: Should expose the browser security-policy header names")]
+    [InlineData("Content-Security-Policy")]
+    [InlineData("Content-Security-Policy-Report-Only")]
+    [InlineData("Cross-Origin-Embedder-Policy")]
+    [InlineData("Cross-Origin-Opener-Policy")]
+    [InlineData("Cross-Origin-Resource-Policy")]
+    [InlineData("Permissions-Policy")]
+    [InlineData("Referrer-Policy")]
+    [InlineData("X-Content-Type-Options")]
+    [InlineData("X-Frame-Options")]
+    public void SecurityPolicyKeys_Value_ShouldMapToCanonicalNames(string expected)
+    {
+        // Arrange
+        var keysByName = new Dictionary<string, HttpHeaderKey>
+        {
+            ["Content-Security-Policy"] = HttpHeaderKey.ContentSecurityPolicy,
+            ["Content-Security-Policy-Report-Only"] = HttpHeaderKey.ContentSecurityPolicyReportOnly,
+            ["Cross-Origin-Embedder-Policy"] = HttpHeaderKey.CrossOriginEmbedderPolicy,
+            ["Cross-Origin-Opener-Policy"] = HttpHeaderKey.CrossOriginOpenerPolicy,
+            ["Cross-Origin-Resource-Policy"] = HttpHeaderKey.CrossOriginResourcePolicy,
+            ["Permissions-Policy"] = HttpHeaderKey.PermissionsPolicy,
+            ["Referrer-Policy"] = HttpHeaderKey.ReferrerPolicy,
+            ["X-Content-Type-Options"] = HttpHeaderKey.XContentTypeOptions,
+            ["X-Frame-Options"] = HttpHeaderKey.XFrameOptions,
+        };
+
+        // Act & Assert
+        keysByName[expected].Value.ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HeaderKey: Referrer-Policy should stay distinct from the misspelled Referer field")]
+    public void ReferrerPolicy_RoundTripThroughHeaderCollection_ShouldNotCollideWithReferer()
+    {
+        // Arrange
+        IHttpHeaderCollection headers = new HttpHeaderCollection();
+        headers.Add(HttpHeaderKey.Referer, "https://example.com/page");
+        headers.Add(HttpHeaderKey.ReferrerPolicy, "no-referrer");
+
+        // Act & Assert — the wire name (lowercase) resolves the canonical key.
+        headers.Count.ShouldBe(2);
+        headers.TryGetValue("referrer-policy", out HttpHeaderValue value).ShouldBeTrue();
+        value.Value.ShouldBe("no-referrer");
+        headers[HttpHeaderKey.Referer].Value.ShouldBe("https://example.com/page");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http] - HeaderKey: Should expose the forwarding header names")]
     [InlineData("Forwarded")]
     [InlineData("X-Forwarded-For")]

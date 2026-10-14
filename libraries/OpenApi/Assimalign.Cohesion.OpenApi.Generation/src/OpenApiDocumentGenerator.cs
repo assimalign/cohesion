@@ -50,7 +50,8 @@ public static class OpenApiDocumentGenerator
 
         foreach (var schema in input.Schemas)
         {
-            components.Schemas[schema.Name] = BuildSchema(schema);
+            // A producer that already holds the complete schema passes it through as it is.
+            components.Schemas[schema.Name] = schema.Schema ?? BuildSchema(schema);
         }
 
         foreach (var scheme in input.SecuritySchemes)
@@ -226,7 +227,11 @@ public static class OpenApiDocumentGenerator
             Deprecated = metadata.Deprecated
         };
 
-        if (metadata.SchemaType is { } schemaType)
+        if (metadata.Schema is not null)
+        {
+            parameter.Schema = metadata.Schema;
+        }
+        else if (metadata.SchemaType is { } schemaType)
         {
             parameter.Schema = new OpenApiSchema { Type = schemaType, Format = metadata.Format };
         }
@@ -242,7 +247,7 @@ public static class OpenApiDocumentGenerator
             Required = metadata.Required
         };
 
-        body.Content[metadata.ContentType] = BuildMediaType(metadata.SchemaReference);
+        body.Content[metadata.ContentType] = BuildMediaType(metadata.Schema, metadata.SchemaReference);
         return body;
     }
 
@@ -252,16 +257,21 @@ public static class OpenApiDocumentGenerator
 
         if (metadata.ContentType is not null)
         {
-            response.Content[metadata.ContentType] = BuildMediaType(metadata.SchemaReference);
+            response.Content[metadata.ContentType] = BuildMediaType(metadata.Schema, metadata.SchemaReference);
         }
 
         return response;
     }
 
-    private static OpenApiMediaType BuildMediaType(string? schemaReference)
+    private static OpenApiMediaType BuildMediaType(OpenApiSchema? schema, string? schemaReference)
     {
         var media = new OpenApiMediaType();
-        if (schemaReference is not null)
+        if (schema is not null)
+        {
+            // A complete schema supplied by the producer wins over a component reference.
+            media.Schema = schema;
+        }
+        else if (schemaReference is not null)
         {
             media.Schema = new OpenApiSchema { Reference = new OpenApiReference { Ref = schemaReference } };
         }

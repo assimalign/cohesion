@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Http;
 /// <remarks>
 /// <para>
 /// The feature is made available by registering
-/// <see cref="HttpInterimResponses.CreateInterceptor"/> on the transport's response-interceptor list
+/// <see cref="HttpInterimResponseInterceptor.Create"/> on the transport's response-interceptor list
 /// (<c>HttpConnectionListenerOptions.Interceptors</c>), the same opt-in way response
 /// streaming and protocol upgrade plug in. Its interceptor wraps the transport's exchange control
 /// (<see cref="HttpExchangeInterceptorResponseContext.Control"/>) in this typed
@@ -67,6 +67,13 @@ public interface IHttpInterimResponseFeature : IHttpFeature
     /// </exception>
     /// <exception cref="System.InvalidOperationException">
     /// The final response has already started, so an interim response can no longer precede it.
+    /// </exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: a field name in
+    /// <paramref name="headers"/> is not a token, or a value holds a control character other than HTAB —
+    /// CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The transport checks the interim head before it
+    /// writes any of it, so nothing was written and the final response has not started; the exchange can
+    /// still be answered, and another interim response can still be sent.
     /// </exception>
     ValueTask SendInterimResponseAsync(
         HttpStatusCode statusCode,

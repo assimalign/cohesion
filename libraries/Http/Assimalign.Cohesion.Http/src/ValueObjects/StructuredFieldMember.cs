@@ -46,13 +46,13 @@ public readonly struct StructuredFieldMember : IEquatable<StructuredFieldMember>
     /// <returns>The item.</returns>
     /// <exception cref="InvalidOperationException">This member is an inner list.</exception>
     public StructuredFieldItem Item
-        => !IsInnerList ? _item : throw new InvalidOperationException("Structured field member is an inner list, not an item.");
+        => !IsInnerList ? _item : throw new InvalidOperationException(ErrorMessages.StructuredFieldItemRequired);
 
     /// <summary>Gets the wrapped inner list.</summary>
     /// <returns>The inner list.</returns>
     /// <exception cref="InvalidOperationException">This member is a single item.</exception>
     public StructuredFieldInnerList InnerList
-        => IsInnerList ? _innerList : throw new InvalidOperationException("Structured field member is an item, not an inner list.");
+        => IsInnerList ? _innerList : throw new InvalidOperationException(ErrorMessages.StructuredFieldInnerListRequired);
 
     /// <summary>
     /// Gets the parameters attached to this member — the item's parameters or the inner

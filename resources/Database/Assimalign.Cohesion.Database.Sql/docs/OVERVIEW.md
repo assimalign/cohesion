@@ -82,3 +82,5 @@ IDatabaseEngine orders = application.Context.GetEngine("orders");
 The `Listen` helper ships in `Database.Sql.Tcp`. Omit `AddServer` for embedded
 SQL. `SqlDatabaseEngine.Create(options)` also remains available for standalone use.
 See [DESIGN.md](DESIGN.md) for the execution model and its decisions.
+
+`SqlDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.

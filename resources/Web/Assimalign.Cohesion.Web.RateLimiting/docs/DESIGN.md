@@ -13,8 +13,7 @@ client-side limiter (`Assimalign.Cohesion.Resilience.RateLimiting`).
 
 The package owns: two options-carried hooks, one options object, one sealed policy type, one sealed
 metadata carrier, a static partition-key helper, a typed feature, and one `extension(IWebApplicationPipelineBuilder)`
-verb. Everything request-time is an `AcquireAsync`/`AttemptAcquire` against a prebuilt limiter and a
-status write.
+verb. Everything request-time is an `AcquireAsync` against a prebuilt limiter and a status write.
 
 ## The policy model — a global limiter plus named policies, additive
 
@@ -22,22 +21,33 @@ status write.
 `RateLimitingPolicy` is a `PartitionedRateLimiter<IHttpContext>` plus a permit count — built once, at
 builder time.
 
-- **The global limiter is the must-have.** It is applied to **every** request and acquired **up-front**,
-  before any downstream work, with the limiter's **full queueing semantics** (`AcquireAsync`). It is the
-  primary flood shield.
+- **The global limiter is the must-have.** It is applied to **every** request that reaches the
+  middleware and acquired **up-front**, before any downstream work, with the limiter's **full queueing
+  semantics** (`AcquireAsync`). It is the primary flood shield, and it needs no endpoint, so it works
+  wherever the middleware is registered.
 - **Named policies attach per-endpoint** through `RateLimitingMetadata` in the routing metadata bag. A
-  per-endpoint policy is evaluated **in addition to** the global limiter — **both must grant a lease**.
+  per-endpoint policy is evaluated **in addition to** the global limiter — **both must grant a lease** —
+  and is acquired the same way, asynchronously and with queueing.
 
 ### Why additive, not replace
 
 `Web.RequestTimeouts` (the sibling per-endpoint-metadata feature) has an endpoint policy **replace** the
-global default. Rate limiting deliberately does **not**, because the two features acquire differently in
-time. A timeout arms a timer that can be re-armed mid-flight; a rate limiter **spends a permit** at
-acquisition. The global lease is acquired **before routing identifies the endpoint** (see the router
-constraint below), so it cannot be retroactively skipped — a "replace" model would already have consumed
-a global permit by the time the endpoint policy was known. The additive model is also faithful to ASP.NET
-Core's `GlobalLimiter`, which is likewise combined with (not replaced by) endpoint limiters.
-`RateLimitingMetadata.Disabled` removes only the **per-endpoint** gate; the global limiter still applies.
+global default. Rate limiting deliberately does **not**, because a rate limiter **spends a permit** at
+acquisition, while a timeout only arms a timer:
+
+- **The global limiter is the flood shield.** If endpoint metadata could replace it, one endpoint with a
+  loose (or misconfigured) policy would carve a hole in the shield for everything routed to it.
+- **The global limiter must not change meaning with its position.** An application that uses only the
+  global limiter may keep the middleware ahead of `UseRouting`, where it runs before any endpoint is
+  known and cannot consult endpoint metadata. Additive semantics are the only ones that hold in both
+  positions.
+- **Parity.** ASP.NET Core's `GlobalLimiter` is likewise combined with, not replaced by, endpoint
+  limiters.
+
+Before #1054 additivity was also forced: routing was terminal, so the global lease was always acquired
+before the endpoint was known. Routing now publishes the endpoint first, so a replace model would be
+implementable; it is rejected for the reasons above. `RateLimitingMetadata.Disabled` removes only the
+**per-endpoint** gate; the global limiter still applies.
 
 ## Partition keys — trust composition and BCP 38
 
@@ -58,47 +68,78 @@ unauthenticated header) can mint unlimited partitions and defeat the limit entir
 safe because it goes through the trust-gated effective identity, not the raw header; `Header` is
 documented as gateway-trusted only.
 
-## Per-endpoint mechanics — the single-middleware router constraint
+## Per-endpoint mechanics — reading the published endpoint
 
-Cohesion's router **matches and dispatches in one middleware** (`RouteAsync`/`UseRouting` calls
-`SetRouteMatch` then invokes the handler in the same call). There is no pipeline position "between match
-and handler" for a separate middleware to gate from — the same constraint `Web.RequestTimeouts` documents.
-The seam is the router's **route-match publication**: it installs `IRouteMatchFeature` on
-`IHttpContext.Features` before running the handler.
+`UseRouting` selects the endpoint and calls `next`; the pipeline's terminal runs it (#1054). A match is
+published as an `IRouteMatchFeature` that every middleware registered after `UseRouting` can read. The
+rate-limiting middleware sits between the two. It acquires the global lease first, then the endpoint's
+own lease, then acknowledges the endpoint and calls `next`; a rejection at either gate answers the
+request and stops the pipeline there, so the endpoint does not run.
 
-So the middleware hands downstream a **decorated context** whose feature collection
-(`RateLimitingFeatureCollection`) observes that publication. When the matched endpoint carries
-`RateLimitingMetadata`, the decorator resolves the policy and gates the request **at that moment, before
-the handler runs** — exactly mirroring the `Web.RequestTimeouts` decorator that re-arms its timer there.
+```mermaid
+flowchart TD
+    Routing["UseRouting: publish the endpoint"] --> Global["Global limiter: AcquireAsync"]
+    Global -->|"rejected"| Reject["429 and Retry-After; the pipeline stops"]
+    Global -->|"admitted"| Endpoint["Endpoint policy from RateLimitingMetadata: AcquireAsync"]
+    Endpoint -->|"rejected"| Reject
+    Endpoint -->|"admitted"| Ack["Acknowledge UseRateLimiting; call next"]
+    Ack --> Terminal["Pipeline terminal runs the endpoint"]
+```
 
-Two consequences follow from the seam being **synchronous** (`Set` is `void`):
+- **The endpoint's policy** is the published match's `RateLimitingMetadata`, read last-wins
+  (`GetMetadata<RateLimitingMetadata>()`), so an endpoint-level declaration overrides a group-level one. A
+  named policy is resolved against `options.AddPolicy`; an unknown name throws
+  `InvalidOperationException`, a configuration error surfaced by the first request that reaches it.
+- **Declared with convention verbs (#1055).** `RequireRateLimiting(name)`, `RequireRateLimiting(policy)`
+  and `DisableRateLimiting()` are generic extension members over routing's `IRouterConventionBuilder`, so
+  one verb serves a mapped route and a route group and returns the receiver's own builder type. Each
+  appends a `RateLimitingMetadata`; routing composes it when the route table is built, outer group first,
+  so the last-wins read above resolves the most specific declaration regardless of call order.
+- **Asynchronous, with queueing.** The endpoint lease is acquired exactly like the global one:
+  `AcquireAsync(context, permits, context.RequestCancelled)`. A queueing limiter holds the request until a
+  permit frees up. A client that goes away while queued stops the wait: the `OperationCanceledException`
+  propagates (the server treats it as a clean drain) and the endpoint never runs.
+- **A rejection is an ordinary short-circuit.** The middleware writes the rejection and returns without
+  calling `next`. No exception carries it, so no catch-all middleware can turn it into a 500.
+- **CORS preflight.** Routing publishes the candidate endpoint of a CORS preflight with `IsPreflight`
+  set; the candidate never runs for the preflight, which carries no credentials. The middleware neither
+  applies the candidate's policy nor acknowledges it, so a preflight never spends an endpoint permit. The
+  global limiter counts it like any other request.
 
-1. **The per-endpoint acquire is synchronous and non-queueing** (`AttemptAcquire`). Queueing (an
-   `await`) cannot happen in a synchronous `Set`, so it stays a global-limiter concern; an endpoint policy
-   admits or rejects immediately. This is an honest limitation of the single-middleware router, not a
-   design preference.
-2. **A per-endpoint rejection is raised as an internal signal** (`RateLimiterRejectedSignal`) from the
-   synchronous publication, carrying the rejected lease. The middleware catches it — the signal never
-   escapes to an outer exception boundary — and writes the rejection **before the handler runs**. This is
-   the same "catch and translate at the outer middleware" shape `Web.RequestTimeouts` uses for its
-   expiry `OperationCanceledException`. Because it is control flow via an exception, it is scoped to the
-   lower-volume per-endpoint path; the high-volume flood path is the global limiter, which short-circuits
-   cleanly (no throw).
+### Fail closed when the middleware is missing or misordered
 
-The endpoint gate applies **at most once per exchange** (a re-published match does not acquire a second
-lease).
+Before #1054 routing was terminal, so the middleware had to sit **ahead** of `UseRouting` and observe the
+router installing its match through a feature-collection decorator. That seam was synchronous (`Set` is
+`void`), which forced a non-queueing `AttemptAcquire` on the endpoint gate and an internal exception
+signal to carry a rejection back to the middleware. Both are gone.
 
-**Ordering constraint that follows:** the signal travels the pipeline segment between the router and
-`UseRateLimiting`, so no catch-all middleware may sit between them — in particular, the `Web.ErrorHandling`
-exception boundary belongs **outside** `UseRateLimiting` (its usual outermost position), never between
-`UseRateLimiting` and `UseRouting`, or it would swallow the signal and render a rejection as a 500.
+The old position is now the hazard. Registered ahead of `UseRouting`, the middleware sees no endpoint, so
+endpoint policies would silently stop applying. `RateLimitingMetadata` therefore implements
+`IRouteMiddlewareMetadata`: `RequiredMiddleware` is `UseRateLimiting`, or `null` for `Disabled`. The
+middleware acknowledges every non-preflight endpoint it processes
+(`context.AcknowledgeEndpointMiddleware("UseRateLimiting")`), whether or not it found a policy, because
+routing checks every metadata item that names the middleware, including a group-level policy an
+endpoint-level `Disabled` overrides. When routing dispatches an endpoint whose metadata names
+`UseRateLimiting` and the request was never acknowledged, it throws `InvalidOperationException` naming the
+endpoint and the middleware instead of running the endpoint without its limit. The global limiter needs no
+endpoint and keeps working in either position.
 
 ## Queueing semantics
 
 `QueueLimit`/`QueueProcessingOrder` pass through the BCL limiter options unchanged — the package configures
-nothing about queueing itself. The global limiter, acquired with `AcquireAsync`, **honors queueing fully**:
-a request waits for a permit up to the queue limit. The per-endpoint gate uses `AttemptAcquire` and so does
-not queue, per the router constraint above.
+nothing about queueing itself. Both gates acquire with `AcquireAsync` and **honor queueing fully**: a
+request waits for a permit up to the queue limit, and stops waiting when the request is cancelled. The
+global lease is acquired first and held while the request waits in an endpoint policy's queue, so a queued
+request still counts against a global concurrency limiter.
+
+## Ordering
+
+`UseForwardedHeaders` → `UseRouting` → `UseRateLimiting` → … → endpoint.
+
+- **After `UseForwardedHeaders`**, so `RateLimitPartitionKeys.ClientAddress` keys on the effective client.
+- **After `UseRouting`**, so the endpoint and its `RateLimitingMetadata` are published when the middleware
+  runs. Registered ahead of `UseRouting`, the global limiter still applies to every request, but an
+  endpoint whose metadata names a policy fails at dispatch (see "Fail closed" above).
 
 ## Lifetime and disposal posture
 
@@ -121,38 +162,60 @@ invoked **after** the status and header are set, so it observes and may override
 default is **bodyless**, which composes with the status-code-pages middleware (#881) that can upgrade the
 bare 429. A rejection on an **already-committed response head** (detected via the response-streaming
 feature) cannot rewrite the status, so the exchange is aborted at the protocol layer instead — the same
-defensive path `Web.RequestTimeouts` takes. In normal use this never trips, because both gates precede the
-handler.
+defensive path `Web.RequestTimeouts` takes. In normal use this never trips, because both gates run before
+`next`; only a middleware registered ahead of rate limiting could have committed the head.
 
-## Telemetry — the observation hook, not OpenTelemetry
+## Diagnostics
 
-The issue asked for lease acquired/rejected/queued counters wired through Cohesion OpenTelemetry/Logging at
-composition time. That is **re-scoped**: a feature package cannot reach a hosting-layer OTel/Logging seam
-without referencing `Web.Hosting`, which `COHRES001` forbids. Instead the package offers a **lightweight,
-dependency-free observation hook** — `RateLimitingOptions.OnDecision`, invoked with an immutable
-`RateLimitingDecision` (policy name, admitted/rejected, retry-after) for each limiter decision. Wiring that
-hook to a Cohesion OTel/metrics seam at hosting-composition time is a recorded follow-up candidate. "Queued"
-is not surfaced separately: the BCL does not expose a per-lease queued signal cleanly, and the
-admitted/rejected decision is what the hook reports.
+The internal `RateLimitingEventSource` uses the assembly name
+`Assimalign.Cohesion.Web.RateLimiting`. It closes the operator-diagnostics follow-up from #783 without a
+logging or hosting dependency. Enable it by name with `dotnet-trace` or `dotnet-counters`.
+
+| Id | Event | Level | Payload |
+|---|---|---|---|
+| 1 | `RequestRejected` | Verbose | `gate`, `policyName`, `retryAfterSeconds:double`, `routeTemplate`, `requestId` |
+| 2 | `RejectionAborted` | Warning | `gate`, `policyName`, `requestId`, `suppressedCount:int` |
+
+`gate` is `global` or `endpoint`, including for an inline endpoint policy with no name. An unnamed policy
+has an empty `policyName`; an absent retry hint is `-1`. The request id comes from
+`IWebRequestIdFeature`, never ambient activity. The configured route template and request id are read only
+inside `IsEnabled`. No partition key, request path, header value, identity, or response body is written.
+`RejectionAborted` includes `requestId` in addition to the scope's original event table, satisfying
+#1404's per-request correlation requirement; it fires before cancelling an already-committed response.
+It is throttled to one event per second across the provider, and the next report carries the number
+suppressed since the previous report (saturating at `int.MaxValue`).
+
+The lazily published `rejected-requests` `PollingCounter` is an exact total. The single failed-acquisition
+branch increments it once, before the application's observation or rejection hooks, even when no listener
+is attached or the abort warning is suppressed. There is no admission counter or per-request success
+event. Diagnostics are additive against `10.0.0-preview.1`. Under program decision 15, the new
+entries are a diagnostic behavior break for applications forwarding the Web provider prefix into
+configured sinks; no public API or rejection status/body behavior changes.
+
+`RateLimitingOptions.OnDecision` remains the dependency-free application hook, invoked with an immutable
+`RateLimitingDecision` (policy name, admitted/rejected, retry-after) for each limiter decision.
+OpenTelemetry instruments remain #317's follow-up. "Queued" is not surfaced separately: the BCL does not
+expose a per-lease queued signal cleanly.
 
 ## AOT posture
 
 Options resolve to prebuilt limiters and captured delegates at registration; request-time work is an
-`AcquireAsync`/`AttemptAcquire`, a metadata read, and a header set. No reflection, no configuration
+`AcquireAsync` per gate, a metadata read, and a header set. No reflection, no configuration
 binding, no service location, no runtime code generation. The partition-key selectors are plain delegates.
 The BCL engine is AOT-safe.
+The source uses primitive event payloads without reflection; a NativeAOT consumer enables event delivery
+with `EventSourceSupport=true`. Limiter behavior and exact rejection accounting do not depend on delivery.
 
 ## Non-goals
 
 - **No limiter algorithm.** Cohesion never reimplements a token bucket or window; the BCL engine is the
   only algorithm source.
 - **No hosting integration.** The package must not (and cannot, per `COHRES001`) reference `Web.Hosting`.
-  Pipeline placement is the application's registration-order responsibility, and OTel/metrics wiring is a
+  Pipeline placement is the application's registration-order responsibility (routing's fail-closed check
+  catches a misplaced middleware for endpoints with a policy), and OTel/metrics wiring is a
   hosting-composition follow-up.
 - **No client-side limiter.** Outbound/execution-side rate limiting is `Resilience.RateLimiting` under
   epic #318; graduating it to the `UseRateLimiter` builder-extension model is explicitly out of scope here.
-- **No queueing on the per-endpoint gate.** The synchronous route-match seam cannot await; queueing is a
-  global-limiter capability.
 - **No replace-the-global endpoint model.** Endpoint policies are additive to the global limiter (see
   above).
 
@@ -167,14 +230,40 @@ The BCL engine is AOT-safe.
 ## Testing
 
 `tests/RateLimitingMiddlewareTests.cs` drives the middleware through its public verb over a capturing
-pipeline builder and an `IHttpContext` double (`tests/TestObjects/`), and
-`tests/RateLimitingEndToEndTests.cs` drives it over the in-memory `WebApplicationTestFactory`. Determinism
-comes from a **fixed-window, one-permit** policy: a window limiter does not return its permit on lease
-disposal, so a second same-window request is rejected with **no timing dependency** (the window is an hour,
-far beyond any test). The **concurrency** limiter (permit returned on completion) covers the
-"permit held for the request lifetime" semantic through two genuinely concurrent unit-level executions —
-never over the in-memory driver, whose per-connection dispatch is sequential and would deadlock an
-intra-connection concurrency test. Coverage: admit/reject, the 429 + `Retry-After` answer, a custom
-rejection status, the `OnRejected` and `OnDecision` hooks, forwarded-composing client-address partitioning,
-named / inline / disabled / unknown per-endpoint policies, the committed-head abort, and the concurrency
-permit hold.
+pipeline builder and an `IHttpContext` double (`tests/TestObjects/`); a stage ahead of the middleware
+publishes a fake route match, which is what `UseRouting` does. `tests/RateLimitingEndToEndTests.cs` drives
+it over the in-memory `WebApplicationTestFactory` with the real router. Determinism comes from a
+**fixed-window, one-permit** policy: a window limiter does not return its permit on lease disposal, so a
+second same-window request is rejected with **no timing dependency** (the window is an hour, far beyond any
+test). The **concurrency** limiter (permit returned on completion) covers the "permit held for the request
+lifetime" semantic through two genuinely concurrent unit-level executions, and, with a one-request queue,
+the queueing endpoint gate: the test waits on the limiter's `CurrentQueuedCount` rather than a delay, so it
+knows the second request is parked before releasing the first. The in-memory driver's default HTTP/1.1
+connection dispatches one exchange at a time, so an intra-connection concurrency test over it would
+deadlock; HTTP/2 streams are dispatched concurrently (#1049), so an end-to-end concurrency test needs the
+factory's HTTP/2 protocol. Coverage: admit/reject, the 429 + `Retry-After` answer, a custom rejection
+status, the `OnRejected` and `OnDecision` hooks, forwarded-composing client-address partitioning, named /
+inline / disabled / unknown per-endpoint policies, the global-then-endpoint decision order, queueing and
+cancellation while queued on the endpoint gate, the CORS-preflight skip (unit and through the real router),
+the committed-head abort, the concurrency permit hold, and registration ahead of `UseRouting` (the global
+limiter still gates; an endpoint with a policy fails at dispatch).
+
+`RateLimitingEventSourceTests` runs in a nonparallel collection and links the canonical test-only
+`EventSourceRecorder`. It checks the provider name, strict manifest, real global/named/inline rejections,
+request-feature correlation despite an unrelated ambient activity, payload privacy, both retry-hint
+shapes, throttled committed-head aborts with exact counts, disabled-listener lazy payload reads, and
+counter publication. Event assertions use request ids and counters use deltas.
+
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

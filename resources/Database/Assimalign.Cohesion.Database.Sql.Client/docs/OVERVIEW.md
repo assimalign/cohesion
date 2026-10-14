@@ -39,7 +39,7 @@ The model reference supplies wire codecs; the client never calls its parser.
 - `Assimalign.Cohesion.Database.Client` — the pooling client core this layers over.
 - `Assimalign.Cohesion.Database.Sql` — the SQL family identifiers and payload codecs.
 - `Assimalign.Cohesion.Database.Types` — `DatabaseType` column identities.
-- `Assimalign.Cohesion.Connections` — the transport `IConnectionFactory` handed to
+- `Assimalign.Cohesion.Connections` — the transport `IDuplexConnectionFactory` handed to
   the client core.
 
 ## Usage

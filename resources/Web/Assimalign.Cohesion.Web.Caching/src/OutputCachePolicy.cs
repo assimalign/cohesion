@@ -51,7 +51,7 @@ public sealed class OutputCachePolicy
         {
             if (value <= TimeSpan.Zero)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "The cache duration must be positive.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.CacheDurationInvalid);
             }
 
             _duration = value;

@@ -1,5 +1,5 @@
 using System;
-using System.Linq;
+using System.Collections;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -19,6 +19,13 @@ namespace Assimalign.Cohesion.Http;
 /// Hot-path consumers that need <c>O(1)</c> access can cache the resolved
 /// feature reference at first lookup.
 /// </para>
+/// <para>
+/// On an <see cref="HttpFeatureCollection"/>, the collection every transport
+/// context carries, a lookup allocates nothing: it scans the backing
+/// dictionaries directly instead of enumerating through <c>OfType</c>, and
+/// returns the feature enumeration would return. Any other implementation is
+/// enumerated without LINQ; any enumerator allocation belongs to that implementation.
+/// </para>
 /// </remarks>
 public static class HttpFeatureCollectionExtensions
 {
@@ -35,7 +42,7 @@ public static class HttpFeatureCollectionExtensions
         public TFeature? Get<TFeature>() where TFeature : class, IHttpFeature
         {
             ArgumentNullException.ThrowIfNull(features);
-            return features.OfType<TFeature>().FirstOrDefault();
+            return Find<TFeature>(features);
         }
 
 
@@ -56,7 +63,7 @@ public static class HttpFeatureCollectionExtensions
 
             if (feature is null)
             {
-                TFeature? existing = features.OfType<TFeature>().FirstOrDefault();
+                TFeature? existing = Find<TFeature>(features);
                 if (existing is not null)
                 {
                     features.Remove(existing.Name);
@@ -66,5 +73,26 @@ public static class HttpFeatureCollectionExtensions
 
             features.Set(feature);
         }
+    }
+
+    // The exact type only: HttpFeatureCollection's enumerator is not virtual, but a derived type can
+    // re-implement IEnumerable<IHttpFeature>, and the fast path must return what enumeration would.
+    private static TFeature? Find<TFeature>(IHttpFeatureCollection features) where TFeature : class, IHttpFeature
+    {
+        if (features.GetType() == typeof(HttpFeatureCollection))
+        {
+            return ((HttpFeatureCollection)features).GetFeature<TFeature>();
+        }
+
+        // OfType used the non-generic enumerator. A custom collection may give it a different order.
+        foreach (object? feature in (IEnumerable)features)
+        {
+            if (feature is TFeature match)
+            {
+                return match;
+            }
+        }
+
+        return null;
     }
 }

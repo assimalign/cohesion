@@ -13,6 +13,16 @@ namespace Assimalign.Cohesion.Logging;
 public interface ILoggerFactoryBuilder
 {
     /// <summary>
+    /// Gets whether at least one forwarder has been registered with this builder, without creating it.
+    /// </summary>
+    /// <remarks>
+    /// Hosting defaults use this probe to preserve application-selected forwarding. The default is
+    /// <see langword="false"/> for compatibility with existing implementations; an implementation that
+    /// records forwarder registrations should override it.
+    /// </remarks>
+    bool HasForwarders => false;
+
+    /// <summary>
     /// Registers a provider. Providers with duplicate <see cref="ILoggerProvider.Name"/>s are
     /// rejected so the resulting factory does not fan out to the same sink twice.
     /// </summary>

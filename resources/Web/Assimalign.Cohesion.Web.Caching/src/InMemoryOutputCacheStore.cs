@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Caching;
 using Assimalign.Cohesion.Caching.InMemory;
+using Assimalign.Cohesion.Web.Caching.Internal;
 
 namespace Assimalign.Cohesion.Web.Caching;
 
@@ -39,6 +40,7 @@ namespace Assimalign.Cohesion.Web.Caching;
 public sealed class InMemoryOutputCacheStore : IOutputCacheStore, IDisposable
 {
     private readonly MemoryCache _cache;
+    private readonly long _sizeLimit;
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _tagIndex = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -59,10 +61,11 @@ public sealed class InMemoryOutputCacheStore : IOutputCacheStore, IDisposable
     {
         if (sizeLimit <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(sizeLimit), sizeLimit, "The size limit must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(sizeLimit), sizeLimit, ErrorMessages.CacheSizeLimitInvalid);
         }
 
         TimeProvider = timeProvider ?? TimeProvider.System;
+        _sizeLimit = sizeLimit;
         _cache = new MemoryCache(new MemoryCacheOptions
         {
             SizeLimit = sizeLimit,
@@ -116,6 +119,7 @@ public sealed class InMemoryOutputCacheStore : IOutputCacheStore, IDisposable
         {
             // An entry larger than the whole size limit is declined by the foundation with a capacity
             // fault; a store politely drops it rather than surfacing the fault to the request path.
+            OutputCacheEventSource.Log.EntryDeclined(entry.Size, _sizeLimit);
         }
 
         return ValueTask.CompletedTask;

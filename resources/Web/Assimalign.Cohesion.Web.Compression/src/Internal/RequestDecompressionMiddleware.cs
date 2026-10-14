@@ -28,6 +28,12 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// the request's <c>Content-Encoding</c> and <c>Content-Length</c> headers are removed once decoding
 /// is in place, since downstream reads the decoded identity representation.
 /// </para>
+/// <para>
+/// Only the decoders' own failures are answered here. A failure of the transport body beneath them
+/// (a malformed chunked framing, a body over the transport's cap) is the client's fault that the
+/// transport answers itself, and it propagates unchanged when the server reports it
+/// (<see cref="IWebClientFaultFeature"/>, #1340).
+/// </para>
 /// </remarks>
 internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
 {
@@ -58,6 +64,7 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         if (!TryParseCodings(contentEncoding, out List<string> codings))
         {
             // An unsupported coding is refused before any handler runs (RFC 9110 §8.4 / §15.5.16).
+            CompressionEventSource.Log.DecompressionRejected(context, "UnsupportedCoding", codings);
             context.Response.StatusCode = HttpStatusCode.UnsupportedMediaType;
             return;
         }
@@ -70,7 +77,9 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         }
 
         Stream decoded = BuildDecodeChain(context.Request.Body, codings);
-        LimitedDecompressionStream limited = new(decoded, _options.MaxDecompressedSizeBytes);
+        // The server's client-fault report tells a decoder's malformed-content failure apart from a
+        // malformed message framing under it, which is the transport's to answer (#1340).
+        LimitedDecompressionStream limited = new(decoded, _options.MaxDecompressedSizeBytes, context.Features.Get<IWebClientFaultFeature>());
 
         // Downstream now reads the decoded identity representation; the coding and the compressed
         // length no longer describe it.
@@ -85,10 +94,12 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         }
         catch (RequestDecompressionLimitException)
         {
+            CompressionEventSource.Log.DecompressionLimitExceeded(context, _options.MaxDecompressedSizeBytes, codings);
             await RejectAsync(context, HttpStatusCode.RequestEntityTooLarge).ConfigureAwait(false);
         }
-        catch (RequestDecompressionFormatException)
+        catch (RequestDecompressionFormatException exception)
         {
+            CompressionEventSource.Log.DecompressionRejected(context, "MalformedContent", codings, exception.InnerException ?? exception);
             await RejectAsync(context, HttpStatusCode.BadRequest).ConfigureAwait(false);
         }
         finally
@@ -161,6 +172,7 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         // response and answer with the status.
         if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
         {
+            CompressionEventSource.Log.RejectionAborted(context, statusCode);
             await context.CancelAsync().ConfigureAwait(false);
             return;
         }

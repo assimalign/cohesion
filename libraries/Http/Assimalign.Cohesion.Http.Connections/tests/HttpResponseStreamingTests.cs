@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 public class HttpResponseStreamingTests
 {
     private static void EnableStreaming(HttpConnectionListenerOptions options)
-        => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
 
     // ------------------------------------------------------------------ HTTP/1.1
 
@@ -38,7 +38,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.Headers[HttpHeaderKey.ContentType] = "text/event-stream";
@@ -73,7 +73,7 @@ public class HttpResponseStreamingTests
         options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // Streaming is opt-in: with no interceptor registered the feature is absent and the buffered
@@ -95,7 +95,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         // Streaming is available, but the handler uses the buffered body.
@@ -117,14 +117,14 @@ public class HttpResponseStreamingTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Streaming/Http2: Should emit incremental DATA frames without a Content-Length")]
     public async Task Http2_Streaming_ShouldEmitDataFramesBeforeComplete()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.Headers[HttpHeaderKey.ContentType] = "text/event-stream";
@@ -166,7 +166,7 @@ public class HttpResponseStreamingTests
             0x4 | 0x1, // END_HEADERS + END_STREAM
             (":method", "GET"),
             (":path", "/sse"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":authority", "api.test"));
         byte[] streamWindowUpdate = Http2TestSettings.RawFrame(0x8, 0, 1, WindowUpdateIncrement(1000));
         byte[] connectionWindowUpdate = Http2TestSettings.RawFrame(0x8, 0, 0, WindowUpdateIncrement(1000));
@@ -177,7 +177,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
         IHttpResponseStreamingFeature streaming = context.Response.Streaming;
 
@@ -207,14 +207,14 @@ public class HttpResponseStreamingTests
         // Regression: a streamed response must remove its fully-closed stream from the connection's
         // stream map (like the buffered path), so a long-lived connection serving many streamed
         // responses does not accumulate stream state without bound.
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         Http2ConnectionContext http2Connection = (Http2ConnectionContext)connectionContext;
@@ -243,7 +243,7 @@ public class HttpResponseStreamingTests
         EnableStreaming(options);
 
         await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         context.Response.Headers[HttpHeaderKey.ContentType] = "text/event-stream";

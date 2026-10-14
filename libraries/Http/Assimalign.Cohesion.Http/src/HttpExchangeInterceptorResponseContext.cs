@@ -46,7 +46,10 @@ public sealed class HttpExchangeInterceptorResponseContext
     public required IHttpFeatureCollection Features { get; init; }
 
     /// <summary>
-    /// Gets the transport connection metadata for the exchange (local/remote endpoints).
+    /// Gets the transport connection metadata for the exchange: the local and remote endpoints, plus
+    /// any facet the transport publishes on it, such as the TLS handshake facts (see
+    /// <see cref="IHttpConnectionInfo"/>). The server transport passes the instance the exchange's
+    /// <see cref="IHttpContext.ConnectionInfo"/> returns.
     /// </summary>
     public required HttpConnectionInfo ConnectionInfo { get; init; }
 
@@ -66,18 +69,21 @@ public sealed class HttpExchangeInterceptorResponseContext
 
     /// <summary>
     /// Gets the transport's per-exchange control surface — the single generic seam by which a
-    /// feature package reads and directs the exchange's control flow
-    /// (<see cref="IHttpExchangeControl.Directive"/>: continue, abort, or give up control) and
-    /// performs the transport-owned wire actions that fall outside the normal response path:
-    /// interim (<c>1xx</c>) writes such as <c>103 Early Hints</c>, and the raw-stream takeover
-    /// that protocol upgrades / <c>CONNECT</c> tunnels need. <see langword="null"/> when the
-    /// transport does not offer exchange control (for example a hand-built test context).
+    /// feature package observes the exchange's response state
+    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/>) and performs the transport-owned wire
+    /// actions that fall outside the normal response path: interim (<c>1xx</c>) writes such as
+    /// <c>103 Early Hints</c>, the raw-connection takeover that HTTP/1.1 protocol upgrades /
+    /// <c>CONNECT</c> tunnels need, and the stream tunnel an HTTP/2 or HTTP/3 extended
+    /// <c>CONNECT</c> needs. <see langword="null"/> when the transport does not offer exchange
+    /// control (for example a hand-built test context).
     /// </summary>
     /// <remarks>
     /// The control is offered on all three protocol versions; capabilities that are not physically
     /// possible on a version report themselves unsupported through the control's probes
     /// (<see cref="IHttpExchangeControl.CanTakeOver"/> is <see langword="false"/> on HTTP/2 and
-    /// HTTP/3, whose exchanges are multiplexed streams over a shared connection). A feature that
+    /// HTTP/3, whose exchanges are multiplexed streams over a shared connection, and
+    /// <see cref="IHttpExchangeControl.CanAcceptTunnel"/> is <see langword="false"/> on HTTP/1.1 and
+    /// on any exchange that is not an extended CONNECT). A feature that
     /// captures this control should defer exercising a transition until the application explicitly
     /// accepts it. Optional with a <see langword="null"/> default so existing construction sites
     /// (including test fakes) keep compiling.

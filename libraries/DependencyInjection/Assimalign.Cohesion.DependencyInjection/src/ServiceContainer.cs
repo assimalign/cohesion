@@ -1,5 +1,4 @@
-﻿using Assimalign.Cohesion.DependencyInjection.Properties;
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -128,7 +127,7 @@ public sealed class ServiceContainer : IServiceContainer
     }
 
     private static void ThrowReadOnlyException() =>
-        throw new InvalidOperationException(Resources.ServiceCollectionReadOnly);
+        throw new InvalidOperationException(ErrorMessages.ServiceCollectionReadOnly);
 
     public void Register(ServiceDescriptor descriptor)
     {

@@ -152,7 +152,7 @@ internal abstract class HttpResponseBodyStream : Stream
         if (_owner.ExchangeDirective != HttpExchangeDirective.Continue)
         {
             throw new InvalidOperationException(
-                "The response head cannot be committed: the exchange was aborted or its connection was taken over.");
+                ErrorMessages.ResponseHeadCommitUnavailable);
         }
 
         // The final response head is about to be committed by the streaming path — this is the
@@ -174,11 +174,24 @@ internal abstract class HttpResponseBodyStream : Stream
         if (_owner.ExchangeDirective != HttpExchangeDirective.Continue)
         {
             throw new InvalidOperationException(
-                "The response head cannot be committed: the exchange was aborted or its connection was taken over.");
+                ErrorMessages.ResponseHeadCommitUnavailable);
         }
 
         _started = true;
-        await CommitHeadersAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await CommitHeadersAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            // The head was refused before any of it was written (#1183): the response has not started,
+            // so the write that tried to start it fails and the exchange can still be answered with
+            // another response. Any other failure may have left part of the head on the wire, so the
+            // response stays started.
+            _started = false;
+            throw;
+        }
     }
 
     private void ThrowIfCompleted()
@@ -186,7 +199,7 @@ internal abstract class HttpResponseBodyStream : Stream
         if (_completed)
         {
             throw new InvalidOperationException(
-                "The streaming response has already been completed; no further body bytes can be written.");
+                ErrorMessages.StreamingResponseAlreadyCompleted);
         }
     }
 }

@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Connections.NamedPipes.Tests;
 
 /// <summary>
 /// End-to-end integration: HTTP/1.1 served over a named-pipe listener via
-/// <see cref="HttpConnectionListenerOptions.UseHttp1(IConnectionListener)"/>, with a client dialing the
+/// <see cref="HttpConnectionListenerOptions.UseHttp1(IDuplexConnectionListener)"/>, with a client dialing the
 /// same pipe through the driver factory. Proves the named-pipe driver composes with the HTTP stack with
 /// no Http-layer changes — the capability-selected listener seam accepts any reliable, ordered stream.
 /// </summary>
@@ -42,7 +42,7 @@ public class HttpOverNamedPipeTests
         NamedPipeConnectionFactory factory = new();
 
         // Act — dial the pipe and speak a raw HTTP/1.1 request over the driver connection.
-        await using Connection client = await factory.ConnectAsync(endPoint, cancellationToken);
+        await using IDuplexConnection client = await factory.ConnectAsync(endPoint, cancellationToken);
 
         byte[] request = Encoding.ASCII.GetBytes(
             "GET /hello?name=pipe HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
@@ -61,7 +61,7 @@ public class HttpOverNamedPipeTests
 
     private static async Task RunServerAsync(HttpConnectionListener httpListener, CancellationToken cancellationToken)
     {
-        await using IHttpConnection connection = await httpListener.AcceptOrListenAsync(cancellationToken);
+        await using IHttpConnection connection = await httpListener.AcceptAsync(cancellationToken);
         IHttpConnectionContext connectionContext = await connection.OpenAsync(cancellationToken);
 
         await foreach (IHttpContext context in connectionContext.ReceiveAsync(cancellationToken))

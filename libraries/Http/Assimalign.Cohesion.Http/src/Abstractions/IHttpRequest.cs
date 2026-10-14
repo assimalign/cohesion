@@ -64,7 +64,7 @@ public interface IHttpRequest
     IHttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
 
     /// <summary>
-    /// Get's the context associated with the request.
+    /// Gets the context of the exchange this request belongs to.
     /// </summary>
     IHttpContext HttpContext { get; }
 

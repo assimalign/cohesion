@@ -11,7 +11,7 @@ public class DataProtectorTests
 {
     private static readonly byte[] _sample = Encoding.UTF8.GetBytes("cohesion-data-protection-sample-payload");
 
-    private static IDataProtectionProvider CreateProvider(string discriminator = "app")
+    private static DataProtectionProvider CreateProvider(string discriminator = "app")
     {
         return DataProtectionProvider.Create(
             new InMemoryKeyRepository(),

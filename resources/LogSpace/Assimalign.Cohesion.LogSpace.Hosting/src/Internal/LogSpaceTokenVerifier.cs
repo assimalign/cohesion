@@ -1,7 +1,9 @@
 using System;
+using System.Linq;
 
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel;
+using Assimalign.Cohesion.IdentityModel.Token;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
@@ -76,7 +78,11 @@ internal sealed class LogSpaceTokenVerifier
             caller = new ResourceCaller(_application, _gateway, ResourceCallerKind.Gateway, []);
         }
 
-        return JsonWebTokenValidator.HasAudience(token, expectedAudience)
+        // The extension rejects null/blank audiences; retain the previous ordinal match for them.
+        bool hasAudience = string.IsNullOrWhiteSpace(expectedAudience)
+            ? token.Audiences.Contains(expectedAudience!, StringComparer.Ordinal)
+            : token.HasAudience(expectedAudience);
+        return hasAudience
             ? new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, caller, null)
             : new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, caller, null);
     }

@@ -2,7 +2,6 @@
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
-using Assimalign.Cohesion.ObjectValidation.Properties;
 
 internal sealed class ValidationRuleBuilder<T, TValue> : IValidationRuleBuilder<TValue>
 {

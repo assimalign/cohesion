@@ -21,7 +21,7 @@ Two carrier shapes are supported, chosen structurally by constructor overload:
 
 | Carrier shape | Server side | Client side | AMQP byte stream |
 |---|---|---|---|
-| Single stream | `IConnectionListener` | `IConnectionFactory` + `EndPoint` | the accepted/dialed `IConnection` itself |
+| Single stream | `IDuplexConnectionListener` | `IDuplexConnectionFactory` + `EndPoint` | the accepted/dialed `IDuplexConnection` itself |
 | Multiplexed | `IMultiplexedConnectionListener` | `IMultiplexedConnectionFactory` + `EndPoint` | one bidirectional stream of the `IMultiplexedConnection` |
 
 Key decisions:
@@ -57,7 +57,7 @@ Key decisions:
   listener/factory — the AMQP analog of the HTTP listener surface — and there is no
   implementation variance to abstract over.
 - **The context *is* a duplex pipe** (`IAmqpConnectionContext : IDuplexPipe`), mirroring the
-  `IConnection : IDuplexPipe` flattening in the Connections design: `Input` is what the peer
+  `IDuplexConnection : IDuplexPipe` flattening in the Connections design: `Input` is what the peer
   sent, `Output` is what you send, and `AsStream()` adapts lazily via the shared
   `DuplexPipeStream` for stream-based consumers. No bespoke pipe wrapper, no eager stream
   allocation.
@@ -69,7 +69,7 @@ Key decisions:
 
 - **The server transport owns its listener.** `AmqpServerTransport.DisposeAsync` disposes every
   tracked connection and then the listener it was constructed over. The client transport does
-  *not* own its factory — `IConnectionFactory` is not disposable by contract — so client
+  *not* own its factory — `IDuplexConnectionFactory` is not disposable by contract — so client
   disposal tears down only the tracked connections.
 - **Accept/connect produce, open activates.** `AcceptAsync`/`ConnectAsync` wrap each carrier in
   an `AmqpConnection` and track it. `OpenAsync` (or the sync-over-async `Open()` convenience)
@@ -181,7 +181,7 @@ over `ArrayBufferWriter<byte>` / `ReadOnlySequence<byte>`. Fully NativeAOT compa
 ## Relationships
 
 - **`Assimalign.Cohesion.Connections`** — the carrier contracts this package consumes by
-  capability (`IConnection`, listeners/factories, `ConnectionCapabilities`,
+  capability (`IDuplexConnection`, listeners/factories, `ConnectionCapabilities`,
   `DuplexPipeStream`).
 - **`Assimalign.Cohesion.Security`** — TLS as a pre-composed `UseTls` layer on the carrier
   listener/factory; never an AMQP concern.
@@ -190,3 +190,28 @@ over `ArrayBufferWriter<byte>` / `ReadOnlySequence<byte>`. Fully NativeAOT compa
 - **`Assimalign.Cohesion.Http.Connections`** — the sibling application-protocol transport; the
   two consume the connection contracts with the same capability-gated, pre-composed-TLS
   pattern.
+
+## Common connection hierarchy
+
+The carrier root `IConnection` provides identity, features and lifecycle. AMQP requires the
+byte-pipe members of `IDuplexConnection`; a multiplexed carrier supplies those through one
+`IMultiplexedConnectionStream`. Listener tracking is observational and does not replace the
+AMQP transport's ownership of its accepted connections. `ConnectionClosed` signals closure,
+abort and peer close, no later than carrier disposal completing.
+
+### Breaking changes from 10.0.0-preview.1 (#1459)
+
+The single-stream constructor signatures change with the carrier hierarchy:
+
+| Preview.1 signature | Replacement |
+| --- | --- |
+| `AmqpServerTransport(IConnectionListener, AmqpTransportOptions?)` | `AmqpServerTransport(IDuplexConnectionListener, AmqpTransportOptions?)` |
+| `AmqpClientTransport(IConnectionFactory, EndPoint, AmqpTransportOptions?)` | `AmqpClientTransport(IDuplexConnectionFactory, EndPoint, AmqpTransportOptions?)` |
+
+These are source and binary breaks, accepted during previews under owner decisions 15 and 58.
+Rebuild callers and type their single-stream listeners/factories as `IDuplexConnectionListener`
+and `IDuplexConnectionFactory`. Custom carriers implement the duplex contracts and produce
+`IDuplexConnection`, or derive from `DuplexConnectionListener`, `DuplexConnectionFactory` and
+`DuplexConnection`; the listener/factory bases use `AcceptCoreAsync`/`ConnectCoreAsync` returning
+`ValueTask<IDuplexConnection>`. The multiplexed constructor overloads retain their parameter
+types and use the updated multiplexed contracts. AMQP wire framing and negotiation are unchanged.

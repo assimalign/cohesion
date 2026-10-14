@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 
 using Assimalign.Cohesion.Web.Routing.Internal;
@@ -162,13 +163,13 @@ public static class RoutePatternFactory
                     !Equals(explicitDefault, parameterPart.Default))
                 {
                     throw new InvalidOperationException(
-                        $"Route parameter '{parameterPart.Name}' cannot define both an inline default and a conflicting explicit default value.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteParameterDefaultsConflict, parameterPart.Name));
                 }
 
                 if (parameterPart.IsOptional)
                 {
                     throw new InvalidOperationException(
-                        $"Route parameter '{parameterPart.Name}' cannot be optional and also define an explicit default value.");
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionalRouteParameterDefaultNotAllowed, parameterPart.Name));
                 }
 
                 effectiveDefault = explicitDefault;
@@ -227,7 +228,7 @@ public static class RoutePatternFactory
 
         if (content.Contains('?'))
         {
-            throw new ArgumentException($"The literal route segment '{content}' is invalid.", nameof(content));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.LiteralRouteSegmentInvalid, content), nameof(content));
         }
 
         return LiteralPartCore(content);
@@ -285,7 +286,7 @@ public static class RoutePatternFactory
         }
 
         throw new InvalidOperationException(
-            $"The supplied route constraint reference '{constraint}' is not supported.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.RouteConstraintUnsupported, constraint));
     }
 
     /// <summary>
@@ -377,7 +378,7 @@ public static class RoutePatternFactory
             if (!hasMatch)
             {
                 throw new InvalidOperationException(
-                    $"No corresponding parameter or default value could be found for the required value '{requiredValue.Key}={requiredValue.Value}'.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequiredRouteValueNotFound, requiredValue.Key, requiredValue.Value));
             }
         }
     }

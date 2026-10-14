@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.Hosting.Health;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 
+using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
+
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostService, IDisposable
@@ -76,6 +78,24 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             health);
         pipeline.MapReadinessCheck(health, new HttpPath("/readyz"));
         pipeline.MapLivenessCheck(health, new HttpPath("/livez"));
+        // Database health aliases run before the shared terminal to retain the database-specific
+        // report and readiness gate. Apply standalone locality before those aliases can short-circuit.
+        if (resourceContext.GatewayName is null)
+        {
+            pipeline.Use(next => context =>
+            {
+                string path = context.Request.Path.Value;
+                bool namespaced = path == "/cohesion/v1" || path.StartsWith("/cohesion/v1/", StringComparison.Ordinal);
+                if (namespaced && !IsLoopbackPeer(context))
+                {
+                    context.Response.StatusCode = HttpStatusCode.Forbidden;
+                    return Task.CompletedTask;
+                }
+
+                return next(context);
+            });
+        }
+
         pipeline.MapHealthChecks(
             new HttpPath("/cohesion/v1/healthz"),
             health);
@@ -84,6 +104,8 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         pipeline.Use(next => context => ResourceControlPlaneMiddleware.InvokeAsync(
             controlPlane, resourceContext, isApplicationReady: true, endpoint.Port, context, next));
     }
+
+    internal IWebApplicationPipelineBuilder Pipeline => _application;
 
     public new void Dispose()
     {
@@ -151,6 +173,22 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             tags: [HealthTags.Ready]);
 
         return builder.Build();
+    }
+
+    private static bool IsLoopbackPeer(IHttpContext context)
+    {
+        if (context.ConnectionInfo.RemoteEndPoint is not IPEndPoint remoteEndPoint)
+        {
+            return false;
+        }
+
+        IPAddress address = remoteEndPoint.Address;
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        return address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback);
     }
 
     private static IPAddress ResolveBindAddress(string host)

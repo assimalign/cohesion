@@ -39,7 +39,7 @@ they need.
 
 - `ResourceContext`, `ResourceMount`, `ResourceRuntime`, `ResourceEntryExitException`
 - `IResourceEntryInvocation`
-- `IResourceControlPlane`, `ResourceControlPlane`
+- `IResourceControlPlane`, `ResourceControlPlane` (public sealed implementation; create with `ResourceControlPlane.Create(kinds)`)
 - `ResourceCommand`
 - `IResourceCredentialVerifier`, `ResourceCredentialPresentation`, `ResourceCredentialVerification`,
   `ResourceCredentialStatus`, `ResourceCaller`, `ResourceCallerKind`, `ResourceCredentialProfile`
@@ -124,6 +124,13 @@ default profile's claim, scope, audience, clock-skew, and lifetime constants are
 hosting module that mints or verifies the default credential already references this package. The
 types are BCL-only, so the guarded ApplicationModel closure does not grow. See
 [DESIGN.md](DESIGN.md#resource-credential-verification).
+
+Standalone HTTP control planes (no gateway identity) accept `/cohesion/v1` and its descendants
+only from transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other or unknown peers
+receive 403. Forwarded headers cannot grant access. Bare `/healthz`, `/readyz`, and `/livez` probes
+stay public. Gateway-managed credential checks are unchanged. This restricts remote standalone
+management compared with 10.0.0-preview.1 (#1431); use loopback for standalone development and a
+gateway identity with credentials for remote management.
 
 ## Endpoint certificate contract (31t)
 

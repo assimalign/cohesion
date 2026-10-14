@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections;
@@ -29,11 +30,16 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
             }
 
             var value = this.GetValue(instance);
-            var stopwatch = new Stopwatch();
+
+            // The chain stops on this member's own failure only, as in ValidationItem: errors other
+            // members reported earlier must not keep this member's rules from running. A rule runs over
+            // every element, so the rule that fails first reports each failing element before the chain
+            // stops.
+            var failed = false;
 
             foreach (var rule in this.ItemRuleStack)
             {
-                if (!context.ContinueThroughValidationChain && context.Errors.Any())
+                if (failed && !context.ContinueThroughValidationChain)
                 {
                     break;
                 }
@@ -42,39 +48,62 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
                     ruleBase.ParentContext = context;
                 }
 
-                stopwatch.Restart();
-
                 if (value is not null && value is IEnumerable<TValue> enumerable)
                 {
+                    var index = 0;
                     foreach (var enumValue in enumerable)
                     {
+                        // Each element's invocation is timed on its own, from a timestamp: nothing is kept on
+                        // the item, which every validation using its profile shares.
+                        long started = Stopwatch.GetTimestamp();
+
                         if (rule.TryValidate(enumValue, out var ruleContext))
                         {
                             foreach (var error in ruleContext.Errors)
                             {
-                                context.AddFailure(error);
+                                // The rule and its error template are shared by every validation. Add the
+                                // index to a copy of the reported error, never to that shared state.
+                                context.AddFailure(new ValidationError(error)
+                                {
+                                    Source = IndexSource(error.Source, index)!
+                                });
+                                failed = true;
                             }
 
-                            stopwatch.Stop();
-                            context.AddInvocation(new ValidationInvocation(rule.Name, true, stopwatch.ElapsedTicks));
+                            context.AddInvocation(new ValidationInvocation(rule.Name, true, Stopwatch.GetElapsedTime(started).Ticks));
                         }
                         else
                         {
-                            stopwatch.Stop();
-                            context.AddInvocation(new ValidationInvocation(rule.Name, false, stopwatch.ElapsedTicks));
+                            context.AddInvocation(new ValidationInvocation(rule.Name, false, Stopwatch.GetElapsedTime(started).Ticks));
                         }
+
+                        index++;
                     }
                 }
                 else
                 {
-                    stopwatch.Stop();
-                    context.AddInvocation(new ValidationInvocation(rule.Name, false, stopwatch.ElapsedTicks)
+                    context.AddInvocation(new ValidationInvocation(rule.Name, false)
                     {
                         InvocationErrorMessage = $"The following enumerable expression: '{this.ItemExpression}' returned null for instance '{this._paramType.Name}'."
                     });
                 }
             }
         }
+    }
+
+    private string? IndexSource(string? source, int index)
+    {
+        string collectionSource = this.ToString();
+
+        // Only default selector sources rooted at this collection are indexed. Explicit source names
+        // stay as written, and a nested collection keeps the indices its own evaluation already added.
+        if (source is null || !source.StartsWith(collectionSource, StringComparison.Ordinal)
+            || (source.Length != collectionSource.Length && source[collectionSource.Length] != '.'))
+        {
+            return source;
+        }
+
+        return source.Insert(collectionSource.Length, "[" + index.ToString(CultureInfo.InvariantCulture) + "]");
     }
 }
 

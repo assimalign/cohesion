@@ -120,3 +120,5 @@ used by platform packages to add container gathering behavior.
 The package owns COHSDK001 and COHSDK003–COHSDK010. The base package owns pin
 validation (COHSDK002) and the missing-import guard (COHSDK011). The detailed
 contracts are listed in [DESIGN.md](./DESIGN.md#diagnostics).
+
+Resource-reference `ConnectionFactory()` returns an `IDuplexConnectionFactory`, suitable for the database client options and other byte-stream consumers.

@@ -11,7 +11,9 @@ namespace Assimalign.Cohesion.Web.Caching.Tests.TestObjects;
 /// <summary>
 /// A minimal in-memory <see cref="IHttpContext"/> for driving the output-cache middleware and key
 /// builder directly, with a settable request line, query, headers, and a response whose body is a
-/// readable <see cref="MemoryStream"/> so captured/served bytes can be asserted.
+/// readable <see cref="MemoryStream"/> so captured/served bytes can be asserted. The connection is
+/// settable so a test can model a request arriving from a specific peer, such as a trusted proxy the
+/// forwarded-headers middleware evaluates.
 /// </summary>
 internal sealed class OutputCacheTestContext : IHttpContext
 {
@@ -31,7 +33,7 @@ internal sealed class OutputCacheTestContext : IHttpContext
 
     IHttpResponse IHttpContext.Response => Response;
 
-    public IHttpConnectionInfo ConnectionInfo => null!;
+    public IHttpConnectionInfo ConnectionInfo { get; set; } = HttpConnectionInfo.Empty;
 
     public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
 

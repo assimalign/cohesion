@@ -45,12 +45,20 @@ peer.
 
 ## Lifecycle and error model
 
-- A datagram connection is live when returned; `DisposeAsync` closes the socket and is idempotent.
+- A datagram connection derives from `IConnection` through `DatagramConnection`, and is `Open` when
+  returned. Its stable `Id` matches its diagnostics. `DisposeAsync` closes the socket, publishes
+  `Closed`, and cancels `ConnectionClosed` before returning. `Abort` closes immediately and publishes
+  `Aborted`; subsequent disposal preserves it. Both are idempotent. UDP has no peer-close signal on
+  the wire, so a remote socket disappearing cannot report connection closure.
 - Socket errors surface as `SocketException` from the operation that hit them. A datagram transport has
   no reset or abort condition to translate into the `ConnectionException` family.
 - The factory disposes a socket it created if binding or connecting fails.
 
 ## Diagnostics
+
+The diagnostics tests link the canonical test-only `build/TestSupport/EventSourceRecorder.cs`
+with MSBuild `Compile`/`Link` (see `.claude/rules/testing.md`); it records
+events and counter publication without adding a shipped dependency.
 
 The driver reports through its own internal event source, named for the assembly:
 `Assimalign.Cohesion.Connections.Udp` (`Internal/EventSource/UdpConnectionEventSource.cs`), per the
@@ -65,8 +73,7 @@ name becomes the log category.
 
 Counters: `current-connections` and `total-connections`.
 
-- `IDatagramConnection` has no identity of its own, so each connection carries a `ConnectionId` used only
-  to correlate its two events.
+- The public `Id` correlates the connection's opened and closed events.
 - Individual datagrams are not events. Per-message tracing on a message-oriented transport would cost
   more than it tells; the runtime's own `System.Net.Sockets` source covers socket-level detail.
 - This source replaced `UdpTraceCode`, a public enum of trace codes that nothing used. Diagnostics are
@@ -81,6 +88,23 @@ internal event source. Fully NativeAOT/trim compatible (`IsAotCompatible=true`).
 
 - **No stream semantics.** Reliability, ordering, and framing belong to a protocol layered on top (QUIC
   is the fused example; a userspace reliable-UDP protocol would be an `IDatagramConnection →
-  IConnection` layer).
+  IDuplexConnection` layer).
 - **No multicast or broadcast surface** until a consumer needs one; add it to the options first.
 - **No Unix domain datagram sockets.** Only IPv4 and IPv6 endpoints are accepted.
+
+## Connection hierarchy compatibility
+
+Decision 58 changes the hierarchy shipped in 10.0.0-preview.1 under decision 15's accepted
+preview source and binary breaks. `IDatagramConnection` now inherits root identity and lifecycle, and `LocalEndPoint` is nullable.
+Every connection shares root lifecycle and features. Accepted connections stay in the live set
+until their closed token fires; listener disposal never closes handed-out connections.
+Only the code that accepted a connection reads or writes it.
+
+## Exception message resources (#1467)
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared MSBuild targets generate
+an internal `ErrorMessages` accessor in the project's root namespace during CLI and CI builds;
+its embedded resources are available under NativeAOT. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ...)`, preserving the existing text and arguments.
+EventSource templates and payload handling keep their existing behavior. This changes no public
+API or exception text relative to 10.0.0-preview.1.

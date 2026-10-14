@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -10,6 +11,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal static class Http1MessageReader
 {
+    // These diagnostics also run during ordinary validation, cancellation or completion.
+    private static readonly string _requestHeaderSectionSubject = ErrorMessages.RequestHeaderSection;
+    private static readonly string _requestLineSubject = ErrorMessages.RequestLine;
+
     /// <summary>
     /// Reads a single HTTP/1.1 request from the wire, enforcing the configured server limits,
     /// invoking the registered request-parse interceptors, and driving the read-timeout phase
@@ -23,6 +28,10 @@ internal static class Http1MessageReader
     /// The listener's snapshotted request-parse interceptors. When empty the parser takes a fast
     /// path with no per-request interception state allocated.
     /// </param>
+    /// <param name="featureCapacity">
+    /// The number of features each exchange is expected to carry; the exchange's feature collection
+    /// is sized for it.
+    /// </param>
     /// <param name="timeProvider">The monotonic clock threaded to the request body's data-rate enforcement.</param>
     /// <param name="readTimeout">
     /// The read-timeout controller. Signalled when the request line begins and once the header
@@ -33,9 +42,19 @@ internal static class Http1MessageReader
     /// Distinct from <paramref name="readTimeout"/>'s token, which is disposed once the head has been
     /// read.
     /// </param>
+    /// <param name="connectionClosed">The driver's closure token, linked for the exchange's lifetime.</param>
     /// <returns>The parsed request context (dispatched at head; its body is read lazily), or <see langword="null"/> on a clean end-of-stream.</returns>
     /// <exception cref="Http1LimitExceededException">
     /// Thrown when the request head violates a configured limit (414 / 431).
+    /// </exception>
+    /// <exception cref="Http1BadRequestException">
+    /// Thrown when the request line holds an octet other than VCHAR and SP, a header field line is
+    /// malformed (a name that is not a token, or a value with a control character other than HTAB), or
+    /// a <c>Host</c> value holds an octet other than VCHAR (400).
+    /// </exception>
+    /// <exception cref="Http1MisdirectedRequestException">
+    /// Thrown when an absolute-form request-target has the <c>https</c> scheme and the connection is not
+    /// secured (421).
     /// </exception>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when an interceptor rejects the request (4xx / 5xx).
@@ -46,9 +65,11 @@ internal static class Http1MessageReader
         HttpScheme scheme,
         Http1ConnectionListenerOptions.Http1Limits limits,
         IHttpExchangeInterceptor[] interceptors,
+        int featureCapacity,
         TimeProvider timeProvider,
         Http1ReadTimeout readTimeout,
-        CancellationToken connectionToken)
+        CancellationToken connectionToken,
+        CancellationToken connectionClosed = default)
     {
         CancellationToken readToken = readTimeout.Token;
 
@@ -59,13 +80,25 @@ internal static class Http1MessageReader
             stream,
             limits.MaxRequestLineSize,
             HttpStatusCode.RequestUriTooLong,
-            "request line",
+            _requestLineSubject,
             readTimeout.OnRequestLineStarted,
             readToken).ConfigureAwait(false);
 
         if (requestLine is null)
         {
             return null;
+        }
+
+        // RFC 9112 §3 — a request line is method SP request-target SP HTTP-version, so every octet in
+        // it is a VCHAR or SP. Anything else is answered with 400 before the line is split (#1341): an
+        // octet above 0x7F was once decoded to '?', which split "/admin\xFFx" into the path "/admin"
+        // and the query "x" while an intermediary forwarding the raw octets saw another path, and a
+        // bare CR, a bare LF, or a tab is whitespace that another parser may split on.
+        int invalidOctet = requestLine.AsSpan().IndexOfAnyExceptInRange(' ', '~');
+        if (invalidOctet >= 0)
+        {
+            throw new Http1BadRequestException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestLineCharacterInvalid, (int)requestLine[invalidOctet], invalidOctet));
         }
 
         if (string.IsNullOrWhiteSpace(requestLine))
@@ -77,21 +110,46 @@ internal static class Http1MessageReader
 
         if (requestLineParts.Length != 3)
         {
-            throw new InvalidDataException($"The HTTP/1.1 request line '{requestLine}' is invalid.");
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestLineInvalid, requestLine));
         }
 
         if (!string.Equals(requestLineParts[2], "HTTP/1.1", StringComparison.Ordinal))
         {
-            throw new InvalidDataException($"The HTTP version '{requestLineParts[2]}' is not supported by the HTTP/1.1 transport.");
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1VersionNotSupported, requestLineParts[2]));
         }
 
-        HttpMethod method = HttpMethod.GetCanonicalizedValue(requestLineParts[0]);
+        // RFC 9112 §3 / RFC 9110 §9.1 — the method is a token. A VCHAR such as '@', '(' or ',' passes the
+        // octet check above but is no tchar, and HttpMethod.GetCanonicalizedValue used to throw
+        // ArgumentException for it out of the receive enumeration instead of answering. HTTP/2 and HTTP/3
+        // refuse the same :method through HttpFieldNormalization.ValidateRequestTarget. The method is not
+        // echoed: it came from the peer.
+        string methodToken = requestLineParts[0];
+        if (!HttpFieldNormalization.IsValidFieldName(methodToken))
+        {
+            throw new Http1BadRequestException(ErrorMessages.RequestMethodInvalid);
+        }
+
+        HttpMethod method;
+        try
+        {
+            method = HttpMethod.GetCanonicalizedValue(methodToken);
+        }
+        catch (ArgumentException)
+        {
+            // A non-empty token is refused only when it is longer than the 32 characters HttpMethod holds.
+            // RFC 9112 §3 — a server that receives a method longer than any that it implements SHOULD
+            // respond with 501 (Not Implemented).
+            throw new Http1LimitExceededException(
+                HttpStatusCode.NotImplemented,
+                ErrorMessages.RequestMethodTooLong);
+        }
+
         // RFC 9112 §3.2 — parse the request-target into one of the four canonical forms
         // (origin / absolute / authority / asterisk) with method/form pairing enforcement.
         if (!HttpRequestTarget.TryParse(requestLineParts[1], method, out HttpRequestTarget target, out string? targetError))
         {
             throw new InvalidDataException(
-                $"The HTTP/1.1 request line '{requestLine}' has a malformed request-target: {targetError}");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestTargetInvalid, requestLine, targetError));
         }
 
         // RFC 3986 §2.4 / RFC 9112 §3.2.1 — percent-decode the origin-form request-target path so this
@@ -104,11 +162,16 @@ internal static class Http1MessageReader
         // to "..", and leaves invalid/overlong sequences intact per UrlDecoder. A decoded octet that is
         // not a legal path character (a space, control, '?'/'#', or NUL) makes the target malformed —
         // the same outcome the shared decode reaches on h2/h3; surface it as the transport's existing
-        // malformed-request-target failure rather than letting it escape the read loop. The other three
-        // request-target forms keep their current handling: absolute-form's path is already normalized by
-        // System.Uri, authority-form (CONNECT) carries none, and asterisk-form is the literal '*'.
+        // malformed-request-target failure rather than letting it escape the read loop.
+        //
+        // RFC 9112 §3.2.2 — absolute-form takes the same decode. HttpRequestTarget reads its path from
+        // System.Uri.AbsolutePath, which removes dot segments and decodes escaped unreserved characters
+        // but leaves every other escape in place ("/caf%C3%A9", "/100%25"), so without it a request that
+        // names the same resource in absolute-form would reach middleware still encoded, and a redirect
+        // that encodes the path would encode it twice. Authority-form (CONNECT) carries no path, and
+        // asterisk-form is the literal '*'.
         HttpPath requestPath;
-        if (target.Form == HttpRequestTargetForm.Origin)
+        if (target.Form is HttpRequestTargetForm.Origin or HttpRequestTargetForm.Absolute)
         {
             try
             {
@@ -117,7 +180,7 @@ internal static class Http1MessageReader
             catch (Exception ex) when (ex is HttpException or InvalidOperationException)
             {
                 throw new InvalidDataException(
-                    $"The HTTP/1.1 request line '{requestLine}' has a malformed request-target: {ex.Message}");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestTargetInvalid, requestLine, ex.Message));
             }
         }
         else
@@ -141,6 +204,13 @@ internal static class Http1MessageReader
         // (tracked as follow-up).
         bool isConnectTunnel = method == HttpMethod.Connect && target.Form == HttpRequestTargetForm.Authority;
 
+        // RFC 9112 §3.2 — a Host field with an invalid value MUST be answered with 400. Host is
+        // uri-host [":" port] (RFC 9110 §7.2), every octet of which is a VCHAR, so anything else makes
+        // it invalid: an interior SP or HTAB, or obs-text. A no-break space would otherwise reach
+        // HttpHost, where a host allowlist reading "api.test\xA0" might match "api.test" while a front
+        // end that routes on the raw value sees another host (#1341).
+        EnsureHostFieldIsVisible(headers);
+
         // Host resolution depends on the request-target form (RFC 9112 §3.2.2 / §3.2.3):
         //   - absolute-form  → authority component of the target supersedes any Host header
         //   - authority-form → the target itself IS the authority (CONNECT)
@@ -156,20 +226,46 @@ internal static class Http1MessageReader
                 : HttpHost.Empty,
         };
 
-        // Scheme follows the same precedence: absolute-form carries it on the wire.
+        // Scheme follows the same precedence: absolute-form carries it on the wire, and it is the target
+        // URI's scheme (RFC 9112 §3.3). An "https" target names a resource reachable only over a secured
+        // connection, and an origin server MUST reject a request for one that arrives over a connection
+        // that is not (RFC 9110 §4.2.2, §7.4): answer 421 (Misdirected Request) instead of serving it.
+        // Taking the target's scheme as it is would mark a cleartext request secure, so
+        // UseHttpsRedirection would pass it on, and HSTS and Secure-cookie decisions would read it as
+        // https. An "http" target over TLS is kept as http: it claims less than the connection gives.
+        if (target.Form == HttpRequestTargetForm.Absolute && target.Scheme == HttpScheme.Https && scheme != HttpScheme.Https)
+        {
+            throw new Http1MisdirectedRequestException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1RequestSchemeMismatch, target.RawValue));
+        }
+
         HttpScheme requestScheme = target.Form == HttpRequestTargetForm.Absolute
             ? target.Scheme
             : scheme;
 
+        // RFC 9112 §6 / §7 — decide the body framing from the headers, rejecting ambiguous
+        // combinations and malformed Content-Length / chunked encodings up front (before
+        // dispatch, and before any hook runs, so a hook never sees a request whose framing cannot be
+        // read). CONNECT carries no framed body (RFC 9110 §9.3.6 — post-header octets are
+        // tunnel traffic). The body-size cap is NOT enforced here: an endpoint or middleware may
+        // still adjust it after dispatch, before the body is read, so Http1RequestBodyStream
+        // freezes and enforces it at the first read.
+        Http1RequestBodyFraming framing = isConnectTunnel
+            ? Http1RequestBodyFraming.None
+            : Http1MessageBodyReader.DetermineFraming(headers);
+
         // Interceptor phase (head hooks). Zero registered interceptors is the fast path: no
         // interception context, no feature collection, no per-request interception allocations —
-        // the transport enforces the listener-wide limits exactly as before the seam existed.
+        // the transport enforces the listener-wide limits exactly as before the seam existed. The
+        // hooks fill the exchange's own collection, so it is sized for every feature the exchange is
+        // expected to carry, not only the hooks' (on the fast path the exchange context creates and
+        // sizes it).
         HttpFeatureCollection? features = null;
         HttpExchangeInterceptorRequestContext? interception = null;
 
         if (interceptors.Length > 0)
         {
-            features = new HttpFeatureCollection();
+            features = new HttpFeatureCollection(featureCapacity);
             interception = new HttpExchangeInterceptorRequestContext
             {
                 Version = HttpVersion.Http11,
@@ -177,10 +273,15 @@ internal static class Http1MessageReader
                 Path = requestPath,
                 Scheme = requestScheme,
                 Host = host,
+                // RFC 9112 §6 — a body follows the head only when its framing declares one.
+                CanHaveBody = framing.Mode == Http1RequestBodyMode.Chunked
+                    || (framing.Mode == Http1RequestBodyMode.ContentLength && framing.ContentLength > 0),
                 Headers = headers.AsReadOnly(),
                 Features = features,
                 ConnectionInfo = connectionInfo,
                 MaxRequestBodySize = limits.MaxRequestBodySize,
+                MinRequestBodyDataRate = limits.MinRequestBodyDataRate,
+                MinResponseDataRate = limits.MinResponseDataRate,
             };
         }
 
@@ -196,16 +297,6 @@ internal static class Http1MessageReader
                     interceptor.AfterRequestHead(interception);
                 }
             }
-
-            // RFC 9112 §6 / §7 — decide the body framing from the headers, rejecting ambiguous
-            // combinations and malformed Content-Length / chunked encodings up front (before
-            // dispatch). CONNECT carries no framed body (RFC 9110 §9.3.6 — post-header octets are
-            // tunnel traffic). The body-size cap is NOT enforced here: an endpoint or middleware may
-            // still adjust it after dispatch, before the body is read, so Http1RequestBodyStream
-            // freezes and enforces it at the first read.
-            Http1RequestBodyFraming framing = isConnectTunnel
-                ? Http1RequestBodyFraming.None
-                : Http1MessageBodyReader.DetermineFraming(headers);
 
             // Hook: the request is about to be dispatched with its lazy body — head hooks done,
             // framing decided, no body octet consumed. Runs before any Expect: 100-continue
@@ -239,15 +330,15 @@ internal static class Http1MessageReader
             bool solicitContinue = !isConnectTunnel && ShouldSolicitContinue(headers);
 
             // The lazy body stream: read incrementally after dispatch, enforcing the (frozen-at-
-            // first-read) body-size cap and the minimum request-body data rate. No body byte is read
-            // here — the request is dispatched at head.
+            // first-read) body-size cap, the minimum request-body data rate, and the bounds on a
+            // chunked body's framing lines and trailer section. No body byte is read here — the
+            // request is dispatched at head.
             requestBody = new Http1RequestBodyStream(
                 stream,
                 framing,
                 solicitContinue,
                 interception,
-                limits.MaxRequestBodySize,
-                limits.MinRequestBodyDataRate,
+                limits,
                 timeProvider,
                 connectionToken,
                 trailers);
@@ -267,7 +358,7 @@ internal static class Http1MessageReader
 
             HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
 
-            Http1Request request = new(
+            TransportHttpRequestHead requestHead = new(
                 host,
                 requestPath,
                 method,
@@ -276,28 +367,41 @@ internal static class Http1MessageReader
                 headers,
                 bodyStream,
                 trailers);
-            Http1Response response = new();
 
             bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");
 
+            // A head hook that needs this exchange's response phase added itself to it; the
+            // connection runs those hooks when it sets the exchange up.
             return new Http1Context(
-                request,
-                response,
+                requestHead,
                 connectionInfo,
                 connectionToken,
                 keepAlive,
                 requestBody,
-                features);
+                featureCapacity,
+                features,
+                connectionClosed)
+            {
+                AddedResponseInterceptors = interception is { ResponseInterceptors.Count: > 0 } ? interception.ResponseInterceptors : null,
+                RequestInterception = interception,
+            };
         }
-        catch when (features is not null)
+        catch (Exception exception) when (features is not null)
         {
             // The request failed after interceptors started participating (a head- or body-hook
-            // rejection, or malformed framing) and no Http1Context — the owner of the feature-
-            // disposal walk — will ever exist for this exchange. Honor the seam's disposal contract
-            // here instead: tear down the partially-built wrapper chain (the outermost wrapper owns
-            // its inner stream) and dispose every hook-attached feature, then let the failure surface
-            // unchanged. The exception filter keeps the zero-interceptor fast path entirely outside
+            // rejection, including malformed body framing read by a hook) and no Http1Context —
+            // the owner of the feature-disposal walk — will ever exist for this exchange. Honor the seam's
+            // disposal contract here instead: tear down the partially-built wrapper chain (the outermost
+            // wrapper owns its inner stream) and dispose every hook-attached feature, then let the failure
+            // surface unchanged. The exception filter keeps the zero-interceptor fast path entirely outside
             // this handler.
+            // Only an escaping framing failure needs replay here. If a hook replaces it with
+            // an explicit rejection, the connection's error-response path reports that instead.
+            if (exception is InvalidDataException)
+            {
+                requestBody?.ReportPendingMalformedRejection(
+                    connectionInfo is HttpTransportConnectionInfo info ? info.ConnectionId : default);
+            }
             bodyStream?.Dispose();
             await DisposeFeaturesAsync(features).ConfigureAwait(false);
             throw;
@@ -353,13 +457,13 @@ internal static class Http1MessageReader
                 stream,
                 totalBytesRemaining,
                 HttpStatusCode.RequestHeaderFieldsTooLarge,
-                "request header section",
+                _requestHeaderSectionSubject,
                 onFirstByte: null,
                 cancellationToken).ConfigureAwait(false);
 
             if (line is null)
             {
-                throw new EndOfStreamException("The connection closed before the request headers were fully received.");
+                throw new EndOfStreamException(ErrorMessages.RequestHeadersTruncated);
             }
 
             if (line.Length == 0)
@@ -373,7 +477,7 @@ internal static class Http1MessageReader
             {
                 throw new Http1LimitExceededException(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    $"The request header section exceeds the configured maximum size ({limits.MaxRequestHeadersTotalSize} octets).");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestHeaderSectionTooLarge, limits.MaxRequestHeadersTotalSize));
             }
             totalBytesRemaining -= consumed;
 
@@ -382,18 +486,19 @@ internal static class Http1MessageReader
             {
                 throw new Http1LimitExceededException(
                     HttpStatusCode.RequestHeaderFieldsTooLarge,
-                    $"The request contains more than the configured maximum of {limits.MaxRequestHeaderCount} header fields.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestHeaderCountExceeded, limits.MaxRequestHeaderCount));
             }
 
-            int separatorIndex = line.IndexOf(':');
-
-            if (separatorIndex <= 0)
+            // RFC 9112 §5.1 — the field name is a token: no whitespace before its colon, never empty. A
+            // server MUST answer such a request with 400, since an intermediary that reads the line
+            // differently would disagree about the message (#1333). RFC 9110 §5.5 — the value, trimmed
+            // of SP and HTAB only, holds no NUL, CR, LF, or other control character but HTAB (#1341).
+            // The connection then closes.
+            if (!Http1FieldLine.TryParse(line, out string name, out string value, out string? violation))
             {
-                throw new InvalidDataException($"The HTTP header '{line}' is invalid.");
+                throw new Http1BadRequestException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http1HeaderSectionInvalid, violation));
             }
 
-            string name = line[..separatorIndex].Trim();
-            string value = line[(separatorIndex + 1)..].Trim();
             HttpHeaderKey key = new(name);
 
             if (headers.TryGetValue(key, out HttpHeaderValue existingValue))
@@ -408,6 +513,31 @@ internal static class Http1MessageReader
     }
 
     /// <summary>
+    /// Rejects a <c>Host</c> field whose value holds an octet other than a VCHAR (RFC 9112 §3.2,
+    /// RFC 9110 §7.2). Optional whitespace is already trimmed, so an empty value passes, as
+    /// RFC 9112 §3.2 allows for a target URI without an authority.
+    /// </summary>
+    /// <exception cref="Http1BadRequestException">A <c>Host</c> field line holds such an octet.</exception>
+    private static void EnsureHostFieldIsVisible(HttpHeaderCollection headers)
+    {
+        if (!headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue host))
+        {
+            return;
+        }
+
+        foreach (string? entry in host)
+        {
+            int invalid = entry is null ? -1 : entry.AsSpan().IndexOfAnyExceptInRange('!', '~');
+            if (invalid >= 0)
+            {
+                // The value is not quoted: it may hold obs-text, and the octet in hex says enough.
+                throw new Http1BadRequestException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HostFieldCharacterInvalid, (int)entry![invalid], invalid));
+            }
+        }
+    }
+
+    /// <summary>
     /// Whether the transport should automatically emit <c>100 Continue</c> before reading the body:
     /// the request declares <c>Expect: 100-continue</c> (RFC 9110 §10.1.1) and carries a framing that
     /// indicates a message body. Absent the expectation, or with no body to solicit, no interim
@@ -415,7 +545,7 @@ internal static class Http1MessageReader
     /// </summary>
     private static bool ShouldSolicitContinue(HttpHeaderCollection headers)
     {
-        return HeaderContainsToken(headers, HttpHeaderKey.Expect, "100-continue")
+        return HttpInterimResponseRules.ExpectsContinue(headers)
             && RequestHasBody(headers);
     }
 
@@ -441,11 +571,15 @@ internal static class Http1MessageReader
                     continue;
                 }
 
-                foreach (string segment in entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                ReadOnlySpan<char> list = entry.AsSpan();
+                foreach (Range range in list.Split(','))
                 {
+                    // RFC 9110 §5.6.3 — trim SP and HTAB only, as the body reader does (#1341).
+                    ReadOnlySpan<char> segment = list[range].Trim(Http1FieldLine.OptionalWhitespace);
+
                     // Any non-"0" segment means a body is expected. A malformed value also lands here
                     // and is rejected by the body reader afterward; soliciting first is harmless.
-                    if (!string.Equals(segment, "0", StringComparison.Ordinal))
+                    if (!segment.IsEmpty && !segment.SequenceEqual("0"))
                     {
                         return true;
                     }
@@ -470,11 +604,13 @@ internal static class Http1MessageReader
                 continue;
             }
 
-            string[] segments = entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            foreach (string segment in segments)
+            ReadOnlySpan<char> list = entry.AsSpan();
+            foreach (Range range in list.Split(','))
             {
-                if (string.Equals(segment, expected, StringComparison.OrdinalIgnoreCase))
+                // RFC 9110 §5.6.1 / §5.6.3 — a list element loses SP and HTAB only, so
+                // "close\xA0" is not the close option (#1341).
+                ReadOnlySpan<char> segment = list[range].Trim(Http1FieldLine.OptionalWhitespace);
+                if (segment.Equals(expected, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
@@ -488,6 +624,12 @@ internal static class Http1MessageReader
     /// Reads a single CRLF-terminated line, capping its length so an unbounded line cannot be
     /// buffered into an ever-growing <see cref="MemoryStream"/> (a live memory-exhaustion vector).
     /// </summary>
+    /// <remarks>
+    /// Only CRLF ends the line. A bare CR or a bare LF stays in it, for the caller to reject: the
+    /// request line accepts nothing but VCHAR and SP, and a field value no control character but HTAB.
+    /// The line is decoded as Latin-1, one character per octet, so an octet above 0x7F reaches the
+    /// caller as itself rather than as the '?' an ASCII decode substitutes (#1341).
+    /// </remarks>
     /// <param name="stream">The connection stream.</param>
     /// <param name="maxLineSize">The maximum number of payload octets the line may contain.</param>
     /// <param name="overflowStatus">The HTTP status to reject with when the cap is exceeded.</param>
@@ -522,7 +664,7 @@ internal static class Http1MessageReader
                     return null;
                 }
 
-                throw new EndOfStreamException("The connection closed while an HTTP line was being read.");
+                throw new EndOfStreamException(ErrorMessages.HttpLineTruncated);
             }
 
             if (!signaledFirstByte)
@@ -535,7 +677,8 @@ internal static class Http1MessageReader
             {
                 if (value == '\n')
                 {
-                    return Encoding.ASCII.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+                    // RFC 9110 §5.5 — obs-text (%x80-FF) is a field-value octet; Latin-1 keeps it.
+                    return Encoding.Latin1.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
                 }
 
                 AppendByte(buffer, (byte)'\r', maxLineSize, overflowStatus, subject);
@@ -558,7 +701,7 @@ internal static class Http1MessageReader
         {
             throw new Http1LimitExceededException(
                 overflowStatus,
-                $"The {subject} exceeds the configured maximum size ({maxLineSize} octets).");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpLineTooLarge, subject, maxLineSize));
         }
 
         buffer.WriteByte(value);

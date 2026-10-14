@@ -6,8 +6,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Connections.Quic.Internal;
 
 /// <summary>
-/// The QUIC driver's diagnostics: listener, connection, and stream lifecycle events, and connection and
-/// stream counters.
+/// The QUIC driver's diagnostics: listener, connection, and stream lifecycle events, the inbound handshakes
+/// a listener dropped, and connection and stream counters.
 /// </summary>
 /// <remarks>
 /// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>). Tools enable
@@ -112,6 +112,22 @@ internal sealed class QuicConnectionEventSource : EventSource
         }
     }
 
+    /// <summary>
+    /// Reports an inbound connection whose handshake failed, which the listener dropped before accepting
+    /// it. The payload carries the exception's type and message: never a certificate or key material.
+    /// </summary>
+    [NonEvent]
+    public void HandshakeFailed(ListenerId listenerId, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            HandshakeFailed(
+                listenerId.ToString(),
+                exception.GetType().FullName ?? exception.GetType().Name,
+                exception.Message);
+        }
+    }
+
     [Event(1, Level = EventLevel.Informational, Message = "Listener {0} bound endpoint {1}")]
     private void ListenerBound(string listenerId, string endPoint)
         => WriteEvent(1, listenerId, endPoint);
@@ -135,6 +151,10 @@ internal sealed class QuicConnectionEventSource : EventSource
     [Event(6, Level = EventLevel.Verbose, Message = "Stream {0} closed")]
     private void StreamClosed(string streamId)
         => WriteEvent(6, streamId);
+
+    [Event(7, Level = EventLevel.Warning, Message = "Listener {0} dropped an inbound connection whose handshake failed: {1}: {2}")]
+    private void HandshakeFailed(string listenerId, string exceptionType, string exceptionMessage)
+        => WriteEvent(7, listenerId, exceptionType, exceptionMessage);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

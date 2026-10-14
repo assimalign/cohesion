@@ -2,9 +2,10 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 
+using Assimalign.Cohesion.DependencyInjection.Internal;
+
 namespace Assimalign.Cohesion.DependencyInjection;
 
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 public static class ServiceProviderExtensions
 {
@@ -50,7 +51,7 @@ public static class ServiceProviderExtensions
 
         if (service == null)
         {
-            throw new InvalidOperationException(Resources.GetNoServiceRegisteredExceptionMessage(serviceType));
+            throw new InvalidOperationException(ErrorMessageFormatter.GetNoServiceRegisteredExceptionMessage(serviceType));
         }
 
         return service;

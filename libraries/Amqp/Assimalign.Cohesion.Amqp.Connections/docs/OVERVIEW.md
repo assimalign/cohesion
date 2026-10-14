@@ -17,10 +17,10 @@ and messaging semantics are out of scope — they belong to the sibling
 
 ## Key Types
 
-- `AmqpServerTransport` — accepts AMQP connections over an `IConnectionListener` or
+- `AmqpServerTransport` — accepts AMQP connections over an `IDuplexConnectionListener` or
   `IMultiplexedConnectionListener`; owns and disposes the listener.
 - `AmqpClientTransport` — establishes AMQP connections to an `EndPoint` over an
-  `IConnectionFactory` or `IMultiplexedConnectionFactory`.
+  `IDuplexConnectionFactory` or `IMultiplexedConnectionFactory`.
 - `IAmqpConnection` / `AmqpConnection` — an AMQP connection over a carrier; `Open()` /
   `OpenAsync()` yield the (cached) connection context.
 - `IAmqpConnectionContext` / `AmqpConnectionContext` — the opened context; **is** an

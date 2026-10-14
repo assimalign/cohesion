@@ -36,12 +36,12 @@ public sealed class InMemoryMultiplexedConnectionFactory : MultiplexedConnection
     /// <inheritdoc />
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="endPoint"/> is <see langword="null"/>.</exception>
     /// <exception cref="ConnectionAbortedException">Thrown when the bound listener has been disposed.</exception>
-    public override ValueTask<MultiplexedConnection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+    protected override ValueTask<IMultiplexedConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        return ValueTask.FromResult(_listener.Connect());
+        return ValueTask.FromResult<IMultiplexedConnection>(_listener.Connect());
     }
 }

@@ -33,6 +33,11 @@ app.Use(async (context, next) =>
 Types surface in the `Assimalign.Cohesion.Web` namespace (documented deviation — see
 [DESIGN.md](DESIGN.md)).
 
+`HttpStatusCode` accepts codes from 100 through 599, including unregistered codes.
+`ProblemDetails.FromStatus(new HttpStatusCode(499))` uses title `Error`; an unregistered 5xx
+code uses `Internal Server Error`. Registered codes use their reason phrase. The response helper
+preserves the numeric status, and an explicit `ProblemDetails.Title` is written unchanged.
+
 ## Scope boundaries
 
 This is the payload only. Error *policy* — when a fault becomes a response and in what shape —

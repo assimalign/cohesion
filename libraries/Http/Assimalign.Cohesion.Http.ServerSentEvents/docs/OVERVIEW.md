@@ -14,6 +14,10 @@ to a client over a long-lived HTTP response.
 - `ServerSentEvent` — the event value model (`event`, `id`, `data`, `retry`,
   comment) with `Message` / `KeepAlive` factories and the `text/event-stream`
   media-type constant.
+- `ServerSentEventFieldValue` — checked single-line text for `EventType` and
+  `Comment`; rejects CR and LF, while allowing NUL and an empty string.
+- `ServerSentEventId` — checked single-line text for `Id`; rejects CR, LF, and
+  NUL, while allowing an empty string to reset the client's last event id.
 - `ServerSentEventFormatter` — WHATWG wire-format serializer (UTF-8 into an
   `IBufferWriter<byte>`, AOT-safe).
 - `WriteEventAsync` / `WriteKeepAliveAsync` extension members on
@@ -21,7 +25,8 @@ to a client over a long-lived HTTP response.
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Http` (the streaming feature contract + `HttpHeaderKey`).
+- `Assimalign.Cohesion.Http` (the protocol contracts + `HttpHeaderKey`).
+- `Assimalign.Cohesion.Http.Streaming` (`IHttpResponseStreamingFeature`).
 - **Not** `Assimalign.Cohesion.Http.Connections` — SSE is transport-agnostic. The
   transports implement the streaming write path; an application composes SSE with
   a transport.
@@ -37,8 +42,33 @@ await stream.WriteEventAsync(new ServerSentEvent("hello") { EventType = "greetin
 await stream.WriteKeepAliveAsync();
 ```
 
+String assignments to `EventType`, `Id`, and `Comment` validate immediately and
+throw `ArgumentException` for CR or LF. `Id` also rejects NUL; event types,
+comments, and `KeepAlive` comments accept and preserve NUL. To handle untrusted
+text without throwing, use the appropriate type's generated `TryCreate` before
+constructing the event:
+
+```csharp
+if (ServerSentEventId.TryCreate(candidateId, out var id))
+{
+    await stream.WriteEventAsync(new ServerSentEvent("first\nsecond") { Id = id });
+}
+```
+
+`Data` remains multi-line text: the example emits two `data:` lines. An empty
+string is a valid field value; `Id = ""` resets the client's last event id.
+`EventType = null` and assignments from nullable strings still work. Null and
+default field values are omitted; empty event types are also omitted.
+
+Consumers upgrading from 10.0.0-preview.1 must recompile for the metadata property
+type changes. Read their text with `@event.Id?.Value`, `@event.EventType?.Value`, or
+`@event.Comment?.Value`. See [DESIGN.md](DESIGN.md#breaking-changes-from-1000-preview1-1475)
+for the source migration and injection fix.
+
 ## Layering
 
 L1 foundation library (HTTP feature layer). See `DESIGN.md` for the rationale
 behind the separate package and the non-goals (response interceptor, Web result
 type, client parsing).
+
+Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

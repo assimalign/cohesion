@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </summary>
 internal abstract class HttpMultiplexedConnectionFactory
 {
+    public virtual HttpResponseHeaderPolicy ResponseHeaderPolicy { get; set; } = HttpResponseHeaderPolicy.Default;
+
     /// <summary>
     /// Wraps <paramref name="connection"/> in the HTTP/3 connection.
     /// </summary>

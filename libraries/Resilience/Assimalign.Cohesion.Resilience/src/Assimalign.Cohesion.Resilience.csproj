@@ -9,17 +9,4 @@
 	<ItemGroup>
 		<CohesionValueType Include="ValueObjects\OperationKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Resilience" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 	</ItemGroup>
-	<ItemGroup>
-		<Compile Update="Properties\ErrorMessages.Designer.cs">
-			<DesignTime>True</DesignTime>
-			<AutoGen>True</AutoGen>
-			<DependentUpon>ErrorMessages.resx</DependentUpon>
-		</Compile>
-	</ItemGroup>
-	<ItemGroup>
-		<EmbeddedResource Update="Properties\ErrorMessages.resx">
-			<Generator>ResXFileCodeGenerator</Generator>
-			<LastGenOutput>ErrorMessages.Designer.cs</LastGenOutput>
-		</EmbeddedResource>
-	</ItemGroup>
 </Project>

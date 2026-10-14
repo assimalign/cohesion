@@ -6,25 +6,13 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections;
 
 /// <summary>
-/// Provides the guided base class for implementing <see cref="IDatagramConnection"/>.
+/// Provides the guided base for a datagram connection, sharing the root's lifecycle and features.
 /// </summary>
-public abstract class DatagramConnection : IDatagramConnection
+public abstract class DatagramConnection : Connection, IDatagramConnection
 {
-    /// <inheritdoc />
-    public abstract EndPoint LocalEndPoint { get; }
-
-    /// <inheritdoc />
-    public abstract EndPoint? RemoteEndPoint { get; }
-
-    /// <inheritdoc />
-    public abstract ConnectionCapabilities Capabilities { get; }
-
     /// <inheritdoc />
     public abstract ValueTask<DatagramReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken = default);
 
     /// <inheritdoc />
     public abstract ValueTask SendAsync(ReadOnlyMemory<byte> payload, EndPoint remoteEndPoint, CancellationToken cancellationToken = default);
-
-    /// <inheritdoc />
-    public abstract ValueTask DisposeAsync();
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -12,6 +13,7 @@ using Shouldly;
 using Xunit;
 
 using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
+using HttpHeaderKey = Assimalign.Cohesion.Http.HttpHeaderKey;
 using NetHttpStatusCode = System.Net.HttpStatusCode;
 
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
@@ -104,20 +106,25 @@ public class WebApplicationPipelineIntegrationTests
         downstreamRan.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Pipeline: A middleware fault should cost only its own connection, not the server")]
-    public async Task Pipeline_MiddlewareThrows_ShouldIsolateFaultToItsConnection()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Pipeline: A middleware fault should cost only its own exchange, answered with a 500")]
+    public async Task Pipeline_MiddlewareThrows_ShouldAnswerThatExchangeWith500AndKeepTheConnection()
     {
-        // Arrange — the application-exception isolation boundary (#762): a throwing exchange
-        // tears down its own connection while the accept loop keeps serving new ones.
+        // Arrange — the application-exception isolation boundary (#1049): a throwing exchange is
+        // answered with a bodyless 500 in place of what it staged, and its keep-alive connection
+        // goes on to serve the next request.
         using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
 
+        ConcurrentQueue<string?> connections = new();
         factory.Application.Use((context, next) =>
         {
+            connections.Enqueue(context.ConnectionInfo.RemoteEndPoint?.ToString());
+
             if (context.Request.Path.ToString() == "/faulty")
             {
+                context.Response.Headers[HttpHeaderKey.ContentType] = "application/json";
                 throw new InvalidOperationException("Deliberate application fault.");
             }
 
@@ -125,15 +132,19 @@ public class WebApplicationPipelineIntegrationTests
             return Task.CompletedTask;
         });
 
-        using HttpClient faultyClient = factory.CreateClient();
-        using HttpClient healthyClient = factory.CreateClient();
+        using HttpClient client = factory.CreateClient();
 
-        // Act & Assert — the faulting exchange surfaces as a transport-level failure on its
-        // own connection...
-        await Should.ThrowAsync<HttpRequestException>(() => faultyClient.GetAsync("/faulty", cancellationToken));
+        // Act
+        using HttpResponseMessage faulty = await client.GetAsync("/faulty", cancellationToken);
+        using HttpResponseMessage healthy = await client.GetAsync("/healthy", cancellationToken);
 
-        // ...and the server keeps serving fresh connections afterwards.
-        using HttpResponseMessage healthy = await healthyClient.GetAsync("/healthy", cancellationToken);
+        // Assert — the fault is a 500 with nothing the handler staged, and the same connection
+        // carried the next request.
+        faulty.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        faulty.Content.Headers.ContentType.ShouldBeNull();
+        (await faulty.Content.ReadAsByteArrayAsync(cancellationToken)).ShouldBeEmpty();
         healthy.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        connections.Count.ShouldBe(2);
+        connections.Distinct().Count().ShouldBe(1);
     }
 }

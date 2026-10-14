@@ -48,6 +48,9 @@ public sealed class FrameworkManifestTests
             "Assimalign.Cohesion.Configuration.FileSystem",
             "Assimalign.Cohesion.Configuration.Json",
             "Assimalign.Cohesion.Connections",
+            "Assimalign.Cohesion.Connections.StreamAbort",
+            "Assimalign.Cohesion.Connections.StreamLimits",
+            "Assimalign.Cohesion.Connections.Tls",
             "Assimalign.Cohesion.Core",
             "Assimalign.Cohesion.DependencyInjection",
             "Assimalign.Cohesion.FileSystem",
@@ -58,6 +61,7 @@ public sealed class FrameworkManifestTests
             "Assimalign.Cohesion.Hosting.Telemetry",
             "Assimalign.Cohesion.Logging",
             "Assimalign.Cohesion.Logging.Console",
+            "Assimalign.Cohesion.Logging.EventSource",
             "Assimalign.Cohesion.OpenTelemetry"
         ];
 
@@ -69,7 +73,7 @@ public sealed class FrameworkManifestTests
             .ToArray();
 
         // Assert
-        roots.Length.ShouldBe(13);
+        roots.Length.ShouldBe(17);
         declaredAssemblies.ShouldBe([AppFramework]);
         actualClosure.ShouldBe(expectedClosure);
     }

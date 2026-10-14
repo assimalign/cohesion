@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Net;
 using System.Runtime.ExceptionServices;
@@ -17,14 +18,14 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// </summary>
 /// <remarks>
 /// One accept loop runs per registered listener: HTTP/1.1 and HTTP/2 loops accept
-/// <see cref="IConnection"/> instances from an <see cref="IConnectionListener"/>, the HTTP/3
+/// <see cref="IDuplexConnection"/> instances from an <see cref="IDuplexConnectionListener"/>, the HTTP/3
 /// loop accepts <see cref="IMultiplexedConnection"/> instances from an
 /// <see cref="IMultiplexedConnectionListener"/>. Accepted connections are buffered on a bounded
-/// channel drained by <see cref="AcceptOrListenAsync(CancellationToken)"/>.
+/// channel drained by <see cref="AcceptAsync(CancellationToken)"/>.
 /// </remarks>
-public sealed class HttpConnectionListener : IHttpConnectionListener
+public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>, IHttpConnectionListener
 {
-    private readonly List<(HttpConnectionFactory Factory, IConnectionListener Listener)> _streamListeners;
+    private readonly List<(HttpConnectionFactory Factory, IDuplexConnectionListener Listener)> _streamListeners;
     private readonly List<(HttpMultiplexedConnectionFactory Factory, IMultiplexedConnectionListener Listener)> _multiplexedListeners;
     private readonly List<Task> _acceptLoops;
     private readonly Channel<HttpConnection> _acceptedConnections;
@@ -38,6 +39,28 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     private bool _isBound;
     private bool _isDisposed;
     private volatile Exception? _acceptLoopException;
+
+    /// <inheritdoc />
+    public override ListenerId Id { get; } = ListenerId.New();
+
+    /// <inheritdoc />
+    public IReadOnlyList<EndPoint> EndPoints
+    {
+        get
+        {
+            EndPoint[] endPoints = new EndPoint[_streamListeners.Count + _multiplexedListeners.Count];
+            int index = 0;
+            foreach (var entry in _streamListeners)
+            {
+                endPoints[index++] = entry.Listener.EndPoint;
+            }
+            foreach (var entry in _multiplexedListeners)
+            {
+                endPoints[index++] = entry.Listener.EndPoint;
+            }
+            return endPoints;
+        }
+    }
 
     /// <summary>
     /// Initializes a new HTTP connection listener, materializing every registered listener
@@ -53,7 +76,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _streamListeners = new List<(HttpConnectionFactory, IConnectionListener)>();
+        _streamListeners = new List<(HttpConnectionFactory, IDuplexConnectionListener)>();
         _multiplexedListeners = new List<(HttpMultiplexedConnectionFactory, IMultiplexedConnectionListener)>();
 
         // Snapshot the single interceptor list once (registrations after this point must not race
@@ -65,25 +88,42 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         IHttpExchangeInterceptor[] interceptors = FilterByScope(snapshot, HttpInterceptorScopes.Request);
         IHttpExchangeInterceptor[] responseInterceptors = FilterByScope(snapshot, HttpInterceptorScopes.Response);
 
+        // Every exchange's feature collection is sized for this many features when the transport
+        // creates it, so the features the host stamps on each exchange do not grow it.
+        int featureCapacity = options.ExchangeFeatureCapacity;
+
         HttpProtocol protocols = HttpProtocol.None;
 
         // Each registration carries the factory that turns an accepted transport connection into
         // its protocol-specific HttpConnection; the accept loops dispatch to that factory rather
-        // than switching on the protocol. Factories bind to the listener-wide interceptors here
-        // (once they are snapshotted); each registration's version-specific options (limits,
-        // QPACK) were already captured at Use* time and are closed over by its factory builder.
+        // than switching on the protocol. Factories bind to the listener-wide interceptors and
+        // feature capacity here (once they are snapshotted); each registration's version-specific
+        // options (limits, QPACK) were already captured at Use* time and are closed over by its
+        // factory builder.
         foreach (HttpListenerRegistration registration in options.Registrations)
         {
             if (registration.IsMultiplexed)
             {
-                _multiplexedListeners.Add((registration.CreateMultiplexedConnectionFactory(interceptors, responseInterceptors), registration.CreateMultiplexedListener()));
+                _multiplexedListeners.Add((registration.CreateMultiplexedConnectionFactory(interceptors, responseInterceptors, featureCapacity), registration.CreateMultiplexedListener()));
             }
             else
             {
-                _streamListeners.Add((registration.CreateStreamConnectionFactory(interceptors, responseInterceptors), registration.CreateStreamListener()));
+                _streamListeners.Add((registration.CreateStreamConnectionFactory(interceptors, responseInterceptors, featureCapacity), registration.CreateStreamListener()));
             }
 
             protocols |= registration.Protocol;
+        }
+
+        HttpResponseHeaderPolicy responseHeaderPolicy = options.AddDateHeader
+            ? new HttpResponseHeaderPolicy(HttpResponseDateCache.For(options.DateTimeProvider))
+            : HttpResponseHeaderPolicy.Disabled;
+        foreach ((HttpConnectionFactory factory, IDuplexConnectionListener _) in _streamListeners)
+        {
+            factory.ResponseHeaderPolicy = responseHeaderPolicy;
+        }
+        foreach ((HttpMultiplexedConnectionFactory factory, IMultiplexedConnectionListener _) in _multiplexedListeners)
+        {
+            factory.ResponseHeaderPolicy = responseHeaderPolicy;
         }
 
         Protocols = protocols;
@@ -113,7 +153,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     public HttpProtocol Protocols { get; }
 
     /// <inheritdoc />
-    public async ValueTask BindAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask BindAsync(CancellationToken cancellationToken = default)
     {
         await _bindSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -128,12 +168,12 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
             if (_streamListeners.Count == 0 && _multiplexedListeners.Count == 0)
             {
-                throw new InvalidOperationException("At least one connection listener must be configured before binding HTTP connections.");
+                throw new InvalidOperationException(ErrorMessages.ConnectionListenerMissing);
             }
 
             try
             {
-                foreach ((HttpConnectionFactory _, IConnectionListener listener) in _streamListeners)
+                foreach ((HttpConnectionFactory _, IDuplexConnectionListener listener) in _streamListeners)
                 {
                     await listener.BindAsync(cancellationToken).ConfigureAwait(false);
                 }
@@ -202,7 +242,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
             if (!TryParseAuthority(authority, out string? host, out int port))
             {
                 throw new InvalidOperationException(
-                    $"The configured Alt-Svc authority '{authority}' is not a valid 'host:port' or ':port' value.");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.AltSvcAuthorityInvalid, authority));
             }
 
             alternative = HttpAltService.Http3(host, port, maxAgeSeconds);
@@ -215,8 +255,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         else
         {
             throw new InvalidOperationException(
-                "Alt-Svc advertisement is enabled but the HTTP/3 listener endpoint does not expose a port; " +
-                $"set {nameof(HttpAltServiceAdvertisementOptions)}.{nameof(HttpAltServiceAdvertisementOptions.Authority)} explicitly.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AltSvcPortMissing, nameof(HttpAltServiceAdvertisementOptions), nameof(HttpAltServiceAdvertisementOptions.Authority)));
         }
 
         return alternative.Format();
@@ -272,7 +311,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     /// <returns>The next accepted HTTP connection.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Thrown when no connection listener has been configured.</exception>
-    public async Task<HttpConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IHttpConnection> AcceptCoreAsync(CancellationToken cancellationToken)
     {
         await BindAsync(cancellationToken).ConfigureAwait(false);
 
@@ -310,7 +349,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         await _bindSemaphore.WaitAsync().ConfigureAwait(false);
 
@@ -343,7 +382,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
             (disposalFailures ??= new List<Exception>()).Add(exception);
         }
 
-        foreach ((HttpConnectionFactory _, IConnectionListener listener) in _streamListeners)
+        foreach ((HttpConnectionFactory _, IDuplexConnectionListener listener) in _streamListeners)
         {
             try
             {
@@ -413,7 +452,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
         if (disposalFailures is { Count: > 1 })
         {
-            throw new AggregateException("One or more HTTP connection listeners failed to dispose.", disposalFailures);
+            throw new AggregateException(ErrorMessages.ListenerDisposalFailure, disposalFailures);
         }
     }
 
@@ -434,11 +473,6 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         return new HttpConnectionListener(options);
     }
 
-    async Task<IHttpConnection> IHttpConnectionListener.AcceptOrListenAsync(CancellationToken cancellationToken)
-    {
-        return await AcceptOrListenAsync(cancellationToken).ConfigureAwait(false);
-    }
-
     private void ConfigureAltServiceAdvertisement()
     {
         string? altSvcHeaderValue = BuildAltSvcHeaderValue(
@@ -453,7 +487,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
             return;
         }
 
-        foreach ((HttpConnectionFactory factory, IConnectionListener _) in _streamListeners)
+        foreach ((HttpConnectionFactory factory, IDuplexConnectionListener _) in _streamListeners)
         {
             factory.AltSvcHeaderValue = altSvcHeaderValue;
         }
@@ -468,7 +502,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                 return;
             }
 
-            foreach ((HttpConnectionFactory factory, IConnectionListener listener) in _streamListeners)
+            foreach ((HttpConnectionFactory factory, IDuplexConnectionListener listener) in _streamListeners)
             {
                 _acceptLoops.Add(RunStreamAcceptLoopAsync(factory, listener));
             }
@@ -482,7 +516,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         }
     }
 
-    private async Task RunStreamAcceptLoopAsync(HttpConnectionFactory connectionFactory, IConnectionListener listener)
+    private async Task RunStreamAcceptLoopAsync(HttpConnectionFactory connectionFactory, IDuplexConnectionListener listener)
     {
         // TLS is composed onto the listener before registration; the capability
         // reports the effective security of every connection it accepts.
@@ -492,11 +526,11 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         {
             while (!_disposeCancellationTokenSource.IsCancellationRequested)
             {
-                IConnection connection = await listener
+                IDuplexConnection connection = await listener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection;
+                HttpConnection? httpConnection;
 
                 try
                 {
@@ -508,11 +542,25 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     throw;
                 }
 
+                if (httpConnection is null)
+                {
+                    // The registration cannot serve this one connection: its TLS handshake negotiated
+                    // an application protocol the registration does not speak (RFC 7301 §3.2 binds the
+                    // connection to it). Close it and keep accepting; the listener itself is healthy.
+                    await DisposeAfterFailedTransferAsync(connection).ConfigureAwait(false);
+                    continue;
+                }
+
                 await QueueAcceptedConnectionAsync(httpConnection).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_disposeCancellationTokenSource.IsCancellationRequested)
         {
+            // Only this listener's own cancellation ends the loop quietly. A transport listener contains
+            // each connection's failure (a TLS-layered listener runs every handshake on its own task;
+            // see IDuplexConnectionListener.AcceptAsync), so whatever else escapes AcceptAsync, a stray
+            // cancellation included, is the transport listener's failure and is surfaced below instead of
+            // silently ending this endpoint's accepts (#1304).
         }
         catch (ChannelClosedException)
         {
@@ -561,8 +609,10 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                 await QueueAcceptedConnectionAsync(httpConnection).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_disposeCancellationTokenSource.IsCancellationRequested)
         {
+            // As in the stream loop: only this listener's cancellation ends the loop quietly. The QUIC
+            // driver contains a connection's failed handshake itself (#1304).
         }
         catch (ChannelClosedException)
         {

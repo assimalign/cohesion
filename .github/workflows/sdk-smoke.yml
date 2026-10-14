@@ -7,15 +7,19 @@ on:
       - ".github/scripts/Invoke-SdkConsumerSmoke.ps1"
       - "analyzers/**"
       - "build/**"
+      - "docs/EVENT_SOURCES.md"
       - "installer/scripts/**"
       - "libraries/App/**"
       - "libraries/ApplicationModel/**"
+      - "libraries/Caching/**"
       - "libraries/Connections/**"
       - "libraries/Core/**"
       - "libraries/FileSystem/**"
       - "libraries/Hosting/**"
       - "libraries/Http/**"
+      - "libraries/IdentityModel/**"
       - "libraries/ObjectMapping/**"
+      - "libraries/ObjectValidation/**"
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
@@ -41,10 +45,7 @@ on:
       - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/**"
-      - "resources/Web/Assimalign.Cohesion.Web.ApplicationModel/**"
-      - "resources/Web/Assimalign.Cohesion.Web.Hosting/**"
-      - "resources/Web/Assimalign.Cohesion.Web.Routing/**"
-      - "resources/Web/Assimalign.Cohesion.Web/**"
+      - "resources/Web/**"
       - "samples/SdkSmoke/**"
       - "sdks/**"
       - "Directory.Build.props"
@@ -56,15 +57,19 @@ on:
       - ".github/scripts/Invoke-SdkConsumerSmoke.ps1"
       - "analyzers/**"
       - "build/**"
+      - "docs/EVENT_SOURCES.md"
       - "installer/scripts/**"
       - "libraries/App/**"
       - "libraries/ApplicationModel/**"
+      - "libraries/Caching/**"
       - "libraries/Connections/**"
       - "libraries/Core/**"
       - "libraries/FileSystem/**"
       - "libraries/Hosting/**"
       - "libraries/Http/**"
+      - "libraries/IdentityModel/**"
       - "libraries/ObjectMapping/**"
+      - "libraries/ObjectValidation/**"
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
@@ -90,10 +95,7 @@ on:
       - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/**"
-      - "resources/Web/Assimalign.Cohesion.Web.ApplicationModel/**"
-      - "resources/Web/Assimalign.Cohesion.Web.Hosting/**"
-      - "resources/Web/Assimalign.Cohesion.Web.Routing/**"
-      - "resources/Web/Assimalign.Cohesion.Web/**"
+      - "resources/Web/**"
       - "samples/SdkSmoke/**"
       - "sdks/**"
       - "Directory.Build.props"
@@ -112,6 +114,7 @@ jobs:
   consumer-smoke:
     name: "SDK consumer smoke [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -307,7 +310,10 @@ jobs:
             "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
             "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
             "Assimalign.Cohesion.Connections"
+            "Assimalign.Cohesion.Connections.StreamAbort"
+            "Assimalign.Cohesion.Connections.StreamLimits"
             "Assimalign.Cohesion.Connections.Tcp"
+            "Assimalign.Cohesion.Connections.Tls"
             "Assimalign.Cohesion.Core"
             "Assimalign.Cohesion.Database"
             "Assimalign.Cohesion.Database.ApplicationModel"
@@ -377,7 +383,10 @@ jobs:
             "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
             "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
             "Assimalign.Cohesion.Connections"
+            "Assimalign.Cohesion.Connections.StreamAbort"
+            "Assimalign.Cohesion.Connections.StreamLimits"
             "Assimalign.Cohesion.Connections.Tcp"
+            "Assimalign.Cohesion.Connections.Tls"
             "Assimalign.Cohesion.Core"
             "Assimalign.Cohesion.Database"
             "Assimalign.Cohesion.Database.ApplicationModel"
@@ -443,6 +452,7 @@ jobs:
     name: "Gateway package smoke [${{ matrix.os }}]"
     needs: gateway-packages
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

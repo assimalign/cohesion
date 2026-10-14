@@ -27,4 +27,12 @@ public sealed class OpenApiParameterMetadata
 
     /// <summary>Gets the format modifier of the parameter schema, if any.</summary>
     public string? Format { get; init; }
+
+    /// <summary>
+    /// Gets a complete schema for the parameter, supplied by a producer that already holds one (the Web
+    /// OpenAPI adapter, which derives schemas from the application's routes and serialization contracts).
+    /// When set, generation uses it as the parameter's schema and ignores <see cref="SchemaType"/> and
+    /// <see cref="Format"/>. The attribute mapper and the source generator never set it.
+    /// </summary>
+    public OpenApiSchema? Schema { get; init; }
 }

@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// Represents an AMQP connection layered on top of a carrier connection produced by a lower-level transport.
 /// </summary>
 /// <remarks>
-/// The connection wraps either a single-stream carrier (the carrier <see cref="IConnection"/> itself)
+/// The connection wraps either a single-stream carrier (the carrier <see cref="IDuplexConnection"/> itself)
 /// or a multiplexed carrier (an <see cref="IMultiplexedConnection"/> whose AMQP stream is acquired
 /// when the connection context is opened). Use <see cref="OpenAsync(CancellationToken)"/> to obtain
 /// the <see cref="AmqpConnectionContext"/> used to negotiate protocol headers and exchange frames.

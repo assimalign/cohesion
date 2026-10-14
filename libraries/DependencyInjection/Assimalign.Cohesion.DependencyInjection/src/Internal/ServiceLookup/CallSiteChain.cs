@@ -4,7 +4,6 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class CallSiteChain
 {
@@ -27,7 +26,7 @@ internal sealed class CallSiteChain
     private string CreateCircularDependencyExceptionMessage(Type type)
     {
         var messageBuilder = new StringBuilder()
-            .Append(Resources.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(type)))
+            .Append(ErrorMessageFormatter.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(type)))
             .AppendLine();
 
         AppendResolutionPath(messageBuilder, type);

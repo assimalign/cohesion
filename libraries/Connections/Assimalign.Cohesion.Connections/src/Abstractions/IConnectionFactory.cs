@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections;
 
 /// <summary>
-/// Establishes outbound single-stream connections to a remote endpoint (the client side of a transport).
+/// Establishes outbound connections to a remote endpoint (the client side of a transport).
 /// </summary>
 public interface IConnectionFactory
 {

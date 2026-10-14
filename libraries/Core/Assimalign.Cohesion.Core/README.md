@@ -5,6 +5,10 @@ owns the frozen `COHESION_*` runtime variable names through `AppEnvironment.Vari
 endpoint values through `System.Uri` plus `UriExtensions`, and the shared application-environment
 resolution rule and runtime-contract readers through `AppEnvironment`.
 
+The value-type conformance tests use the repository build task. In a fresh worktree, run
+`dotnet build build/Tasks -c Debug` before
+`dotnet test libraries/Core/Assimalign.Cohesion.Core/tests/Assimalign.Cohesion.Core.Tests.csproj`.
+
 
 
 # Types

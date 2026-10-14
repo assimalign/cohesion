@@ -75,3 +75,23 @@ Graph transactions remain a deliberate limit: there are no connection transactio
 BEGIN, COMMIT, ROLLBACK, and the reserved Transaction message are unsupported. Mutations retain
 the engine's existing execution and validation semantics. Database binding remains fixed at
 handshake and catalog SHOW keeps its existing read-only and scoping diagnostics.
+
+## Duplex transport composition
+
+`ConnectionFactory` accepts `IDuplexConnectionFactory`. The shared client reads and writes
+framed bytes through the returned `IDuplexConnection`; the common `IConnection` root carries
+identity, features and lifecycle only. TCP, InMemory and TLS-layered duplex factories satisfy
+this contract. The pool owns each established connection and disposes it when discarded or
+when the pool closes; transport disposal has signaled `ConnectionClosed` before it completes.
+
+### Breaking changes from 10.0.0-preview.1 (#1459)
+
+`GraphClientOptions.ConnectionFactory` changes from `IConnectionFactory?` to
+`IDuplexConnectionFactory?`. Changing the property's getter and setter signatures breaks
+preview.1 binaries and source that supplies a factory typed only as `IConnectionFactory`.
+This preview break is accepted under owner decisions 15 and 58. Rebuild consumers and use
+`IDuplexConnectionFactory` for factory variables and custom implementations. Custom factories
+can derive from `DuplexConnectionFactory`, implement `ConnectCoreAsync` returning
+`ValueTask<IDuplexConnection>`, and produce a `DuplexConnection` implementation. Built-in TCP,
+InMemory and TLS-layered duplex factories already satisfy the new contract. Database wire
+framing, handshake and model messages are unchanged.

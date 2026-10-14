@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 
 
@@ -83,7 +84,7 @@ internal sealed class QPackDynamicTable
         {
             throw new QPackException(
                 Http3ErrorCode.QPackEncoderStreamError,
-                $"QPACK dynamic table capacity {capacity} is invalid or exceeds the advertised maximum {_maxCapacity}.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackDynamicTableCapacityInvalid, capacity, _maxCapacity));
         }
 
         _capacity = capacity;
@@ -111,7 +112,7 @@ internal sealed class QPackDynamicTable
         {
             throw new QPackException(
                 Http3ErrorCode.QPackEncoderStreamError,
-                $"QPACK insert with name reference targets static index {staticIndex}, which is out of range.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackInsertNameIndexInvalid, staticIndex));
         }
 
         Insert(name, value);
@@ -179,7 +180,7 @@ internal sealed class QPackDynamicTable
         {
             throw new QPackException(
                 Http3ErrorCode.QPackEncoderStreamError,
-                $"QPACK relative index {relativeIndex} does not resolve to a live dynamic-table entry.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackRelativeIndexInvalid, relativeIndex));
         }
 
         return new Entry(name, value, EntrySize(name, value));
@@ -195,7 +196,7 @@ internal sealed class QPackDynamicTable
             // that inserts such an entry has committed a stream error.
             throw new QPackException(
                 Http3ErrorCode.QPackEncoderStreamError,
-                $"QPACK insert of size {entrySize} exceeds the dynamic table capacity {_capacity}.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QpackInsertTooLarge, entrySize, _capacity));
         }
 
         EvictToFit(entrySize);

@@ -72,6 +72,25 @@ Programs retain the landed composition scope. Zone gateways currently realize th
 subset while retaining the other references. Generic area configuration and full provider-backed
 production realization remain separate work; builds here do not claim runtime readiness of every domain.
 
+## Standalone SPA routing (#1092)
+
+`cohesion-spa` registers the routing feature through `builder.Services.AddRouting()` before
+building the application. Its pipeline runs `UseStaticFiles()`, then `UseRouting()`, then maps
+`MapFallbackToFile("index.html")`. Static assets retain their normal handling, and the lowest
+precedence GET/HEAD fallback serves `wwwroot/index.html` for client-side routes. The nonfile
+constraint examines the last path segment: `/settings` and `/releases/v1.0/settings` can fall
+back, while `/assets/missing.js` remains 404. Routing and static-file support already ship in
+`App.Web`; no extra package reference, reflection or runtime code generation is required.
+
+This is a behavior break from 10.0.0-preview.1 on the HTTP/Web program's decision 15 terms:
+newly generated standalone SPA applications answer client-route deep links with the page instead
+of 404. Existing generated applications must add the same composition explicitly. Other templates
+are unchanged.
+
+The packed-SDK SPA run test starts the generated apphost and checks the page content for deep
+links, HEAD semantics and 404 responses for missing file paths. Its process is stopped in a
+`finally` block, including when an assertion fails.
+
 ## Gateway composition and providers
 
 `Sdk.Gateway` generates `Manifests`, `Externals`, `Applications`, the provider catalog, `UseGateway`

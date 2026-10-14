@@ -46,6 +46,6 @@ internal sealed class UnwritablePipeWriter : PipeWriter
 
     private static InvalidOperationException NewWriteException()
     {
-        return new InvalidOperationException("The stream is read-only.");
+        return new InvalidOperationException(ErrorMessages.StreamReadOnly);
     }
 }

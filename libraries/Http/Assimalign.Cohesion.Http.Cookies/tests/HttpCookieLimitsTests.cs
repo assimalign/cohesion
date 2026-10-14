@@ -39,7 +39,7 @@ public class HttpCookieLimitsTests
         HttpCookieCollection cookies = new(headers, HttpHeaderKey.Cookie);
 
         cookies.Count.ShouldBe(1);
-        cookies.Single().Value.Length.ShouldBe(4095);
+        cookies.Single().Value.Value.Length.ShouldBe(4095);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - Request parse: name+value over the 4096 limit is ignored")]
@@ -68,7 +68,7 @@ public class HttpCookieLimitsTests
         HttpCookieCollection cookies = new(headers, HttpHeaderKey.SetCookie);
 
         cookies.Count.ShouldBe(1);
-        cookies.Single().Name.ShouldBe("ok");
+        cookies.Single().Name.ShouldBe<HttpCookieName>("ok");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - Response parse: attribute value at the 1024 limit is kept")]
@@ -94,8 +94,8 @@ public class HttpCookieLimitsTests
         HttpCookieCollection cookies = new(headers, HttpHeaderKey.SetCookie);
 
         HttpCookie cookie = cookies.Single();
-        cookie.Name.ShouldBe("id");
-        cookie.Value.ShouldBe("1");
+        cookie.Name.ShouldBe<HttpCookieName>("id");
+        cookie.Value.ShouldBe<HttpCookieValue>("1");
         cookie.Options.Extensions.ShouldBeEmpty();
     }
 
@@ -127,7 +127,7 @@ public class HttpCookieLimitsTests
         HttpCookieCollection cookies = new(headers, HttpHeaderKey.Cookie, limits);
 
         cookies.Count.ShouldBe(1);
-        cookies.Single().Value.ShouldBe("keep");
+        cookies.Single().Value.ShouldBe<HttpCookieValue>("keep");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - Parse: oversized input is ignored, never thrown")]

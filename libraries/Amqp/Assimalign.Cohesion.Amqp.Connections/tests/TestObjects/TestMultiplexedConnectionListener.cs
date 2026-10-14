@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 /// </summary>
 internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionListener
 {
-    private readonly Queue<MultiplexedConnection> _pending = new();
+    private readonly Queue<IMultiplexedConnection> _pending = new();
     private readonly ConnectionCapabilities _capabilities;
 
     public TestMultiplexedConnectionListener(ConnectionCapabilities? capabilities = null)
@@ -23,13 +23,15 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
 
     public bool IsDisposed { get; private set; }
 
+    public override ListenerId Id { get; } = ListenerId.New();
+
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 5671);
 
     public override ConnectionCapabilities Capabilities => _capabilities;
 
-    public void Enqueue(MultiplexedConnection connection) => _pending.Enqueue(connection);
+    public void Enqueue(IMultiplexedConnection connection) => _pending.Enqueue(connection);
 
-    public override ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
         => ValueTask.FromResult(_pending.Dequeue());
 
     public override ValueTask DisposeAsync()

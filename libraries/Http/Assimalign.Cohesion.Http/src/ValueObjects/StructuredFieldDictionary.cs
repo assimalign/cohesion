@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -39,7 +40,7 @@ public readonly struct StructuredFieldDictionary
         {
             if (pair.Key is null || !StructuredFieldGrammar.IsValidKey(pair.Key))
             {
-                throw new ArgumentException($"'{pair.Key}' is not a valid RFC 9651 key.", nameof(members));
+                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.InvalidStructuredFieldKey, pair.Key), nameof(members));
             }
             Upsert(list, pair.Key, pair.Value);
         }
@@ -145,7 +146,7 @@ public readonly struct StructuredFieldDictionary
     {
         if (!TryParse(input, out StructuredFieldDictionary result, out string? error))
         {
-            throw new HttpInvalidStructuredFieldException(error ?? "Malformed structured field dictionary.");
+            throw new HttpInvalidStructuredFieldException(error ?? ErrorMessages.MalformedStructuredFieldDictionary);
         }
         return result;
     }

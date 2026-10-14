@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Web.Compression.Internal;
 
@@ -10,7 +11,7 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 internal sealed class RequestDecompressionLimitException : Exception
 {
     public RequestDecompressionLimitException(long limit)
-        : base($"The decompressed request body exceeded the configured limit of {limit} bytes.")
+        : base(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestDecompressionLimitExceeded, limit))
     {
     }
 }

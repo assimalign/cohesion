@@ -6,6 +6,8 @@
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
 	<ItemGroup>
+		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />
@@ -13,10 +15,16 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Logging.EventSource" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Compression" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Diagnostics" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.RequestTimeouts" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Rewrite" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
 </Project>

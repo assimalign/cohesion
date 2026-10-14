@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Http;
 /// Ergonomic access to the per-exchange <see cref="IHttpInterimResponseFeature"/>: resolving it from
 /// the feature collection and emitting the two common interim responses (<c>100 Continue</c> and
 /// <c>103 Early Hints</c>) without the caller assembling status codes or header collections by hand.
-/// Available once <see cref="HttpInterimResponses.CreateInterceptor"/> is registered on the transport.
+/// Available once <see cref="HttpInterimResponseInterceptor.Create"/> is registered on the transport.
 /// </summary>
 public static class HttpInterimResponseExtensions
 {
@@ -91,8 +91,8 @@ public static class HttpInterimResponseExtensions
         /// </returns>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         /// <remarks>
-        /// The HTTP/1.1 transport already emits <c>100 Continue</c> automatically for a request that
-        /// carries <c>Expect: 100-continue</c> with a framed body, so this is only needed for a
+        /// The transport already emits <c>100 Continue</c> automatically, on every version, for a request
+        /// that carries <c>Expect: 100-continue</c> and still has content to send, so this is only needed for a
         /// handler that manages the continue handshake explicitly.
         /// </remarks>
         public async ValueTask<bool> SendContinueAsync(CancellationToken cancellationToken = default)

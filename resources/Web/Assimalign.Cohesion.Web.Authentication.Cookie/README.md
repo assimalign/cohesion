@@ -12,8 +12,8 @@ login / logout / access-denied flow.
   and the `IDataProtector` that seals the ticket.
 - `CookieAuthenticationDefaults` &mdash; the default scheme name
   (`"Cookies"`) and paths.
-- `CookieAuthentication.CreateHandler(options)` &mdash; the factory the
-  composition root calls; the concrete handler stays internal.
+- `CookieAuthenticationHandler.Create(options)` &mdash; the factory the
+  composition root calls; it returns the public sealed handler with private construction.
 
 ## How it fits
 
@@ -21,21 +21,32 @@ login / logout / access-denied flow.
   `Assimalign.Cohesion.Web.Authentication` (the scheme model).
 - Seals tickets through `Assimalign.Cohesion.Security.DataProtection`
   &mdash; keys are never hand-rolled.
-- Keys its redirect-vs-`401`/`403` decision on the `IApiEndpointMetadata`
-  endpoint marker resolved through `Assimalign.Cohesion.Web.Routing`.
+- Keys its redirect-vs-`401`/`403` decision on the sealed `ApiEndpointMetadata`
+  marker resolved through `Assimalign.Cohesion.Web.Routing`; attach `ApiEndpointMetadata.Instance`
+  to an API endpoint.
 
 Register it at the composition root, not here:
 
 ```csharp
-builder.AddAuthentication(o => o.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme)
-       .AddCookie(o =>
-       {
-           o.LoginPath = "/account/login";
-           o.Cookie.Secure = true;
-       });
+builder.Services.AddAuthentication(auth =>
+{
+    auth.Options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    auth.AddCookie(o =>
+    {
+        o.LoginPath = "/account/login";
+        o.Cookie.Secure = true;
+    });
+});
 
 app.UseAuthentication();
 ```
+
+Over HTTPS the ticket cookie is always `Secure`, even without `Cookie.Secure`:
+the handler reads the effective scheme, so TLS terminated at a trusted proxy
+counts once `UseForwardedHeaders` runs ahead of `UseAuthentication`.
+
+The ticket cookie is essential by default (`Cookie.IsEssential`), so a
+`UseCookiePolicy` consent requirement never stops a user from signing in.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the ticket format, sliding-renewal
 rule, and the redirect-vs-status decision.

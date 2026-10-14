@@ -2,6 +2,9 @@ name: Connections
 on:
   push:
     paths:
+      - "build/Tasks/**"
+      - "build/Targets/Build.CodeGeneration.*"
+      - "build/TestSupport/**"
       - "libraries/Connections/**"
       - "!libraries/Connections/**/*.slnx"
       - "!libraries/Connections/**/*.md"
@@ -13,13 +16,17 @@ jobs:
   build:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     continue-on-error: false
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
             "Assimalign.Cohesion.Connections",
+            "Assimalign.Cohesion.Connections.StreamAbort",
+            "Assimalign.Cohesion.Connections.StreamLimits",
             "Assimalign.Cohesion.Connections.Tcp",
+            "Assimalign.Cohesion.Connections.Tls",
             "Assimalign.Cohesion.Connections.Udp",
             "Assimalign.Cohesion.Connections.Quic",
             "Assimalign.Cohesion.Connections.Security",

@@ -189,7 +189,7 @@ graph elements or persisted system data.
 
 `GraphDatabaseServer.Create(engine, options)` exposes these statements to the existing generic
 model-owned catalog exchange over the shared `Database.Client` connection infrastructure. The composition root supplies an
-`IConnectionListener` through `GraphDatabaseServerOptions.Listener` and owns the engine lifecycle;
+`IDuplexConnectionListener` through `GraphDatabaseServerOptions.Listener` and owns the engine lifecycle;
 the server owns the listener and its accepted sessions. Startup authentication binds each connection
 to one database. Typed scalar result columns and rows use the Graph-owned codecs, including GUID
 identities and nullable ownership values. The same `Execute` exchange now serves scalar `MATCH`,
@@ -471,3 +471,25 @@ factories, and returns `Build()`; the model package still never sees DI.
 There is no generic production orchestration over `IDatabaseEngineBuilder`;
 the base contract supports model-agnostic worker composition, demonstrated by
 tests exercising the public factory through that base interface.
+
+## Connection contracts
+
+The server accepts `IDuplexConnection` values through `IDuplexConnectionListener`:
+framed database traffic requires the byte-pipe contract. The transport listener's live
+`Connections` collection is observational; the server owns every connection it accepts,
+performs its I/O, and drains, aborts or disposes it during shutdown. Disposing the listener
+alone does not close accepted connections. `ConnectionClosed` signals local close, abort,
+peer close and, at the latest, completion of connection disposal.
+
+### Breaking changes from 10.0.0-preview.1 (#1459)
+
+`GraphDatabaseServerOptions.Listener` changes from `IConnectionListener?` to
+`IDuplexConnectionListener?`. Changing the property's getter and setter signatures breaks
+preview.1 binaries and source that supplies a listener typed only as `IConnectionListener`.
+This preview break is accepted under owner decisions 15 and 58. Rebuild consumers and use
+`IDuplexConnectionListener` for listener variables and custom implementations. Custom listeners
+can derive from `DuplexConnectionListener`, supply `Id`, and implement `AcceptCoreAsync`
+returning `ValueTask<IDuplexConnection>`; the base handles shared accept dispatch and live
+connection tracking. Custom byte-pipe connections derive from `DuplexConnection` or implement
+`IDuplexConnection`. Built-in duplex listeners already satisfy the new contract. Database wire
+framing, handshake and model messages are unchanged.

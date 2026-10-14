@@ -13,9 +13,20 @@ namespace Assimalign.Cohesion.Web.HttpsPolicy.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Connection security is read from <see cref="IHttpRequest.Scheme"/> — the transport-derived typed
-/// scheme resolved from the listener's transport-security capability (#763) — not from any header or
-/// scheme string.
+/// Connection security is the <em>effective</em> typed scheme
+/// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>): the scheme the client used on the
+/// outermost trusted hop when the forwarded-headers middleware resolved one, otherwise the
+/// transport-derived <see cref="IHttpRequest.Scheme"/> (#763). RFC 6797 §7.2 is about the transport the
+/// user agent receives the field over; behind a trusted TLS-terminating proxy that transport is the
+/// proxy's TLS leg, so the policy is emitted even though the app-facing hop is plaintext. Nothing here
+/// reads a header or a scheme string — without the forwarded-headers trust model the effective scheme is
+/// exactly the wire scheme. The excluded-host check reads the effective host for the same reason: it is
+/// the authority the policy pins in the user agent (a local proxy dialing <c>localhost</c> must not
+/// suppress the policy for the public host).
+/// </para>
+/// <para>
+/// Both reads happen after <c>next</c> returns, so the forwarded identity is visible even when this
+/// middleware is registered ahead of <c>UseForwardedHeaders</c>.
 /// </para>
 /// <para>
 /// The field is applied <em>after</em> the pipeline unwinds (post-<c>next</c>). That is deliberate: the
@@ -46,15 +57,16 @@ internal sealed class HstsMiddleware : IWebApplicationMiddleware
 
         await next.Invoke(context).ConfigureAwait(false);
 
-        // RFC 6797 §7.2: an HSTS host MUST NOT emit the field over a non-secure transport.
-        if (context.Request.Scheme != HttpScheme.Https)
+        // RFC 6797 §7.2: an HSTS host MUST NOT emit the field over a non-secure transport. The
+        // effective scheme is the client-facing one: a trusted TLS-terminating proxy's https counts.
+        if (context.EffectiveScheme != HttpScheme.Https)
         {
             return;
         }
 
         // Never assert the policy on an excluded host (loopback by default). No exclusions is a null
         // matcher — the empty-allowlist case that HttpHostMatcher.Create rejects — so guard for it.
-        if (_excludedHosts is not null && _excludedHosts.IsMatch(context.Request.Host))
+        if (_excludedHosts is not null && _excludedHosts.IsMatch(context.EffectiveHost))
         {
             return;
         }

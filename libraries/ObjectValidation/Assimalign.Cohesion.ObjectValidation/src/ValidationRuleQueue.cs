@@ -8,9 +8,13 @@ namespace Assimalign.Cohesion.ObjectValidation;
 
 
 /// <summary>
-/// A rule set is a collection of validation rules to be used to 
-/// when validating the instance.
+/// The validation rules chained to one validation item, in a first-in, first-out queue: the item evaluates
+/// them in the order they were pushed, which is the order they are chained.
 /// </summary>
+/// <remarks>
+/// Enumeration, <see cref="ToArray()"/>, <see cref="CopyTo(IValidationRule[], int)"/>, <c>Peek</c> and
+/// <c>Pop</c> all start at the rule pushed first.
+/// </remarks>
 public sealed class ValidationRuleQueue : IValidationRuleQueue
 {
 	private int _size;
@@ -36,6 +40,12 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 		this._array = new IValidationRule[capacity];
 	}
 
+	/// <summary>
+	/// Initializes a queue holding the rules of <paramref name="collection"/> in the collection's order, so
+	/// its first rule is evaluated first.
+	/// </summary>
+	/// <param name="collection">The rules to queue.</param>
+	/// <exception cref="ArgumentNullException"><paramref name="collection"/> is <see langword="null"/>.</exception>
 	public ValidationRuleQueue(IEnumerable<IValidationRule> collection)
 	{
 		if (collection == null)
@@ -67,6 +77,15 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 		return false;
 	}
 
+	/// <summary>
+	/// Copies the rules to <paramref name="array"/>, starting at <paramref name="arrayIndex"/>, in queue order:
+	/// the rule pushed first is copied first.
+	/// </summary>
+	/// <param name="array">The array to copy to.</param>
+	/// <param name="arrayIndex">The index in <paramref name="array"/> to copy the first rule to.</param>
+	/// <exception cref="ArgumentNullException"><paramref name="array"/> is <see langword="null"/>.</exception>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="arrayIndex"/> is negative or past the end of <paramref name="array"/>.</exception>
+	/// <exception cref="ArgumentException"><paramref name="array"/> has too little room after <paramref name="arrayIndex"/>.</exception>
 	public void CopyTo(IValidationRule[] array, int arrayIndex)
 	{
 		if (array == null)
@@ -81,12 +100,7 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 		{
 			throw new ArgumentException("The size of the array is less than the current size.");
 		}
-		int num = 0;
-		int num2 = arrayIndex + _size;
-		while (num < _size)
-		{
-			array[--num2] = this._array[num++];
-		}
+		Array.Copy(this._array, 0, array, arrayIndex, _size);
 	}
 
 	void ICollection.CopyTo(Array array, int arrayIndex)
@@ -113,8 +127,7 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 		}
 		try
 		{
-            Array.Copy(this._array, 0, array, arrayIndex, _size);
-			Array.Reverse(array, arrayIndex, _size);
+			Array.Copy(this._array, 0, array, arrayIndex, _size);
 		}
 		catch (ArrayTypeMismatchException)
 		{
@@ -135,64 +148,55 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 
 	IValidationRule IValidationRuleQueue.Peek()
 	{
-		int num = _size - 1;
-		IValidationRule[] array = this._array;
-		if ((uint)num >= (uint)array.Length)
+		if (_size == 0)
 		{
-			ThrowForEmptyStack();
+			ThrowForEmptyQueue();
 		}
-		return array[num];
+		return _array[0];
 	}
 
 	bool IValidationRuleQueue.TryPeek([MaybeNullWhen(false)] out IValidationRule result)
 	{
-		int num = _size - 1;
-		IValidationRule[] array = this._array;
-		if ((uint)num >= (uint)array.Length)
+		if (_size == 0)
 		{
 			result = default(IValidationRule);
 			return false;
 		}
-		result = array[num];
+		result = _array[0];
 		return true;
 	}
 
 
 	IValidationRule IValidationRuleQueue.Pop()
 	{
-		int num = _size - 1;
-		IValidationRule[] array = this._array;
-		if ((uint)num >= (uint)array.Length)
+		if (_size == 0)
 		{
-			ThrowForEmptyStack();
+			ThrowForEmptyQueue();
 		}
-		_version++;
-		_size = num;
-		IValidationRule result = array[num];
-		if (RuntimeHelpers.IsReferenceOrContainsReferences<IValidationRule>())
-		{
-			array[num] = default;
-		}
-		return result;
+		return RemoveFront();
 	}
 
 	bool IValidationRuleQueue.TryPop([MaybeNullWhen(false)] out IValidationRule result)
 	{
-		int num = _size - 1;
-		IValidationRule[] array = this._array;
-		if ((uint)num >= (uint)array.Length)
+		if (_size == 0)
 		{
 			result = default;
 			return false;
 		}
-		_version++;
-		_size = num;
-		result = array[num];
-		if (RuntimeHelpers.IsReferenceOrContainsReferences<IValidationRule>())
-		{
-			array[num] = default;
-		}
+		result = RemoveFront();
 		return true;
+	}
+
+	// Removes the rule at the front, the one pushed first, and moves the rest up one place, so the rules
+	// stay at 0.._size - 1 in the order they were pushed: the order enumeration and every copy read.
+	private IValidationRule RemoveFront()
+	{
+		IValidationRule result = _array[0];
+		_size--;
+		Array.Copy(_array, 1, _array, 0, _size);
+		_array[_size] = default!;
+		_version++;
+		return result;
 	}
 
 	void IValidationRuleQueue.Push(IValidationRule item)
@@ -248,6 +252,10 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 		Array.Resize(ref _array, num);
 	}
 
+	/// <summary>
+	/// Copies the rules to a new array in queue order: the rule pushed first is at index 0.
+	/// </summary>
+	/// <returns>The rules, in the order they are evaluated.</returns>
 	public IValidationRule[] ToArray()
 	{
 		if (_size == 0)
@@ -255,16 +263,13 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 			return Array.Empty<IValidationRule>();
 		}
 		IValidationRule[] array = new IValidationRule[_size];
-		for (int i = 0; i < _size; i++)
-		{
-			array[i] = this._array[_size - i - 1];
-		}
+		Array.Copy(this._array, 0, array, 0, _size);
 		return array;
 	}
 
-	private void ThrowForEmptyStack()
+	private void ThrowForEmptyQueue()
 	{
-		throw new InvalidOperationException();// (System.SR.InvalidOperation_EmptyStack);
+		throw new InvalidOperationException("The queue is empty.");
 	}
 
 
@@ -316,6 +321,11 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 		return Array.Empty<T>();
 	}
 
+    /// <summary>
+    /// Returns an enumerator over the rules in queue order: the rule pushed first, which is evaluated first,
+    /// comes first.
+    /// </summary>
+    /// <returns>The enumerator.</returns>
     public IEnumerator<IValidationRule> GetEnumerator()
     {
 		return new Enumerator(this);
@@ -329,8 +339,10 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
     internal struct Enumerator : IEnumerator<IValidationRule>, IDisposable, IEnumerator
 	{
 		private readonly int _version;
-		private readonly ValidationRuleQueue _stack;
-		
+		private readonly ValidationRuleQueue _queue;
+
+		// -2 before the first MoveNext, -1 once the enumeration has ended, otherwise the current position
+		// counted from the front of the queue.
 		private int _index;
 		private IValidationRule _current;
 
@@ -348,10 +360,10 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 
 		object? IEnumerator.Current => Current;
 
-		internal Enumerator(ValidationRuleQueue stack)
+		internal Enumerator(ValidationRuleQueue queue)
 		{
-			this._stack = stack;
-			this._version = stack._version;
+			this._queue = queue;
+			this._version = queue._version;
 			this._index = -2;
 			this._current = default;
 		}
@@ -363,35 +375,23 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 
 		public bool MoveNext()
 		{
-			if (this._version != _stack._version)
+			if (this._version != _queue._version)
 			{
 				throw new InvalidOperationException("");// System.SR.InvalidOperation_EnumFailedVersion);
-			}
-			bool flag;
-			if (this._index == -2)
-			{
-				this._index = _stack._size - 1;
-				flag = _index >= 0;
-				if (flag)
-				{
-					this._current = _stack._array[_index];
-				}
-				return flag;
 			}
 			if (_index == -1)
 			{
 				return false;
 			}
-			flag = --_index >= 0;
-			if (flag)
+			_index = _index == -2 ? 0 : _index + 1;
+			if (_index < _queue._size)
 			{
-				this._current = _stack._array[_index];
+				this._current = _queue._array[_index];
+				return true;
 			}
-			else
-			{
-				this._current = default;
-			}
-			return flag;
+			_index = -1;
+			this._current = default;
+			return false;
 		}
 
 		private void ThrowEnumerationNotStartedOrEnded()
@@ -401,7 +401,7 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 
 		void IEnumerator.Reset()
 		{
-			if (_version != _stack._version)
+			if (_version != _queue._version)
 			{
 				throw new InvalidOperationException("");// System.SR.InvalidOperation_EnumFailedVersion);
 			}

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 
 namespace Assimalign.Cohesion.Web.Diagnostics;
@@ -57,12 +58,12 @@ public sealed class W3CAccessLogProvider : LoggerProvider
 
         if (options.FileNamePrefix.AsSpan().IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
-            throw new ArgumentException("The file name prefix contains invalid file name characters.", nameof(options));
+            throw new ArgumentException(ErrorMessages.AccessLogFilePrefixInvalid, nameof(options));
         }
 
         if (options.Format is not (AccessLogFormat.W3CExtended or AccessLogFormat.Common or AccessLogFormat.Combined))
         {
-            throw new ArgumentException($"Unknown access log format '{options.Format}'.", nameof(options));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AccessLogFormatUnknown, options.Format), nameof(options));
         }
 
         if (options.FileSizeLimit is { } sizeLimit)

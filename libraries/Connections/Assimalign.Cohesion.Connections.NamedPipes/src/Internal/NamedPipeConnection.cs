@@ -11,24 +11,21 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Connections.NamedPipes.Internal;
 
 /// <summary>
-/// A reliable, ordered, single-stream <see cref="Connection"/> over a connected named-pipe stream
+/// A reliable, ordered, single-stream <see cref="DuplexConnection"/> over a connected named-pipe stream
 /// (<see cref="NamedPipeServerStream"/> on the accept side, <see cref="NamedPipeClientStream"/> on the
 /// dial side).
 /// </summary>
 /// <remarks>
 /// <para>
-/// The duplex pipe is bridged over the pipe stream with <see cref="PipeReader.Create(Stream, StreamPipeReaderOptions)"/>
-/// and <see cref="PipeWriter.Create(Stream, StreamPipeWriterOptions)"/> — pull-based adapters with no
-/// background pump loop, so the connection is allocation-light and trim-safe. The stream is left open by
-/// the reader/writer and disposed once, by this connection, on tear-down.
+/// A receive pump copies the pipe stream into a bounded input pipe and observes peer closure.
+/// The output uses a stream-backed writer. The connection owns the native pipe stream.
 /// </para>
 /// <para>
-/// <see cref="ConnectionClosed"/> fires when this end is disposed or aborted; a peer close is observed by
-/// reading <see cref="Input"/> (which completes) or writing <see cref="Output"/> (whose flush faults),
-/// exactly as a byte-stream consumer such as an HTTP parser already detects end-of-connection.
+/// <see cref="ConnectionClosed"/> fires on local disposal, abort, and peer closure observed by the
+/// receive pump, including while the application performs no reads or writes.
 /// </para>
 /// </remarks>
-internal sealed class NamedPipeConnection : Connection
+internal sealed class NamedPipeConnection : DuplexConnection
 {
     private static readonly ConnectionCapabilities _namedPipeCapabilities = new(
         ConnectionProtocol.NamedPipe,
@@ -39,6 +36,8 @@ internal sealed class NamedPipeConnection : Connection
         ConnectionSecurity.None);
 
     private readonly PipeStream _stream;
+    private readonly Pipe _incoming = new();
+    private readonly Task _receiveTask;
     private readonly PipeReader _input;
     private readonly PipeWriter _output;
     private readonly EndPoint? _localEndPoint;
@@ -66,10 +65,11 @@ internal sealed class NamedPipeConnection : Connection
 
         // Leave the stream open: this connection owns the stream and disposes it exactly once on
         // tear-down, so neither the reader nor the writer should close it underneath.
-        _input = PipeReader.Create(stream, new StreamPipeReaderOptions(leaveOpen: true));
+        _input = _incoming.Reader;
         _output = PipeWriter.Create(stream, new StreamPipeWriterOptions(leaveOpen: true));
 
         NamedPipeConnectionEventSource.Log.ConnectionOpened(_id, listenerId, localEndPoint, remoteEndPoint);
+        _receiveTask = ReceiveAsync();
     }
 
     /// <inheritdoc />
@@ -108,14 +108,20 @@ internal sealed class NamedPipeConnection : Connection
     /// <inheritdoc />
     public override void Abort(Exception? reason = null)
     {
+        bool firstAbort;
         lock (_gate)
         {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            firstAbort = _state is not (ConnectionState.Aborted or ConnectionState.Closed);
+            if (firstAbort)
             {
-                return;
+                _state = ConnectionState.Aborted;
             }
+        }
 
-            _state = ConnectionState.Aborted;
+        if (!firstAbort)
+        {
+            CancelConnectionClosed();
+            return;
         }
 
         // Completing the halves with the abort reason makes an in-flight read/write on this end observe
@@ -124,6 +130,7 @@ internal sealed class NamedPipeConnection : Connection
 
         CompleteWriter(abortReason);
         CompleteReader(abortReason);
+        _incoming.Writer.CancelPendingFlush();
         DisposeStream();
         ReportClosed();
         CancelConnectionClosed();
@@ -133,16 +140,19 @@ internal sealed class NamedPipeConnection : Connection
     public override async ValueTask DisposeAsync()
     {
         bool wasAborted;
+        bool alreadyDisposed;
 
         lock (_gate)
         {
-            if (_isDisposed)
-            {
-                return;
-            }
-
+            alreadyDisposed = _isDisposed;
             _isDisposed = true;
             wasAborted = _state == ConnectionState.Aborted;
+        }
+
+        if (alreadyDisposed)
+        {
+            CancelConnectionClosed();
+            return;
         }
 
         // A graceful dispose completes both halves without an error and closes the pipe, so the peer
@@ -150,7 +160,9 @@ internal sealed class NamedPipeConnection : Connection
         CompleteWriter(null);
         CompleteReader(null);
 
+        _incoming.Writer.CancelPendingFlush();
         await _stream.DisposeAsync().ConfigureAwait(false);
+        await _receiveTask.ConfigureAwait(false);
 
         if (!wasAborted)
         {
@@ -162,6 +174,47 @@ internal sealed class NamedPipeConnection : Connection
 
         ReportClosed();
         CancelConnectionClosed();
+    }
+
+    private async Task ReceiveAsync()
+    {
+        Exception? error = null;
+        try
+        {
+            while (true)
+            {
+                int read = await _stream.ReadAsync(_incoming.Writer.GetMemory(4096)).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                _incoming.Writer.Advance(read);
+                FlushResult flush = await _incoming.Writer.FlushAsync().ConfigureAwait(false);
+                if (flush.IsCanceled || flush.IsCompleted)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            error = exception;
+        }
+        finally
+        {
+            await _incoming.Writer.CompleteAsync(error).ConfigureAwait(false);
+            lock (_gate)
+            {
+                if (_state == ConnectionState.Open)
+                {
+                    _state = error is null ? ConnectionState.Closed : ConnectionState.Aborted;
+                }
+            }
+
+            ReportClosed();
+            CancelConnectionClosed();
+        }
     }
 
     private void CompleteWriter(Exception? exception)
@@ -215,9 +268,9 @@ internal sealed class NamedPipeConnection : Connection
         {
             _connectionClosedSource.Cancel();
         }
-        catch (ObjectDisposedException)
+        catch (AggregateException)
         {
-            // The token source was disposed concurrently with tear-down.
+            // Observer failures cannot prevent transport teardown.
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -72,7 +73,7 @@ internal sealed class HttpMultipartFormReader
         int minBuffer = boundary.Length + 10;
         if (bufferSize < minBuffer)
         {
-            throw new ArgumentOutOfRangeException(nameof(bufferSize), $"Buffer must be at least {minBuffer} bytes to accommodate the boundary.");
+            throw new ArgumentOutOfRangeException(nameof(bufferSize), string.Format(CultureInfo.CurrentCulture, ErrorMessages.BoundaryBufferTooSmall, minBuffer));
         }
 
         _stream = new BufferedReadStream(stream, bufferSize);
@@ -149,7 +150,8 @@ internal sealed class HttpMultipartFormReader
             {
                 // Defensive: a peer that just emits non-boundary lines forever
                 // should not be allowed to drain the buffer indefinitely.
-                throw new InvalidDataException("Multipart preamble exceeded the headers-length limit.");
+                string message = ErrorMessages.MultipartPreambleTooLarge;
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersLength, message));
             }
 
             if (line.Length == 0)
@@ -197,7 +199,10 @@ internal sealed class HttpMultipartFormReader
 
         while (true)
         {
-            string line = await _stream.ReadLineAsync(HeadersLengthLimit - totalBytes, cancellationToken).ConfigureAwait(false);
+            // The CRLF of each line counts against the budget, so it can run two bytes past the limit;
+            // a negative remainder would reach the pooled buffer as a negative size. With nothing left,
+            // only the blank line that ends the block still fits.
+            string line = await _stream.ReadLineAsync(Math.Max(0, HeadersLengthLimit - totalBytes), cancellationToken).ConfigureAwait(false);
             totalBytes += line.Length + 2; // CRLF
 
             if (line.Length == 0)
@@ -208,12 +213,13 @@ internal sealed class HttpMultipartFormReader
             int colon = line.IndexOf(':');
             if (colon <= 0)
             {
-                throw new InvalidDataException($"Invalid multipart header line '{line}'.");
+                throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.InvalidMultipartHeaderLine, line));
             }
 
             if (headers.Count >= HeadersCountLimit)
             {
-                throw new InvalidDataException($"Multipart section header count exceeded the {HeadersCountLimit} limit.");
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultipartSectionHeaderCountExceeded, HeadersCountLimit);
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(HttpFormLimit.MultipartHeadersCount, message));
             }
 
             string name = line[..colon].Trim();

@@ -132,7 +132,14 @@ internal sealed class TestHttpRequest : IHttpRequest
 
 internal sealed class TestHttpResponse : IHttpResponse
 {
-    public TestHttpResponse(IHttpContext context) => HttpContext = context;
+    public static readonly DateTimeOffset DefaultDate = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
+    private static readonly string _defaultDateHeader = HttpDate.Format(DefaultDate);
+
+    public TestHttpResponse(IHttpContext context)
+    {
+        HttpContext = context;
+        Headers[HttpHeaderKey.Date] = _defaultDateHeader;
+    }
 
     public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
     public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();

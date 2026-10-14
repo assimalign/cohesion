@@ -20,5 +20,6 @@
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.SecurityHeaders" />
 	</ItemGroup>
 </Project>

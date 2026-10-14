@@ -23,12 +23,12 @@ public class NamedPipeConnectionRoundTripTests
         await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
             options => options.EndPoint = endPoint);
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         NamedPipeConnectionFactory factory = new();
 
-        await using Connection client = await factory.ConnectAsync(endPoint, cancellation.Token);
-        await using Connection server = await acceptTask;
+        await using IDuplexConnection client = await factory.ConnectAsync(endPoint, cancellation.Token);
+        await using IDuplexConnection server = await acceptTask;
 
         // Both ends advertise the named-pipe protocol.
         client.Capabilities.Protocol.ShouldBe(ConnectionProtocol.NamedPipe);
@@ -62,9 +62,9 @@ public class NamedPipeConnectionRoundTripTests
         NamedPipeConnectionFactory factory = new();
 
         // Act / Assert — first client
-        ValueTask<Connection> firstAccept = listener.AcceptAsync(cancellation.Token);
-        await using (Connection firstClient = await factory.ConnectAsync(endPoint, cancellation.Token))
-        await using (Connection firstServer = await firstAccept)
+        ValueTask<IDuplexConnection> firstAccept = listener.AcceptAsync(cancellation.Token);
+        await using (IDuplexConnection firstClient = await factory.ConnectAsync(endPoint, cancellation.Token))
+        await using (IDuplexConnection firstServer = await firstAccept)
         {
             await firstClient.Output.WriteAsync(Encoding.UTF8.GetBytes("one"), cancellation.Token);
             await firstClient.Output.FlushAsync(cancellation.Token);
@@ -72,9 +72,9 @@ public class NamedPipeConnectionRoundTripTests
         }
 
         // Act / Assert — second client on the same name after the first closed
-        ValueTask<Connection> secondAccept = listener.AcceptAsync(cancellation.Token);
-        await using (Connection secondClient = await factory.ConnectAsync(endPoint, cancellation.Token))
-        await using (Connection secondServer = await secondAccept)
+        ValueTask<IDuplexConnection> secondAccept = listener.AcceptAsync(cancellation.Token);
+        await using (IDuplexConnection secondClient = await factory.ConnectAsync(endPoint, cancellation.Token))
+        await using (IDuplexConnection secondServer = await secondAccept)
         {
             await secondClient.Output.WriteAsync(Encoding.UTF8.GetBytes("two"), cancellation.Token);
             await secondClient.Output.FlushAsync(cancellation.Token);
@@ -92,12 +92,12 @@ public class NamedPipeConnectionRoundTripTests
         await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
             options => options.EndPoint = endPoint);
 
-        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+        ValueTask<IDuplexConnection> acceptTask = listener.AcceptAsync(cancellation.Token);
 
         NamedPipeConnectionFactory factory = new();
 
-        Connection client = await factory.ConnectAsync(endPoint, cancellation.Token);
-        await using Connection server = await acceptTask;
+        IDuplexConnection client = await factory.ConnectAsync(endPoint, cancellation.Token);
+        await using IDuplexConnection server = await acceptTask;
 
         // Act — the client half-closes by disposing.
         await client.DisposeAsync();

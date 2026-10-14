@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Http;
@@ -72,7 +73,7 @@ public readonly struct HttpWantDigestField
 
         if (dictionary.Count == 0)
         {
-            error = "A want-digest field must carry at least one algorithm preference.";
+            error = ErrorMessages.WantDigestPreferenceRequired;
             return false;
         }
 
@@ -82,7 +83,7 @@ public readonly struct HttpWantDigestField
             StructuredFieldMember value = member.Value;
             if (value.IsInnerList || value.Item.Value.Type != StructuredFieldType.Integer)
             {
-                error = $"The want-digest field member '{member.Key}' must be an Integer preference (RFC 9530 §4).";
+                error = string.Format(CultureInfo.CurrentCulture, ErrorMessages.WantDigestMemberTypeInvalid, member.Key);
                 return false;
             }
 
@@ -106,7 +107,7 @@ public readonly struct HttpWantDigestField
     {
         if (!TryParse(input, out HttpWantDigestField field, out string? error))
         {
-            throw new HttpDigestException(error ?? "Malformed want-digest field.");
+            throw new HttpDigestException(error ?? ErrorMessages.MalformedWantDigestField);
         }
         return field;
     }
@@ -126,7 +127,7 @@ public readonly struct HttpWantDigestField
         ArgumentNullException.ThrowIfNull(preferences);
         if (preferences.Length == 0)
         {
-            throw new ArgumentException("At least one preference is required.", nameof(preferences));
+            throw new ArgumentException(ErrorMessages.DigestPreferenceRequired, nameof(preferences));
         }
 
         var members = new KeyValuePair<string, StructuredFieldMember>[preferences.Length];
@@ -135,7 +136,7 @@ public readonly struct HttpWantDigestField
             HttpWantDigestPreference preference = preferences[i];
             if (!preference.Algorithm.IsRegistered)
             {
-                throw new ArgumentException("A want-digest preference must reference a registered algorithm.", nameof(preferences));
+                throw new ArgumentException(ErrorMessages.WantDigestAlgorithmNotRegistered, nameof(preferences));
             }
             StructuredFieldBareItem integer = StructuredFieldBareItem.FromInteger(preference.Preference);
             members[i] = new KeyValuePair<string, StructuredFieldMember>(

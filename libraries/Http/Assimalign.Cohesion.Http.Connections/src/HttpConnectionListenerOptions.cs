@@ -13,17 +13,20 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// <remarks>
 /// <para>
 /// Each registration binds one HTTP protocol to one listener. Stream protocols (HTTP/1.1,
-/// HTTP/2) take an <see cref="IConnectionListener"/> whose capabilities must report a reliable,
+/// HTTP/2) take an <see cref="IDuplexConnectionListener"/> whose capabilities must report a reliable,
 /// ordered byte stream; HTTP/3 takes an <see cref="IMultiplexedConnectionListener"/>, where the
-/// listener type itself is the shape gate.
+/// listener type itself is the shape gate. The one exception is
+/// <see cref="UseHttp1AndHttp2(IDuplexConnectionListener)"/>, which binds both stream protocols to one TLS
+/// listener and picks between them per connection from the application protocol the TLS handshake
+/// negotiated through ALPN (RFC 7301).
 /// </para>
 /// <para>
 /// Version-specific configuration (limits, QPACK) is captured per registration through the
 /// <c>Use*</c> overloads that accept a configure callback
 /// (<see cref="Http1ConnectionListenerOptions"/>, <see cref="Http2ConnectionListenerOptions"/>,
 /// <see cref="Http3ConnectionListenerOptions"/>); the overloads without a callback register with
-/// conservative defaults. Cross-version concerns — the request/response interceptors and the
-/// accept backlog — remain listener-wide on this type.
+/// conservative defaults. Cross-version concerns — the request/response interceptors, the
+/// accept backlog, and the per-exchange feature capacity — remain listener-wide on this type.
 /// </para>
 /// <para>
 /// TLS is not configured here: compose it onto the listener before registration (for example via
@@ -34,6 +37,35 @@ namespace Assimalign.Cohesion.Http.Connections;
 public sealed class HttpConnectionListenerOptions
 {
     private int _backlogCapacity = 512;
+    private int _exchangeFeatureCapacity;
+
+    /// <summary>
+    /// Gets or sets whether cleartext HTTP/2 accepts an <c>https</c> <c>:scheme</c>.
+    /// Defaults to <see langword="false"/>, which answers such requests with 421 before dispatch.
+    /// </summary>
+    /// <remarks>
+    /// Enable only for a trusted gateway that terminates TLS and forwards the original scheme to
+    /// an h2c backend. When enabled, <c>Request.Scheme</c> reports the gateway's scheme; the connection
+    /// remains cleartext. This option does not change HTTP/1.1 absolute-form target validation.
+    /// </remarks>
+    public bool AllowAlternateSchemes { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the listener adds a Date field when the application supplies none.
+    /// Defaults to <see langword="true"/>. All final responses, including 5xx, carry the generated
+    /// IMF-fixdate; interim responses do not. An application-supplied Date is preserved.
+    /// </summary>
+    /// <remarks>
+    /// Disable when a trusted proxy supplies Date. The generated timestamp is available in response
+    /// headers before dispatch, so middleware can use the response's origination time. Disabling
+    /// this option suppresses only the automatic header. Web.StaticFiles retains Last-Modified and
+    /// date validators, using one <c>TimeProvider.System.GetUtcNow()</c> read when the response Date
+    /// is absent, invalid, or repeated. A valid response Date remains authoritative, and StaticFiles
+    /// does not add or replace that header.
+    /// </remarks>
+    public bool AddDateHeader { get; set; } = true;
+
+    internal TimeProvider DateTimeProvider { get; set; } = TimeProvider.System;
 
     internal List<HttpListenerRegistration> Registrations { get; } = new List<HttpListenerRegistration>();
 
@@ -41,7 +73,7 @@ public sealed class HttpConnectionListenerOptions
     /// Gets the ordered list of exchange interceptors — the transport's single extension seam for
     /// participating in an exchange's lifecycle. See <see cref="IHttpExchangeInterceptor"/> for
     /// the hook contract; feature packages register through their factory (for example
-    /// <c>HttpResponseStreaming.CreateInterceptor()</c>) and derive from
+    /// <c>HttpResponseStreamingInterceptor.Create()</c>) and derive from
     /// <see cref="HttpExchangeInterceptor"/> to override only the hooks they need.
     /// </summary>
     /// <remarks>
@@ -96,7 +128,7 @@ public sealed class HttpConnectionListenerOptions
 
     /// <summary>
     /// Gets or sets the maximum number of accepted HTTP connections that may be buffered
-    /// before producers wait for <see cref="HttpConnectionListener.AcceptOrListenAsync(System.Threading.CancellationToken)"/>
+    /// before producers wait for <see cref="HttpConnectionListener.AcceptAsync(System.Threading.CancellationToken)"/>
     /// to dequeue them.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -113,6 +145,47 @@ public sealed class HttpConnectionListenerOptions
     }
 
     /// <summary>
+    /// Gets or sets the number of features each exchange is expected to carry. The transport sizes
+    /// every exchange's <see cref="HttpFeatureCollection"/> for that many features when it creates it,
+    /// so installing them never grows the collection. Defaults to <c>0</c>, which leaves the
+    /// collection to grow as features are installed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Count every feature an ordinary exchange carries: the ones the registered
+    /// <see cref="Interceptors"/> attach while the request is parsed, and the ones the host and its
+    /// middleware install before the application reads them. A capacity larger than needed costs
+    /// memory on every exchange, so prefer the count an ordinary exchange carries over the largest
+    /// count any exchange can carry.
+    /// </para>
+    /// <para>
+    /// A collection that outgrows the capacity still works, but it grows from the size the capacity
+    /// chose, not through the sizes an unsized collection passes through, so the overflow can allocate
+    /// more than not presizing would have. Sized for 11 features, a collection that receives a twelfth
+    /// allocates more than an unsized collection holding twelve. A host that cannot count every
+    /// feature can round its count up to a size an unsized collection grows through (on .NET 10, 3,
+    /// 7, 17, 37, 89 and so on); an overflow from one of those costs no more than not presizing.
+    /// </para>
+    /// <para>
+    /// The value is a sizing hint and changes no behavior. It applies to every protocol the listener
+    /// serves, and like the interceptors it is read once, when the
+    /// <see cref="HttpConnectionListener"/> is constructed.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when the assigned value is negative.
+    /// </exception>
+    public int ExchangeFeatureCapacity
+    {
+        get => _exchangeFeatureCapacity;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _exchangeFeatureCapacity = value;
+        }
+    }
+
+    /// <summary>
     /// Serves HTTP/1.1 over the supplied connection listener, with default configuration.
     /// </summary>
     /// <param name="listener">The listener producing the transport connections.</param>
@@ -121,7 +194,7 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentException">
     /// Thrown when the listener's capabilities do not report a reliable, ordered byte stream.
     /// </exception>
-    public HttpConnectionListenerOptions UseHttp1(IConnectionListener listener)
+    public HttpConnectionListenerOptions UseHttp1(IDuplexConnectionListener listener)
     {
         return UseHttp1(listener, static _ => { });
     }
@@ -140,14 +213,14 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentException">
     /// Thrown when the listener's capabilities do not report a reliable, ordered byte stream.
     /// </exception>
-    public HttpConnectionListenerOptions UseHttp1(IConnectionListener listener, Action<Http1ConnectionListenerOptions> configure)
+    public HttpConnectionListenerOptions UseHttp1(IDuplexConnectionListener listener, Action<Http1ConnectionListenerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
         Http1ConnectionListenerOptions http1Options = new();
         configure(http1Options);
 
-        return UseStreamListener(HttpProtocol.Http11, listener, (interceptors, responseInterceptors) => new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http11, listener, (interceptors, responseInterceptors, featureCapacity) => new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors, featureCapacity));
     }
 
     /// <summary>
@@ -160,7 +233,7 @@ public sealed class HttpConnectionListenerOptions
     /// </param>
     /// <returns>The current options instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listenerFactory"/> is <see langword="null"/>.</exception>
-    public HttpConnectionListenerOptions UseHttp1(Func<IConnectionListener> listenerFactory)
+    public HttpConnectionListenerOptions UseHttp1(Func<IDuplexConnectionListener> listenerFactory)
     {
         return UseHttp1(listenerFactory, static _ => { });
     }
@@ -179,14 +252,14 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="listenerFactory"/> or <paramref name="configure"/> is <see langword="null"/>.
     /// </exception>
-    public HttpConnectionListenerOptions UseHttp1(Func<IConnectionListener> listenerFactory, Action<Http1ConnectionListenerOptions> configure)
+    public HttpConnectionListenerOptions UseHttp1(Func<IDuplexConnectionListener> listenerFactory, Action<Http1ConnectionListenerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
         Http1ConnectionListenerOptions http1Options = new();
         configure(http1Options);
 
-        return UseStreamListener(HttpProtocol.Http11, listenerFactory, (interceptors, responseInterceptors) => new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http11, listenerFactory, (interceptors, responseInterceptors, featureCapacity) => new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors, featureCapacity));
     }
 
     /// <summary>
@@ -198,7 +271,7 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentException">
     /// Thrown when the listener's capabilities do not report a reliable, ordered byte stream.
     /// </exception>
-    public HttpConnectionListenerOptions UseHttp2(IConnectionListener listener)
+    public HttpConnectionListenerOptions UseHttp2(IDuplexConnectionListener listener)
     {
         return UseHttp2(listener, static _ => { });
     }
@@ -217,14 +290,14 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentException">
     /// Thrown when the listener's capabilities do not report a reliable, ordered byte stream.
     /// </exception>
-    public HttpConnectionListenerOptions UseHttp2(IConnectionListener listener, Action<Http2ConnectionListenerOptions> configure)
+    public HttpConnectionListenerOptions UseHttp2(IDuplexConnectionListener listener, Action<Http2ConnectionListenerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
         Http2ConnectionListenerOptions http2Options = new();
         configure(http2Options);
 
-        return UseStreamListener(HttpProtocol.Http20, listener, (interceptors, responseInterceptors) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http20, listener, (interceptors, responseInterceptors, featureCapacity) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity, AllowAlternateSchemes));
     }
 
     /// <summary>
@@ -237,7 +310,7 @@ public sealed class HttpConnectionListenerOptions
     /// </param>
     /// <returns>The current options instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listenerFactory"/> is <see langword="null"/>.</exception>
-    public HttpConnectionListenerOptions UseHttp2(Func<IConnectionListener> listenerFactory)
+    public HttpConnectionListenerOptions UseHttp2(Func<IDuplexConnectionListener> listenerFactory)
     {
         return UseHttp2(listenerFactory, static _ => { });
     }
@@ -256,14 +329,133 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="listenerFactory"/> or <paramref name="configure"/> is <see langword="null"/>.
     /// </exception>
-    public HttpConnectionListenerOptions UseHttp2(Func<IConnectionListener> listenerFactory, Action<Http2ConnectionListenerOptions> configure)
+    public HttpConnectionListenerOptions UseHttp2(Func<IDuplexConnectionListener> listenerFactory, Action<Http2ConnectionListenerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
         Http2ConnectionListenerOptions http2Options = new();
         configure(http2Options);
 
-        return UseStreamListener(HttpProtocol.Http20, listenerFactory, (interceptors, responseInterceptors) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http20, listenerFactory, (interceptors, responseInterceptors, featureCapacity) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity, AllowAlternateSchemes));
+    }
+
+    /// <summary>
+    /// Serves HTTP/1.1 and HTTP/2 over the supplied TLS connection listener, with default
+    /// configuration, choosing the protocol for each connection from the application protocol its
+    /// TLS handshake negotiated through ALPN (RFC 7301).
+    /// </summary>
+    /// <param name="listener">
+    /// The listener producing the transport connections. TLS must already be composed onto it (for
+    /// example through the security library's <c>UseTls</c> layer), and its handshake must offer the
+    /// <c>h2</c> and <c>http/1.1</c> protocol identifiers.
+    /// </param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="listener"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the listener's capabilities do not report a reliable, ordered byte stream secured by
+    /// TLS.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A connection that negotiated <c>h2</c> is served HTTP/2 (RFC 9113 §3.2); one that negotiated
+    /// <c>http/1.1</c>, or no protocol at all because the client sent no ALPN extension, is served
+    /// HTTP/1.1. A connection that negotiated any other protocol is closed: the handshake bound it to a
+    /// protocol this registration does not speak. The protocol is read through
+    /// the <c>Tls</c> feature on the accepted connection, so a connection that does not
+    /// report its handshake is served HTTP/1.1.
+    /// </para>
+    /// <para>
+    /// ALPN is a TLS extension, so the registration requires a listener whose
+    /// <see cref="ConnectionCapabilities.Security"/> is <see cref="ConnectionSecurity.Tls"/>. Serving
+    /// both protocols on a cleartext port (HTTP/2 prior knowledge or the retired <c>h2c</c> upgrade) is
+    /// not supported; register <see cref="UseHttp1(IDuplexConnectionListener)"/> and
+    /// <see cref="UseHttp2(IDuplexConnectionListener)"/> on separate listeners instead.
+    /// </para>
+    /// </remarks>
+    public HttpConnectionListenerOptions UseHttp1AndHttp2(IDuplexConnectionListener listener)
+    {
+        return UseHttp1AndHttp2(listener, static _ => { }, static _ => { });
+    }
+
+    /// <summary>
+    /// Serves HTTP/1.1 and HTTP/2 over the supplied TLS connection listener, choosing the protocol for
+    /// each connection from the application protocol its TLS handshake negotiated through ALPN
+    /// (RFC 7301). Each protocol keeps its own options, configured through
+    /// <paramref name="configureHttp1"/> and <paramref name="configureHttp2"/>.
+    /// </summary>
+    /// <param name="listener">
+    /// The listener producing the transport connections. TLS must already be composed onto it, and its
+    /// handshake must offer the <c>h2</c> and <c>http/1.1</c> protocol identifiers.
+    /// </param>
+    /// <param name="configureHttp1">Configures the options of the connections served HTTP/1.1 (see <see cref="Http1ConnectionListenerOptions"/>).</param>
+    /// <param name="configureHttp2">Configures the options of the connections served HTTP/2 (see <see cref="Http2ConnectionListenerOptions"/>).</param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="listener"/>, <paramref name="configureHttp1"/>, or
+    /// <paramref name="configureHttp2"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the listener's capabilities do not report a reliable, ordered byte stream secured by
+    /// TLS.
+    /// </exception>
+    /// <remarks>See <see cref="UseHttp1AndHttp2(IDuplexConnectionListener)"/> for how each connection's protocol is chosen.</remarks>
+    public HttpConnectionListenerOptions UseHttp1AndHttp2(
+        IDuplexConnectionListener listener,
+        Action<Http1ConnectionListenerOptions> configureHttp1,
+        Action<Http2ConnectionListenerOptions> configureHttp2)
+    {
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder =
+            CreateAlpnConnectionFactoryBuilder(configureHttp1, configureHttp2);
+
+        return UseStreamListener(HttpProtocol.Http11 | HttpProtocol.Http20, listener, connectionFactoryBuilder);
+    }
+
+    /// <summary>
+    /// Serves HTTP/1.1 and HTTP/2 over the TLS connection listener produced by the supplied factory,
+    /// with default configuration, choosing the protocol for each connection from the application
+    /// protocol its TLS handshake negotiated through ALPN (RFC 7301).
+    /// </summary>
+    /// <param name="listenerFactory">
+    /// The factory producing the listener; it is invoked (and its result capability-validated) when
+    /// the <see cref="HttpConnectionListener"/> is constructed. The listener it returns must have TLS
+    /// composed onto it.
+    /// </param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="listenerFactory"/> is <see langword="null"/>.</exception>
+    /// <remarks>See <see cref="UseHttp1AndHttp2(IDuplexConnectionListener)"/> for how each connection's protocol is chosen.</remarks>
+    public HttpConnectionListenerOptions UseHttp1AndHttp2(Func<IDuplexConnectionListener> listenerFactory)
+    {
+        return UseHttp1AndHttp2(listenerFactory, static _ => { }, static _ => { });
+    }
+
+    /// <summary>
+    /// Serves HTTP/1.1 and HTTP/2 over the TLS connection listener produced by the supplied factory,
+    /// choosing the protocol for each connection from the application protocol its TLS handshake
+    /// negotiated through ALPN (RFC 7301). Each protocol keeps its own options, configured through
+    /// <paramref name="configureHttp1"/> and <paramref name="configureHttp2"/>.
+    /// </summary>
+    /// <param name="listenerFactory">
+    /// The factory producing the listener; it is invoked (and its result capability-validated) when
+    /// the <see cref="HttpConnectionListener"/> is constructed. The listener it returns must have TLS
+    /// composed onto it.
+    /// </param>
+    /// <param name="configureHttp1">Configures the options of the connections served HTTP/1.1 (see <see cref="Http1ConnectionListenerOptions"/>).</param>
+    /// <param name="configureHttp2">Configures the options of the connections served HTTP/2 (see <see cref="Http2ConnectionListenerOptions"/>).</param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="listenerFactory"/>, <paramref name="configureHttp1"/>, or
+    /// <paramref name="configureHttp2"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>See <see cref="UseHttp1AndHttp2(IDuplexConnectionListener)"/> for how each connection's protocol is chosen.</remarks>
+    public HttpConnectionListenerOptions UseHttp1AndHttp2(
+        Func<IDuplexConnectionListener> listenerFactory,
+        Action<Http1ConnectionListenerOptions> configureHttp1,
+        Action<Http2ConnectionListenerOptions> configureHttp2)
+    {
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder =
+            CreateAlpnConnectionFactoryBuilder(configureHttp1, configureHttp2);
+
+        return UseStreamListener(HttpProtocol.Http11 | HttpProtocol.Http20, listenerFactory, connectionFactoryBuilder);
     }
 
     /// <summary>
@@ -338,18 +530,40 @@ public sealed class HttpConnectionListenerOptions
         configure(http3Options);
 
         // The QPACK options and limits are captured now (registration time); the listener-wide
-        // request/response interceptors are bound when the HttpConnectionListener snapshots them.
+        // request/response interceptors and feature capacity are bound when the
+        // HttpConnectionListener snapshots them.
         Registrations.Add(HttpListenerRegistration.ForMultiplexed(
             listenerFactory,
-            (interceptors, responseInterceptors) => new Http3ConnectionFactory(http3Options.Limits, interceptors, responseInterceptors, http3Options.QPack)));
+            (interceptors, responseInterceptors, featureCapacity) => new Http3ConnectionFactory(http3Options.Limits, interceptors, responseInterceptors, featureCapacity, http3Options.QPack)));
 
         return this;
     }
 
+    private Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> CreateAlpnConnectionFactoryBuilder(
+        Action<Http1ConnectionListenerOptions> configureHttp1,
+        Action<Http2ConnectionListenerOptions> configureHttp2)
+    {
+        ArgumentNullException.ThrowIfNull(configureHttp1);
+        ArgumentNullException.ThrowIfNull(configureHttp2);
+
+        // Both protocols' options are captured now (registration time), exactly as UseHttp1/UseHttp2
+        // capture theirs; the listener-wide interceptors and feature capacity are bound when the
+        // HttpConnectionListener snapshots them, and both protocols share that one snapshot.
+        Http1ConnectionListenerOptions http1Options = new();
+        configureHttp1(http1Options);
+
+        Http2ConnectionListenerOptions http2Options = new();
+        configureHttp2(http2Options);
+
+        return (interceptors, responseInterceptors, featureCapacity) => new HttpAlpnConnectionFactory(
+            new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors, featureCapacity),
+            new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity, AllowAlternateSchemes));
+    }
+
     private HttpConnectionListenerOptions UseStreamListener(
         HttpProtocol protocol,
-        IConnectionListener listener,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        IDuplexConnectionListener listener,
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder)
     {
         ArgumentNullException.ThrowIfNull(listener);
 
@@ -362,8 +576,8 @@ public sealed class HttpConnectionListenerOptions
 
     private HttpConnectionListenerOptions UseStreamListener(
         HttpProtocol protocol,
-        Func<IConnectionListener> listenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IDuplexConnectionListener> listenerFactory,
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder)
     {
         ArgumentNullException.ThrowIfNull(listenerFactory);
 

@@ -1,18 +1,10 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Linq;
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
 {
-    private readonly Stopwatch _stopwatch;
-
-    public ValidationItem()
-    {
-        this._stopwatch = SimpleObjectPool.Rent<Stopwatch>();
-    }
-
     public override void Evaluate(IValidationContext context)
     {
         if (context.Instance is not T instance)
@@ -26,9 +18,14 @@ internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
 
         var value = this.GetValue(instance);
 
+        // The chain stops on this member's own failure only. The context also holds the errors of every
+        // member evaluated before this one, and those must not keep this member's rules from running:
+        // stopping across members is ValidationMode.Stop, which the validator applies between items.
+        var failed = false;
+
         foreach (var rule in this.ItemRuleStack)
         {
-            if (!context.ContinueThroughValidationChain && context.Errors.Any())
+            if (failed && !context.ContinueThroughValidationChain)
             {
                 break;
             }
@@ -37,25 +34,24 @@ internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
                 ruleBase.ParentContext = context;
             }
 
-            _stopwatch.Restart();
+            // A timestamp per evaluation, never state on the item: the item is shared by every validation
+            // that uses its profile, concurrently in a server.
+            long started = Stopwatch.GetTimestamp();
 
             if (rule.TryValidate(value, out var ruleContext))
             {
                 foreach (var error in ruleContext.Errors)
                 {
                     context.AddFailure(error);
+                    failed = true;
                 }
 
-                _stopwatch.Stop();
-                context.AddInvocation(new ValidationInvocation(rule.Name, true, _stopwatch.ElapsedTicks));
+                context.AddInvocation(new ValidationInvocation(rule.Name, true, Stopwatch.GetElapsedTime(started).Ticks));
             }
             else
             {
-                _stopwatch.Stop();
-                context.AddInvocation(new ValidationInvocation(rule.Name, false, _stopwatch.ElapsedTicks));
+                context.AddInvocation(new ValidationInvocation(rule.Name, false, Stopwatch.GetElapsedTime(started).Ticks));
             }
         }
-
-        _stopwatch.Reset();
     }
 }

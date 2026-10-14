@@ -21,4 +21,7 @@ public abstract class HttpConnectionContext : IHttpConnectionContext
 
     /// <inheritdoc />
     public abstract ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default);
+
+    /// <inheritdoc />
+    public abstract void BeginGracefulClose();
 }

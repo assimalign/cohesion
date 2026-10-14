@@ -1,3 +1,6 @@
+using System;
+using System.Globalization;
+
 using Shouldly;
 
 using Xunit;
@@ -6,8 +9,8 @@ namespace Assimalign.Cohesion.Http.Tests;
 
 public class HttpStatusCodeTests
 {
-    [Theory]
-    [InlineData(200, "200 Ok")]
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode.ToString: renders the code and its reason phrase")]
+    [InlineData(200, "200 OK")]
     [InlineData(300, "300 Multiple Choices")]
     [InlineData(425, "425 Too Early")]
     public void ToString_KnownStatusCode_ShouldReturnCodeAndReasonPhrase(int value, string expected)
@@ -22,12 +25,128 @@ public class HttpStatusCodeTests
         actual.ShouldBe(expected);
     }
 
-    [Theory]
+    // The IANA HTTP Status Code Registry's assigned codes and phrases: RFC 9110 §15 for the codes it
+    // defines, the defining specification for the rest (#1204). The reserved 418 and the registry's
+    // temporary registrations are left out; the reserved 306 stays only because the obsolete
+    // HttpStatusCode.Unused shipped in 10.0.0-preview.1.
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode.ReasonPhrase: every registered code carries the registry's phrase")]
+    [InlineData(100, "Continue")]
+    [InlineData(101, "Switching Protocols")]
+    [InlineData(102, "Processing")]
+    [InlineData(103, "Early Hints")]
+    [InlineData(200, "OK")]
+    [InlineData(201, "Created")]
+    [InlineData(202, "Accepted")]
+    [InlineData(203, "Non-Authoritative Information")]
+    [InlineData(204, "No Content")]
+    [InlineData(205, "Reset Content")]
+    [InlineData(206, "Partial Content")]
+    [InlineData(207, "Multi-Status")]
+    [InlineData(208, "Already Reported")]
+    [InlineData(226, "IM Used")]
+    [InlineData(300, "Multiple Choices")]
+    [InlineData(301, "Moved Permanently")]
+    [InlineData(302, "Found")]
+    [InlineData(303, "See Other")]
+    [InlineData(304, "Not Modified")]
+    [InlineData(305, "Use Proxy")]
+    [InlineData(306, "(Unused)")]
+    [InlineData(307, "Temporary Redirect")]
+    [InlineData(308, "Permanent Redirect")]
+    [InlineData(400, "Bad Request")]
+    [InlineData(401, "Unauthorized")]
+    [InlineData(402, "Payment Required")]
+    [InlineData(403, "Forbidden")]
+    [InlineData(404, "Not Found")]
+    [InlineData(405, "Method Not Allowed")]
+    [InlineData(406, "Not Acceptable")]
+    [InlineData(407, "Proxy Authentication Required")]
+    [InlineData(408, "Request Timeout")]
+    [InlineData(409, "Conflict")]
+    [InlineData(410, "Gone")]
+    [InlineData(411, "Length Required")]
+    [InlineData(412, "Precondition Failed")]
+    [InlineData(413, "Content Too Large")]
+    [InlineData(414, "URI Too Long")]
+    [InlineData(415, "Unsupported Media Type")]
+    [InlineData(416, "Range Not Satisfiable")]
+    [InlineData(417, "Expectation Failed")]
+    [InlineData(421, "Misdirected Request")]
+    [InlineData(422, "Unprocessable Content")]
+    [InlineData(423, "Locked")]
+    [InlineData(424, "Failed Dependency")]
+    [InlineData(425, "Too Early")]
+    [InlineData(426, "Upgrade Required")]
+    [InlineData(428, "Precondition Required")]
+    [InlineData(429, "Too Many Requests")]
+    [InlineData(431, "Request Header Fields Too Large")]
+    [InlineData(451, "Unavailable For Legal Reasons")]
+    [InlineData(500, "Internal Server Error")]
+    [InlineData(501, "Not Implemented")]
+    [InlineData(502, "Bad Gateway")]
+    [InlineData(503, "Service Unavailable")]
+    [InlineData(504, "Gateway Timeout")]
+    [InlineData(505, "HTTP Version Not Supported")]
+    [InlineData(506, "Variant Also Negotiates")]
+    [InlineData(507, "Insufficient Storage")]
+    [InlineData(508, "Loop Detected")]
+    [InlineData(510, "Not Extended")] // the registry's "(OBSOLETED)" annotation is not part of the phrase
+    [InlineData(511, "Network Authentication Required")]
+    public void ReasonPhrase_RegisteredStatusCode_ShouldBeRegistryPhrase(int value, string expected)
+    {
+        // Arrange
+        HttpStatusCode statusCode = value;
+
+        // Act
+        string reasonPhrase = statusCode.ReasonPhrase;
+        string rendered = statusCode.ToString();
+
+        // Assert
+        reasonPhrase.ShouldBe(expected);
+        rendered.ShouldBe(value + " " + expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpStatusCode.ReasonPhrase: a default instance has no phrase")]
+    public void ReasonPhrase_DefaultInstance_ShouldBeEmpty()
+    {
+        // Arrange
+        HttpStatusCode statusCode = default;
+
+        // Act
+        string reasonPhrase = statusCode.ReasonPhrase;
+        string rendered = statusCode.ToString();
+
+        // Assert
+        reasonPhrase.ShouldBeEmpty();
+        rendered.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpStatusCode.ImUsed: is 226 IM Used")]
+    public void ImUsed_ShouldBe226()
+    {
+        // Act
+        HttpStatusCode statusCode = HttpStatusCode.ImUsed;
+
+        // Assert
+        statusCode.Value.ShouldBe(226);
+        statusCode.ToString().ShouldBe("226 IM Used");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode.IsValid: accepts exactly the HTTP status range")]
     [InlineData(200, true)]
+    [InlineData(226, true)]
     [InlineData(300, true)]
+    [InlineData(306, true)]
     [InlineData(425, true)]
+    [InlineData(100, true)]
+    [InlineData(104, true)]
+    [InlineData(299, true)]
+    [InlineData(418, true)]
+    [InlineData(599, true)]
+    [InlineData(99, false)]
+    [InlineData(600, false)]
     [InlineData(999, false)]
-    public void IsValid_KnownAndUnknownCodes_ShouldReturnExpectedResult(int value, bool expected)
+    public void IsValid_InsideAndOutsideRange_ShouldReturnExpectedResult(int value, bool expected)
     {
         // Act
         bool actual = HttpStatusCode.IsValid(value);
@@ -36,7 +155,67 @@ public class HttpStatusCodeTests
         actual.ShouldBe(expected);
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpStatusCode: All 500 status values round-trip through construction and conversion")]
+    public void Constructor_EntireValidRange_ShouldRoundTripEveryCode()
+    {
+        // Arrange
+        for (int value = 100; value <= 599; value++)
+        {
+            // Act
+            HttpStatusCode constructed = new(value);
+            HttpStatusCode converted = value;
+
+            // Assert
+            HttpStatusCode.IsValid(value).ShouldBeTrue();
+            constructed.Value.ShouldBe(value);
+            converted.ShouldBe(constructed);
+            ((int)converted).ShouldBe(value);
+            converted.GetHashCode().ShouldBe(constructed.GetHashCode());
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode: Out-of-range construction and conversion still fail")]
+    [InlineData(int.MinValue)]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(99)]
+    [InlineData(600)]
+    [InlineData(int.MaxValue)]
+    public void Constructor_OutsideValidRange_ShouldThrow(int value)
+    {
+        // Act
+        Action construct = () => _ = new HttpStatusCode(value);
+        Action convert = () => { HttpStatusCode status = value; };
+
+        // Assert
+        HttpStatusCode.IsValid(value).ShouldBeFalse();
+        construct.ShouldThrow<ArgumentException>();
+        convert.ShouldThrow<ArgumentException>();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode: Codes without a registered phrase retain their digits and status-line space")]
+    [InlineData(104)]
+    [InlineData(199)]
+    [InlineData(299)]
+    [InlineData(399)]
+    [InlineData(418)]
+    [InlineData(499)]
+    [InlineData(599)]
+    public void ToString_UnregisteredCode_ShouldRenderDigitsAndEmptyPhrase(int value)
+    {
+        // Arrange
+        HttpStatusCode status = new(value);
+
+        // Act
+        string phrase = status.ReasonPhrase;
+        string rendered = status.ToString();
+
+        // Assert
+        phrase.ShouldBeEmpty();
+        rendered.ShouldBe(value.ToString(CultureInfo.InvariantCulture) + " ");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpStatusCode: implicit conversions round-trip the numeric value")]
     public void ImplicitConversions_ShouldRoundTripNumericValue()
     {
         // Arrange

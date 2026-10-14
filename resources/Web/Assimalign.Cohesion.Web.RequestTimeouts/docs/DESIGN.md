@@ -47,9 +47,9 @@ whose `RequestCancelled` is `linked(transport token, timeout token)`.
 That single decoration makes every existing consumer timeout-aware with no contract changes:
 
 - Handlers reading `context.RequestCancelled` observe the linked token.
-- The router creates its per-dispatch handler token by linking off
-  `context.RequestCancelled` — of the *decorated* context — so `IRouterRouteHandler`
-  cancellation tokens trip too.
+- The pipeline's terminal runs a routed endpoint with `context.RequestCancelled` of the context
+  it receives — the *decorated* one, since the middleware sits ahead of the terminal — so
+  `IRouterRouteHandler` cancellation tokens trip too.
 - `Cancel`/`CancelAsync`/`Features`/`Items` forward to the real context, so shared state
   never forks. The middleware retained the original context and writes the timeout response
   on it.
@@ -65,19 +65,42 @@ unchanged — the server loop already treats an escaping OCE as a clean per-conn
 and when both race, the client abort wins (nothing can be delivered anyway). A handler that
 swallows the cancellation and completes keeps the response it produced, matching ASP.NET. The
 filter deliberately keys off the middleware's own state, not
-`OperationCanceledException.CancellationToken`, because the throwing token is usually a
-*further-linked* token (e.g. the router's per-dispatch source), not ours.
+`OperationCanceledException.CancellationToken`, because the throwing token is often a
+*further-linked* token (one a handler or a client library linked off the request token), not
+ours.
 
-## Per-endpoint policy: observing the route-match publication
+## Per-endpoint policy: reading the published endpoint
 
-Cohesion's router **matches and dispatches in one middleware** — on a match it invokes the
-handler and never calls `next`. There is no pipeline position "between match and dispatch" for
-a policy consumer to occupy (the position ASP.NET's timeout middleware occupies between
-`UseRouting` and endpoint execution). The documented routing contract fills the gap: *the
-router installs `IRouteMatchFeature` on `IHttpContext.Features` before invoking the handler*.
-The decorated context's feature collection forwards everything and reacts to that one
-installation, applying the endpoint's `RequestTimeoutMetadata` (last-wins over the bag) at
-exactly the match→dispatch boundary.
+`UseRouting` selects the endpoint, publishes it as an `IRouteMatchFeature` and calls `next`; the
+pipeline's terminal runs it (#1054). `UseRequestTimeouts` is registered between the two — the
+position ASP.NET's timeout middleware occupies — and picks the effective policy when the exchange
+reaches it:
+
+```mermaid
+flowchart TD
+    Routing["UseRouting: publish the endpoint"] --> Pick["UseRequestTimeouts: the endpoint's policy, else the global default"]
+    Pick --> Arm["Arm the timer; acknowledge the endpoint"]
+    Arm --> Downstream["Later middleware and the endpoint run under the linked token"]
+    Downstream -->|"expired, response not started"| Answer["Write the policy's timeout response"]
+    Downstream -->|"expired, response started"| Abort["Abort the exchange"]
+```
+
+- The published match's `RequestTimeoutMetadata` (last-wins over the bag) **replaces** the global
+  default outright, a disabled policy included. With no metadata — or no match at all (404, 405) —
+  the global default governs.
+- The timer is armed **once**, with the effective policy, when the exchange reaches the
+  middleware. The endpoint's budget belongs to the middleware and endpoint downstream of it, not
+  to route-table evaluation or anything registered ahead. `SetTimeout` re-arms from the moment
+  of the call, like `CancellationTokenSource.CancelAfter`.
+- **CORS preflight.** Routing publishes the candidate endpoint of a CORS preflight with
+  `IsPreflight` set; the candidate never runs for the preflight, so its policy is not applied (the
+  global default governs the preflight) and it is not acknowledged.
+
+Before #1054 routing matched **and** dispatched in one middleware, so this middleware had to sit
+ahead of `UseRouting` and observe the router installing its match through a feature-collection
+decorator, re-arming the timer at that moment. This document anticipated that splitting match
+from dispatch would collapse the observation into a plain read of the match feature between the
+two phases; that is what happened, and the public surface did not change.
 
 Alternatives rejected:
 
@@ -90,33 +113,43 @@ Alternatives rejected:
   cross-cutting policy inside the router is the wrong ownership and would splinter the policy
   surface across two packages.
 
-When routing eventually splits match from dispatch (the #28 evolution), the observation
-collapses into a plain read of the match feature between the phases; the public surface is
-unaffected.
+### Fail closed when the middleware is missing or misordered
 
-The endpoint timer is measured **from the match**, not from request start — the endpoint's
-budget belongs to its handler, not to route-table evaluation. `SetTimeout` re-arms from the
-moment of the call, like `CancellationTokenSource.CancelAfter`.
+Registered ahead of `UseRouting`, the middleware sees no endpoint, so an endpoint's timeout would
+silently stop applying and the endpoint would run under the global default, or unbounded when there
+is none. `RequestTimeoutMetadata` therefore implements `IRouteMiddlewareMetadata`:
+`RequiredMiddleware` is `UseRequestTimeouts` when the policy carries a timeout. The middleware
+acknowledges every non-preflight endpoint it processes
+(`context.AcknowledgeEndpointMiddleware("UseRequestTimeouts")`), whether or not it found a policy,
+because routing checks every metadata item that names the middleware, including a group-level
+timeout an endpoint-level override replaced. When routing dispatches an endpoint whose metadata names
+`UseRequestTimeouts` and the request was never acknowledged, it throws `InvalidOperationException`
+naming the endpoint and the middleware instead of running the endpoint unbounded.
 
-## The timer: one unarmed CTS per exchange, TimeProvider-bound
+- **A disabling policy requires nothing** (`RequiredMiddleware` is `null` when `Timeout` is
+  `null`, `RequestTimeoutMetadata.Disabled` included). Misordered, such an endpoint runs under the
+  global default: bounded, the safe direction. Requiring the middleware would also fail every
+  application that marks an endpoint disabled without using request timeouts at all.
+- **Debugger suspension still acknowledges.** Enforcement is suspended there, not missing, so an
+  endpoint with a timeout runs normally under an attached debugger.
 
-Each governed exchange owns two sources: a timeout source constructed
-`new CancellationTokenSource(Timeout.InfiniteTimeSpan, options.TimeProvider)` and the linked
-source described above. Creating the timeout source *unarmed but with the provider* is
-deliberate:
+## The timer: one TimeProvider-bound timer per exchange
 
-- the `(delay, TimeProvider)` constructor is what binds `CancelAfter` to the provider — a
-  bare CTS re-armed later would silently fall back to system timing;
-- the source must exist before a deadline is known, because a per-endpoint policy or a
-  handler's `SetTimeout` can arm it when there is no global default;
-- disable is `CancelAfter(InfiniteTimeSpan)` — the same one-timer re-arm as every other
-  transition, so there is no timer allocation churn per policy change.
+Each governed exchange owns one initially unarmed `ITimer` from the configured `TimeProvider`,
+a timeout cancellation source, and a source linking timeout and transport cancellation.
+The timer exists even without a policy because a handler can call `SetTimeout`.
+Arming, disabling, and claiming expiry share a per-exchange lock. The arm records both its
+interval and timestamp. A callback already queued from a previous arm checks the current
+deadline before cancelling work, so it cannot expire a later arm or misattribute its interval.
+Once expiry is claimed the interval is retained, and subsequent re-arms cannot un-cancel it.
 
-`CancelAfter` after the source has fired is inherently a no-op, which yields the documented
-race semantic of `Disable`/`SetTimeout` (effective only before expiry) — the same race ASP.NET
-documents for `DisableRequestTimeout`. Cost when the middleware is registered but nothing arms:
-two small allocations per request, comparable to the linked source the router itself creates
-per dispatch.
+Cancellation runs outside the timer lock because it can synchronously invoke application
+callbacks. Disposing the request stops the timer and releases both cancellation sources;
+a callback that races disposal tolerates the disposed timeout source. The timer callback
+raises no events: the middleware reports the outcome when downstream unwinds or completes.
+
+This keeps one timer per exchange without allocation churn on `SetTimeout`. Range validation
+matches `CancellationTokenSource.CancelAfter`, including calls made after expiry.
 
 ## Policy and metadata shape
 
@@ -124,12 +157,19 @@ per dispatch.
   disabled spelling (`RequestTimeoutPolicy.Disabled` is the shared instance). Disable is policy
   **data**, not an attribute — attributes would need reflection or a translation layer under
   AOT, and the metadata bag already gives last-wins override composition for free.
-- `RequestTimeoutMetadata` is a **sealed concrete carrier with no interface** per the repo's
-  metadata-carrier discipline (`RouteNameMetadata`/`RouteHostMetadata` precedent): the sealed
-  type is the contract, guaranteeing the validated, immutable policy consumers read.
+- `RequestTimeoutMetadata` is a **sealed concrete carrier with no interface of its own** per the
+  repo's metadata-carrier discipline (`RouteNameMetadata`/`RouteHostMetadata` precedent): the
+  sealed type is the contract, guaranteeing the validated, immutable policy consumers read. It
+  implements routing's `IRouteMiddlewareMetadata` only to name the middleware that must honor it
+  (see "Fail closed" above).
 - An endpoint policy **replaces** the effective policy outright (timeout *and* response
   members); policies do not merge member-by-member — merging invites "where did this status
   come from" archaeology.
+- Applications declare it with the convention verbs (#1055) `WithRequestTimeout(TimeSpan)`,
+  `WithRequestTimeout(RequestTimeoutPolicy)` and `DisableRequestTimeout()`: generic extension
+  members over routing's `IRouterConventionBuilder`, so one verb serves a mapped route and a route
+  group. Each appends a `RequestTimeoutMetadata`, which routing composes when the route table is
+  built, outer group first; the last-wins read resolves the most specific declaration.
 - The timeout response: `WriteResponse` (imperative, owns everything) beats
   `WriteProblemDetails` (RFC 9457 payload via `Web.ProblemDetails`) beats the bare status.
   Before writing, staged response state is reset (headers cleared, buffered body truncated) —
@@ -137,22 +177,24 @@ per dispatch.
 
 ## Feature lifecycle
 
-`IHttpRequestTimeoutFeature` is installed on the *real* feature collection for the duration of
+`IRequestTimeoutFeature` is installed on the *real* feature collection for the duration of
 the middleware scope and removed before its cancellation sources are disposed, so later
 pipeline stages can never resolve a feature with disposed state. When the middleware is not
 registered — or is suspended for an attached debugger — no feature exists and
-`Features.Get<IHttpRequestTimeoutFeature>()` returns `null`, which is the discoverable
+`Features.Get<IRequestTimeoutFeature>()` returns `null`, which is the discoverable
 "no timeout governance" signal.
 
 ## Ordering and composition constraints
 
-- `UseRequestTimeouts` must be registered **before** `UseRouting` (and before anything
-  long-running it should govern): the middleware wraps its downstream, and endpoint policies
-  are observed only when routing runs inside the timeout scope.
+- `UseRequestTimeouts` must be registered **after** `UseRouting` and before anything
+  long-running it should govern: it reads the endpoint `UseRouting` published, and it wraps
+  only its downstream. Registered ahead of `UseRouting`, the global default still governs every
+  request, but an endpoint whose metadata carries a timeout fails at dispatch (see "Fail closed"
+  above).
 - Registration is expected once per pipeline. Nesting is not harmful (the innermost scope's
   token is what downstream observes) but has no defined use.
 - Debugger suspension (`Debugger.IsAttached`, checked per request) skips the entire scope —
-  no timer, no decoration, no feature — mirroring ASP.NET.
+  no timer, no decoration, no feature — mirroring ASP.NET. It still acknowledges the endpoint.
 
 ## AOT posture
 
@@ -173,3 +215,56 @@ Nothing in the package (or its tests) needs dynamic code.
 - **No 504 after the response has started** — physically impossible; the started path aborts.
 - **No Microsoft.Extensions dependencies, no separate hosting wiring.** The package composes
   purely against the Web root's builder seams and ships to applications via `App.Web`.
+
+## Diagnostics
+
+The internal `RequestTimeoutEventSource` is named
+`Assimalign.Cohesion.Web.RequestTimeouts`. It reports timeout outcomes on the request flow,
+never in the timer callback. It reads `requestId` from `IWebRequestIdFeature` and the route
+from `IWebEndpointFeature` only inside the enabled-event check; it never reads the ambient
+activity, request path, query, headers or body. The Web.Server dependency
+supplies correlation and the client-fault markers without a hosting dependency.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `RequestTimedOut` | Warning | `timeoutMilliseconds:double`, `responseStarted:bool`, `statusCode:int`, `routeTemplate`, `suppressedCount:int`, `requestId` |
+| 2 | `TimeoutIgnored` | Verbose | `timeoutMilliseconds:double`, `routeTemplate`, `requestId` |
+
+`timeoutMilliseconds` records the armed interval, including a handler's `SetTimeout` override,
+not elapsed wall time or the original policy. Re-arming after expiry does not change it.
+`RequestTimedOut` reports the selected policy's status (a custom response writer still owns its
+actual response), or zero when the head was already committed and the exchange must abort.
+Warnings are limited to one per second for the process; the next warning reports the number
+suppressed since the preceding warning. No event is raised for successful, unexpired requests.
+
+The exact `PollingCounter` totals `timed-out-requests` and `ignored-timeouts` are maintained
+with or without listeners, including suppressed warnings. A cancelled unwind is counted by the
+first counter; normal completion despite expiry is counted by the second, never both.
+Transport cancellation and either client-fault marker take precedence over the timer. In
+particular a request-body rate fault (408) or response-rate abort remains a transport outcome
+even if its cancellation is wrapped or swallowed while the request timer expires. No request
+timeout event or counter duplicates those rate faults.
+
+Compared with 10.0.0-preview.1, event delivery and counters are additive. The new entries are a
+diagnostic behavior break for applications forwarding the Web provider prefix into configured
+sinks, on program decision 15's terms. The attribution
+correction is a behavior change under program decision 15: a latched client fault now wins
+over a simultaneous application timer even when downstream wraps it in an
+`OperationCanceledException` without cancelling the original transport token. It is no longer
+converted into a timeout response. Existing public interfaces and timeout policy defaults are
+unchanged. A queued callback from an older arm now respects a replacement deadline instead
+of cancelling it early. NativeAOT listeners require `EventSourceSupport=true` in the application.
+
+## Exception messages (#1467, #1471)
+
+Resource names are short PascalCase noun phrases naming the failure, at most 40 characters.
+The internal naming cleanup preserves message text, placeholders and resource order.
+
+Exception text lives in `src/Properties/ErrorMessages.resx`. The shared build targets generate
+an internal `ErrorMessages` accessor in this project's root namespace under the intermediate
+output directory; no designer is checked in. Formatted messages use
+`string.Format(CultureInfo.CurrentCulture, ErrorMessages.<Name>, ...)`. Resource extraction
+preserves the existing exception text and input-disclosure rules, including any diagnostic
+type-only exclusions. EventSource templates, log messages and response bodies retain their
+existing ownership. This is a conventions change with no public API or behavior break against
+10.0.0-preview.1.

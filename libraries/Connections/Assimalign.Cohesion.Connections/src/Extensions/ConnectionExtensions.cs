@@ -4,11 +4,11 @@ using System.IO;
 namespace Assimalign.Cohesion.Connections;
 
 /// <summary>
-/// Provides convenience extension members for <see cref="IConnection"/>.
+/// Provides convenience extension members for <see cref="IDuplexConnection"/>.
 /// </summary>
 public static class ConnectionExtensions
 {
-    extension(IConnection connection)
+    extension(IDuplexConnection connection)
     {
         /// <summary>
         /// Lazily adapts the connection's duplex pipe as a bidirectional <see cref="Stream"/>.

@@ -19,6 +19,9 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// </remarks>
 public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectionListener
 {
+    // Teardown and cancellation can be normal paths; resolve resource text once.
+    private static readonly string _listenerDisposedMessage = ErrorMessages.MultiplexedListenerDisposed;
+
     private readonly Channel<MultiplexedConnection> _inbound = Channel.CreateUnbounded<MultiplexedConnection>(
         new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
 
@@ -42,6 +45,9 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
     }
 
     /// <inheritdoc />
+    public override ListenerId Id { get; } = ListenerId.New();
+
+    /// <inheritdoc />
     public override EndPoint EndPoint => _endPoint;
 
     /// <inheritdoc />
@@ -63,7 +69,7 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
     }
 
     /// <inheritdoc />
-    public override async ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -71,7 +77,7 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
         }
         catch (ChannelClosedException)
         {
-            throw new OperationCanceledException("The in-memory multiplexed listener has been disposed.", cancellationToken);
+            throw new OperationCanceledException(_listenerDisposedMessage, cancellationToken);
         }
     }
 
@@ -127,6 +133,6 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
         _ = client.DisposeAsync();
         _ = server.DisposeAsync();
 
-        throw new ConnectionAbortedException("The in-memory multiplexed listener has been disposed and is no longer accepting connections.");
+        throw new ConnectionAbortedException(ErrorMessages.MultiplexedListenerNotAccepting);
     }
 }

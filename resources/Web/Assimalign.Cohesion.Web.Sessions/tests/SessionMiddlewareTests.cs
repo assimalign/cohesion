@@ -53,16 +53,39 @@ public class SessionMiddlewareTests
 
         // Assert
         HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
-        cookie.Name.ShouldBe(DefaultCookieName);
+        cookie.Name.ShouldBe<HttpCookieName>(DefaultCookieName);
         cookie.Options.HttpOnly.ShouldBeTrue();
         cookie.Options.SameSite.ShouldBe(HttpCookieSameSiteMode.Lax);
         cookie.Options.Secure.ShouldBeFalse();        // plaintext request
-        cookie.Options.Path.ShouldBe("/");
+        cookie.Options.Path.ShouldBe<HttpCookiePath?>("/");
         cookie.Options.Expires.ShouldBeNull();         // session-scoped
         cookie.Options.MaxAge.ShouldBeNull();
+        cookie.Options.IsEssential.ShouldBeFalse();    // a consent policy gates it by default
 
         // The state round-trips through the store under the cookie's id.
         (await ReadStoredStringAsync(store, cookie.Value, "user")).ShouldBe("alice");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: An empty session cookie establishes a new session and persists its state")]
+    public async Task Invoke_EmptySessionCookie_ShouldEstablishNewSessionAndPersistState()
+    {
+        // Arrange
+        SessionTestContext context = new(HttpScheme.Http, requestCookieHeader: ".Cohesion.Session=");
+        InMemoryHttpSessionStore store = new();
+
+        // Act
+        await RunAsync(context, store, async c =>
+        {
+            IHttpSession session = await c.LoadSessionAsync(c.RequestCancelled);
+            session.SetString("user", "alice");
+        });
+
+        // Assert
+        HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
+        cookie.Name.ShouldBe<HttpCookieName>(DefaultCookieName);
+        string id = cookie.Value;
+        id.ShouldNotBeNullOrEmpty();
+        (await ReadStoredStringAsync(store, id, "user")).ShouldBe("alice");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: An HTTPS request marks the session cookie Secure")]
@@ -155,8 +178,8 @@ public class SessionMiddlewareTests
 
         // Assert
         HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
-        cookie.Name.ShouldBe("app.sid");
-        cookie.Options.Path.ShouldBe("/app");
+        cookie.Name.ShouldBe<HttpCookieName>("app.sid");
+        cookie.Options.Path.ShouldBe<HttpCookiePath?>("/app");
         cookie.Options.HttpOnly.ShouldBeFalse();
     }
 
@@ -184,7 +207,7 @@ public class SessionMiddlewareTests
         newId.ShouldNotBe("old-id");
 
         HttpCookie cookie = context.Response.Cookies.ShouldHaveSingleItem();
-        cookie.Value.ShouldBe(newId);
+        cookie.Value.ShouldBe<HttpCookieValue>(newId);
 
         (await ReadStoredStringAsync(store, "old-id", "user")).ShouldBeNull();  // old id evicted
         (await ReadStoredStringAsync(store, newId!, "user")).ShouldBe("alice"); // state under new id
@@ -284,6 +307,24 @@ public class SessionMiddlewareTests
         // Act / Assert
         await Should.ThrowAsync<InvalidOperationException>(async () =>
             await context.LoadSessionAsync());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: An essential session cookie is marked so a consent policy emits it")]
+    public async Task Invoke_EssentialSessionCookie_ShouldMarkCookieEssential()
+    {
+        // Arrange
+        SessionTestContext context = new(HttpScheme.Http);
+        InMemoryHttpSessionStore store = new();
+
+        // Act
+        await RunAsync(context, store, async c =>
+        {
+            IHttpSession session = await c.LoadSessionAsync();
+            session.SetString("cart", "1");
+        }, options => options.CookieIsEssential = true);
+
+        // Assert
+        context.Response.Cookies.ShouldHaveSingleItem().Options.IsEssential.ShouldBeTrue();
     }
 
     private static async Task RunAsync(

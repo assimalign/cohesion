@@ -7,18 +7,18 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections.Tests;
 
 /// <summary>
-/// A <see cref="Connection"/> decorator used by <see cref="RecordingConnectionLayer"/> so tests
+/// A <see cref="DuplexConnection"/> decorator used by <see cref="RecordingConnectionLayer"/> so tests
 /// can observe which layer produced a connection and unwrap back to the inner connection.
 /// </summary>
-internal sealed class LayerWrappedConnection : Connection
+internal sealed class LayerWrappedConnection : DuplexConnection
 {
-    public LayerWrappedConnection(IConnection inner, string layerName)
+    public LayerWrappedConnection(IDuplexConnection inner, string layerName)
     {
         Inner = inner;
         LayerName = layerName;
     }
 
-    public IConnection Inner { get; }
+    public IDuplexConnection Inner { get; }
 
     public string LayerName { get; }
 

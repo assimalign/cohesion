@@ -61,6 +61,26 @@ metadata for build and tooling inspection. It is not a runtime discovery mechani
 gateway code supplies the same identity directly to `Application.CreateBuilder(ApplicationName,
 args)`, preserving the package's no-reflection boundary.
 
+## Generated string value-type compatibility (#1472)
+
+Regeneration removes `ToString(string?, IFormatProvider?)` from `ResourceName`, `ApplicationName`,
+and `EnvironmentName`. These overloads shipped in `10.0.0-preview.1`, so their removal is a
+source and binary breaking change under the preview compatibility policy (HTTP/Web program
+decision 15). Replace calls such as `resourceName.ToString(format, provider)` with
+`resourceName.ToString()` and recompile consumers. The removed overload did not apply formatting
+or culture to initialized string values; `ToString()` preserves their text and now returns an
+empty string for `default`.
+
+The generated nested converters for `ResourceName`, `ResourceId`, `ApplicationName`, and
+`EnvironmentName` are now public sealed types with public parameterless constructors. A
+source-generated `JsonSerializerContext` in a consuming assembly can use these value objects
+without a custom converter. This adds public surface compared with preview.1's non-public nested
+converters; the conversion rules for null, invalid values and dictionary keys are unchanged.
+The redundant internal nested converter partials in `ResourceName` and `ApplicationName` are
+removed because their modifiers conflict with the generated public declaration (CS0262).
+The separate `Internal.ResourceNameJsonConverter` and `Internal.ApplicationNameJsonConverter`
+types retain their existing roles and accessibility.
+
 ## Design intent and why-this-not-that
 
 - **`IApplication` does not extend a host abstraction.** A host runs inside one

@@ -12,6 +12,7 @@ getters and setters) for performance.
 - Status: Active
 - Project references: `Assimalign.Cohesion.Core`
 - Package references: None
+- Bundled analyzer: `Assimalign.Cohesion.SourceGeneration.ObjectMapping`
 - Target framework: managed centrally (`build/Targets/Build.TargetFramework.props`)
 
 ## Primary Responsibilities

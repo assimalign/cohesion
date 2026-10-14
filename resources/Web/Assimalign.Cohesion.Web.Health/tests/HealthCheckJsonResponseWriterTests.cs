@@ -62,23 +62,129 @@ public class HealthCheckJsonResponseWriterTests
         entryData.GetProperty("degraded").GetBoolean().ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: serializes a captured exception message")]
-    public async Task WriteAsync_WhenEntryHasException_ShouldSerializeMessage()
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: Should not publish a captured exception message by default")]
+    public async Task WriteAsync_WhenEntryHasException_ShouldOmitExceptionMessage()
     {
-        var entries = new Dictionary<string, HealthReportEntry>
-        {
-            ["db"] = new(HealthStatus.Unhealthy, "failed", TimeSpan.Zero, new InvalidOperationException("boom"), data: null, tags: null),
-        };
-        var report = new HealthReport(entries, TimeSpan.Zero);
+        // Arrange
+        HealthReport report = ReportWith("Primary database unavailable.", new InvalidOperationException(HostMessage));
         TestHttpContext context = new("/healthz", HttpMethod.Get);
 
+        // Act
         await HealthCheckJsonResponseWriter.Instance.WriteAsync(context, report);
 
-        using JsonDocument document = JsonDocument.Parse(context.ReadResponseBody());
-        document.RootElement
-            .GetProperty("entries").GetProperty("db")
-            .GetProperty("exception").GetString().ShouldBe("boom");
+        // Assert
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(HostName, Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        JsonElement entry = document.RootElement.GetProperty("entries").GetProperty("db");
+        entry.TryGetProperty("exception", out _).ShouldBeFalse();
+        entry.GetProperty("description").GetString().ShouldBe("Primary database unavailable.");
     }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: Should withhold a description equal to the exception message")]
+    public async Task WriteAsync_WhenDescriptionIsExceptionMessage_ShouldWithholdDescription()
+    {
+        // Arrange: the HealthCheckResult.Unhealthy(exception.Message, exception) idiom.
+        var exception = new InvalidOperationException(HostMessage);
+        HealthReport report = ReportWith(exception.Message, exception);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await HealthCheckJsonResponseWriter.Instance.WriteAsync(context, report);
+
+        // Assert
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(HostName, Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("entries").GetProperty("db")
+            .GetProperty("description").GetString().ShouldBe(HealthCheckJsonResponseWriter.ReportedExceptionDescription);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: Should withhold a description that embeds an inner exception message")]
+    public async Task WriteAsync_WhenDescriptionEmbedsInnerExceptionMessage_ShouldWithholdDescription()
+    {
+        // Arrange
+        var exception = new InvalidOperationException("Connection failed.", new System.IO.IOException(HostMessage));
+        HealthReport report = ReportWith($"Database check failed: {HostMessage}", exception);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await HealthCheckJsonResponseWriter.Instance.WriteAsync(context, report);
+
+        // Assert
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(HostName, Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("entries").GetProperty("db")
+            .GetProperty("description").GetString().ShouldBe(HealthCheckJsonResponseWriter.ReportedExceptionDescription);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: Should publish the exception message and description with developer details")]
+    public async Task WriteAsync_WithDeveloperDetails_ShouldPublishExceptionMessageAndDescription()
+    {
+        // Arrange
+        var exception = new InvalidOperationException(HostMessage);
+        HealthReport report = ReportWith(exception.Message, exception);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await HealthCheckJsonResponseWriter.DeveloperDetails.WriteAsync(context, report);
+
+        // Assert
+        using JsonDocument document = JsonDocument.Parse(context.ReadResponseBody());
+        JsonElement entry = document.RootElement.GetProperty("entries").GetProperty("db");
+        entry.GetProperty("exception").GetString().ShouldBe(HostMessage);
+        entry.GetProperty("description").GetString().ShouldBe(HostMessage);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: Should withhold the text of an exception placed in data by default")]
+    public async Task WriteAsync_WhenDataHoldsException_ShouldWithholdExceptionText()
+    {
+        // Arrange: the exception sits only in data, with an inner exception and a stack trace.
+        Exception exception = ThrownException();
+        HealthReport report = ReportWithData(exception);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await HealthCheckJsonResponseWriter.Instance.WriteAsync(context, report);
+
+        // Assert
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(HostName, Case.Sensitive);
+        body.ShouldNotContain(InnerMessage, Case.Sensitive);
+        body.ShouldNotContain(nameof(InvalidOperationException), Case.Sensitive);
+        body.ShouldNotContain(nameof(ThrownException), Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("entries").GetProperty("db").GetProperty("data")
+            .GetProperty("error").GetString().ShouldBe(HealthCheckJsonResponseWriter.ReportedExceptionDescription);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: Should write only the message of an exception placed in data with developer details")]
+    public async Task WriteAsync_WithDeveloperDetails_WhenDataHoldsException_ShouldWriteMessageOnly()
+    {
+        // Arrange
+        Exception exception = ThrownException();
+        HealthReport report = ReportWithData(exception);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await HealthCheckJsonResponseWriter.DeveloperDetails.WriteAsync(context, report);
+
+        // Assert
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(InnerMessage, Case.Sensitive);
+        body.ShouldNotContain(nameof(InvalidOperationException), Case.Sensitive);
+        body.ShouldNotContain(nameof(ThrownException), Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("entries").GetProperty("db").GetProperty("data")
+            .GetProperty("error").GetString().ShouldBe(HostMessage);
+    }
+
+    private const string InnerMessage = "Socket error 10061 from 10.20.30.40.";
+
+    private const string HostName = "db-primary.corp.internal";
+
+    private const string HostMessage = "Failed to connect to db-primary.corp.internal:5432.";
 
     private static HealthReport ReportWith(HealthStatus status)
     {
@@ -87,5 +193,36 @@ public class HealthCheckJsonResponseWriterTests
             ["check"] = new(status, description: null, TimeSpan.Zero, exception: null, data: null, tags: null),
         };
         return new HealthReport(entries, TimeSpan.Zero);
+    }
+
+    private static HealthReport ReportWith(string description, Exception exception)
+    {
+        var entries = new Dictionary<string, HealthReportEntry>
+        {
+            ["db"] = new(HealthStatus.Unhealthy, description, TimeSpan.Zero, exception, data: null, tags: null),
+        };
+        return new HealthReport(entries, TimeSpan.Zero);
+    }
+
+    private static HealthReport ReportWithData(Exception exception)
+    {
+        var data = new Dictionary<string, object> { ["error"] = exception };
+        var entries = new Dictionary<string, HealthReportEntry>
+        {
+            ["db"] = new(HealthStatus.Unhealthy, "Primary database unavailable.", TimeSpan.Zero, exception: null, data, tags: null),
+        };
+        return new HealthReport(entries, TimeSpan.Zero);
+    }
+
+    private static Exception ThrownException()
+    {
+        try
+        {
+            throw new InvalidOperationException(HostMessage, new System.IO.IOException(InnerMessage));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return exception;
+        }
     }
 }

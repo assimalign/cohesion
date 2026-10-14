@@ -4,7 +4,6 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.DependencyInjection.Properties;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
@@ -84,7 +83,7 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
         if (ReferenceEquals(entry, _creationInProgress))
         {
             throw new InvalidOperationException(
-                Resources.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(key.Type)));
+                ErrorMessageFormatter.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(key.Type)));
         }
 
         service = entry;
@@ -168,7 +167,7 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
                 else
                 {
                     throw new InvalidOperationException(
-                        Resources.GetAsyncDisposableServiceDisposeExceptionMessage(
+                        ErrorMessageFormatter.GetAsyncDisposableServiceDisposeExceptionMessage(
                             TypeNameHelper.GetTypeDisplayName(entry)));
                 }
             }

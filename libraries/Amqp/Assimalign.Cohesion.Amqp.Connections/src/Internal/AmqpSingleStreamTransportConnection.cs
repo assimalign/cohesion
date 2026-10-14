@@ -7,14 +7,14 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 
 /// <summary>
-/// An AMQP connection over a single-stream carrier: the live <see cref="IConnection"/>
+/// An AMQP connection over a single-stream carrier: the live <see cref="IDuplexConnection"/>
 /// itself is the carrier of the AMQP byte stream, so acquisition has no open step.
 /// </summary>
 internal sealed class AmqpSingleStreamTransportConnection : AmqpTransportConnection
 {
-    private readonly IConnection _connection;
+    private readonly IDuplexConnection _connection;
 
-    public AmqpSingleStreamTransportConnection(IConnection connection, AmqpTransportOptions options)
+    public AmqpSingleStreamTransportConnection(IDuplexConnection connection, AmqpTransportOptions options)
         : base(options)
     {
         _connection = connection;
@@ -31,7 +31,7 @@ internal sealed class AmqpSingleStreamTransportConnection : AmqpTransportConnect
         _connection.Abort(reason);
     }
 
-    protected override ValueTask<IConnection> AcquireCarrierAsync(CancellationToken cancellationToken)
+    protected override ValueTask<IDuplexConnection> AcquireCarrierAsync(CancellationToken cancellationToken)
     {
         return ValueTask.FromResult(_connection);
     }

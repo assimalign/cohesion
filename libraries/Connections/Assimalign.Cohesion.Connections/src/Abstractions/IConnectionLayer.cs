@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.Connections;
 /// <para>
 /// A layer is the generic unit of composition in the connection model. Layers are applied once
 /// per connection at establishment time (via
-/// <c>IConnectionListener.Use(...)</c> / <c>IConnectionFactory.Use(...)</c> or by calling
-/// <see cref="UpgradeAsync(IConnection, CancellationToken)"/> directly), so composition adds no
+/// <c>IDuplexConnectionListener.Use(...)</c> / <c>IDuplexConnectionFactory.Use(...)</c> or by calling
+/// <see cref="UpgradeAsync(IDuplexConnection, CancellationToken)"/> directly), so composition adds no
 /// per-byte cost: the steady-state data path is whatever the layer's returned connection exposes.
 /// </para>
 /// <para>
@@ -38,10 +38,18 @@ public interface IConnectionLayer
     /// Applies the layer to an established connection.
     /// </summary>
     /// <param name="connection">The connection to upgrade.</param>
-    /// <param name="cancellationToken">A token to cancel the upgrade (for example, a handshake).</param>
+    /// <param name="cancellationToken">
+    /// A token to cancel the upgrade (for example, a handshake). A layered listener cancels it when the
+    /// listener is disposed, so an implementation must honor it.
+    /// </param>
     /// <returns>
-    /// The upgraded <see cref="IConnection"/>, or <paramref name="connection"/> itself for
+    /// The upgraded <see cref="IDuplexConnection"/>, or <paramref name="connection"/> itself for
     /// pass-through layers.
     /// </returns>
-    ValueTask<IConnection> UpgradeAsync(IConnection connection, CancellationToken cancellationToken = default);
+    /// <remarks>
+    /// When the upgrade fails, the exception propagates and <paramref name="connection"/> still belongs
+    /// to the caller, which disposes it. A layered listener calls this once per accepted connection, each
+    /// call on its own task, so an implementation must allow concurrent calls for different connections.
+    /// </remarks>
+    ValueTask<IDuplexConnection> UpgradeAsync(IDuplexConnection connection, CancellationToken cancellationToken = default);
 }

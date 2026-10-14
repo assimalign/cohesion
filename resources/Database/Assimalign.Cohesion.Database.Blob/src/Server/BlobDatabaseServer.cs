@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Database.Blob;
 public sealed class BlobDatabaseServer : IDatabaseServer
 {
     private readonly BlobDatabaseServerOptions _options;
-    private readonly IConnectionListener _listener;
+    private readonly IDuplexConnectionListener _listener;
     private readonly IDatabaseAuthenticator _authenticator;
     private readonly BlobDatabaseServerContext _context;
     private readonly ConcurrentDictionary<Guid, BlobDatabaseServerSession> _sessions = new();
@@ -241,7 +241,7 @@ public sealed class BlobDatabaseServer : IDatabaseServer
     {
         while (!softStop.IsCancellationRequested)
         {
-            IConnection connection;
+            IDuplexConnection connection;
 
             try
             {
@@ -278,13 +278,13 @@ public sealed class BlobDatabaseServer : IDatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private static async Task RejectAsync(IConnection connection, CancellationToken hardAbort)
+    private static async Task RejectAsync(IDuplexConnection connection, CancellationToken hardAbort)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(hardAbort);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
         using CancellationTokenRegistration abort = timeout.Token.Register(static state =>
         {
-            try { ((IConnection)state!).Abort(new ConnectionAbortedException("The rejected connection is closing.")); }
+            try { ((IDuplexConnection)state!).Abort(new ConnectionAbortedException("The rejected connection is closing.")); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { }
         }, connection);
         try

@@ -1,8 +1,9 @@
 # Assimalign.Cohesion.Http.RequestLimits — Design
 
-Per-request limit features for the Cohesion HTTP server, starting with the typed
-max-request-body-size feature. The package owns the feature contract and its implementation and
-references only core `Assimalign.Cohesion.Http` — the transport never references this package.
+Per-request limit features for the Cohesion HTTP server: the typed max-request-body-size feature, the
+typed minimum request-body data-rate feature (#1383), and the typed minimum response data-rate feature
+(#1384). The package owns the feature contracts and their implementation and references only core
+`Assimalign.Cohesion.Http` — the transport never references this package.
 
 ## Why this package exists (seams vs. features)
 
@@ -17,16 +18,20 @@ That placement conflated two different kinds of surface:
 - **Features** — concrete capabilities: extended CONNECT, sessions, cookies, forms, and
   per-request body-size limiting. These belong in their own packages that reference only core.
 
-The repo already encodes this taxonomy: `IHttpExtendedConnectFeature` lives in
-`Assimalign.Cohesion.Http.ExtendedConnect`, not in core, and the transport stays decoupled from
-it. This package restores that discipline for the body-size feature. The enforcement itself —
+The repo encodes this taxonomy elsewhere too: feature packages such as
+`Assimalign.Cohesion.Http.ProtocolUpgrade` and `Assimalign.Cohesion.Http.InterimResponses` own their
+contracts, and the transport never references them. (A transport never needs a feature contract in core:
+it publishes connection facts as facets on its connection info (the TLS handshake, which `Http.Tls`
+reads), or offers wire mechanisms through `IHttpExchangeControl`, as the extended CONNECT tunnel
+has been since #1368; see core Http DESIGN.) This package restores that
+discipline for the body-size feature. The enforcement itself —
 the wire-level cap with 413 semantics — is *not* a feature and stays transport-owned in
 `Http.Connections` (`HttpConnectionListenerLimits.MaxRequestBodySize`): the security guarantee must hold
 with zero optional packages installed.
 
 ## How it works
 
-`HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()` returns a stateless
+`HttpMaxRequestBodySizeInterceptor.Create()` returns a stateless
 `IHttpExchangeInterceptor` the composition root registers on the server's listener options. Per
 request, its `AfterRequestHead` hook attaches an internal `HttpMaxRequestBodySizeFeature` to the
 exchange's feature collection.
@@ -37,24 +42,55 @@ The feature is a **write-through view over the parse context**, not a copy:
   the very value the transport enforces. There is no second source of truth.
 - `IsReadOnly` delegates to the context's transport-owned freeze flag
   (`IsMaxRequestBodySizeReadOnly`). The transport freezes the knob when it starts consuming the
-  body. On HTTP/1.1 that is now the **first read of the streamed body** (#810): the request is
-  dispatched at head and the body read lazily, so the writable window spans the head hooks, the
-  `BeforeRequestBody` hooks, *and* every middleware / endpoint that runs before the body is read —
-  which is what makes the middleware-visible pre-read override real. (On HTTP/2 / HTTP/3 the
-  pipeline still freezes before the body is exposed, so their `BeforeRequestBody` hooks observe
-  the frozen value.) Because the feature holds no frozen copy of its own, that per-version timing
+  body. On HTTP/1.1 (#810) and HTTP/3 (#1066) that is the **first read of the streamed body**:
+  the request is dispatched at head and the body read lazily, so the writable window spans the
+  head hooks, the `BeforeRequestBody` hooks, *and* every middleware / endpoint that runs before the
+  body is read — which is what makes the middleware-visible pre-read override real. (On HTTP/2 the
+  pipeline still freezes before the body is exposed, so its `BeforeRequestBody` hooks observe the
+  frozen value.) Because the feature holds no frozen copy of its own, that per-version timing
   is invisible to this package and to feature consumers: the contract ("adjust before the body is
   read; observe any time") is stable while the transport's definition of "read" evolves.
 
 The transport keeps the context alive until the request body is consumed (documented on
 `HttpExchangeInterceptorRequestContext`), so the view never dangles.
 
-### Why a typed seam here, when ExtendedConnect chose an Items-key bridge
+### The minimum request-body data rate (#1383)
 
-ExtendedConnect deliberately bridges transport → package with a convention-named
-`IHttpContext.Items` string and **no shared symbol**. That is the right shape for its job:
-one-way publication of an immutable value after parse. This package needs three things the
-Items bridge cannot express:
+`IHttpMinRequestBodyDataRateFeature` is the same kind of view over the context's
+`MinRequestBodyDataRate`: `MinDataRate` (an `HttpMinDataRate`, `null` = no rate) reads and writes the
+knob the transport enforces, and `IsReadOnly` delegates to `IsMinRequestBodyDataRateReadOnly`. Every
+transport seeds the knob from its listener's `MinRequestBodyDataRate` and freezes it at the first read
+of the request body, on HTTP/2 too, where the body-size knob froze at dispatch. An endpoint whose request
+body legitimately idles (a client-streaming or duplex call, a telemetry upload that sends a message now
+and then) sets it to `null` before it reads; an endpoint that needs a stricter rate raises it. Every
+other request keeps the listener's rate, so the slow-body defence stays on for them. Kestrel's
+`IHttpMinRequestBodyDataRateFeature`, which gRPC disables on streaming calls, is the model.
+
+### The minimum response data rate (#1384)
+
+`IHttpMinResponseDataRateFeature` views the context's `MinResponseDataRate`, the slow-read defence's
+knob: a peer that withholds flow-control credit or reads below it is reclaimed and the exchange
+cancelled. The transport freezes it at the response's first write, independently of the request-body
+knobs, so an endpoint whose reader legitimately pauses for long stretches sets it to `null` (or a
+lower rate) before it starts its response. Kestrel's `IHttpMinResponseDataRateFeature` is the model.
+
+### One object for every limit
+
+`HttpRequestLimitsInterceptor.Create()` attaches every contract on **one** object
+(`HttpRequestLimitsFeature`): the feature collection is keyed by name, and a typed lookup returns the
+first feature implementing the contract asked for, so `Get<IHttpMaxRequestBodySizeFeature>()`,
+`Get<IHttpMinRequestBodyDataRateFeature>()` and `Get<IHttpMinResponseDataRateFeature>()` all find it.
+An exchange pays one allocation and one slot for every limit, as it did for the body-size feature
+alone, so the web host's presized feature collection (#1381) does not grow.
+`HttpMaxRequestBodySizeInterceptor.Create()` still attaches the body-size feature alone; the two register
+under the same name, so a host registers one or the other.
+
+### Why a typed seam here, rather than an Items-key bridge
+
+An `Items`-key bridge — the transport publishes a convention-named `IHttpContext.Items` value with
+**no shared symbol**, and a package interprets it (what extended CONNECT used before its tunnel) — is
+the right shape for one-way publication of an immutable value after parse. This package needs three
+things such a bridge cannot express:
 
 1. **Mutation with enforcement coupling** — the feature must write a value the transport then
    enforces mid-parse, not merely read one it published.
@@ -63,26 +99,26 @@ Items bridge cannot express:
 3. **Stream wrapping** — returning a replacement body stream has no Items-key analogue.
 
 Those three are exactly the `IHttpExchangeInterceptor` surface, which is why the escalation to a
-compile-time shared seam (in core, shared by all future parse-time features) is justified. New
-capabilities that only need one-way post-parse publication should still prefer the Items-key
-bridge.
+compile-time shared seam (in core, shared by all future parse-time features) is justified. A
+capability that only needs one-way post-parse publication can still use an `Items` key.
 
 ## Ordering and defaults
 
 Register this package's interceptor **first**. Its `AfterRequestHead` hook attaches the feature;
 later interceptors' `AfterRequestHead` hooks may then look it up (or simply write the context
 knob — same store).
-The web host (`Assimalign.Cohesion.Web.Hosting`) installs it by default so every request carries
-the typed feature — the seam is now invoked on all three parse paths (h1, h2, h3; #819), so the
-feature is attached uniformly regardless of protocol (enforcement of the cap remains h1-only —
-see "Protocol coverage" below). The raw transport remains lean (zero interceptors ⇒ no
+The web host (`Assimalign.Cohesion.Web.Hosting`) installs `HttpRequestLimitsInterceptor.Create()` by default so every
+request carries the typed features — the seam is now invoked on all three parse paths (h1, h2, h3; #819), so the
+feature is attached uniformly regardless of protocol (the cap is enforced on all three — see
+"Protocol coverage" below). The raw transport remains lean (zero interceptors ⇒ no
 per-request context or feature allocation).
 
 ## Feature identity
 
 `Name` is `"Assimalign.Cohesion.Http.MaxRequestBodySize"` — kept byte-identical to the value the
 transport historically used, because the string is the feature collection's dictionary key and
-any name-keyed consumer would otherwise silently miss.
+any name-keyed consumer would otherwise silently miss. The combined feature
+`HttpRequestLimitsInterceptor.Create()` attaches registers under the same name for the same reason.
 
 ## Transport integration (as implemented)
 
@@ -96,13 +132,15 @@ The migration from the original in-core placement is complete; the pieces sit as
    listener is constructed (post-construction registrations are inert — no racing the accept
    loops); each transport builds one `HttpExchangeInterceptorRequestContext` per request (read-only
    `Headers` view via `AsReadOnly()`), runs `AfterRequestHead` hooks after the head is assembled,
-   freezes the knob, runs `BeforeRequestBody` hooks (skipped for CONNECT; on h1 they precede the
+   freezes the knob (h2 right after those hooks; h1 and h3 at the first body read), runs
+   `BeforeRequestBody` hooks (skipped for CONNECT; on h1 they precede the
    automatic `Expect: 100-continue` solicitation), chains `AfterRequestBody` hooks over the
    materialized stream, and flows the hook-populated feature collection into the exchange through
    the context constructors' `features` parameters. On h1 the
    parser does this inline and enforces whatever cap remains (413); on h2/h3 the shared
-   `HttpRequestInterceptorPipeline` does it at the context-construction site (no cap enforcement
-   yet — see "Protocol coverage"). `HttpRequestRejectedException` is caught ahead of the
+   `HttpRequestInterceptorPipeline` does it at the context-construction site: h2 enforces the
+   frozen value the pipeline returns (413), and h3's lazy body enforces the cap the way h1's does
+   (413 — see "Protocol coverage"). `HttpRequestRejectedException` is caught ahead of the
    wire-failure classifier and answered with the protocol-appropriate wire behavior (h1 minimal
    status response + close; h2 `RST_STREAM(CANCEL)`; h3 stream abort). Zero registered interceptors
    keeps the exact pre-seam fast path (no context, no feature, no hook dispatch).
@@ -110,14 +148,15 @@ The migration from the original in-core placement is complete; the pieces sit as
    `TransportHttpContext` and the Connections `DESIGN.md` were replaced by the interceptor
    documentation.
 4. **Web.Hosting installs by default.** `WebApplicationServerBuilder` registers
-   `HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()` ahead of all user configuration,
-   so it holds interceptor slot 0.
+   `HttpRequestLimitsInterceptor.Create()` (the body-size cap and, since #1383 and #1384, the
+   request-body and response rates) ahead of all user configuration, so it holds interceptor slot 0.
 5. **Tests.** The transport suite exercises the seam with local doubles on all three protocols
    (h1: attach / cap-raise / cap-lower / wrap / reject / freeze / read-only headers / CONNECT skip
    / snapshot inertness; h2 + h3: attach / wrap / reject → RST_STREAM/stream-abort / freeze /
-   read-only headers / CONNECT skip / empty-body / lowered-cap no-reject / fast path); this
-   package's suite covers the feature contract; the h1 limit-rejection suite is unchanged because
-   enforcement never moved.
+   read-only headers / CONNECT skip / empty-body / fast path; h2: cap-lower → 413 and cap-raise;
+   h3: the h1-style freeze-at-first-read, cap-raise, and cap-lower → 413); this package's suite
+   covers the feature contract; the h1 limit-rejection suite is unchanged because h1 enforcement
+   never moved.
 
 ## Protocol coverage (honest gaps)
 
@@ -125,24 +164,32 @@ The migration from the original in-core placement is complete; the pieces sit as
   HTTP/3 (#819) — so this package's `AfterRequestHead` hook attaches the typed
   `IHttpMaxRequestBodySizeFeature` on every request regardless of protocol, and the feature is
   visible from the first middleware onward on h2/h3 exactly as on h1.
-- **Cap *enforcement* remains HTTP/1.1-only.** HTTP/2 dispatches a request at header completion
-  and streams the body under flow-control backpressure (h2: `Http2Stream.CreateContextAsync` runs
-  at the frame pump's END_HEADERS dispatch, so `AfterRequestHead` hooks run before the application
-  observes any body octet); HTTP/3 drains the request stream before header decode, so its
-  `AfterRequestHead` hook runs before the body is *exposed*, not before it is *received*. On both,
-  no hard body-size cap is
-  enforced yet — h2 bounds buffering via flow-control backpressure and h3 via QUIC flow control
-  (see `HttpConnectionListenerLimits.MaxRequestBodySize`; the hard cap is tracked follow-up
-  work). A hook that lowers the cap on h2/h3 therefore changes the value the feature reports
-  without rejecting the body. Nothing in this package should be read as implying h2/h3 body
-  *protection* exists yet — only the typed feature and the hook plumbing do.
-- **The middleware-visible pre-read override window is live on HTTP/1.1 (#810).** The h1 transport
-  now streams the request body and freezes the cap at the first body read, so middleware and
-  endpoints — not just head-hook interceptors — can adjust `MaxRequestBodySize` through this
-  feature before the body is read, and the transport enforces whatever value remains (413). The
-  same window opens on h2/h3 once their body reads gain hard-cap enforcement. Minimum-data-rate
-  limits (`MinRequestBodyDataRate` / `MinResponseDataRate`) also landed with #810, but as
-  transport-owned limits (`HttpConnectionListenerLimits`), not features surfaced by this package.
+- **Cap *enforcement* covers all three protocols.** HTTP/1.1 and HTTP/3 (#1066) dispatch a
+  request at its head and read the body lazily, and their body streams enforce whatever cap the
+  feature holds at the first read (413). HTTP/2 dispatches a request at header completion
+  (`Http2Stream.CreateContextAsync` runs at the frame pump's END_HEADERS dispatch, so
+  `AfterRequestHead` hooks run before the application observes any body octet) and enforces the
+  cap as frozen after those hooks (#1048): a declared `content-length` over it is answered `413`
+  before the request is dispatched, and a body that grows past it is answered on receipt — `413`
+  when the response has not started, a stream reset when it has. A hook that lowers the cap
+  therefore rejects an oversized body on every protocol; one that raises it admits the larger
+  body.
+- **The middleware-visible pre-read override window is live on HTTP/1.1 (#810) and HTTP/3
+  (#1066).** Both transports stream the request body and freeze the cap at the first body read, so
+  middleware and endpoints — not just head-hook interceptors — can adjust `MaxRequestBodySize`
+  through this feature before the body is read, and the transport enforces whatever value remains
+  (413). The h2 pipeline freezes the knob at dispatch, so on HTTP/2 the feature is read-only from
+  the first middleware onward and only head hooks can adjust the cap; opening the same window
+  there is later work. Minimum-data-rate limits (`MinRequestBodyDataRate` /
+  `MinResponseDataRate`) also landed with #810, but as transport-owned limits
+  (`HttpConnectionListenerLimits`), not features surfaced by this package.
+  `MinRequestBodyDataRate` is enforced on HTTP/1.1, HTTP/2 and HTTP/3 (#1085 added the last two);
+  `MinResponseDataRate` on every response since #1384, which ended the HTTP/1.1-streaming-only
+  coverage. Since #1383 the transport seeds the request-body rate into the parse context too and
+  freezes it at the first body read on all three versions, and `IHttpMinRequestBodyDataRateFeature`
+  is the typed view over it, with the middleware-visible pre-read window on HTTP/2 as well (see "The
+  minimum request-body data rate"). #1384 does the same for the response rate, frozen at the
+  response's first write.
 
 ## AOT posture
 
@@ -153,8 +200,26 @@ allocation per request, only when the interceptor is registered.
 ## Non-goals
 
 - **Enforcement.** The wire-level cap and its 413 semantics are transport-owned
-  (the per-registration `Http1Limits`); this package only observes and adjusts the per-request value.
+  (the per-registration `Http1Limits` / `Http2Limits` / `Http3Limits`); this package only observes
+  and adjusts the per-request value.
 - **Other limit knobs (request line, header count/size, timeouts).** Those are connection-wide
   policy on the per-version listener limits with no per-request story; they gain typed features here only if
   a real per-request consumer appears.
 - **Client-side limits.** This is a server-side surface.
+## Public interceptors and breaking changes since 10.0.0-preview.1 (#1465)
+
+`HttpRequestLimitsInterceptor` and `HttpMaxRequestBodySizeInterceptor` are public sealed
+implementations of the existing `IHttpExchangeInterceptor` contract through
+`HttpExchangeInterceptor`. Each has a private constructor and its own `Create()` returning its
+concrete type. The interface remains the listener registration contract; the per-exchange feature
+implementations remain internal. This is the factory-to-implementation convention approved by
+owner decision 59. Register one interceptor or the other, first in the listener's list.
+
+The `v10.0.0-preview.1` tag shipped `HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()`;
+consumers replace it with `HttpMaxRequestBodySizeInterceptor.Create()` and rebuild. Removing the
+old static class and factory is a **source- and binary-breaking change**, accepted during previews
+on decision 15's terms. The combined `HttpRequestLimits.CreateInterceptor()` was added after that
+tag by #1383/#1384; its replacement, `HttpRequestLimitsInterceptor.Create()`, is likewise source-
+and binary-breaking for consumers of the intervening branch. Both new factories remain assignable
+to `IHttpExchangeInterceptor`. Their scope, registration order, limits, freeze rules, and feature
+identity are unchanged.
