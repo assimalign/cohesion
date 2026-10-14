@@ -1,9 +1,11 @@
 using System;
+using System.Globalization;
 using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Dns.Internal;
 
 namespace Assimalign.Cohesion.Dns;
 
@@ -35,7 +37,9 @@ namespace Assimalign.Cohesion.Dns;
 /// </remarks>
 public sealed class UdpDnsTransport : DnsTransport
 {
-    private readonly UdpDnsTransportOptions _options;
+    private readonly EndPoint _endPoint;
+    private readonly TimeSpan _queryTimeout;
+    private readonly int _maxResponseSize;
     private readonly Socket _socket;
     private readonly SemaphoreSlim _exchangeLock;
 
@@ -44,31 +48,25 @@ public sealed class UdpDnsTransport : DnsTransport
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="options"/>.<c>EndPoint</c> is <see langword="null"/>.</exception>
+    /// <remarks>Configuration values are captured at construction. Later option assignments do not change this instance.</remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A numeric limit or timeout is outside its supported range.</exception>
     public UdpDnsTransport(UdpDnsTransportOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (options.EndPoint is null)
+        _endPoint = DnsEndpointSnapshot.Copy(options.EndPoint!);
+        _queryTimeout = options.QueryTimeout;
+        _maxResponseSize = options.MaxResponseSize;
+        if (_endPoint is null)
         {
             throw new ArgumentException(
-                $"{nameof(UdpDnsTransportOptions)}.{nameof(UdpDnsTransportOptions.EndPoint)} is required.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionRequired, nameof(UdpDnsTransportOptions), nameof(UdpDnsTransportOptions.EndPoint)),
                 nameof(options));
         }
-        if (options.QueryTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentException(
-                $"{nameof(UdpDnsTransportOptions)}.{nameof(UdpDnsTransportOptions.QueryTimeout)} must be positive.",
-                nameof(options));
-        }
-        if (options.MaxResponseSize <= 0 || options.MaxResponseSize > 65_535)
-        {
-            throw new ArgumentException(
-                $"{nameof(UdpDnsTransportOptions)}.{nameof(UdpDnsTransportOptions.MaxResponseSize)} must be in [1, 65535].",
-                nameof(options));
-        }
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_queryTimeout, TimeSpan.Zero, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_maxResponseSize, 0, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(_maxResponseSize, 65_535, nameof(options));
 
-        _options = options;
-
-        AddressFamily family = options.EndPoint switch
+        AddressFamily family = _endPoint switch
         {
             IPEndPoint ip => ip.AddressFamily,
             DnsEndPoint dns => dns.AddressFamily,
@@ -83,7 +81,7 @@ public sealed class UdpDnsTransport : DnsTransport
     }
 
     /// <inheritdoc />
-    public override EndPoint Endpoint => _options.EndPoint!;
+    public override EndPoint Endpoint => DnsEndpointSnapshot.Copy(_endPoint);
 
     /// <inheritdoc />
     public override async Task<ReadOnlyMemory<byte>> ExchangeAsync(
@@ -94,22 +92,22 @@ public sealed class UdpDnsTransport : DnsTransport
 
         if (request.IsEmpty)
         {
-            throw new ArgumentException("DNS request must be non-empty.", nameof(request));
+            throw new ArgumentException(ErrorMessages.RequestEmpty, nameof(request));
         }
 
         // RFC 1035 §4.2.1: UDP messages are limited to 512 octets without EDNS. We accept the
         // EDNS-advertised payload size here; the resolver enforces the lower bound when it
         // composes the message.
-        if (request.Length > _options.MaxResponseSize)
+        if (request.Length > _maxResponseSize)
         {
             // Not strictly a transport failure — the message is just too big for UDP. Surface
             // it as Transport so the caller falls back to TCP.
             DnsException.ThrowTransport(
-                $"UDP request size {request.Length} exceeds the configured MaxResponseSize {_options.MaxResponseSize}");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.UdpRequestTooLarge, request.Length, _maxResponseSize));
         }
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(_options.QueryTimeout);
+        timeoutCts.CancelAfter(_queryTimeout);
 
         await _exchangeLock.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
         try
@@ -119,38 +117,38 @@ public sealed class UdpDnsTransport : DnsTransport
                 await _socket.SendToAsync(
                     request,
                     SocketFlags.None,
-                    _options.EndPoint!,
+                    _endPoint,
                     timeoutCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
-                DnsException.ThrowTimeout($"UDP send to {Endpoint}");
+                DnsException.ThrowTimeout(string.Format(CultureInfo.CurrentCulture, ErrorMessages.UdpSendTimeout, Endpoint));
             }
             catch (SocketException ex)
             {
-                DnsException.ThrowTransport($"UDP send to {Endpoint}: {ex.SocketErrorCode}", ex);
+                DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.UdpSendFailure, Endpoint, ex.SocketErrorCode), ex);
             }
 
             // Allocate a per-exchange buffer so concurrent exchanges don't share storage. The
             // returned ReadOnlyMemory<byte> aliases this buffer; we never recycle it.
-            byte[] buffer = new byte[_options.MaxResponseSize];
+            byte[] buffer = new byte[_maxResponseSize];
 
             try
             {
                 SocketReceiveFromResult result = await _socket
-                    .ReceiveFromAsync(buffer, SocketFlags.None, _options.EndPoint!, timeoutCts.Token)
+                    .ReceiveFromAsync(buffer, SocketFlags.None, _endPoint, timeoutCts.Token)
                     .ConfigureAwait(false);
 
                 return buffer.AsMemory(0, result.ReceivedBytes);
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
-                DnsException.ThrowTimeout($"UDP receive from {Endpoint}");
+                DnsException.ThrowTimeout(string.Format(CultureInfo.CurrentCulture, ErrorMessages.UdpReceiveTimeout, Endpoint));
                 throw; // unreachable; satisfies the analyzer
             }
             catch (SocketException ex)
             {
-                DnsException.ThrowTransport($"UDP receive from {Endpoint}: {ex.SocketErrorCode}", ex);
+                DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.UdpReceiveFailure, Endpoint, ex.SocketErrorCode), ex);
                 throw; // unreachable
             }
         }
