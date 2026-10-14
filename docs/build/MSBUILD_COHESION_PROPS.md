@@ -147,6 +147,10 @@ this boundary on its own.
 
 **JSON.** The generated converter reads JSON null as default for structs; the serializer handles
 null classes itself. Rejected values and invalid Ulid text throw `JsonException` with the reason.
+ULID scalars and dictionary keys must contain exactly 26 characters from the case-insensitive
+[ULID alphabet](https://github.com/ulid/spec#canonical-string-representation), with a leading digit
+from `0` through `7` to prevent 128-bit overflow. Malformed text is rejected before decoding so
+it cannot alias a valid identifier or silently overwrite a dictionary entry.
 String defaults write JSON null. Dictionary property-name conversion is supported for every
 runtime type; numbers use invariant culture. A default string wrapper has no valid JSON property
 name and cannot be used as a serialized dictionary key. Consumers using source-generated
@@ -179,7 +183,8 @@ removes string `ToString(format, provider)`, and changes string ordering from cu
 ordinal. `HttpCookieDomain` (introduced after preview.1) now compares and hashes ignoring case.
 Validated `Parse` now throws `FormatException` on rejection, while `TryParse` returns false.
 JSON null now means default, invalid values surface as `JsonException`, and dictionary keys are
-supported. The actual converter remains private, behind an internal factory accessible to
+supported. Malformed and overflowing ULID JSON strings that preview.1 accepted now throw
+`JsonException`. The actual converter remains private, behind an internal factory accessible to
 source-generated contexts in the same assembly. A context in another assembly needs its own
 accessible converter. The Core conformance suite uses a source-generated context without reflection.
 `ToString()` on a default string wrapper now returns empty instead of null. These are

@@ -24,6 +24,12 @@ default-value semantics and preview compatibility changes. `System.Ulid` accepts
 providers and nullable `TryParse` input in its annotations, matching the BCL interfaces used by
 generated wrappers; its parsing and formatting behavior is unchanged.
 
+Generated ULID JSON converters validate the case-insensitive ULID alphabet, the 26-character
+length and the leading digit (`0` through `7`) before invoking that decoder. Scalars and dictionary
+keys share this check so malformed text cannot alias a valid identifier. Compared with
+10.0.0-preview.1, malformed and overflowing JSON strings now throw `JsonException`; direct
+`System.Ulid` parsing is unchanged.
+
 ## Frozen runtime contract
 
 `AppEnvironment.Variables` is the only .NET home of the version 1 gateway-to-resource contract

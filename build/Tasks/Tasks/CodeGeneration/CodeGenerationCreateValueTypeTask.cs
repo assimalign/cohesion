@@ -498,7 +498,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         builder.AppendTabbedLine(3, "try\n{");
         if (context.RuntimeType == ObjectRuntimeType.Ulid)
         {
-            builder.AppendTabbedLine(4, "if (!global::System.Ulid.TryParse(reader.GetString(), out var value))\n{\n\tthrow new global::System.Text.Json.JsonException(new FormatException().Message);\n}");
+            builder.AppendTabbedLine(4, "var value = ParseUlid(reader.GetString());");
         }
         else
         {
@@ -523,6 +523,11 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
             builder.AppendTabbedLine(4, "var value = reader.GetString()!;");
             AppendJsonConstruction(builder, context, 4);
         }
+        else if (context.RuntimeType == ObjectRuntimeType.Ulid)
+        {
+            builder.AppendTabbedLine(4, "var value = ParseUlid(reader.GetString());");
+            AppendJsonConstruction(builder, context, 4);
+        }
         else
         {
             builder.AppendTabbedLine(4, "return Parse(reader.GetString()!, global::System.Globalization.CultureInfo.InvariantCulture);");
@@ -544,6 +549,36 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
             builder.AppendTabbedLine(3, "writer.WritePropertyName(value.Value.ToString(null, global::System.Globalization.CultureInfo.InvariantCulture));");
         }
         builder.AppendTabbedLine(2, "}");
+        if (context.RuntimeType == ObjectRuntimeType.Ulid)
+        {
+            builder.AppendTabbedLine(2, """
+
+                private static global::System.Ulid ParseUlid(string? text)
+                {
+                    // A ULID encodes 128 bits in 26 base32 characters, so the first digit is at most 7.
+                    if (text is null || text.Length != 26 || text[0] < '0' || text[0] > '7')
+                    {
+                        throw new FormatException();
+                    }
+
+                    const string alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZabcdefghjkmnpqrstvwxyz";
+                    foreach (char character in text)
+                    {
+                        if (alphabet.IndexOf(character) < 0)
+                        {
+                            throw new FormatException();
+                        }
+                    }
+
+                    if (!global::System.Ulid.TryParse(text, out var value))
+                    {
+                        throw new FormatException();
+                    }
+
+                    return value;
+                }
+                """);
+        }
         builder.AppendTabbedLine(1, "}");
     }
 
