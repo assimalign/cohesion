@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Content.Yaml;
 
@@ -47,7 +48,7 @@ public sealed class YamlMapping : YamlNode, IEnumerable<YamlMappingEntry>
     /// <param name="key">The scalar key text.</param>
     /// <exception cref="KeyNotFoundException">Thrown when no entry has the key.</exception>
     public YamlNode this[string key] =>
-        TryGetValue(key, out var value) ? value : throw new KeyNotFoundException($"The mapping contains no '{key}' key.");
+        TryGetValue(key, out var value) ? value : throw new KeyNotFoundException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MappingKeyMissing, key));
 
     /// <summary>Adds an entry with a scalar key.</summary>
     /// <param name="key">The scalar key text.</param>

@@ -46,6 +46,38 @@ Kind resolution applies to plain scalars only; quoted and block scalars are stri
 survives round-trips. Mappings preserve entry order and allow arbitrary nodes as keys (string-keyed
 convenience access covers the dominant case).
 
+## Anchor and tag boundaries
+
+`YamlNode.Anchor` and `YamlEvent.Anchor` carry `YamlAnchorName?`; their `Tag` properties carry
+`YamlTag?`. Both are generated string value objects with the grammar in the handwritten `IsValid`
+partial under `ValueObjects/`. Construction and string conversion validate once; parser call sites
+use `TryCreate` and retain `YamlException` with source positions for malformed text.
+
+`YamlAnchorName` follows [YAML 1.2.2 §6.9.2](https://yaml.org/spec/1.2.2/#692-node-anchors)'s `ns-anchor-name`: one or more printable non-space
+characters excluding the flow indicators `,[]{}`. YAML's character classes govern this rule,
+including valid Unicode scalar values; .NET's broader whitespace classification does not. NEL,
+NBSP, U+2028 and U+2029 remain valid name characters. The value contains no leading `&` or `*`.
+The parser's existing colon-before-space/end limitation remains documented below.
+
+`YamlTag` holds a resolved tag spelling: YAML 1.2.2 §5.6's `ns-uri-char` sequence, including only
+complete `%HH` escapes, or the non-specific `!` tag from §6.9.1. It validates character grammar
+without imposing an absolute-URI scheme requirement or decoding percent escapes. Named tag handles
+are resolved by the parser before storage. Local and core tags retain the existing shorthand when
+its suffix is legal; valid resolved tags containing shorthand delimiters such as `,`, `[` or `!`
+use verbatim `!<...>` form. The existing omission and scalar-kind behavior of non-specific `!`
+is unchanged.
+
+YAML anchor and tag spelling is case-sensitive, so generated equality, hashing and ordering use
+`ObjectComparison="Ordinal"`; neither type normalizes its stored text. Nullable string conversions
+in both directions preserve absence as `null`. `default(YamlAnchorName)` and `default(YamlTag)`
+bypass validation, so the node setters refuse a present nullable containing
+one of those defaults. A nullable with no value remains valid absence.
+
+`YamlWriterOptions.IndentSize` remains an init-only `int`. `YamlText.CreateWriter` rejects zero or
+negative values at writer creation with `ArgumentOutOfRangeException`; direct `YamlText.Write`
+calls enforce the same guard before emission. This keeps numeric range validation at composition
+without adding a numeric value object.
+
 ## Retained scope and known gaps
 
 Supported: block and flow collections, all five scalar styles with escapes and folding, anchors and
@@ -62,12 +94,38 @@ gap fixes move cases in, and cases never silently drop out.
 
 Additional deliberate gaps: escapes beyond U+FFFF (`\U`) are rejected rather than paired; multi-line
 implicit keys are unsupported (the spec caps implicit keys at one line in practice); anchor names
-stop at `: ` for alias-key ergonomics.
+stop at a colon followed by separation or end-of-input for alias-key ergonomics, even though the
+anchor-name value grammar permits a colon.
 
 ## Error model
 
-Everything malformed throws `YamlException : ContentFormatException` with one-based line/column —
+Malformed parsed YAML throws `YamlException : ContentFormatException` with one-based line/column —
 the Content-family error contract, so callers catch content failures at area granularity.
+Exception messages use the build-generated `ErrorMessages` resources, with parameterized text
+formatted using the current culture.
+Programmatic invalid anchors and tags throw `ArgumentException` during value construction or
+conversion; assigning a wrapped default to a node also throws `ArgumentException`. Non-throwing
+callers use the value objects' `TryCreate`. Invalid writer indentation throws
+`ArgumentOutOfRangeException` before emission.
+
+## Compatibility with 10.0.0-preview.1
+
+- `YamlNode.Anchor`/`Tag` and `YamlEvent.Anchor`/`Tag` change from `string?` to
+  `YamlAnchorName?`/`YamlTag?`. These are source and binary breaks. Nullable string conversions
+  preserve ordinary string assignments and extraction, but callers using string members directly
+  on those properties must extract the string first, and compiled consumers must rebuild.
+- Invalid programmatic metadata is rejected with `ArgumentException` at construction, conversion
+  or assignment, instead of reaching the emitter and changing token boundaries. A present nullable
+  containing a default value object is rejected; `null` still means absent metadata.
+- Parsed anchors and tags containing characters outside their YAML grammar, including malformed
+  percent escapes in tags, now throw `YamlException` where preview.1 could accept them.
+  Empty anchor/alias names still throw `YamlException`, with the shared anchor-grammar diagnostic.
+- Zero and negative `IndentSize` values now throw `ArgumentOutOfRangeException` at writer creation
+  or direct write entry. Previously creation succeeded, zero could produce ambiguous output, and
+  negative values could fail later during indentation.
+- Valid resolved local/core tags whose suffix cannot use shorthand now emit verbatim tag syntax
+  so their values round-trip. Other valid anchor/tag spellings and safe shorthand output are
+  unchanged; the existing non-specific `!` behavior remains unchanged.
 
 ## AOT posture
 

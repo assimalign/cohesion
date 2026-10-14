@@ -89,14 +89,14 @@ public sealed class YamlScalar : YamlNode
     /// <exception cref="InvalidOperationException">Thrown when <see cref="Kind"/> is not <see cref="YamlScalarKind.Boolean"/>.</exception>
     public bool GetBoolean() => Kind == YamlScalarKind.Boolean
         ? Value is "true" or "True" or "TRUE"
-        : throw new InvalidOperationException($"Scalar of kind '{Kind}' is not a boolean.");
+        : throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScalarNotBoolean, Kind));
 
     /// <summary>Gets the integral value of a <see cref="YamlScalarKind.Integer"/> scalar.</summary>
     /// <returns>The parsed integer.</returns>
     /// <exception cref="InvalidOperationException">Thrown when <see cref="Kind"/> is not <see cref="YamlScalarKind.Integer"/>.</exception>
     public long GetInteger() => Kind == YamlScalarKind.Integer
         ? YamlCoreSchema.ParseInteger(Value)
-        : throw new InvalidOperationException($"Scalar of kind '{Kind}' is not an integer.");
+        : throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScalarNotInteger, Kind));
 
     /// <summary>Gets the numeric value of a <see cref="YamlScalarKind.Float"/> or <see cref="YamlScalarKind.Integer"/> scalar.</summary>
     /// <returns>The parsed number.</returns>
@@ -105,7 +105,7 @@ public sealed class YamlScalar : YamlNode
     {
         YamlScalarKind.Float => YamlCoreSchema.ParseFloat(Value),
         YamlScalarKind.Integer => YamlCoreSchema.ParseInteger(Value),
-        _ => throw new InvalidOperationException($"Scalar of kind '{Kind}' is not a number.")
+        _ => throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScalarNotNumber, Kind))
     };
 
     /// <inheritdoc/>
