@@ -41,6 +41,12 @@ inbound bidirectional streams begin disposal, unlike the fixed concurrent limit 
 uses its captured value for both native handshakes and the facet. Retain a local storage cap when
 using the facet to validate references, because pending disposals may include unadvertised credit.
 
+Listener `MaxBidirectionalStreamCount` and `MaxUnidirectionalStreamCount` accept 0 through 65535
+inclusive, matching the .NET 10 runtime. `Backlog` accepts nonnegative integers; zero selects the
+runtime default. Invalid assignments throw `ArgumentOutOfRangeException` immediately and leave
+the previous value intact. This changes failure timing from 10.0.0-preview.1; validate configured
+values before assigning them. See DESIGN.md, "Listener option ranges", for the BCL sources.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Connections` — the contracts this driver

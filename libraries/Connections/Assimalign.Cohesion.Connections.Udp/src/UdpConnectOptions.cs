@@ -1,3 +1,4 @@
+using System;
 using System.Net;
 
 namespace Assimalign.Cohesion.Connections.Udp;
@@ -7,6 +8,9 @@ namespace Assimalign.Cohesion.Connections.Udp;
 /// </summary>
 public sealed class UdpConnectOptions
 {
+    private int? _receiveBufferSize;
+    private int? _sendBufferSize;
+
     /// <summary>
     /// Gets a new options instance populated with default values.
     /// </summary>
@@ -33,11 +37,43 @@ public sealed class UdpConnectOptions
     /// Gets or sets the socket receive buffer size in bytes, or <see langword="null"/>
     /// to use the operating system default.
     /// </summary>
-    public int? ReceiveBufferSize { get; set; }
+    /// <remarks>
+    /// Accepts zero or a positive byte count, matching the .NET socket buffer setter.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is negative.</exception>
+    public int? ReceiveBufferSize
+    {
+        get => _receiveBufferSize;
+        set
+        {
+            if (value is int bufferSize)
+            {
+                ArgumentOutOfRangeException.ThrowIfNegative(bufferSize, nameof(value));
+            }
+
+            _receiveBufferSize = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the socket send buffer size in bytes, or <see langword="null"/>
     /// to use the operating system default.
     /// </summary>
-    public int? SendBufferSize { get; set; }
+    /// <remarks>
+    /// Accepts zero or a positive byte count, matching the .NET socket buffer setter.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is negative.</exception>
+    public int? SendBufferSize
+    {
+        get => _sendBufferSize;
+        set
+        {
+            if (value is int bufferSize)
+            {
+                ArgumentOutOfRangeException.ThrowIfNegative(bufferSize, nameof(value));
+            }
+
+            _sendBufferSize = value;
+        }
+    }
 }
