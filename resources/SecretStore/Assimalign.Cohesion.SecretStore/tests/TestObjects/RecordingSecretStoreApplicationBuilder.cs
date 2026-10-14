@@ -11,9 +11,10 @@ internal sealed class RecordingSecretStoreApplicationBuilder : ISecretStoreAppli
 
     internal CertificateAuthorityOptions? CertificateAuthority { get; private set; }
 
-    public ISecretStoreApplicationBuilder AddSecret(string path, ReadOnlyMemory<byte> value)
+    public ISecretStoreApplicationBuilder AddSecret(SecretStoreSeedPath path, ReadOnlyMemory<byte> value)
     {
-        _secrets.Add((path, value.ToArray()));
+        ArgumentException.ThrowIfNullOrWhiteSpace(path.Value, nameof(path));
+        _secrets.Add((path.Value, value.ToArray()));
         return this;
     }
 

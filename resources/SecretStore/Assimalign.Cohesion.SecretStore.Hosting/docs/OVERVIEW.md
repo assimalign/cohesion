@@ -117,3 +117,9 @@ The concrete application and IHost route share it. Startup failures still roll b
 ## Dependency injection composition
 
 `SecretStoreApplicationBuilder.Services` holds every registration the application runs with. `AddService` registers an `IHostService`, and a direct `IHostService` registration joins the lifecycle in the same order. `Build` closes registration and resolves the services once. Disposing the application disposes every factory-created service. See [DESIGN.md](DESIGN.md#dependency-injection-composition).
+
+`AddSecret` accepts the root's generated `SecretStoreSeedPath` (ordinary strings convert implicitly).
+It refuses blank paths, exact `trusted-issuers.json`, and `default` during registration. Seeds may
+still use `certs/`; that namespace is reserved only for add-secret commands. Command delivery and
+certificate reads share the declaring/client packages' validation predicates through internal shared
+source, so malformed values cannot bypass validation by supplying raw JSON or query strings.

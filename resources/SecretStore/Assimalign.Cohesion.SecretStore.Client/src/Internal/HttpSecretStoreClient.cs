@@ -57,17 +57,20 @@ internal sealed class HttpSecretStoreClient : ISecretStoreClient
     }
 
     public async Task<string> GetCertificateAsync(
-        string name,
+        SecretStoreCertificateReference name,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (name.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.CertificateReferenceInvalid, nameof(name));
+        }
 
         using HttpRequestMessage request = CreateRequest(
             HttpMethod.Get,
             certificateRoute,
             "application/x-pem-file",
             "name",
-            name);
+            name.Value);
         using HttpResponseMessage response = await _transport
             .SendAsync(request, cancellationToken)
             .ConfigureAwait(false);
@@ -80,7 +83,7 @@ internal sealed class HttpSecretStoreClient : ISecretStoreClient
 
         if (string.IsNullOrEmpty(pem))
         {
-            throw new InvalidDataException("The secret-store endpoint returned an empty certificate.");
+            throw new InvalidDataException(ErrorMessages.CertificateEmpty);
         }
 
         return pem;

@@ -72,9 +72,9 @@ public sealed class CommandVerbTests
     public void Declare_InvalidArguments_ShouldNameParameter()
     {
         ISecretStoreResourceDescriptor descriptor = CreateBuilder().AddSecretStore(Manifest());
-        Should.Throw<ArgumentException>(() => descriptor.AddSecret("path", "literal:forbidden")).ParamName.ShouldBe("source");
-        Should.Throw<ArgumentException>(() => descriptor.AddSecret("path", "missing-prefix")).ParamName.ShouldBe("source");
-        Should.Throw<ArgumentException>(() => descriptor.IssueCertificate("bad/name", "CN=api")).ParamName.ShouldBe("name");
+        Should.Throw<ArgumentException>(() => descriptor.AddSecret("path", "literal:forbidden")).ParamName.ShouldBe("value");
+        Should.Throw<ArgumentException>(() => descriptor.AddSecret("path", "missing-prefix")).ParamName.ShouldBe("value");
+        Should.Throw<ArgumentException>(() => descriptor.IssueCertificate("bad/name", "CN=api")).ParamName.ShouldBe("value");
         Should.Throw<ArgumentException>(() => descriptor.IssueCertificate("api", " ")).ParamName.ShouldBe("subject");
     }
 

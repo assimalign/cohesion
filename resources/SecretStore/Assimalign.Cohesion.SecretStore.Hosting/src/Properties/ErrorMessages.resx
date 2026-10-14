@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CommandSourceInvalid" xml:space="preserve"><value>secretstore.add-secret sources must use parameter:&lt;name&gt; or &lt;resource&gt;:&lt;key&gt;; literal sources are forbidden.</value></data>
+  <data name="CommandPathInvalid" xml:space="preserve"><value>A command secret path must be nonblank and must not name trusted-issuers.json or start with certs/.</value></data>
+  <data name="CertificateNameInvalid" xml:space="preserve"><value>A certificate leaf name must be a nonblank path segment other than . or .., without slash or backslash.</value></data>
+  <data name="CertificateReferenceInvalid" xml:space="preserve"><value>Certificate names must be ca/root or certs/&lt;name&gt; with a nonblank leaf segment other than . or .., without slash or backslash.</value></data>
+  <data name="AlternativeNameInvalid" xml:space="preserve"><value>A certificate alternative name must be a nonblank IP address or an IDN-encodable DNS name.</value></data>
+</root>

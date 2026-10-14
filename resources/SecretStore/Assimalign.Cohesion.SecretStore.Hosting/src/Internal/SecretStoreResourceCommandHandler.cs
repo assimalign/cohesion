@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.ApplicationModel.Internal;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
@@ -44,9 +45,9 @@ internal sealed class SecretStoreResourceCommandHandler : IResourceCommandHandle
         if (Kind == AddSecret)
         {
             string source = Required(payload, "source");
-            if (source.StartsWith("literal:", StringComparison.OrdinalIgnoreCase))
+            if (!SecretStoreCommandGrammar.IsValidSource(source))
             {
-                throw new ResourceCommandRejectedException("secretstore.add-secret forbids literal sources; declare a parameter or resource source.");
+                throw new ResourceCommandRejectedException(ErrorMessages.CommandSourceInvalid);
             }
             if (!payload.TryGetProperty("resolvedValue", out JsonElement value) || value.ValueKind != JsonValueKind.String)
             {
@@ -65,9 +66,9 @@ internal sealed class SecretStoreResourceCommandHandler : IResourceCommandHandle
         else
         {
             string subject = Required(payload, "subject");
-            if (key.Contains('/'))
+            if (!SecretStoreCommandGrammar.IsValidCertificateName(key))
             {
-                throw new ResourceCommandRejectedException($"{Kind} certificate name '{key}' must be one segment.");
+                throw new ResourceCommandRejectedException(ErrorMessages.CertificateNameInvalid);
             }
             bool hasAlternatives = payload.TryGetProperty("subjectAlternativeNames", out JsonElement names);
             if (hasAlternatives && names.ValueKind is not (JsonValueKind.Array or JsonValueKind.Null))
@@ -77,8 +78,16 @@ internal sealed class SecretStoreResourceCommandHandler : IResourceCommandHandle
             string[] alternatives = hasAlternatives && names.ValueKind == JsonValueKind.Array
                 ? names.EnumerateArray().Select(static name =>
                     name.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(name.GetString())
-                        ? name.GetString()! : throw new JsonException("Certificate alternative names must be nonblank strings.")).ToArray()
+                        ? name.GetString()! : throw new JsonException(ErrorMessages.AlternativeNameInvalid)).ToArray()
                 : [];
+            foreach (string alternative in alternatives)
+            {
+                if (!SecretStoreCommandGrammar.IsValidSubjectAlternativeName(alternative))
+                {
+                    // Preserve the issuance path's rejected-command result for malformed DNS names.
+                    throw new ResourceCommandRejectedException(ErrorMessages.AlternativeNameInvalid);
+                }
+            }
             try
             {
                 await _authority.GetCertificatePemAsync("certs/" + key, subject, alternatives, cancellationToken).ConfigureAwait(false);

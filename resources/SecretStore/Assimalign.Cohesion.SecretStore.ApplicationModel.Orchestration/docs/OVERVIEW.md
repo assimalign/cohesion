@@ -44,6 +44,15 @@ The calls are idempotent for the same store. They never silently replace a regis
 not make: a different provider under the store's name, a different `secretstore.add-secret`
 resolver, or another certificate authority or trust store is an `InvalidOperationException`.
 
+The add-secret resolver shares the declaration's source grammar and checks it before calling any
+source provider. The exact, case-sensitive `parameter:` prefix requires a nonblank parameter name
+and permits colons in that name. Other sources require an ASCII letters/digits/`-`/`_`/`.` resource
+prefix, exactly one colon and a nonblank key; `literal:` is forbidden without regard to case.
+For example, `parameter:name:part` and resource source `Parameter:name` are valid, while
+`Parameter:name:part`, `store$:key`, and `parameter:   ` are refused. This tightens delivery
+validation from 10.0.0-preview.1 for malformed prefixes and blank parameter names; declarations
+already rejected those values.
+
 ### In an application-set gateway
 
 A set member's model comes from its own gateway's describe output, which carries no providers, so

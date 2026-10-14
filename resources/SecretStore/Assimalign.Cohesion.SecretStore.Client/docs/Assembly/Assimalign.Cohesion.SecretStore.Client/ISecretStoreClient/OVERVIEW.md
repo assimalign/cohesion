@@ -7,12 +7,15 @@ commands to a SecretStore endpoint.
 
 - `GetSecretAsync(string path, CancellationToken)` returns the stored bytes from
   `GET /cohesion/v1/secrets?path=...`.
-- `GetCertificateAsync(string name, CancellationToken)` returns PEM text from
+- `GetCertificateAsync(SecretStoreCertificateReference name, CancellationToken)` returns PEM text from
   `GET /cohesion/v1/certificates?name=...`.
 - `SendCommandAsync(ResourceCommand command, CancellationToken)` submits the command with
   `POST /cohesion/v1/commands`.
 
-All methods propagate cancellation. Blank paths or names raise `ArgumentException`; transport and
+All methods propagate cancellation. Blank secret paths and default certificate references raise
+`ArgumentException`. Certificate references accept exact `ca/root`, or `certs/` followed by a
+nonblank leaf with no slash or backslash, excluding `.` and `..`. Invalid string conversions fail
+before HTTP; the references compare ordinally and preserve case. Transport and
 non-success status failures raise `HttpRequestException`. An empty certificate raises
 `InvalidDataException`, and command serialization may raise `JsonException`.
 

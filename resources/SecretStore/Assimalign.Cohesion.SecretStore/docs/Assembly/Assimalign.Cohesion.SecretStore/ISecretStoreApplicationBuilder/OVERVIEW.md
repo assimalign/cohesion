@@ -9,7 +9,7 @@ Assembly: `Assimalign.Cohesion.SecretStore`
 
 ## Surface and behavior
 
-- `AddSecret(string path, ReadOnlyMemory<byte> value)` registers an ordinal path and a snapshot of
+- `AddSecret(SecretStoreSeedPath path, ReadOnlyMemory<byte> value)` registers an ordinal path and a snapshot of
   its first-start bytes. It never replaces an existing durable version.
 - `AddCertificateAuthority(Action<CertificateAuthorityOptions>? configure = null)` declares one
   authority. Existing durable state wins; first-start selection is explicit PEM material, then
@@ -23,8 +23,9 @@ The public concrete `SecretStoreApplicationBuilder` lives in `Assimalign.Cohesio
 
 ## Exceptions
 
-`AddSecret` throws `ArgumentException` for a blank path and `InvalidOperationException` for a
-duplicate path. `AddCertificateAuthority` rejects invalid or incomplete options and duplicate
+`SecretStoreSeedPath` rejects blank text and exact `trusted-issuers.json` when constructed or
+implicitly converted from a string. `AddSecret` throws `ArgumentException` for a default path and
+`InvalidOperationException` for a duplicate path. `AddCertificateAuthority` rejects invalid or incomplete options and duplicate
 declarations. The concrete Hosting builder's `AddService` throws `ArgumentNullException` for a null service or factory. `Build()`
 throws `InvalidOperationException` after an earlier build, when a factory returns null, or when
 the ambient endpoint/data mount cannot host the store; it otherwise propagates factory failures.
