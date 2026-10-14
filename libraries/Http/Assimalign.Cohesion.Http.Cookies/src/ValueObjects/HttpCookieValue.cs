@@ -23,7 +23,7 @@ public partial struct HttpCookieValue
     /// <param name="value">The candidate value.</param>
     /// <param name="message">The reason the value is refused, or <see langword="null"/> when it is valid.</param>
     /// <returns><see langword="true"/> when <paramref name="value"/> contains only cookie-octets, ignoring an optional surrounding DQUOTE pair.</returns>
-    public partial bool IsValid(string value, out string? message)
+    public static partial bool IsValid(string value, out string? message)
     {
         // The raw value is not echoed: it may hold the control character that made it invalid.
         if (value is null || !HttpCookieGrammar.IsValidValue(value))

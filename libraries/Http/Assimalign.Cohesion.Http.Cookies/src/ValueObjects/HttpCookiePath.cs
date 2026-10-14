@@ -25,7 +25,7 @@ public partial struct HttpCookiePath
     /// <param name="value">The candidate path.</param>
     /// <param name="message">The reason the path is refused, or <see langword="null"/> when it is valid.</param>
     /// <returns><see langword="true"/> when every character lies in <c>0x20</c>&#8211;<c>0x7E</c> and none is <c>;</c>.</returns>
-    public partial bool IsValid(string value, out string? message)
+    public static partial bool IsValid(string value, out string? message)
     {
         // The value is not echoed: it may hold the control character that made it invalid.
         if (value is null || !HttpCookieGrammar.IsValidPath(value))

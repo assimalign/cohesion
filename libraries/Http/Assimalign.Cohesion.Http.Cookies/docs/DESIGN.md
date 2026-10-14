@@ -249,6 +249,12 @@ added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
      and the other three hold a null `Value`. `HttpCookie` refuses a
      `default` name with `ArgumentNullException` and reads a `default`
      value as empty; `ToString()` omits a `default` `Path` or `Domain`.
+     Generated equality and hashing accept this state: two defaults are
+     equal, their hash code is zero, and default sorts before every
+     constructed value, including an empty string. Each value object's
+     own `ToString()` returns `string.Empty` for default. Default bypasses
+     validation, so an accepting boundary still has to reject it when a
+     value is required, as `HttpAntiforgery.Create` does for its cookie name.
    - **The parser drops a cookie** whose `Path` or `Domain` attribute is
      outside the grammar, as it drops an out-of-grammar name or value,
      instead of throwing on wire input. It does not keep the cookie
@@ -277,6 +283,42 @@ wire grammar:
 The one-way dependency direction (`Web.CookiePolicy` → `Http.Cookies` →
 `Http` core, never a back-reference) is what lets the policy layer compose
 these model mechanisms without the model ever learning about policy.
+
+## Generated value-object contract (#1472)
+
+The four types are `readonly partial struct` declarations generated from
+`CohesionValueType` items. Their handwritten partials own the grammar and
+expose static `IsValid(string value, out string? message)`, so a caller can
+validate a candidate without constructing an instance. The generated
+`TryCreate(string? value, out T result)` returns false for null or invalid
+input, with a default result. It validates once and constructs without
+validating again. Constructors and implicit conversions continue to throw
+`ArgumentException` with `ParamName = "value"` for invalid input.
+
+Equality, hashing, and ordering use ordinal string comparison. Names,
+values, and paths are case-sensitive. `HttpCookieDomain` declares
+`ObjectComparison="OrdinalIgnoreCase"`, because RFC 6265 §5.1.3 compares
+domain names without regard to case. This preserves the original spelling
+for serialization; it does not strip the optional leading dot or perform
+domain-suffix matching. `example.com` equals `EXAMPLE.COM`, while
+`.example.com` remains a different stored value. Ordering is independent
+of the current culture.
+
+The generated JSON converter writes a default value as JSON null and reads
+JSON null as default. Invalid cookie text throws `JsonException` with the
+validation reason. The types also work as dictionary keys through the
+converter's property-name methods; JSON property names cannot represent a
+default null string. Applications using source-generated
+`JsonSerializerContext` metadata keep serialization NativeAOT-safe.
+
+The generator changes are breaking changes to the generated surface:
+`IsValid` is static, string `ToString(format, provider)` is removed, ordering
+is ordinal, domain equality and hashing ignore case, and invalid JSON now
+uses `JsonException`. Default operations are now safe, and default JSON
+round trips as null. These cookie value types were introduced after
+10.0.0-preview.1; the shared generator's other consumers shipped in that
+release. See the [value-type build contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md)
+for the complete metadata and generated surface.
 
 ## AOT posture
 

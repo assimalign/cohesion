@@ -6,8 +6,6 @@
 		<Compile Remove="Delegates\**" />
 		<Compile Remove="Internal\ScheduleTaskScheduler.cs" />
 		<Compile Remove="Internal\SoftSchedulerNotifyDebounce.cs" />
-		<Compile Remove="ValueObjects\JobId.generated.cs" />
-		<Compile Remove="ValueObjects\ScheduleId.generated.cs" />
 		<EmbeddedResource Remove="Delegates\**" />
 		<EmbeddedResource Remove="Extensions\**" />
 		<None Remove="Delegates\**" />

@@ -20,6 +20,11 @@ Retries, misfire policies, durable history, leader election, and distributed wor
 
 Runtime composition uses explicit registrations and immutable snapshots. It does not scan for jobs or activate them through reflection.
 
+`JobId` and `ScheduleId` come from `CohesionValueType` items. Their generated sources live only in
+the intermediate code-generation directory; the former checked-in copies are obsolete. The
+generator supplies readonly Ulid wrappers, parsing and formatting interfaces, and JSON converters
+that support dictionary keys. See the [generator contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types).
+
 ## Hosting-free application contract (O34)
 
 The root contracts are hosting-free (O34): `ISchedulerApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `ISchedulerApplicationContext` exposes `ContentRootPath` plus the immutable `Jobs` and `ScheduleProviders` snapshots. `ISchedulerApplicationBuilder` owns area declarations and `Build()`. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.

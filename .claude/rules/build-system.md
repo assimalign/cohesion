@@ -201,7 +201,9 @@ A library sometimes needs another library as an internal implementation detail w
 
 Privacy is enforced at the package boundary, not the type system — keep cross-library uses of the private dep `internal`, and expose proxy types publicly if hosts need to configure the underlying piece. Forgetting the `Private` variants either leaks the dep into the `.nupkg` (used `CohesionProjectReference`) or crashes the host at run time (missing `CohesionFrameworkPrivateAssembly`). A leak surfaces downstream as a `CS0012` for the consumer, because the private assembly isn't in their reference graph.
 
-Also available: `CohesionCodeGenValueType` for generating strongly typed value objects.
+Also available: `CohesionValueType` for generating strongly typed value objects. See
+[`MSBUILD_COHESION_PROPS.md`](../../docs/build/MSBUILD_COHESION_PROPS.md#value-types) for metadata,
+generated contracts, default-value semantics, diagnostics, and write-on-change generation.
 
 ## Resource orchestration dependency guards
 

@@ -690,9 +690,16 @@ memory without bound.
 Contracts, small value types, two allocation-light utilities (`DuplexPipeStream` and the layered
 factory decorator), and the layered listener, whose pump uses only `System.Threading.Channels`, a
 `SemaphoreSlim`, and the thread pool. No reflection, no runtime code generation, no serialization.
-`ConnectionId` and `ConnectionProtocol` are produced by the repository's `CohesionValueType`
-source generator. The layered listener's event source writes only string payloads. Fully NativeAOT
-compatible.
+`ConnectionId`, `ListenerId`, and `ConnectionProtocol` are produced by the repository's
+`CohesionValueType` MSBuild generator. The ID wrappers implement `ISpanParsable<T>` and
+`ISpanFormattable`; their JSON converters also support dictionary keys. `ConnectionProtocol`
+uses ordinal equality, hashing and ordering, with `default` representing no value: it compares
+equal to another default, sorts first and formats as an empty string. JSON null reads as default,
+and default writes as JSON null. Boundaries that require a protocol still need to reject default.
+See the [generator contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types).
+Compared with 10.0.0-preview.1, protocol ordering is now ordinal and the string wrapper's
+`ToString(format, provider)` overload is removed. The layered listener's event source writes only
+string payloads. Fully NativeAOT compatible.
 
 ## Non-Goals
 

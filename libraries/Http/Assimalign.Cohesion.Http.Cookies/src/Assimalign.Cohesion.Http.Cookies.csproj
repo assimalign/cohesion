@@ -8,6 +8,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType Include="ValueObjects\HttpCookieDomain.cs" 
+						   ObjectComparison="OrdinalIgnoreCase"
 						   ObjectRuntimeType="String" 
 						   ObjectNamespace="Assimalign.Cohesion.Http" 
 						   ObjectAccessModifier="public" 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,464 +8,556 @@ using Microsoft.Build.Utilities;
 
 namespace Assimalign.Cohesion.Build.Tasks;
 
+/// <summary>Generates the value objects declared by CohesionValueType items.</summary>
 public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 {
+    /// <summary>Gets or sets the value objects to generate.</summary>
     [Required]
     public ITaskItem[]? ValueTypes { get; set; }
 
+    /// <summary>Gets the generated value object items, including unchanged files.</summary>
     [Output]
     public ITaskItem[]? ValueTypesCreated { get; set; }
 
+    /// <inheritdoc/>
     public override bool Execute()
     {
-        // Ensure Value Types where provided
-        if (ValueTypes is null || ValueTypes.Length == 0)
-        {
-            Log.LogError("No ValueTypes were specified for code generation.");
-            return false;
-        }
-
         try
         {
-            StringBuilder? builder = null;
-            DirectoryInfo? directoryInfo = null;
-            List<ValueTypeContext> contexts = new List<ValueTypeContext>();
-            List<ITaskItem> created = new List<ITaskItem>();
-
-            foreach (var valueType in ValueTypes)
+            var contexts = new List<ValueTypeContext>();
+            foreach (var item in ValueTypes ?? Array.Empty<ITaskItem>())
             {
-                // Set Current Execution Stage
-                Log.LogMessage("Beginning Value Type Generation: {0}", valueType.ItemSpec);
-
-                string name = Path.GetFileNameWithoutExtension(valueType.ItemSpec);
-                // Must match ObjectFilePath in Build.CodeGeneration.targets, which compiles and cleans this file
-                string fileName = $"{name}.generated.cs";
-                string fileDirectory = Path.GetDirectoryName(valueType.ItemSpec)!;
-                string filePath = string.IsNullOrEmpty(fileDirectory) ?
-                         Path.Combine(CodeGenOutputPath!, fileName) :
-                         Path.Combine(CodeGenOutputPath!, fileDirectory!, fileName);
-
-                // Set File System information
-                var context = new ValueTypeContext()
+                var context = ReadContext(item);
+                if (context is not null)
                 {
-                    FileName = fileName,
-                    FileDirectory = fileDirectory,
-                    FilePath = filePath,
-                    ObjectName = name,
-                    ObjectRuntimeType = valueType.GetMetadata<ObjectRuntimeType>("ObjectRuntimeType", isRequired: true),
-                    ObjectNamespace = valueType.GetMetadata<string>("ObjectNamespace", isRequired: true)!,
-                    ObjectAccessModifier = valueType.GetMetadata<ObjectAccessModifier>("ObjectAccessModifier"),
-                    ObjectKind = valueType.GetMetadata<ObjectKind>("ObjectKind"),
-                    ObjectHasImplicitOperators = valueType.GetMetadata<bool>("ObjectHasImplicitOperators"),
-                    ObjectHasIsValidMethod = valueType.GetMetadata<bool>("ObjectHasIsValidMethod"),
-                    Item = valueType
-                };
-
-                // If no ObjectKind parameter was supplied, then default to struct
-                if (context.ObjectKind == ObjectKind.None)
-                {
-                    context.ObjectKind = ObjectKind.Struct;
+                    contexts.Add(context);
                 }
-
-                // Generate Code
-                builder ??= new StringBuilder();
-                GenerateValueType(builder, context);
-
-                // Get and Create directory if not existing. 
-                directoryInfo = new DirectoryInfo(Path.GetDirectoryName(context.FilePath)!);
-                if (!directoryInfo.Exists)
-                {
-                    directoryInfo.Create();
-                }
-
-                // Create Code File
-                using var stream = File.Open(context.FilePath!, FileMode.Create, FileAccess.ReadWrite);
-
-                string content = builder.ToString();
-                byte[] bytes = Encoding.UTF8.GetBytes(content);
-
-                stream.Write(bytes, 0, bytes.Length);
-                stream.Flush();
-
-
-                TaskItem taskItem = new TaskItem(context.Item?.ItemSpec);
-                taskItem.SetMetadata("ObjectRuntimeType", context.ObjectRuntimeType.ToString());
-                taskItem.SetMetadata("ObjectName", context.ObjectName);
-                taskItem.SetMetadata("ObjectNamespace", context.ObjectNamespace);
-                taskItem.SetMetadata("ObjectFilePath", context.FilePath);
-
-                contexts.Add(context);
-                created.Add(taskItem);
-
-                // Clear out existing data
-                builder.Clear();
             }
 
-            // Clean up old files
-            //RemoveOldGeneratedFiles(contexts);
+            // Validate every item before changing any generated output.
+            if (Log.HasLoggedErrors)
+            {
+                return false;
+            }
+
+            var outputDirectory = Path.GetFullPath(CodeGenOutputPath!);
+            var produced = new HashSet<string>(Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            var created = new List<ITaskItem>();
+            foreach (var context in contexts)
+            {
+                var builder = new StringBuilder();
+                GenerateValueType(builder, context);
+                // Generated sources use CRLF on either MSBuild runtime and either checkout style.
+                string content = builder.ToString().Replace("\r\n", "\n").Replace("\n", "\r\n");
+                if (!File.Exists(context.FilePath) || File.ReadAllText(context.FilePath) != content)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(context.FilePath)!);
+                    File.WriteAllText(context.FilePath, content, new UTF8Encoding(false));
+                    Log.LogMessage(MessageImportance.Normal, "Generated: {0}", context.FilePath);
+                }
+
+                produced.Add(Path.GetFullPath(context.FilePath));
+                var generated = new TaskItem(context.Item);
+                generated.SetMetadata("ObjectName", context.Name);
+                generated.SetMetadata("ObjectFilePath", context.FilePath);
+                created.Add(generated);
+            }
+
+            if (Directory.Exists(outputDirectory))
+            {
+                foreach (var file in Directory.EnumerateFiles(outputDirectory, "*.generated.cs", SearchOption.AllDirectories))
+                {
+                    if (!produced.Contains(Path.GetFullPath(file)))
+                    {
+                        File.Delete(file);
+                    }
+                }
+            }
 
             ValueTypesCreated = created.ToArray();
+            return true;
         }
         catch (Exception exception)
         {
-            Log.LogError("An unexpected error occurred. Error Message: '{0}'.", exception.GetBaseException().Message);
+            Log.LogErrorFromException(exception, showStackTrace: false);
             return false;
         }
-
-        return true;
     }
 
-    #region Models
-
-    partial class ValueTypeContext
+    private ValueTypeContext? ReadContext(ITaskItem item)
     {
-        public string? FileName { get; set; }
-        public string? FileDirectory { get; set; }
-        public string? FilePath { get; set; }
-        public string ObjectName { get; set; } = string.Empty;
-        public string ObjectNamespace { get; set; } = string.Empty;
-        public ObjectRuntimeType ObjectRuntimeType { get; set; }
-        public ObjectKind ObjectKind { get; set; }
-        public ObjectAccessModifier ObjectAccessModifier { get; set; }
-        public bool ObjectHasIsValidMethod { get; set; }
-        public bool ObjectHasImplicitOperators { get; set; }
-        public ITaskItem? Item { get; set; }
-    }
-    enum ObjectRuntimeType
-    {
-        Int,
-        Short,
-        Long,
-        UInt,
-        UShort,
-        ULong,
-        Double,
-        Decimal,
-        String,
-        Guid,
-        Ulid
-    }
-    enum ObjectKind
-    {
-        None,
-        Struct,
-        Class
-    }
-    enum ObjectAccessModifier
-    {
-        None,
-        Public,
-        Internal
-    }
-
-
-
-    #endregion
-
-    private void RemoveOldGeneratedFiles(List<ValueTypeContext> contexts)
-    {
-        // Get the base Directory for all code generation output
-        DirectoryInfo basePath = new DirectoryInfo(CodeGenOutputPath!);
-
-        if (!basePath.Exists)
+        bool valid = true;
+        var context = new ValueTypeContext { Item = item, Name = Path.GetFileNameWithoutExtension(item.ItemSpec) };
+        valid &= ReadChoice(item, "ObjectRuntimeType", "COHVT001", null, out ObjectRuntimeType runtimeType);
+        context.RuntimeType = runtimeType;
+        context.Namespace = item.GetMetadata("ObjectNamespace");
+        if (string.IsNullOrWhiteSpace(context.Namespace))
         {
-            basePath.Create();
+            MetadataError(item, "ObjectNamespace", "COHVT002", "a nonempty C# namespace");
+            valid = false;
         }
 
-        IEnumerable<FileInfo> files = basePath.EnumerateFiles("*.cs", SearchOption.AllDirectories);
-
-        foreach (var file in files)
+        valid &= ReadChoice(item, "ObjectKind", "COHVT003", ObjectKind.Struct, out ObjectKind kind);
+        context.IsClass = kind == ObjectKind.Class;
+        valid &= ReadChoice(item, "ObjectAccessModifier", "COHVT004", ObjectAccessModifier.Internal, out ObjectAccessModifier access);
+        // An omitted modifier preserves the accessibility supplied by another partial declaration.
+        context.Access = string.IsNullOrEmpty(item.GetMetadata("ObjectAccessModifier")) || access == ObjectAccessModifier.None ? "" : access.ToString().ToLowerInvariant() + " ";
+        valid &= ReadBoolean(item, "ObjectHasImplicitOperators", out bool implicitOperators);
+        context.HasImplicitOperators = implicitOperators;
+        valid &= ReadBoolean(item, "ObjectHasIsValidMethod", out bool validation);
+        context.HasValidation = validation;
+        valid &= ReadChoice(item, "ObjectComparison", "COHVT006", ObjectComparison.Ordinal, out ObjectComparison comparison);
+        context.Comparison = comparison.ToString();
+        if (!string.IsNullOrEmpty(item.GetMetadata("ObjectComparison")) && runtimeType != ObjectRuntimeType.String)
         {
-            // If there is no file matching the exiting Value Types items then remove.
-            if (!contexts.Any(context => context.FilePath == file.FullName))
-            {
-                file.Delete();
-            }
+            MetadataError(item, "ObjectComparison", "COHVT006", "Ordinal or OrdinalIgnoreCase, only with ObjectRuntimeType=String");
+            valid = false;
         }
+
+        context.FilePath = Path.Combine(CodeGenOutputPath!, Path.GetDirectoryName(item.ItemSpec) ?? "", context.Name + ".generated.cs");
+        return valid ? context : null;
     }
+
+    private bool ReadChoice<T>(ITaskItem item, string metadata, string code, T? defaultValue, out T value) where T : struct
+    {
+        string text = item.GetMetadata(metadata);
+        if (text.Length == 0 && defaultValue.HasValue)
+        {
+            value = defaultValue.Value;
+            return true;
+        }
+
+        if (Enum.GetNames(typeof(T)).Any(name => string.Equals(name, text, StringComparison.OrdinalIgnoreCase)) && Enum.TryParse(text, true, out value))
+        {
+            return true;
+        }
+
+        value = default;
+        MetadataError(item, metadata, code, string.Join(", ", Enum.GetNames(typeof(T))));
+        return false;
+    }
+
+    private bool ReadBoolean(ITaskItem item, string metadata, out bool value)
+    {
+        string text = item.GetMetadata(metadata);
+        value = false;
+        if (text.Length == 0 || bool.TryParse(text, out value))
+        {
+            return true;
+        }
+
+        MetadataError(item, metadata, "COHVT005", "true, false (default: false)");
+        return false;
+    }
+
+    private void MetadataError(ITaskItem item, string metadata, string code, string allowed)
+    {
+        Log.LogError(null, code, null, null, 0, 0, 0, 0,
+            "CohesionValueType '{0}' has invalid or missing {1} '{2}'. Allowed values: {3}.",
+            item.ItemSpec, metadata, item.GetMetadata(metadata), allowed);
+    }
+
+    private sealed class ValueTypeContext
+    {
+        public ITaskItem Item { get; set; } = null!;
+        public string Name { get; set; } = "";
+        public string Namespace { get; set; } = "";
+        public string FilePath { get; set; } = "";
+        public string Access { get; set; } = "";
+        public string Comparison { get; set; } = "Ordinal";
+        public ObjectRuntimeType RuntimeType { get; set; }
+        public bool IsClass { get; set; }
+        public bool HasValidation { get; set; }
+        public bool HasImplicitOperators { get; set; }
+        public bool IsString => RuntimeType == ObjectRuntimeType.String;
+        public string NullableName => Name + (IsClass ? "?" : "");
+        public string Type => RuntimeType == ObjectRuntimeType.Guid || RuntimeType == ObjectRuntimeType.Ulid
+            ? "global::System." + RuntimeType
+            : RuntimeType.ToString().ToLowerInvariant();
+        public string Construct(string value) => "new " + Name + "(" + value + (HasValidation ? ", true)" : ")");
+    }
+
+    private enum ObjectRuntimeType { Int, Short, Long, UInt, UShort, ULong, Double, Decimal, String, Guid, Ulid }
+    private enum ObjectKind { Struct, Class }
+    private enum ObjectAccessModifier { None, Public, Internal }
+    private enum ObjectComparison { Ordinal, OrdinalIgnoreCase }
 
     private static void GenerateValueType(StringBuilder builder, ValueTypeContext context)
     {
-        var modifier = context.ObjectAccessModifier == ObjectAccessModifier.None ? "partial " : $"{context.ObjectAccessModifier.ToString().ToLower()} partial";
-        builder.AppendLine($$"""
-		using System;
-
-		#nullable enable
-		#pragma warning disable CS8604, CS8625
-		
-		namespace {{context.ObjectNamespace}}
-		{
-		    [global::System.Text.Json.Serialization.JsonConverter(typeof({{context.ObjectName}}JsonConverter))]
-		    [global::System.Diagnostics.DebuggerDisplay("{Value}")]
-			{{modifier}} {{context.ObjectKind.ToString().ToLower()}} {{context.ObjectName}} :
-		""");
-
-        GenerateValueTypeInterfaces(builder, context);
-
-        builder.AppendLine("    {");
-
-        GenerateValueTypeConstructor(builder, context);
-        GenerateValueTypeProperties(builder, context);
-        GenerateValueTypeMethods(builder, context);
-        GenerateValueTypeOverloads(builder, context);
-        GenerateValueTypeOperators(builder, context);
-        GenerateValueTypeJsonConverter(builder, context);
-
-        builder.AppendLine("    }");
+        builder.AppendLine("// <auto-generated/>");
+        builder.AppendLine("// Generator: CodeGenerationCreateValueTypeTask; CohesionValueType: " + context.Item.ItemSpec);
+        builder.AppendLine("#nullable enable");
+        builder.AppendLine("using System;");
+        builder.AppendLine();
+        builder.AppendLine("namespace " + context.Namespace + ";");
+        builder.AppendLine();
+        builder.AppendLine("/// <summary>Represents a strongly typed " + context.Type + " value.</summary>");
+        builder.AppendLine("[global::System.Text.Json.Serialization.JsonConverter(typeof(" + context.Name + "JsonConverter))]");
+        builder.AppendLine("[global::System.Diagnostics.DebuggerDisplay(\"{Value}\")]");
+        builder.AppendLine(context.Access + (context.IsClass ? "sealed partial class " : "readonly partial struct ") + context.Name + " :");
+        builder.AppendTabbedLine(1, $$"""
+            global::System.Numerics.IEqualityOperators<{{context.Name}}, {{context.Name}}, bool>,
+            global::System.Numerics.IComparisonOperators<{{context.Name}}, {{context.Name}}, bool>,
+            global::System.IComparable<{{context.Name}}>,
+            global::System.IEquatable<{{context.Name}}>{{(context.IsString ? "" : ",")}}
+            """);
+        if (!context.IsString)
+        {
+            builder.AppendTabbedLine(1, $"global::System.ISpanParsable<{context.Name}>,\nglobal::System.ISpanFormattable");
+        }
+        builder.AppendLine("{");
+        GenerateConstruction(builder, context);
+        GenerateEquality(builder, context);
+        GenerateOperators(builder, context);
+        if (!context.IsString)
+        {
+            GenerateParsing(builder, context);
+        }
+        GenerateWellKnownValues(builder, context);
+        GenerateJsonConverter(builder, context);
         builder.AppendLine("}");
     }
 
-    private static void GenerateValueTypeJsonConverter(StringBuilder builder, ValueTypeContext context)
+    private static void GenerateConstruction(StringBuilder builder, ValueTypeContext context)
     {
-        var readMethod = context.ObjectRuntimeType switch
+        builder.AppendTabbedLine(1, $$"""
+            /// <summary>Initializes a value object from its runtime value.</summary>
+            /// <param name="value">The runtime value.</param>
+            """);
+        if (context.IsString && context.IsClass)
         {
-            ObjectRuntimeType.Int => "GetInt32()",
-            ObjectRuntimeType.Short => "GetInt16()",
-            ObjectRuntimeType.Long => "GetInt64()",
-            ObjectRuntimeType.UInt => "GetUInt32()",
-            ObjectRuntimeType.UShort => "GetUInt16()",
-            ObjectRuntimeType.ULong => "GetUInt64()",
-            ObjectRuntimeType.Double => "GetDouble()",
-            ObjectRuntimeType.Decimal => "GetDecimal()",
-            ObjectRuntimeType.String => "GetString()",
-            ObjectRuntimeType.Guid => "GetGuid()",
-            ObjectRuntimeType.Ulid => "GetString()"
-        };
-        var writeMethod = context.ObjectRuntimeType switch
+            builder.AppendTabbedLine(1, "/// <exception cref=\"ArgumentNullException\">The value is null.</exception>");
+        }
+        if (context.HasValidation)
         {
-            ObjectRuntimeType.Int => "WriteNumberValue(value.Value)",
-            ObjectRuntimeType.Short => "WriteNumberValue(value.Value)",
-            ObjectRuntimeType.Long => "WriteNumberValue(value.Value)",
-            ObjectRuntimeType.UInt => "WriteNumberValue(value.Value)",
-            ObjectRuntimeType.UShort => "WriteNumberValue(value.Value)",
-            ObjectRuntimeType.ULong => "WriteNumberValue(value.Value)",
-            ObjectRuntimeType.Double => "WriteNumberValue(value.Value)",
-            ObjectRuntimeType.Decimal => "WriteNumberValue(value.Value)",
-            ObjectRuntimeType.String => "WriteStringValue(value.Value)",
-            ObjectRuntimeType.Guid => "WriteStringValue(value.Value)",
-            ObjectRuntimeType.Ulid => "WriteStringValue(value.Value.ToString())"
-        };
+            builder.AppendTabbedLine(1, "/// <exception cref=\"ArgumentException\">The value fails validation.</exception>");
+        }
+        builder.AppendTabbedLine(1, $"public {context.Name}({context.Type} value)\n{{");
+        if (context.IsString && context.IsClass)
+        {
+            builder.AppendTabbedLine(2, "ArgumentNullException.ThrowIfNull(value);");
+        }
+        if (context.HasValidation)
+        {
+            builder.AppendTabbedLine(2, "if (!IsValid(value, out string? message))\n{\n\tthrow new ArgumentException(message, nameof(value));\n}");
+        }
+        builder.AppendTabbedLine(2, "Value = value;");
+        builder.AppendTabbedLine(1, "}\n");
+        builder.AppendTabbedLine(1, $$"""
+            /// <summary>Gets the underlying runtime value. A default string struct has a null value.</summary>
+            public {{context.Type}} Value { get; }
+            """);
+        if (!context.HasValidation)
+        {
+            return;
+        }
+        builder.AppendTabbedLine(1, $$"""
 
-        if (context.ObjectRuntimeType == ObjectRuntimeType.Ulid)
-        {
-            builder.AppendTabbedLine(2, $$"""
-            partial class {{context.ObjectName}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.ObjectName}}>
+            private {{context.Name}}({{context.Type}} value, bool validated)
             {
-                public override {{context.ObjectName}} Read(
-                    ref global::System.Text.Json.Utf8JsonReader reader, 
-                    global::System.Type typeToConvert, 
-                    global::System.Text.Json.JsonSerializerOptions options) => new {{context.ObjectName}}({{GetNormalizedName(context.ObjectRuntimeType)}}.Parse(reader.{{readMethod}}));
-            
-                public override void Write(
-                    global::System.Text.Json.Utf8JsonWriter writer, 
-                    {{context.ObjectName}} value, 
-                    global::System.Text.Json.JsonSerializerOptions options)
-                    => writer.{{writeMethod}};
+                Value = value;
+            }
+
+            /// <summary>Determines whether a candidate runtime value satisfies this type's rules.</summary>
+            /// <param name="value">The candidate value.</param>
+            /// <param name="message">The failure reason, or null on success.</param>
+            /// <returns>True when the value satisfies the rules; otherwise false.</returns>
+            public static partial bool IsValid({{context.Type}} value, [global::System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? message);
+
+            /// <summary>Creates a value object when the candidate satisfies its validation rules.</summary>
+            /// <param name="value">The candidate runtime value.</param>
+            /// <param name="result">The created value on success; otherwise default.</param>
+            /// <returns>True when the value is valid; otherwise false.</returns>
+            public static bool TryCreate({{context.Type}}{{(context.IsString ? "?" : "")}} value, {{(context.IsClass ? "[global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] " : "")}}out {{context.NullableName}} result)
+            {
+                result = default;
+                if ({{(context.IsString ? "value is null || " : "")}}!IsValid(value, out _))
+                {
+                    return false;
+                }
+
+                result = {{context.Construct("value")}};
+                return true;
             }
             """);
+    }
+
+    private static void GenerateEquality(StringBuilder builder, ValueTypeContext context)
+    {
+        string equality = context.IsString ? $"string.Equals(Value, other.Value, StringComparison.{context.Comparison})" : "Value.Equals(other.Value)";
+        string comparison = context.IsString ? $"string.Compare(Value, other.Value, StringComparison.{context.Comparison})" : "Value.CompareTo(other.Value)";
+        string hash = context.IsString ? $"Value is null ? 0 : StringComparer.{context.Comparison}.GetHashCode(Value)" : "Value.GetHashCode()";
+        string display = context.IsString ? "Value ?? string.Empty" : context.RuntimeType == ObjectRuntimeType.Guid || context.RuntimeType == ObjectRuntimeType.Ulid ? "Value.ToString()" : "Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture)";
+        builder.AppendTabbedLine(1, $$"""
+
+            /// <inheritdoc/>
+            public bool Equals({{context.NullableName}} other) => {{(context.IsClass ? "other is not null && " : "")}}{{equality}};
+
+            /// <inheritdoc/>
+            public int CompareTo({{context.NullableName}} other) => {{(context.IsClass ? "other is null ? 1 : " : "")}}{{comparison}};
+
+            /// <inheritdoc/>
+            public override bool Equals(object? obj) => obj is {{context.Name}} other && Equals(other);
+
+            /// <inheritdoc/>
+            public override int GetHashCode() => {{hash}};
+
+            /// <summary>Returns the value's text, or an empty string for a default string value.</summary>
+            /// <returns>The non-null textual representation.</returns>
+            public override string ToString() => {{display}};
+            """);
+    }
+
+    private static void GenerateOperators(StringBuilder builder, ValueTypeContext context)
+    {
+        if (context.IsClass)
+        {
+            builder.AppendTabbedLine(1, $"\nprivate static int Compare({context.Name}? a, {context.Name}? b) => a is null ? (b is null ? 0 : -1) : a.CompareTo(b);");
+        }
+        foreach (string op in new[] { "==", "!=", ">", "<", ">=", "<=" })
+        {
+            string equality = context.IsClass ? "(ReferenceEquals(a, b) || (a is not null && a.Equals(b)))" : "a.Equals(b)";
+            string body = op == "==" ? equality : op == "!=" ? "!" + equality : (context.IsClass ? "Compare(a, b)" : "a.CompareTo(b)") + " " + op + " 0";
+            builder.AppendTabbedLine(1, $$"""
+
+                /// <inheritdoc/>
+                public static bool operator {{op}}({{context.NullableName}} a, {{context.NullableName}} b) => {{body}};
+                """);
+        }
+        if (!context.HasImplicitOperators)
+        {
+            return;
+        }
+        bool nullableString = context.IsClass && context.IsString;
+        builder.AppendTabbedLine(1, $$"""
+
+            /// <summary>Converts a value object to its runtime value.</summary>
+            /// <param name="item">The value object.</param>
+            /// <returns>The underlying runtime value{{(nullableString ? ", or null for a null object" : "")}}.</returns>
+            """);
+        if (context.IsClass && !context.IsString)
+        {
+            builder.AppendTabbedLine(1, "/// <exception cref=\"ArgumentNullException\">The object is null.</exception>");
+        }
+        if (nullableString)
+        {
+            builder.AppendTabbedLine(1, "[return: global::System.Diagnostics.CodeAnalysis.NotNullIfNotNull(nameof(item))]");
+        }
+        string toValue = nullableString ? "item?.Value" : context.IsClass ? "(item ?? throw new ArgumentNullException(nameof(item))).Value" : "item.Value";
+        builder.AppendTabbedLine(1, $"public static implicit operator {context.Type}{(nullableString ? "?" : "")}({context.NullableName} item) => {toValue};");
+        builder.AppendTabbedLine(1, $$"""
+
+            /// <summary>Converts a runtime value to its value object.</summary>
+            /// <param name="item">The runtime value.</param>
+            /// <returns>The value object{{(nullableString ? ", or null for a null string" : "")}}.</returns>
+            """);
+        if (context.HasValidation)
+        {
+            builder.AppendTabbedLine(1, "/// <exception cref=\"ArgumentException\">The value fails validation.</exception>");
+        }
+        if (nullableString)
+        {
+            builder.AppendTabbedLine(1, "[return: global::System.Diagnostics.CodeAnalysis.NotNullIfNotNull(nameof(item))]");
+        }
+        builder.AppendTabbedLine(1, $"public static implicit operator {context.Name}{(nullableString ? "?" : "")}({context.Type}{(nullableString ? "?" : "")} item) => {(nullableString ? "item is null ? null : " : "")}new {context.Name}(item);");
+    }
+
+    private static void GenerateParsing(StringBuilder builder, ValueTypeContext context)
+    {
+        string syntax = context.RuntimeType == ObjectRuntimeType.Ulid ? "" : "[global::System.Diagnostics.CodeAnalysis.StringSyntax(global::System.Diagnostics.CodeAnalysis.StringSyntaxAttribute." + (context.RuntimeType == ObjectRuntimeType.Guid ? "GuidFormat" : "NumericFormat") + ")] ";
+        builder.AppendTabbedLine(1, $$"""
+
+            /// <inheritdoc/>
+            public string ToString({{syntax}}string? format, IFormatProvider? formatProvider) => Value.ToString(format, formatProvider);
+
+            /// <inheritdoc/>
+            public bool TryFormat(Span<char> destination, out int charsWritten, {{syntax}}ReadOnlySpan<char> format, IFormatProvider? provider) => Value.TryFormat(destination, out charsWritten, format{{(context.RuntimeType == ObjectRuntimeType.Guid ? "" : ", provider")}});
+            """);
+        foreach (bool span in new[] { false, true })
+        {
+            string inputType = span ? "ReadOnlySpan<char>" : "string";
+            string parameter = span ? "span" : "value";
+            builder.AppendTabbedLine(1, $$"""
+
+                /// <summary>Parses a runtime value using the current culture and validates it.</summary>
+                /// <param name="{{parameter}}">The text to parse.</param>
+                /// <returns>The parsed value object.</returns>
+                /// <exception cref="FormatException">The text cannot be parsed or its value fails validation.</exception>
+                /// <exception cref="OverflowException">The parsed number is outside the runtime type's range.</exception>
+                {{(span ? "" : "/// <exception cref=\"ArgumentNullException\">The text is null.</exception>")}}
+                public static {{context.Name}} Parse({{inputType}} {{parameter}}) => Parse({{parameter}}, null);
+
+                /// <inheritdoc/>
+                /// <exception cref="FormatException">The text cannot be parsed or its value fails validation.</exception>
+                {{(span ? "" : "/// <exception cref=\"ArgumentNullException\">The text is null.</exception>")}}
+                public static {{context.Name}} Parse({{inputType}} {{parameter}}, IFormatProvider? provider)
+                {
+                """);
+            if (!span)
+            {
+                builder.AppendTabbedLine(2, $"ArgumentNullException.ThrowIfNull({parameter});");
+            }
+            if (context.RuntimeType == ObjectRuntimeType.Ulid)
+            {
+                builder.AppendTabbedLine(2, $$"""
+                    if (!{{context.Type}}.TryParse({{parameter}}, provider, out var parsed))
+                    {
+                        throw new FormatException();
+                    }
+                    """);
+            }
+            else
+            {
+                builder.AppendTabbedLine(2, $"var parsed = {context.Type}.Parse({parameter}, provider);");
+            }
+            if (context.HasValidation)
+            {
+                builder.AppendTabbedLine(2, "if (!IsValid(parsed, out string? message))\n{\n\tthrow new FormatException(message);\n}");
+            }
+            builder.AppendTabbedLine(2, $"return {context.Construct("parsed")};");
+            builder.AppendTabbedLine(1, "}");
+            string tryType = span ? "ReadOnlySpan<char>" : "[global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string?";
+            string resultType = "[global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out " + context.Name;
+            builder.AppendTabbedLine(1, $$"""
+
+                /// <summary>Attempts to parse and validate a runtime value using the current culture.</summary>
+                /// <param name="{{parameter}}">The text to parse.</param>
+                /// <param name="result">The parsed value on success; otherwise default.</param>
+                /// <returns>True when parsing and validation succeed; otherwise false.</returns>
+                public static bool TryParse({{tryType}} {{parameter}}, {{resultType}} result) => TryParse({{parameter}}, null, out result);
+
+                /// <inheritdoc/>
+                public static bool TryParse({{tryType}} {{parameter}}, IFormatProvider? provider, {{resultType}} result)
+                {
+                    result = default;
+                    if (!{{context.Type}}.TryParse({{parameter}}, provider, out var parsed){{(context.HasValidation ? " || !IsValid(parsed, out _)" : "")}})
+                    {
+                        return false;
+                    }
+
+                    result = {{context.Construct("parsed")}};
+                    return true;
+                }
+                """);
+        }
+    }
+
+    private static void GenerateWellKnownValues(StringBuilder builder, ValueTypeContext context)
+    {
+        if (context.RuntimeType != ObjectRuntimeType.Guid && context.RuntimeType != ObjectRuntimeType.Ulid)
+        {
+            return;
+        }
+        builder.AppendTabbedLine(1, $$"""
+
+            /// <summary>Creates a new identifier.</summary>
+            /// <returns>A newly generated identifier.</returns>
+            {{(context.HasValidation ? "/// <exception cref=\"ArgumentException\">The generated identifier fails validation.</exception>" : "")}}
+            public static {{context.Name}} New() => new {{context.Name}}({{context.Type}}.{{(context.RuntimeType == ObjectRuntimeType.Guid ? "NewGuid" : "NewUlid")}}());
+
+            /// <summary>The identifier whose underlying value is empty.</summary>
+            {{(context.HasValidation ? "/// <exception cref=\"ArgumentException\">The empty identifier fails validation.</exception>" : "")}}
+            public static readonly {{context.Name}} Empty = new {{context.Name}}({{context.Type}}.Empty);
+            """);
+    }
+
+    private static void GenerateJsonConverter(StringBuilder builder, ValueTypeContext context)
+    {
+        string getter = context.RuntimeType switch
+        {
+            ObjectRuntimeType.Int => "GetInt32()", ObjectRuntimeType.Short => "GetInt16()",
+            ObjectRuntimeType.Long => "GetInt64()", ObjectRuntimeType.UInt => "GetUInt32()",
+            ObjectRuntimeType.UShort => "GetUInt16()", ObjectRuntimeType.ULong => "GetUInt64()",
+            ObjectRuntimeType.Double => "GetDouble()", ObjectRuntimeType.Decimal => "GetDecimal()",
+            ObjectRuntimeType.Guid => "GetGuid()", _ => "GetString()!"
+        };
+        string write = context.IsString || context.RuntimeType == ObjectRuntimeType.Guid ? "WriteStringValue(value.Value)" : context.RuntimeType == ObjectRuntimeType.Ulid ? "WriteStringValue(value.Value.ToString())" : "WriteNumberValue(value.Value)";
+        builder.AppendTabbedLine(1, $$"""
+
+            // Source-generated serializer contexts in this assembly can construct the factory.
+            // The converter that handles values remains private to the value object.
+            internal sealed partial class {{context.Name}}JsonConverter : global::System.Text.Json.Serialization.JsonConverterFactory
+            {
+                /// <inheritdoc/>
+                public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof({{context.Name}});
+
+                /// <inheritdoc/>
+                public override global::System.Text.Json.Serialization.JsonConverter CreateConverter(Type typeToConvert, global::System.Text.Json.JsonSerializerOptions options) => new {{context.Name}}ValueJsonConverter();
+            }
+
+            private sealed class {{context.Name}}ValueJsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.Name}}>
+            {
+                /// <inheritdoc/>
+                public override {{context.Name}} Read(ref global::System.Text.Json.Utf8JsonReader reader, Type typeToConvert, global::System.Text.Json.JsonSerializerOptions options)
+                {
+            """);
+        if (!context.IsClass)
+        {
+            builder.AppendTabbedLine(3, "if (reader.TokenType == global::System.Text.Json.JsonTokenType.Null)\n{\n\treturn default;\n}\n");
+        }
+        builder.AppendTabbedLine(3, "try\n{");
+        if (context.RuntimeType == ObjectRuntimeType.Ulid)
+        {
+            builder.AppendTabbedLine(4, "if (!global::System.Ulid.TryParse(reader.GetString(), out var value))\n{\n\tthrow new global::System.Text.Json.JsonException(new FormatException().Message);\n}");
         }
         else
         {
-            builder.AppendTabbedLine(2, $$"""
-            partial class {{context.ObjectName}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.ObjectName}}>
-            {
-                public override {{context.ObjectName}} Read(
-                    ref global::System.Text.Json.Utf8JsonReader reader, 
-                    global::System.Type typeToConvert, 
-                    global::System.Text.Json.JsonSerializerOptions options) => new {{context.ObjectName}}(reader.{{readMethod}});
-            
-                public override void Write(
-                    global::System.Text.Json.Utf8JsonWriter writer, 
-                    {{context.ObjectName}} value, 
-                    global::System.Text.Json.JsonSerializerOptions options)
-                    => writer.{{writeMethod}};
-            }
-            """);
+            builder.AppendTabbedLine(4, "var value = reader." + getter + ";");
         }
+        AppendJsonConstruction(builder, context, 4);
+        AppendJsonCatch(builder, 3);
+        builder.AppendTabbedLine(2, $$"""
+                }
 
-    }
-    private static void GenerateValueTypeInterfaces(StringBuilder builder, ValueTypeContext context)
-    {
-        // ISpanParsable
-        if (context.ObjectRuntimeType != ObjectRuntimeType.String)
+                /// <inheritdoc/>
+                public override void Write(global::System.Text.Json.Utf8JsonWriter writer, {{context.Name}} value, global::System.Text.Json.JsonSerializerOptions options) => writer.{{write}};
+
+                /// <inheritdoc/>
+                public override {{context.Name}} ReadAsPropertyName(ref global::System.Text.Json.Utf8JsonReader reader, Type typeToConvert, global::System.Text.Json.JsonSerializerOptions options)
+                {
+                    try
+                    {
+                """);
+        if (context.IsString)
         {
-            builder.AppendTabbedLine(2, $$"""
-			global::System.Numerics.IEqualityOperators<{{context.ObjectName}}, {{context.ObjectName}}, bool>,
-			global::System.Numerics.IComparisonOperators<{{context.ObjectName}}, {{context.ObjectName}}, bool>,
-			global::System.IComparable<{{context.ObjectName}}>,
-			global::System.IEquatable<{{context.ObjectName}}>,
-			global::System.IFormattable
-			""");
+            builder.AppendTabbedLine(4, "var value = reader.GetString()!;");
+            AppendJsonConstruction(builder, context, 4);
         }
         else
         {
-            builder.AppendTabbedLine(2, $$"""
-            global::System.Numerics.IEqualityOperators<{{context.ObjectName}}, {{context.ObjectName}}, bool>,
-            global::System.Numerics.IComparisonOperators<{{context.ObjectName}}, {{context.ObjectName}}, bool>,
-            global::System.IComparable<{{context.ObjectName}}>,
-            global::System.IEquatable<{{context.ObjectName}}>
-            """);
+            builder.AppendTabbedLine(4, "return Parse(reader.GetString()!, global::System.Globalization.CultureInfo.InvariantCulture);");
         }
-    }
-    private static void GenerateValueTypeConstructor(StringBuilder builder, ValueTypeContext info)
-    {
-        builder.Append("        public ");
-        builder.Append(info.ObjectName);
-        builder.Append("(");
-        builder.Append(GetNormalizedName(info.ObjectRuntimeType));
-        builder.Append(" ");
-        builder.AppendLine("value)");
-        builder.AppendLine("        {");
-
-        if (info.ObjectHasIsValidMethod)
-        {
-            builder.AppendLine("			if (!IsValid(value, out string? message))");
-            builder.AppendLine("			{");
-            builder.AppendLine("				throw new ArgumentException(message, nameof(value));");
-            builder.AppendLine("			}");
-        }
-
-        builder.AppendLine("			Value = value;");
-        builder.AppendLine("        }");
-        builder.AppendLine();
-    }
-    private static void GenerateValueTypeProperties(StringBuilder builder, ValueTypeContext context)
-    {
+        AppendJsonCatch(builder, 3);
         builder.AppendTabbedLine(2, $$"""
-            public {{GetNormalizedName(context.ObjectRuntimeType)}} Value { get; }
-            """);
-    }
-    private static void GenerateValueTypeOperators(StringBuilder builder, ValueTypeContext context)
-    {
-        var operators = new string[] { "==", "!=", ">", "<", ">=", "<=" };
+                }
 
-        foreach (var op in operators)
-        {
-            var body = op switch
-            {
-                "==" => "a.Equals(b);",
-                "!=" => "!a.Equals(b);",
-                ">" => "a.CompareTo(b) > 0;",
-                "<" => "a.CompareTo(b) < 0;",
-                ">=" => "a.CompareTo(b) >= 0;",
-                "<=" => "a.CompareTo(b) <= 0;",
-            };
-
-            builder.AppendTabbedLine(2, $$"""
-                public static bool operator {{op}}({{context.ObjectName}} a, {{context.ObjectName}} b) => {{body}}
+                /// <inheritdoc/>
+                public override void WriteAsPropertyName(global::System.Text.Json.Utf8JsonWriter writer, {{context.Name}} value, global::System.Text.Json.JsonSerializerOptions options)
+                {
                 """);
-        }
-
-        if (context.ObjectHasImplicitOperators)
+        if (context.IsString)
         {
-            builder.AppendTabbedLine(2, $$"""
-                public static implicit operator {{GetNormalizedName(context.ObjectRuntimeType)}}({{context.ObjectName}} item) => item.Value;
-                public static implicit operator {{context.ObjectName}}({{GetNormalizedName(context.ObjectRuntimeType)}} item) => new {{context.ObjectName}}(item);
-                """);
+            builder.AppendTabbedLine(3, "if (value.Value is null)\n{\n\tthrow new global::System.Text.Json.JsonException(new ArgumentNullException(nameof(value.Value)).Message);\n}\nwriter.WritePropertyName(value.Value);");
         }
+        else
+        {
+            builder.AppendTabbedLine(3, "writer.WritePropertyName(value.Value.ToString(null, global::System.Globalization.CultureInfo.InvariantCulture));");
+        }
+        builder.AppendTabbedLine(2, "}");
+        builder.AppendTabbedLine(1, "}");
     }
-    private static void GenerateValueTypeOverloads(StringBuilder builder, ValueTypeContext context)
+
+    private static void AppendJsonConstruction(StringBuilder builder, ValueTypeContext context, ushort tabs)
     {
-        builder.AppendTabbedLine(2, $$"""
-		public override int GetHashCode() => Value.GetHashCode();
-		public override string ToString() => {{GetToString(context.ObjectRuntimeType)}}
-		public override bool Equals(object? obj) => ReferenceEquals(null, obj) || obj is not {{context.ObjectName}} instance ? false : Equals(instance);
-		""");
-
-        string GetToString(ObjectRuntimeType? type) => type switch
+        if (context.HasValidation)
         {
-            ObjectRuntimeType.Guid => "Value.ToString();",
-            ObjectRuntimeType.Ulid => "Value.ToString();",
-            ObjectRuntimeType.String => "Value;",
-            _ => "Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);"
-        };
-
+            builder.AppendTabbedLine(tabs, "if (!IsValid(value, out string? message))\n{\n\tthrow new global::System.Text.Json.JsonException(message);\n}");
+        }
+        builder.AppendTabbedLine(tabs, "return " + context.Construct("value") + ";");
     }
-    private static void GenerateValueTypeMethods(StringBuilder builder, ValueTypeContext context)
+
+    private static void AppendJsonCatch(StringBuilder builder, ushort tabs)
     {
-        if (context.ObjectHasIsValidMethod)
-        {
-            builder.Append("		public partial bool IsValid(");
-            builder.Append(GetNormalizedName(context.ObjectRuntimeType));
-            builder.AppendLine(" value, [global::System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? message);");
-        }
-
-        // Write CompareTo
-        builder.Append("		public int CompareTo(");
-        builder.Append(context.ObjectName);
-        builder.AppendLine(" other) => Value.CompareTo(other.Value);");
-
-        // Write IEquality
-        builder.AppendTabbedLine(2, $"public bool Equals({context.ObjectName} other) => Value.Equals(other.Value);");
-
-        // Write IFormattable
-        var toStringBody = context.ObjectRuntimeType switch
-        {
-            ObjectRuntimeType.String => "Value.ToString(formatProvider);",
-            _ => " Value.ToString(format, formatProvider);"
-        };
-
-        builder.AppendTabbedLine(2, $$"""
-            public string ToString(
-                [global::System.Diagnostics.CodeAnalysis.StringSyntax(global::System.Diagnostics.CodeAnalysis.StringSyntaxAttribute.NumericFormat)] string? format,
-                global::System.IFormatProvider? formatProvider) => {{toStringBody}}
-            """);
-
-        // IParsable<>
-        if (context.ObjectRuntimeType != ObjectRuntimeType.String)
-        {
-            builder.AppendTabbedLine(2, $$"""
-			public static {{context.ObjectName}} Parse(string value) =>  new {{context.ObjectName}}({{GetNormalizedName(context.ObjectRuntimeType)}}.Parse(value));
-			public static {{context.ObjectName}} Parse(string value, global::System.IFormatProvider provider) => Parse(value.AsSpan());
-			public static bool TryParse([global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value, global::System.IFormatProvider? provider, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out {{context.ObjectName}} result) => TryParse(value.AsSpan(), provider, out result);
-			public static {{context.ObjectName}} Parse(global::System.ReadOnlySpan<char> span) => Parse(span, null);
-			public static {{context.ObjectName}} Parse(global::System.ReadOnlySpan<char> span, global::System.IFormatProvider provider) => new {{context.ObjectName}}({{GetNormalizedName(context.ObjectRuntimeType)}}.Parse(span, provider));
-			public static bool TryParse(global::System.ReadOnlySpan<char> span, global::System.IFormatProvider provider, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out {{context.ObjectName}} result)
-			{
-				result = default;
-				
-				if ({{GetNormalizedName(context.ObjectRuntimeType)}}.TryParse(span, provider, out {{GetNormalizedName(context.ObjectRuntimeType)}} value))
-				{
-					result = new {{context.ObjectName}}(value);
-					return true;
-				}
-				
-				return false;
-			}
-			""");
-        }
-
-        if (context.ObjectRuntimeType == ObjectRuntimeType.Guid)
-        {
-            // Generate a static NewId method for Guid types
-            builder.AppendTabbedLine(2, $$"""
-                public static {{context.ObjectName}}  New() => new {{context.ObjectName}} ({{GetNormalizedName(context.ObjectRuntimeType)}}.NewGuid());
-                public static readonly {{context.ObjectName}}  Empty = new {{context.ObjectName}} ({{GetNormalizedName(context.ObjectRuntimeType)}}.Empty);
-                """);
-
-        }
-
-        if (context.ObjectRuntimeType == ObjectRuntimeType.Ulid)
-        {
-            // Generate a static NewId method for Guid types
-            builder.AppendTabbedLine(2, $$"""
-                public static {{context.ObjectName}}  New() => new {{context.ObjectName}} ({{GetNormalizedName(context.ObjectRuntimeType)}}.NewUlid());
-                public static readonly {{context.ObjectName}}  Empty = new {{context.ObjectName}} ({{GetNormalizedName(context.ObjectRuntimeType)}}.Empty);
-                """);
-
-        }
-
-        builder.AppendLine();
-    }
-    private static string GetNormalizedName(ObjectRuntimeType? underlyingType)
-    {
-        return underlyingType!.Value switch
-        {
-            ObjectRuntimeType.Guid => "global::System.Guid",
-            ObjectRuntimeType.Ulid => "global::System.Ulid",
-            _ => underlyingType.Value.ToString().ToLower()
-        };
+        builder.AppendTabbedLine(tabs, "}\ncatch (Exception exception) when (exception is FormatException || exception is ArgumentException || exception is OverflowException || exception is InvalidOperationException)\n{\n\tthrow new global::System.Text.Json.JsonException(exception.Message, exception);\n}");
     }
 }
-
-

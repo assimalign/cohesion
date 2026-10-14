@@ -24,7 +24,7 @@ public partial struct HttpCookieName
     /// <param name="value">The candidate name.</param>
     /// <param name="message">The reason the name is refused, or <see langword="null"/> when it is valid.</param>
     /// <returns><see langword="true"/> when <paramref name="value"/> is a non-empty token.</returns>
-    public partial bool IsValid(string value, out string? message)
+    public static partial bool IsValid(string value, out string? message)
     {
         // RFC 6265 §4.1.1 octet-grammar validation (anti header-splitting). The
         // raw name is deliberately not echoed into the message so a hostile

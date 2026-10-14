@@ -14,6 +14,16 @@ Examples below document the intended public shape; some members still throw NotI
 - Exception and system extension helpers centralize small cross-cutting behaviors.
 - The library is dependency-light by design so other Core packages can reference it safely.
 
+## Generated value-type conformance
+
+Core's tests compile `CohesionValueType` fixtures for every supported runtime type and exercise
+comparison, validation, parsing, formatting and source-generated JSON metadata. The build task
+remains outside the shipped Core assembly. See the
+[generator contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types) for metadata,
+default-value semantics and preview compatibility changes. `System.Ulid` accepts nullable format
+providers and nullable `TryParse` input in its annotations, matching the BCL interfaces used by
+generated wrappers; its parsing and formatting behavior is unchanged.
+
 ## Frozen runtime contract
 
 `AppEnvironment.Variables` is the only .NET home of the version 1 gateway-to-resource contract

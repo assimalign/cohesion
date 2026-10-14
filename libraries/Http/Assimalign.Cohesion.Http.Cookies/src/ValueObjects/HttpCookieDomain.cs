@@ -15,7 +15,8 @@ namespace Assimalign.Cohesion.Http;
 /// untrusted input, such as a forwarded host, can never add an attribute to, or
 /// corrupt, the <c>Set-Cookie</c> line. A constructed domain is never empty.
 /// <see langword="default"/> holds no domain, and <see cref="HttpCookie.ToString"/>
-/// omits the attribute for it.
+/// omits the attribute for it. Equality, hashing, and ordering use ordinal,
+/// case-insensitive comparison, matching RFC 6265 &#167; 5.1.3.
 /// </remarks>
 public partial struct HttpCookieDomain
 {
@@ -30,7 +31,7 @@ public partial struct HttpCookieDomain
     /// one or more dot-separated labels of at most 63 letters, digits, and
     /// hyphens, and is at most 253 characters long.
     /// </returns>
-    public partial bool IsValid(string value, out string? message)
+    public static partial bool IsValid(string value, out string? message)
     {
         // The value is not echoed: it may hold the control character that made it invalid.
         if (value is null || !HttpCookieGrammar.IsValidDomain(value))

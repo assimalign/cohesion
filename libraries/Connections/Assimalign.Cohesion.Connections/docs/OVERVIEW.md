@@ -44,6 +44,10 @@ transformations (such as TLS) compose over it.
 
 ## Accepting and observing connections
 
+`ConnectionProtocol` compares ordinally; its default value represents no protocol and formats as
+an empty string. `ConnectionId` and `ListenerId` support span parsing and formatting, and all three
+support JSON dictionary keys. See [DESIGN.md](DESIGN.md#aot-posture) for generated-value semantics.
+
 Use `IDuplexConnectionListener` for byte protocols and `IMultiplexedConnectionListener` for
 stream multiplexers. Both also implement `IConnectionListener`; its `AcceptAsync` drains the
 same queue. `Connections` is one live, concurrently enumerable collection, removed by each

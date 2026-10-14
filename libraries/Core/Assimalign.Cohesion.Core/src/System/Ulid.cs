@@ -326,7 +326,7 @@ public readonly partial struct Ulid :
         return ulid;
     }
 
-    public static bool TryParse(string base32, out Ulid ulid)
+    public static bool TryParse([NotNullWhen(true)] string? base32, out Ulid ulid)
     {
         return TryParse(base32.AsSpan(), out ulid);
     }
@@ -528,7 +528,7 @@ public readonly partial struct Ulid :
     //
     //ISpanFormattable
     //
-    public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider provider)
+    public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
     {
         if (TryWriteStringify(destination))
         {
@@ -542,30 +542,30 @@ public readonly partial struct Ulid :
         }
     }
 
-    public string ToString(string format, IFormatProvider formatProvider) => ToString();
+    public string ToString(string? format, IFormatProvider? formatProvider) => ToString();
 
     //
     // IParsable
     //
     /// <inheritdoc cref="IParsable{TSelf}.Parse(string, IFormatProvider?)" />
-    public static Ulid Parse(string s, IFormatProvider provider) => Parse(s);
+    public static Ulid Parse(string s, IFormatProvider? provider) => Parse(s);
 
     /// <inheritdoc cref="IParsable{TSelf}.TryParse(string?, IFormatProvider?, out TSelf)" />
-    public static bool TryParse([NotNullWhen(true)] string s, IFormatProvider provider, out Ulid result) => TryParse(s, out result);
+    public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, out Ulid result) => TryParse(s, out result);
 
     //
     // ISpanParsable
     //
     /// <inheritdoc cref="ISpanParsable{TSelf}.Parse(ReadOnlySpan{char}, IFormatProvider?)" />
-    public static Ulid Parse(ReadOnlySpan<char> s, IFormatProvider provider) => Parse(s);
+    public static Ulid Parse(ReadOnlySpan<char> s, IFormatProvider? provider) => Parse(s);
 
     /// <inheritdoc cref="ISpanParsable{TSelf}.TryParse(ReadOnlySpan{char}, IFormatProvider?, out TSelf)" />
-    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider provider, out Ulid result) => TryParse(s, out result);
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out Ulid result) => TryParse(s, out result);
 
     //
     // IUtf8SpanFormattable
     //
-    public bool TryFormat(Span<byte> destination, out int bytesWritten, ReadOnlySpan<char> format, IFormatProvider provider)
+    public bool TryFormat(Span<byte> destination, out int bytesWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
     {
         if (TryWriteStringify(destination))
         {
