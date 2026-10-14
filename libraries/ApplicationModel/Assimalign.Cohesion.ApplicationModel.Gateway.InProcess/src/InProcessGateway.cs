@@ -33,7 +33,7 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
     /// </exception>
     /// <exception cref="ArgumentException">A directory option is empty.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// A duration, liveness threshold, or restart-attempt limit is outside its supported range.
+    /// A duration is outside its supported range.
     /// </exception>
     public InProcessGateway(InProcessGatewayOptions options)
         : base(options)

@@ -184,8 +184,8 @@ Each setter uses an `ArgumentOutOfRangeException` guard before storing the value
 retains the caller's options, so valid later assignments remain supported, while an invalid
 assignment leaves the previous value intact and cannot reach the supervisor. This follows
 numeric-range rule V3 without adding a value type or changing the public property signatures.
-Remaining option-validation messages use build-generated `ErrorMessages` resources with their
-existing text preserved.
+The remaining options are validated by the `InProcessGateway` constructor. Their validation
+messages use build-generated `ErrorMessages` resources with their existing text preserved.
 
 **Compatibility with 10.0.0-preview.1 (#1495).** Assigning a nonpositive liveness threshold or a
 negative restart limit now throws immediately, including in an object initializer and after
