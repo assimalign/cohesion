@@ -6,4 +6,14 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\OtlpTraceId.cs"
+			ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.OpenTelemetry"
+			ObjectAccessModifier="public" ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
+		<CohesionValueType Include="ValueObjects\OtlpSpanId.cs"
+			ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.OpenTelemetry"
+			ObjectAccessModifier="public" ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
+	</ItemGroup>
 </Project>
