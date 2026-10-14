@@ -2,6 +2,8 @@ name: Http
 on:
   push:
     paths:
+      - 'build/Tasks/**'
+      - 'build/Targets/Build.CodeGeneration.*'
       - 'build/TestSupport/**'
       - "libraries/Http/**"
       - "!libraries/Http/**/*.slnx"

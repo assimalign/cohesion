@@ -2,6 +2,8 @@ name: Logging
 on:
   push:
     paths:
+      - "build/Tasks/**"
+      - "build/Targets/Build.CodeGeneration.*"
       - "libraries/Logging/**"
       - "!libraries/Logging/**/*.slnx"
       - "!libraries/Logging/**/*.md"

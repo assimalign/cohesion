@@ -2,6 +2,8 @@ name: Hosting
 on:
   push:
     paths:
+      - "build/Tasks/**"
+      - "build/Targets/Build.CodeGeneration.*"
       - "build/TestSupport/**"
       - "libraries/Hosting/**"
       - "!libraries/Hosting/**/*.slnx"

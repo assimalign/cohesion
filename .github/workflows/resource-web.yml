@@ -11,6 +11,8 @@ on:
       - 'build/ResourceGenerationCheck/**'
       - 'build/Build.targets'
       - 'build/Targets/Build.ErrorMessages.targets'
+      - 'build/Tasks/**'
+      - 'build/Targets/Build.CodeGeneration.*'
       - '!resources/Web/**/*.slnx'
       - '!resources/Web/**/*.md'
       - 'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/**'

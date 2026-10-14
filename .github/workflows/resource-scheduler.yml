@@ -2,6 +2,8 @@ name: Scheduler
 on:
   push:
     paths:
+      - 'build/Tasks/**'
+      - 'build/Targets/Build.CodeGeneration.*'
       - 'resources/Scheduler/**'
       - '!resources/Scheduler/**/*.slnx'
       - '!resources/Scheduler/**/*.md'
