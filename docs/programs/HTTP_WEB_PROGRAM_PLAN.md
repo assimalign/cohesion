@@ -1219,6 +1219,10 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - **Waiting:**
       - #1476 waits on V2, and #1477–#1478 on V3.
       - Buckets H–O are not filed yet; V1 decides whether they are.
+    - **CI (#1480):**
+      - The generator's paths now trigger the nine consumer workflows (`43802368`).
+      - Verification exposed two timing races, the Hosting shutdown-budget test and the HTTP/3 above-rate data-rate test, plus a macOS hang that CI could not diagnose. #1480 (`e718a574`, `62d32c72`, `7b097020`) fixed the races, run 200 times each. It also added a five-minute blame hang timeout and job limits sized from measured whole-job durations.
+      - All 50 workflows passed on `62d32c72` and `7b097020`, including Database, which runs unchanged against the new generator and `Ulid` parser.
 
   Behavior changes for the review (decision 15's terms):
   - **Client faults:**
