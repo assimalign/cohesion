@@ -10,4 +10,12 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\ServerSentEventFieldValue.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.Http"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true" />
+	</ItemGroup>
 </Project>

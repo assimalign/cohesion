@@ -49,6 +49,8 @@ public static class ServerSentEventStreamingExtensions
         /// <param name="cancellationToken">A token to cancel the write.</param>
         /// <returns>A task that completes when the heartbeat has been flushed.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="streaming"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="comment"/> contains CR, LF, or NUL.</exception>
+        /// <remarks>The comment is checked before any bytes are written or flushed.</remarks>
         public ValueTask WriteKeepAliveAsync(string comment = "keep-alive", CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(streaming);
