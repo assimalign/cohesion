@@ -412,12 +412,23 @@ Path-filtered on push, each a thin matrix over project names calling the shared 
 
 The shared test step uses a five-minute blame hang timeout and mini dumps. Recent healthy runs
 completed Http.Connections in at most 78 seconds, Web.Hosting in 41 seconds, and Templates in
-91 seconds (runs `38563034652`, `38558592445`, and `38567999644`). Per-area test jobs have an
-identical `timeout-minutes: 30`, leaving room for restore, builds, dump collection and upload.
+91 seconds (runs `38563034652`, `38558592445`, and `38567999644`). Non-Database per-area test jobs
+have `timeout-minutes: 30`, leaving room for restore, builds, dump collection and upload.
+Database workflow timeouts are deferred to #1470 while the owner rewrites that workflow.
 On failure, the action uploads `TestResults/<project>/**/Sequence_*.xml` and dumps as a
 project/OS/architecture/job/attempt-specific artifact retained for seven days. Ordinary failures
 without blame output do not create an artifact. The hang timeout diagnoses a stuck test; the job
 limit also bounds a stuck restore or build.
+
+SDK smoke and release test-job limits use completed successful job durations (`started_at` to
+`completed_at`), taking the maximum across all matrix legs in the latest five successful runs on
+any branch (or all successful runs when fewer exist). Double the maximum, round up to a multiple
+of 15 minutes, and use at least 45 minutes. A job without measurements gets 120 minutes and a YAML
+comment explaining the missing evidence. The SDK sample (`38567999606`, `38567990958`,
+`38546428166`, `38534939095`, `38534930255`) gives `consumer-smoke` 33m35s (75-minute limit) and
+`gateway-smoke` 9m19s (45-minute limit). Release runs `36659700651` (preview.1) and `32994864088`
+(beta.1), including every page of matrix jobs, give `validate-release` 11m34s and `validate-consumer`
+1m17s (45-minute limits). SDK task builds and package-feed preparation do not run tests.
 
 ### Release — `.github/workflows/release.yml`
 
