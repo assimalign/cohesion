@@ -27,7 +27,10 @@ when done.
 
 - `ArgumentNullException` — `request` is `null`.
 - `ArgumentException` — `request.Store` is `null` or not a SecretStore, the key is blank, or the
-  address or credential is invalid.
+  address or credential is invalid. For `ReadCertificateAsync`, the key must be exactly `ca/root`
+  or `certs/` followed by a nonblank leaf name containing neither `/` nor `\` and unequal to `.`
+  or `..`. References are case-sensitive; invalid references (for example `certs/..`) are rejected
+  locally before any HTTP request is sent.
 - `NotSupportedException` — `request.Kind` is not `Secret`.
 - `HttpRequestException` — the store is unreachable or refuses; `StatusCode` carries its status.
 - `InvalidDataException` — the store returns an empty certificate.

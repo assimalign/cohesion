@@ -24,8 +24,10 @@ the project design.
 ## Exceptions
 
 - `ArgumentNullException` — `request` or `authority` is `null`.
-- `ArgumentException` — the leaf name is blank, or `authority` is not a SecretStore connection or
-  carries an invalid address or credential.
+- `ArgumentException` — the leaf name is blank, contains `/` or `\`, or equals `.` or `..`, or
+  `authority` is not a SecretStore connection or carries an invalid address or credential. Leaf
+  names are case-sensitive, unprefixed storage identifiers; invalid leaf names (for example `a/b`)
+  are rejected locally before any HTTP request is sent.
 - `HttpRequestException` — the store is unreachable or refuses.
 - `InvalidDataException` — the store returns an empty certificate.
 

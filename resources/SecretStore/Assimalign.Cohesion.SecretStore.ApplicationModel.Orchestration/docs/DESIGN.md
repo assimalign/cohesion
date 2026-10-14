@@ -248,7 +248,11 @@ The package defines no exception types. Its failures are the BCL exceptions the 
 classifies:
 
 - `ArgumentNullException` / `ArgumentException` — a missing connection, a connection to a resource
-  of another kind, a blank key, leaf name, owner, or credential. Thrown before any I/O.
+  of another kind, a blank key, leaf name, owner, or credential, or a malformed certificate reference
+  or leaf name. `ReadCertificateAsync` accepts exact `ca/root` or `certs/<leaf>`; `IssueAsync` takes
+  the unprefixed leaf. References and leaf names are case-sensitive, and a leaf must be nonblank,
+  contain neither `/` nor `\`, and equal neither `.` nor `..`. Invalid inputs are rejected locally
+  before any HTTP request is sent.
 - `NotSupportedException` — a Configuration mount on the source provider (the default
   `ReadConfigurationAsync` body, and `ReadSecretAsync`/`ReadCertificateAsync` for a non-Secret
   mount kind).
