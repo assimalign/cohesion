@@ -83,6 +83,72 @@ public class HttpHeaderCollectionTests
         headers["x-new"].Value.ShouldBe("new");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpHeaderCollection: Add rejects default keys in every storage mode")]
+    [InlineData(0, 0)]
+    [InlineData(0, 1)]
+    [InlineData(0, 2)]
+    [InlineData(1, 0)]
+    [InlineData(1, 1)]
+    [InlineData(1, 2)]
+    [InlineData(2, 0)]
+    [InlineData(2, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 0)]
+    [InlineData(3, 1)]
+    [InlineData(3, 2)]
+    public void Add_DefaultKeyAcrossStorageModes_ShouldThrowWithoutMutation(int constructor, int fieldCount)
+    {
+        // Arrange
+        HttpHeaderCollection headers = CreateCollection(constructor);
+        HttpHeaderKey[] keys = [HttpHeaderKey.Date, HttpHeaderKey.ContentType];
+        for (int i = 0; i < fieldCount; i++)
+        {
+            headers.Add(keys[i], "existing");
+        }
+        KeyValuePair<HttpHeaderKey, HttpHeaderValue>[] original = headers.ToArray();
+
+        // Act
+        Action insert = () => headers.Add(default, "value");
+
+        // Assert
+        Should.Throw<ArgumentNullException>(insert);
+        headers.Count.ShouldBe(fieldCount);
+        headers.ToArray().ShouldBe(original);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpHeaderCollection: Indexer rejects default keys in every storage mode")]
+    [InlineData(0, 0)]
+    [InlineData(0, 1)]
+    [InlineData(0, 2)]
+    [InlineData(1, 0)]
+    [InlineData(1, 1)]
+    [InlineData(1, 2)]
+    [InlineData(2, 0)]
+    [InlineData(2, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 0)]
+    [InlineData(3, 1)]
+    [InlineData(3, 2)]
+    public void Indexer_DefaultKeyAcrossStorageModes_ShouldThrowWithoutMutation(int constructor, int fieldCount)
+    {
+        // Arrange
+        HttpHeaderCollection headers = CreateCollection(constructor);
+        HttpHeaderKey[] keys = [HttpHeaderKey.Date, HttpHeaderKey.ContentType];
+        for (int i = 0; i < fieldCount; i++)
+        {
+            headers.Add(keys[i], "existing");
+        }
+        KeyValuePair<HttpHeaderKey, HttpHeaderValue>[] original = headers.ToArray();
+
+        // Act
+        Action insert = () => headers[default] = "value";
+
+        // Assert
+        Should.Throw<ArgumentNullException>(insert);
+        headers.Count.ShouldBe(fieldCount);
+        headers.ToArray().ShouldBe(original);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - HttpHeaderCollection: A read-only view follows growth, removal and reuse of the original")]
     public void AsReadOnly_EmptySourceThenMutations_ShouldExposeLiveCollection()
     {

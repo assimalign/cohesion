@@ -2133,6 +2133,16 @@ do not acquire one. `ToString()` and implicit string conversions never return nu
 Raw storage properties retain their existing representation and can still be null at
 default; optional properties such as a missing port or charset still return null.
 
+Default-safe hashing does not make a default `HttpHeaderKey` a valid header name.
+`HttpHeaderCollection.Add` rejects its null `Value` with `ArgumentNullException`
+before choosing inline or dictionary storage. Non-empty indexer insertion delegates
+to `Add` and has the same validation. Empty and populated collections, including
+capacity-backed and supplied-dictionary collections, therefore preserve the rejection
+from 10.0.0-preview.1 without mutating their contents. The exception's `ParamName`
+is now `key.Value` instead of the comparer's `obj`: code inspecting this diagnostic
+observes a behavior change from preview.1 (decision 15). `HttpHeaderCollectionTests`
+covers these paths; empty inline collections already rejected the key before this fix.
+
 `HttpPath` treats default as an empty path for `Concat` and `StartsWith`: concatenating
 it returns the other operand, it is a prefix of every path, and only an empty prefix
 matches it. It remains unequal to the constructed root path. `HttpMediaType.Suffix`

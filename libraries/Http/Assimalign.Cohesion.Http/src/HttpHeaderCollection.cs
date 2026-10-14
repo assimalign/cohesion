@@ -96,14 +96,13 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
     public void Add(HttpHeaderKey key, HttpHeaderValue value)
     {
         ThrowIfReadOnly();
+        ArgumentNullException.ThrowIfNull(key.Value);
         if (_hasInlineEntry && _inlineKey.Equals(key))
         {
             throw new ArgumentException(ErrorMessages.DuplicateCollectionKey, nameof(key));
         }
         if (_usesInlineStorage && !_hasInlineEntry && (_store is null || !_store.ContainsKey(key)))
         {
-            // Match Dictionary's rejection of a default (null-valued) key before storing it.
-            ArgumentNullException.ThrowIfNull(key.Value);
             _inlineKey = key;
             _inlineValue = value;
             _hasInlineEntry = true;
