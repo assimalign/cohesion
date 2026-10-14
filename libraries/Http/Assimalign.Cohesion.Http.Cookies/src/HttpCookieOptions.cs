@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Http.Internal;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
@@ -19,7 +21,7 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpCookieOptions
 {
-    private List<string>? _extensions;
+    private HttpCookieExtensionCollection? _extensions;
 
     /// <summary>
     /// Initializes a new set of cookie options.
@@ -49,7 +51,11 @@ public sealed class HttpCookieOptions
 
         if (options._extensions is not null)
         {
-            _extensions = new List<string>(options._extensions);
+            _extensions = new HttpCookieExtensionCollection();
+            foreach (HttpCookieExtension extension in options._extensions)
+            {
+                _extensions.Add(extension);
+            }
         }
     }
 
@@ -131,10 +137,17 @@ public sealed class HttpCookieOptions
     public bool IsEssential { get; set; }
 
     /// <summary>
-    /// Gets the extension attributes, each written verbatim after the known
-    /// attributes as <c>; &lt;extension&gt;</c>.
+    /// Gets the extension attributes, each written after the known attributes
+    /// as <c>; &lt;extension&gt;</c>.
     /// </summary>
-    public IList<string> Extensions => _extensions ??= new List<string>();
+    /// <remarks>
+    /// Each item is a non-empty RFC 6265 <c>extension-av</c>: characters in
+    /// <c>0x20</c>&#8211;<c>0x7E</c> except <c>;</c>. Adding or assigning an
+    /// invalid string throws <see cref="ArgumentException"/> through its
+    /// implicit conversion, leaving the collection unchanged. The collection
+    /// also refuses <see langword="default"/>, which holds no extension.
+    /// </remarks>
+    public IList<HttpCookieExtension> Extensions => _extensions ??= new HttpCookieExtensionCollection();
 }
 
 /// <summary>

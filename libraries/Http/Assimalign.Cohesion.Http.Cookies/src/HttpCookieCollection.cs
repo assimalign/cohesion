@@ -343,7 +343,8 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
         int attributes = 0;
         for (int i = 1; i < segments.Length; i++)
         {
-            string segment = segments[i].Trim();
+            // RFC 6265 trims WSP, not arbitrary Unicode whitespace or CR/LF.
+            string segment = segments[i].Trim(' ', '\t');
             if (segment.Length == 0)
             {
                 continue;
@@ -364,8 +365,8 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                string attrName = segment[..attrEq].Trim();
-                string attrValue = segment[(attrEq + 1)..].Trim();
+                string attrName = segment[..attrEq].Trim(' ', '\t');
+                string attrValue = segment[(attrEq + 1)..].Trim(' ', '\t');
 
                 // RFC 6265bis attribute-value size guard — an oversized
                 // attribute value is dropped while the rest of the cookie
@@ -405,7 +406,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             // back on the wire (RFC 6265 §5.3 says unknown attributes are
             // ignored by the user agent, but a proxy / middleware that
             // re-emits the header should not silently drop them).
-            options.Extensions.Add(segment);
+            AddExtension(segment, options);
         }
     }
 
@@ -454,7 +455,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                options.Extensions.Add(name + "=" + value);
+                AddExtension(name + "=" + value, options);
             }
         }
         else if (string.Equals(name, "Max-Age", StringComparison.OrdinalIgnoreCase))
@@ -465,7 +466,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                options.Extensions.Add(name + "=" + value);
+                AddExtension(name + "=" + value, options);
             }
         }
         else if (string.Equals(name, "SameSite", StringComparison.OrdinalIgnoreCase))
@@ -476,14 +477,24 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             }
             else
             {
-                options.Extensions.Add(name + "=" + value);
+                AddExtension(name + "=" + value, options);
             }
         }
         else
         {
-            options.Extensions.Add(name + "=" + value);
+            AddExtension(name + "=" + value, options);
         }
 
         return true;
+    }
+
+    private static void AddExtension(string value, HttpCookieOptions options)
+    {
+        // Malformed received attributes are dropped without throwing; valid
+        // unknown attributes (including unrecognized known values) round-trip.
+        if (HttpCookieExtension.TryCreate(value, out HttpCookieExtension extension))
+        {
+            options.Extensions.Add(extension);
+        }
     }
 }

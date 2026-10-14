@@ -120,6 +120,9 @@
   <data name="CookieDomainInvalid" xml:space="preserve">
     <value>The cookie Domain attribute is not an RFC 6265 domain-value: it must be dot-separated labels of letters, digits, and hyphens (an optional leading dot is ignored), with no &apos;;&apos;, whitespace, or control characters. Write an internationalized name in its &apos;xn--&apos; form.</value>
   </data>
+  <data name="CookieExtensionInvalid" xml:space="preserve">
+    <value>The cookie extension attribute must be a non-empty RFC 6265 extension-av: US-ASCII with no &apos;;&apos; and no control characters.</value>
+  </data>
   <data name="CookieNameInvalid" xml:space="preserve">
     <value>Cookie name is not a valid RFC 6265 token: it must be non-empty and contain only token characters (no control characters, whitespace, or separators such as &apos;=&apos;, &apos;;&apos;, or &apos;,&apos;).</value>
   </data>

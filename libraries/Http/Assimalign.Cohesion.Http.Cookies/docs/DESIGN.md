@@ -155,8 +155,8 @@ that decide whether a well-formed cookie is **allowed by policy**. The
 dividing line is: *"could this corrupt the header or the store?"* is a
 model concern; *"should this cookie be permitted / rewritten for this
 site?"* is a policy concern. The first three model-level guards were
-added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
-(#1153):
+added under issue [L01.01.11.30], the fourth under [L01.01.11.30.01]
+(#1153), and the fifth under [L03.01.01.49.10] (#1474):
 
 1. **Octet-grammar validation at construction (anti header-splitting).**
    `HttpCookie.Name` and `Value` are the `HttpCookieName` and
@@ -246,7 +246,7 @@ added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
      `HttpCookie`'s copy of its options, and a later write to
      `cookie.Options`.
    - **`default` is the one unchecked value.** `default(HttpCookieName)`
-     and the other three hold a null `Value`. `HttpCookie` refuses a
+     and the other four hold a null `Value`. `HttpCookie` refuses a
      `default` name with `ArgumentNullException` and reads a `default`
      value as empty; `ToString()` omits a `default` `Path` or `Domain`.
      Generated equality and hashing accept this state: two defaults are
@@ -254,17 +254,66 @@ added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
      constructed value, including an empty string. Each value object's
      own `ToString()` returns `string.Empty` for default. Default bypasses
      validation, so an accepting boundary still has to reject it when a
-     value is required, as `HttpAntiforgery.Create` does for its cookie name.
+     value is required, as `HttpAntiforgery.Create` does for its cookie name
+     and `HttpCookieOptions.Extensions` does for every item.
    - **The parser drops a cookie** whose `Path` or `Domain` attribute is
      outside the grammar, as it drops an out-of-grammar name or value,
      instead of throwing on wire input. It does not keep the cookie
      without the attribute: re-emitted that way, the cookie would have a
      different scope from the one its sender wrote. An empty `Domain=` is
      the exception; it is ignored, per §5.2.3.
-   - **What it does not cover.** `Extensions` are still appended
-     verbatim; each one is an attribute by design. The transports' head
-     writers refuse CR, LF and the other control characters in any field
-     value at encode time (#1183), whatever builds the value.
+
+5. **Typed extension attributes (#1474).** `HttpCookieExtension` accepts a
+   non-empty RFC 6265 §4.1.1 `extension-av`: every character must be in
+   `0x20`–`0x7E` and must not be `;`. Empty strings, non-ASCII characters,
+   and all controls, including CR, LF, NUL, TAB and DEL, are refused.
+   Spaces, `=`, commas, quotes and backslashes are allowed by this grammar.
+
+   - `HttpCookieOptions.Extensions` is `IList<HttpCookieExtension>`.
+     `options.Extensions.Add("Priority=High")` still compiles through the
+     implicit string conversion, which throws `ArgumentException` for
+     invalid text before the list changes. The diagnostic comes from
+     `ErrorMessages` and never echoes the rejected input.
+   - The internal collection also rejects `default(HttpCookieExtension)`
+     from `InsertItem` and `SetItem`. This covers adding, inserting and
+     replacing an item, since a default struct bypasses construction.
+     The options copy constructor takes an independent typed snapshot;
+     `HttpCookie` and cookie-policy rewrites preserve that behavior.
+     `HttpCookie.ToString()` appends each extension's checked `.Value`.
+   - The `Set-Cookie` parser uses `HttpCookieExtension.TryCreate` for
+     unknown flags, unknown `name=value` attributes, and the extension
+     fallbacks for unparseable `Expires`, `Max-Age` and `SameSite` values.
+     It drops an extension it cannot represent and retains the rest of
+     the cookie. Attribute parsing trims only SP and HTAB at segment,
+     name and value boundaries; boundary CR/LF or other Unicode whitespace
+     is not sanitized into a valid extension. Valid unknown attributes
+     still round-trip, subject to the existing parse limits.
+   - This is a grammar rule, not a reserved-name policy. A single
+     `Domain=example.com` is a representable extension, as is a single
+     `Priority=High`; a string such as `x; Domain=example.com` cannot add a
+     second attribute. Applications choose which extension names and
+     values they trust, and use the typed options for standard attributes.
+     The transport still validates every response field at encode time
+     (#1183).
+
+**Breaking changes from 10.0.0-preview.1 (#1474).** The `Extensions` getter
+changes from `IList<string>` to `IList<HttpCookieExtension>`, which breaks
+binary compatibility and source that binds the collection as
+`IList<string>`. Recompile consumers and use the typed list or project
+each item's `.Value` when strings are needed. Direct `Add("Priority=High")`
+calls remain source-compatible. Invalid strings previously accepted by
+the list now throw at conversion; malformed received extension attributes
+are dropped instead of being re-emitted. These changes follow decision
+15's preview compatibility terms.
+
+**Advisory triage (#1474).** The defect shipped in the
+`Assimalign.Cohesion.Http.Cookies` library package in 10.0.0-preview.1:
+an extension was appended verbatim after `; `, allowing embedded
+semicolons to add attributes and controls to survive cookie serialization.
+Unauthenticated remote exploitation requires an application to put
+untrusted text into `Extensions`; the default framework flow does not do
+so. The impact is cookie-attribute injection or response emission failure
+(CWE-74 / CWE-113), conditional on that application dataflow.
 
 **What stays here vs. what is `Web.CookiePolicy`'s job.** Everything above
 is wire-safety / well-formedness and lives in this model library. The
@@ -286,7 +335,7 @@ these model mechanisms without the model ever learning about policy.
 
 ## Generated value-object contract (#1472)
 
-The four types are `readonly partial struct` declarations generated from
+The five types are `readonly partial struct` declarations generated from
 `CohesionValueType` items. Their handwritten partials own the grammar and
 expose static `IsValid(string value, out string? message)`, so a caller can
 validate a candidate without constructing an instance. The generated
@@ -296,7 +345,7 @@ validating again. Constructors and implicit conversions continue to throw
 `ArgumentException` with `ParamName = "value"` for invalid input.
 
 Equality, hashing, and ordering use ordinal string comparison. Names,
-values, and paths are case-sensitive. `HttpCookieDomain` declares
+values, paths, and extensions are case-sensitive. `HttpCookieDomain` declares
 `ObjectComparison="OrdinalIgnoreCase"`, because RFC 6265 §5.1.3 compares
 domain names without regard to case. This preserves the original spelling
 for serialization; it does not strip the optional leading dot or perform

@@ -182,9 +182,9 @@ public sealed class HttpCookie
             builder.Append("; SameSite=").Append(Options.SameSite);
         }
 
-        foreach (string extension in Options.Extensions)
+        foreach (HttpCookieExtension extension in Options.Extensions)
         {
-            builder.Append("; ").Append(extension);
+            builder.Append("; ").Append(extension.Value);
         }
 
         return builder.ToString();
