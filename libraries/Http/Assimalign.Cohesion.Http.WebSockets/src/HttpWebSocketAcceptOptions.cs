@@ -22,6 +22,7 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpWebSocketAcceptOptions
 {
+    private string? _subProtocol;
     private TimeSpan? _keepAliveInterval;
     private TimeSpan? _keepAliveTimeout;
     private int _serverMaxWindowBits = 15;
@@ -31,7 +32,20 @@ public sealed class HttpWebSocketAcceptOptions
     /// be one of <see cref="IHttpWebSocketFeature.RequestedProtocols"/>, compared case-sensitively;
     /// <see langword="null"/> selects none.
     /// </summary>
-    public string? SubProtocol { get; set; }
+    /// <exception cref="ArgumentException">The non-null value is not an RFC 9110 token.</exception>
+    public string? SubProtocol
+    {
+        get => _subProtocol;
+        set
+        {
+            if (value is not null && !HttpFieldName.IsValid(value, out _))
+            {
+                throw new ArgumentException(ErrorMessages.SubprotocolInvalid, nameof(SubProtocol));
+            }
+
+            _subProtocol = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets how often the server sends a keep-alive frame on an otherwise idle socket.
