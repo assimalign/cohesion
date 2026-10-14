@@ -24,6 +24,14 @@ contracts on top of the shared `…Protocols` abstractions:
   response modes, grant types, parameter names, prompt/display values, error
   codes, claim types, event types, and OIDC-minted validation codes.
 
+## ID token validation policy
+
+Set `OpenIdConnectIdTokenValidationOptions.MaxAge` to a nonnegative number of
+seconds, or null to omit the authentication-age requirement. Zero is supported
+and enforces fresh authentication with the configured clock skew. Assigning a
+negative value throws `ArgumentOutOfRangeException` immediately; this tightens
+the behavior released in `10.0.0-preview.1`.
+
 ## Status
 
 Delivered by feature `[L01.01.12.04]` (#596), including
