@@ -10,12 +10,18 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="NUlid" />
 		<CohesionPackageReference Include="Shouldly"/>
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<!-- Build tasks are outside the name-only library/resource project index. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Build.Tasks" ProjectPath="$(CohesionRepositoryDirectory)build\Tasks\Assimalign.Cohesion.Build.Tasks.csproj" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="System\SumTypes\" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedPublicString.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="Public" ObjectKind="Struct" ObjectComparison="Ordinal" ObjectHasIsValidMethod="false" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedNoneAccessInt.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="None" />
+		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedDefaultAccessInt.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" />
 		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedInt.cs" ObjectRuntimeType="Int" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
 		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedShort.cs" ObjectRuntimeType="Short" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />
 		<CohesionValueType Include="TestObjects\ValueObjects\GeneratedLong.cs" ObjectRuntimeType="Long" ObjectNamespace="Assimalign.Cohesion.Core.Tests" ObjectAccessModifier="internal" ObjectHasImplicitOperators="true" />

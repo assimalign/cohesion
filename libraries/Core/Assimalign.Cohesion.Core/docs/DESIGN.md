@@ -17,8 +17,12 @@ Examples below document the intended public shape; some members still throw NotI
 ## Generated value-type conformance
 
 Core's tests compile `CohesionValueType` fixtures for every supported runtime type and exercise
-comparison, validation, parsing, formatting and source-generated JSON metadata. The build task
-remains outside the shipped Core assembly. See the
+comparison, validation, parsing, formatting and source-generated JSON metadata. Compilation fixtures
+pin all accessibility modes (Public, Internal, None and omitted) through compilation,
+including public handwritten partials for None and omitted metadata. Invalid-metadata task
+tests assert each `COHVT001` through `COHVT006` diagnostic, the item name and the metadata name,
+and verify that failure produces no generated output. These tests preserve existing behavior.
+The build task remains outside the shipped Core assembly. See the
 [generator contract](../../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types) for metadata,
 default-value semantics and preview compatibility changes. `System.Ulid` accepts nullable format
 providers and nullable `TryParse` input in its annotations, matching the BCL interfaces used by
