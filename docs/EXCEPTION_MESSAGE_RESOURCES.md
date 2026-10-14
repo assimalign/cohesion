@@ -21,7 +21,9 @@ A project adds `src/Properties/ErrorMessages.resx`. The shared
 | `ManifestResourceName` | `$(RootNamespace).ErrorMessages` |
 
 MSBuild's `GenerateResource` task emits and compiles the internal accessor during ordinary
-`dotnet build`. There is no checked-in `Designer.cs`, Visual Studio custom tool, or per-project
+`dotnet build`. The targets also prepend `PrepareResources` to `CompileDependsOn`, because Visual
+Studio's design-time build (`CompileDesignTime`) runs `Compile` without `CoreBuild`. Without it,
+IntelliSense never sees the accessor and reports CS0103 while the build succeeds. There is no checked-in `Designer.cs`, Visual Studio custom tool, or per-project
 generation configuration. Explicit manifest naming keeps the accessor's `ResourceManager` base
 name equal to the embedded resource name. The existing `Resources.resx` convention receives the
 same treatment with class `Resources`, output `Resources.g.cs`, and manifest name

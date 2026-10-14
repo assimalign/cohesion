@@ -1,6 +1,14 @@
 <Project>
-  <!-- The SDK's GenerateResource task emits and compiles this internal accessor during
-       ordinary command-line builds, including CI and NativeAOT publication. -->
+  <!-- The SDK's GenerateResource task (CoreResGen, under PrepareResources) emits and compiles the
+       internal accessors below. A full build reaches PrepareResources through CoreBuild, but
+       Visual Studio's design-time build runs CompileDesignTime -> Compile only, so without this
+       the accessor is never generated and IntelliSense reports CS0103 on ErrorMessages while
+       the build itself succeeds. Prepending PrepareResources to Compile is a no-op in full
+       builds, where CoreBuild has already run it; GenerateResource stays incremental. -->
+  <PropertyGroup>
+    <CompileDependsOn>PrepareResources;$(CompileDependsOn)</CompileDependsOn>
+  </PropertyGroup>
+
   <ItemGroup>
     <EmbeddedResource Update="Properties\ErrorMessages.resx">
       <StronglyTypedLanguage>CSharp</StronglyTypedLanguage>
