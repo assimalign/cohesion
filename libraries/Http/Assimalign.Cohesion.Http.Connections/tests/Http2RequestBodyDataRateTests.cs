@@ -222,27 +222,32 @@ public class Http2RequestBodyDataRateTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Data Rate: A body that keeps the rate should be read in full")]
     public async Task ReadBody_OnBodyAboveRate_ShouldDeliverWholeBody()
     {
-        // Arrange — 50 octets every 100 ms is 500 octets per second, five times the rate, for longer than
-        // the grace period.
+        // Arrange — buffer the first chunk before reading. Its 1,000 octets buy ten seconds of
+        // allowance, so a late timer wake cannot spend it before the test's own timeout. The remaining
+        // chunks arrive at 10,000 octets per second, over nine waits spanning more than the grace period.
+        const int chunkSize = 1000;
+        using CancellationTokenSource timeout = new(_timeout);
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(configure: http2 => http2.Limits.MinRequestBodyDataRate = _rate);
         await peer.SendHeadersAsync(1, endStream: false, Http2TestPeer.Request("POST", "/upload"));
         IHttpContext exchange = await peer.ReceiveContextAsync();
-        byte[] body = Http2TestPeer.CreateBody(500);
-        Task<byte[]> received = ReadToEndAsync(exchange.Request.Body);
+        byte[] body = Http2TestPeer.CreateBody(chunkSize * 10);
+        await peer.SendDataAsync(1, body[..chunkSize], endStream: false).WaitAsync(timeout.Token);
+        await peer.SyncAsync().WaitAsync(timeout.Token);
+        Task<byte[]> received = ReadToEndAsync(exchange.Request.Body, timeout.Token);
 
         // Act
-        for (int offset = 0; offset < body.Length; offset += 50)
+        for (int offset = chunkSize; offset < body.Length; offset += chunkSize)
         {
-            await Task.Delay(100);
-            await peer.SendDataAsync(1, body[offset..(offset + 50)], endStream: offset + 50 == body.Length);
+            await Task.Delay(100, timeout.Token);
+            await peer.SendDataAsync(1, body[offset..(offset + chunkSize)], endStream: offset + chunkSize == body.Length).WaitAsync(timeout.Token);
         }
 
         // Assert — delivered in full; the stream was neither answered nor reset by the transport.
-        (await received.WaitAsync(_timeout)).ShouldBe(body);
-        await peer.SyncAsync();
+        (await received.WaitAsync(timeout.Token)).ShouldBe(body);
+        await peer.SyncAsync().WaitAsync(timeout.Token);
         peer.Output.ForStream(1).ShouldNotContain(frame => frame.IsHeaders || frame.IsRstStream);
 
-        await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
+        await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(timeout.Token);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Data Rate: An idle extended CONNECT tunnel should not be held to the rate")]
@@ -275,10 +280,10 @@ public class Http2RequestBodyDataRateTests
         await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
     }
 
-    private static async Task<byte[]> ReadToEndAsync(Stream body)
+    private static async Task<byte[]> ReadToEndAsync(Stream body, CancellationToken cancellationToken)
     {
         using MemoryStream received = new();
-        await body.CopyToAsync(received);
+        await body.CopyToAsync(received, cancellationToken);
         return received.ToArray();
     }
 

@@ -33,6 +33,7 @@ jobs:
   build:
     name: "Templates [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       COHESION_TEMPLATES_TEST_FEED: _out/packages
     strategy:

@@ -24,6 +24,7 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       # Every leg reports its own result. With fail-fast, one failing project cancelled the rest
       # of the matrix and left a branch with no signal for the other Web libraries (#1093).

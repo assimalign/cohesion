@@ -410,6 +410,15 @@ Per-area CI and the publish-less SDK consumer smoke prove the branch; **the rele
 
 Path-filtered on push, each a thin matrix over project names calling the shared composite action at `.github/actions/build/action.yml` across ubuntu/windows/macos. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.
 
+The shared test step uses a five-minute blame hang timeout and mini dumps. Recent healthy runs
+completed Http.Connections in at most 78 seconds, Web.Hosting in 41 seconds, and Templates in
+91 seconds (runs `38563034652`, `38558592445`, and `38567999644`). Per-area test jobs have an
+identical `timeout-minutes: 30`, leaving room for restore, builds, dump collection and upload.
+On failure, the action uploads `TestResults/<project>/**/Sequence_*.xml` and dumps as a
+project/OS/architecture/job/attempt-specific artifact retained for seven days. Ordinary failures
+without blame output do not create an artifact. The hang timeout diagnoses a stuck test; the job
+limit also bounds a stuck restore or build.
+
 ### Release — `.github/workflows/release.yml`
 
 There are two entry paths. A **published GitHub Release** whose tag is `v$(CohesionVersion)`, prerelease suffix included, always validates, packs, and stages. Public promotion is a separate `workflow_dispatch` from the default branch that names the already-published tag and explicitly sets the Boolean `promote` input to `true`; its default is `false`. Both paths run the same six jobs:

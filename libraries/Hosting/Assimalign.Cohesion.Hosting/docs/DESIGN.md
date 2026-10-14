@@ -83,6 +83,11 @@ concurrent callers join the same child drain and observe the same failure. Seria
 uses the host's normal reverse-registration traversal; strict reverse dependency order therefore
 requires `StopServicesConcurrently` to remain disabled.
 
+Shutdown-budget tests observe cancellation separately from completion: a child stop delegate can
+report its cancelled token before the child reaches `Stopped`. State assertions therefore await
+that state for both hosts under the test timeout, while the shorter parent budget still bounds the
+child drain. This changes only test synchronization, with no runtime change from 10.0.0-preview.1.
+
 Nesting is lifecycle composition, not process-policy composition. The wrapper calls only the
 child's `StartAsync` and `StopAsync`; it never invokes, replaces, or clears the child's
 `HostContext.Runner`. Only the outer host's direct `RunAsync` owns the process-level runner and its

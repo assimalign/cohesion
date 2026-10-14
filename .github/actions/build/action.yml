@@ -82,4 +82,20 @@ runs:
     - name: Test ${{ inputs.project }}
       if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.area, inputs.category, inputs.project)) != '' }}
       shell: pwsh
-      run: dotnet test "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj" --configuration Release --no-restore
+      # Recent healthy suites: Http.Connections <= 78 s (run 38563034652), Web.Hosting <= 41 s
+      # (38558592445), Templates <= 91 s (38567999644). Five minutes leaves ample scheduling
+      # margin; the per-area jobs allow 30 minutes for setup, builds, dump collection and upload.
+      run: dotnet test "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj" --configuration Release --no-restore --blame-hang-timeout 5m --blame-hang-dump-type mini --results-directory "./TestResults/${{ inputs.project }}"
+
+    - name: Upload test hang diagnostics for ${{ inputs.project }}
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: test-blame-${{ inputs.project }}-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.run_attempt }}
+        path: |
+          TestResults/${{ inputs.project }}/**/Sequence_*.xml
+          TestResults/${{ inputs.project }}/**/*.dmp
+          TestResults/${{ inputs.project }}/**/*.core
+          TestResults/${{ inputs.project }}/**/core.*
+        if-no-files-found: ignore
+        retention-days: 7

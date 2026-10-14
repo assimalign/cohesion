@@ -107,27 +107,31 @@ public class Http3RequestBodyDataRateTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Data Rate: A body that keeps the rate should be read in full")]
     public async Task ReadBody_OnBodyAboveRate_ShouldDeliverWholeBody()
     {
-        // Arrange — 50 octets every 100 ms is 500 octets per second, five times the rate, for longer than
-        // the grace period.
+        // Arrange — buffer the first chunk before reading. Its 1,000 octets buy ten seconds of
+        // allowance, so a late timer wake cannot spend it before the test's own timeout. The remaining
+        // chunks arrive at 10,000 octets per second, over nine waits spanning more than the grace period.
+        const int chunkSize = 1000;
+        using CancellationTokenSource timeout = new(_timeout);
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate);
         IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
         IHttpContext context = await peer.NextContextAsync();
-        byte[] body = new byte[500];
+        byte[] body = new byte[chunkSize * 10];
         Random.Shared.NextBytes(body);
-        Task<byte[]> received = ReadToEndAsync(context.Request.Body);
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, body[..chunkSize]), timeout.Token);
+        Task<byte[]> received = ReadToEndAsync(context.Request.Body, timeout.Token);
 
         // Act
-        for (int offset = 0; offset < body.Length; offset += 50)
+        for (int offset = chunkSize; offset < body.Length; offset += chunkSize)
         {
-            await Task.Delay(100);
-            await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, body[offset..(offset + 50)]));
+            await Task.Delay(100, timeout.Token);
+            await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, body[offset..(offset + chunkSize)]), timeout.Token);
         }
 
         request.Output.Complete();
 
         // Assert
-        (await received.WaitAsync(_timeout)).ShouldBe(body);
+        (await received.WaitAsync(timeout.Token)).ShouldBe(body);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Data Rate: An idle extended CONNECT tunnel should not be held to the rate")]
@@ -154,10 +158,10 @@ public class Http3RequestBodyDataRateTests
         (await read.WaitAsync(_timeout)).ShouldBe(4);
     }
 
-    private static async Task<byte[]> ReadToEndAsync(Stream body)
+    private static async Task<byte[]> ReadToEndAsync(Stream body, CancellationToken cancellationToken)
     {
         using MemoryStream received = new();
-        await body.CopyToAsync(received);
+        await body.CopyToAsync(received, cancellationToken);
         return received.ToArray();
     }
 

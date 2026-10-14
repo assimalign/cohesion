@@ -2502,6 +2502,21 @@ octets delivered extend the allowance. When the allowance runs out:
   whatever the application staged, and a reset with `H3_REQUEST_CANCELLED` once a streamed head
   is on the wire (#1084).
 
+### Data-rate test scheduling (#1480)
+
+The HTTP/2 and HTTP/3 above-rate integration tests buffer 1,000 DATA octets before
+starting the body reader. At their 100 B/s minimum this earns ten seconds of wait
+allowance in addition to the 300 ms grace period, before any pacing timer is awaited.
+The remaining nine 1,000-octet chunks are spaced 100 ms apart, so delivery spans more
+than the grace period and the complete body must arrive within one ten-second test
+deadline. A late pacing wake therefore consumes earned allowance instead of racing
+the initial grace period with an empty body.
+
+The below-rate tests retain the short grace period: they withhold DATA (or trickle
+one octet per 100 ms) and require an I/O failure plus the protocol's 408/reset outcome.
+A test deadline is not an acceptable substitute for that rejection. This changes
+test scheduling only; no transport behavior or preview.1 compatibility changes.
+
 ### Not covered
 
 - **`MinResponseDataRate` on HTTP/2 and HTTP/3.** Closed by #1384: a peer that grants no
