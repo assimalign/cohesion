@@ -11,8 +11,8 @@ using Assimalign.Cohesion.Database.Sql.Language;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// The database's bound table versions: every persisted CHECK and DEFAULT of a table version is
-/// parsed and bound exactly once, and validated writes evaluate the cached result.
+/// The database's bound table versions: successful bindings of a version's persisted CHECKs and
+/// DEFAULTs are shared by validated writes.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -34,16 +34,14 @@ internal sealed class SqlBoundTableCache
 {
     private readonly SqlCatalog _catalog;
     private readonly SqlFunctionEnvironment _native;
-    private readonly ConditionalWeakTable<SqlCatalogTable, SqlBoundTable> _bound = new();
     private readonly object _sync = new();
+    private CacheState _state;
+    private SqlBindingEntry<CacheState>? _pending;
     private long _bindCount;
-    private volatile bool _refreshPending;
-    private ulong? _validatedGeneration;
-    private SqlUnresolvedDefinition? _unresolvedDefinition;
-    private SqlUnresolvedDomain? _unresolvedDomain;
+    private int _validationWalkCount;
 
     // The required open-time binding pass is separate from repeat Build validation.
-    internal int ValidationWalkCount { get; private set; }
+    internal int ValidationWalkCount => Volatile.Read(ref _validationWalkCount);
 
     /// <summary>Initializes an empty cache over a catalog.</summary>
     /// <param name="catalog">The catalog whose table versions are bound.</param>
@@ -56,39 +54,60 @@ internal sealed class SqlBoundTableCache
     {
         _catalog = catalog;
         _native = functions ?? SqlFunctionEnvironment.Standard;
-        Functions = SqlDefinitionBinder.Load(catalog, _native, cancellationToken);
+        _state = Load(cancellationToken);
+        PrepareDefinitions(_state.Functions, cancellationToken);
     }
 
     /// <summary>
     /// Gets the engine's function catalog and the database: what a statement of the database
     /// resolves its calls against, and what the bound CHECK predicates were bound against.
     /// </summary>
-    internal SqlFunctionEnvironment Functions { get; private set; }
+    internal SqlFunctionEnvironment Functions => Volatile.Read(ref _state).Functions;
 
-    // Definition DDL publishes before rebinding. If binding is canceled, the next operation
-    // reloads the published catalog with its own token instead of using the previous environment.
+    // Metadata loading never executes application code. Body compilation happens per entry,
+    // after publication, so a statement needing no such body never waits for its compiler.
     internal void EnsureDefinitions(CancellationToken cancellationToken)
     {
-        if (_refreshPending)
+        while (Volatile.Read(ref _pending) is { } pending)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var state = pending.Get(cancellationToken);
             lock (_sync)
             {
-                if (_refreshPending) { RefreshDefinitions(cancellationToken); }
+                if (ReferenceEquals(_pending, pending))
+                {
+                    Volatile.Write(ref _state, state);
+                    Volatile.Write(ref _pending, null);
+                }
             }
         }
     }
 
     internal void RefreshDefinitions(CancellationToken cancellationToken)
     {
-        lock (_sync)
+        lock (_sync) { Volatile.Write(ref _pending, new SqlBindingEntry<CacheState>(Load)); }
+        EnsureDefinitions(cancellationToken);
+        PrepareDefinitions(Functions, cancellationToken);
+    }
+
+    private CacheState Load(CancellationToken cancellationToken)
+        => new(this, SqlDefinitionBinder.Load(_catalog, _native, cancellationToken));
+
+    private void PrepareDefinitions(SqlFunctionEnvironment functions, CancellationToken cancellationToken)
+    {
+        foreach (var function in functions.Catalog.OfType<SqlExpressionFunction>())
         {
-            _refreshPending = true;
-            _bound.Clear();
-            _validatedGeneration = null;
-            Functions = SqlDefinitionBinder.Load(_catalog, _native, cancellationToken);
-            _refreshPending = false;
+            function.PrepareBody(_catalog.DefaultCollation, cancellationToken);
         }
+        foreach (var type in functions.Types)
+        {
+            if (type.Check is SqlExpressionFunction check) { check.PrepareBody(_catalog.DefaultCollation, cancellationToken); }
+        }
+    }
+
+    private CacheState GetState(CancellationToken cancellationToken)
+    {
+        EnsureDefinitions(cancellationToken);
+        return Volatile.Read(ref _state);
     }
 
     /// <summary>
@@ -110,11 +129,7 @@ internal sealed class SqlBoundTableCache
     internal SqlBoundTable Get(SqlCatalogTable table, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(table);
-        lock (_sync)
-        {
-            EnsureDefinitions(cancellationToken);
-            return _bound.TryGetValue(table, out var bound) ? bound : Store(table, Bind(table, cancellationToken));
-        }
+        return GetState(cancellationToken).Get(table, cancellationToken);
     }
 
     /// <summary>
@@ -132,15 +147,16 @@ internal sealed class SqlBoundTableCache
     {
         ArgumentNullException.ThrowIfNull(published);
         ArgumentNullException.ThrowIfNull(source);
-        if (_bound.TryGetValue(published, out var existing))
+        var state = GetState(cancellationToken);
+        if (state.Bound.TryGetValue(published, out var existing))
         {
-            return existing;
+            return existing.Get(cancellationToken);
         }
 
-        if (!_bound.TryGetValue(source, out var bound) || !SameColumns(published, source) ||
+        if (!state.Bound.TryGetValue(source, out var entry) || entry.Value is not { } bound || !SameColumns(published, source) ||
             !published.Constraints.All(constraint => source.Constraints.Any(candidate => ReferenceEquals(candidate, constraint))))
         {
-            return Get(published, cancellationToken);
+            return state.Get(published, cancellationToken);
         }
 
         var checks = new List<SqlBoundCheck>();
@@ -152,27 +168,15 @@ internal sealed class SqlBoundTableCache
             }
         }
 
-        return Store(published, new SqlBoundTable(published, checks.ToArray(), bound.DefaultValues, bound.Domains));
+        var adopted = new SqlBindingEntry<SqlBoundTable>(new SqlBoundTable(published, checks.ToArray(), bound.DefaultValues, bound.Domains));
+        return state.Bound.GetValue(published, _ => adopted).Get(cancellationToken);
     }
 
     /// <summary>Whether a table version is already bound, without binding it.</summary>
     /// <param name="table">The table version.</param>
     /// <returns><see langword="true"/> when the version is bound.</returns>
-    internal bool IsBound(SqlCatalogTable table) => _bound.TryGetValue(table, out _);
-
-    private SqlBoundTable Store(SqlCatalogTable table, SqlBoundTable bound)
-    {
-        lock (_sync)
-        {
-            if (_bound.TryGetValue(table, out var existing))
-            {
-                return existing;
-            }
-
-            _bound.Add(table, bound);
-            return bound;
-        }
-    }
+    internal bool IsBound(SqlCatalogTable table)
+        => Volatile.Read(ref _state).Bound.TryGetValue(table, out var entry) && entry.Value is not null;
 
     private static bool SameColumns(SqlCatalogTable left, SqlCatalogTable right)
     {
@@ -202,7 +206,7 @@ internal sealed class SqlBoundTableCache
     {
         try
         {
-            ValidateCatalog(cancellationToken);
+            GetValidation(cancellationToken, countWalk: false);
         }
         catch (InsufficientExecutionStackException exception)
         {
@@ -211,62 +215,68 @@ internal sealed class SqlBoundTableCache
         }
     }
 
-    private void ValidateCatalog(CancellationToken cancellationToken)
+    private Validation ValidateCatalog(CacheState state, CancellationToken cancellationToken)
     {
+        SqlUnresolvedDefinition? definition = null;
+        SqlUnresolvedDomain? unresolvedDomain = null;
+        foreach (var function in state.Functions.Catalog.OfType<SqlExpressionFunction>())
+        {
+            if (function.Unresolved is { } reason) { definition ??= new SqlUnresolvedDefinition("SQL function '" + function.Name + "'", function.Name, reason); }
+        }
+        foreach (var type in state.Functions.Types)
+        {
+            if (type.Check is SqlExpressionFunction { Unresolved: { } reason }) { definition ??= new SqlUnresolvedDefinition("SQL domain '" + type.Name + "'", type.Name, reason); }
+        }
+        foreach (var table in _catalog.Tables)
+        {
+            var bound = state.Get(table, cancellationToken);
+            foreach (var column in table.Columns)
+            {
+                if (column.DefaultLiteral is not { } text) { continue; }
+                var expression = SqlPersistedExpression.Load(text, "DEFAULT");
+                var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: state.Functions);
+                SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
+                if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
+                {
+                    definition ??= new SqlUnresolvedDefinition("DEFAULT of '" + table.Name + "." + column.Name + "'", text, "which this engine does not register");
+                }
+            }
+            foreach (var check in bound.Checks)
+            {
+                definition ??= check.Unresolved;
+            }
+            foreach (var domain in bound.Domains)
+            {
+                unresolvedDomain ??= domain.Unresolved;
+            }
+        }
+
+        return new Validation(definition, unresolvedDomain);
+    }
+
+    private Validation GetValidation(CancellationToken cancellationToken, bool countWalk = true)
+    {
+        var state = GetState(cancellationToken);
+        ulong generation = _catalog.DdlGeneration;
+        SqlBindingEntry<Validation> entry;
         lock (_sync)
         {
-            EnsureDefinitions(cancellationToken);
-            ulong generation = _catalog.DdlGeneration;
-            SqlUnresolvedDefinition? definition = null;
-            SqlUnresolvedDomain? unresolvedDomain = null;
-            foreach (var function in Functions.Catalog.OfType<SqlExpressionFunction>())
+            if (state.Validation is null || state.ValidatedGeneration != generation)
             {
-                if (function.Unresolved is { } reason) { definition ??= new SqlUnresolvedDefinition("SQL function '" + function.Name + "'", function.Name, reason); }
-            }
-            foreach (var type in Functions.Types)
-            {
-                if (type.Check is SqlExpressionFunction { Unresolved: { } reason }) { definition ??= new SqlUnresolvedDefinition("SQL domain '" + type.Name + "'", type.Name, reason); }
-            }
-            foreach (var table in _catalog.Tables)
-            {
-                var bound = Get(table, cancellationToken);
-                foreach (var column in table.Columns)
+                state.ValidatedGeneration = generation;
+                state.Validation = new SqlBindingEntry<Validation>(token =>
                 {
-                    if (column.DefaultLiteral is not { } text) { continue; }
-                    var expression = SqlPersistedExpression.Load(text, "DEFAULT");
-                    var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: Functions);
-                    SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
-                    if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
-                    {
-                        definition ??= new SqlUnresolvedDefinition("DEFAULT of '" + table.Name + "." + column.Name + "'", text, "which this engine does not register");
-                    }
-                }
-                foreach (var check in bound.Checks)
-                {
-                    definition ??= check.Unresolved;
-                }
-                foreach (var domain in bound.Domains)
-                {
-                    unresolvedDomain ??= domain.Unresolved;
-                }
+                    if (countWalk) { Interlocked.Increment(ref _validationWalkCount); }
+                    PrepareDefinitions(state.Functions, token);
+                    return ValidateCatalog(state, token);
+                });
             }
-
-            _unresolvedDefinition = definition;
-            _unresolvedDomain = unresolvedDomain;
-            _validatedGeneration = generation;
+            entry = state.Validation;
         }
+        return entry.Get(cancellationToken);
     }
 
-    private void EnsureValidated(CancellationToken cancellationToken)
-    {
-        if (_validatedGeneration != _catalog.DdlGeneration)
-        {
-            ValidationWalkCount++;
-            ValidateCatalog(cancellationToken);
-        }
-    }
-
-    private SqlBoundTable Bind(SqlCatalogTable table, CancellationToken cancellationToken)
+    private SqlBoundTable Bind(SqlCatalogTable table, SqlFunctionEnvironment functions, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _bindCount);
         string tableName = $"{table.Schema}.{table.Name}";
@@ -283,7 +293,7 @@ internal sealed class SqlBoundTableCache
             var predicate = SqlPersistedExpression.Load(constraint.CheckExpression!, subject);
             try
             {
-                checks.Add(BindCheck(table, constraint, predicate, subject, cancellationToken));
+                checks.Add(BindCheck(table, constraint, predicate, subject, functions, cancellationToken));
             }
             catch (InsufficientExecutionStackException exception)
             {
@@ -303,12 +313,12 @@ internal sealed class SqlBoundTableCache
             {
                 // Converted to the column's type once, here: no decoded row and no INSERT converts it again.
                 defaults[ordinal] = SqlPlanExecutor.BindDefaultExpression(column,
-                    $"DEFAULT of column '{column.Name}' on table '{tableName}'", Functions, _catalog.DefaultCollation, cancellationToken);
+                    $"DEFAULT of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
             }
 
             if (column.DomainName is not null)
             {
-                (domains ??= []).Add(BindDomain(table, ordinal, tableName, cancellationToken));
+                (domains ??= []).Add(BindDomain(table, ordinal, tableName, functions, cancellationToken));
             }
         }
 
@@ -324,11 +334,11 @@ internal sealed class SqlBoundTableCache
     /// created with, so a domain whose base type changed would otherwise bound the column's writes and
     /// a <c>CAST</c> to the domain differently.
     /// </summary>
-    private SqlBoundDomain BindDomain(SqlCatalogTable table, int ordinal, string tableName, CancellationToken cancellationToken)
+    private SqlBoundDomain BindDomain(SqlCatalogTable table, int ordinal, string tableName, SqlFunctionEnvironment functions, CancellationToken cancellationToken)
     {
         var column = table.Columns[ordinal];
         string name = column.DomainName!;
-        string? reason = !Functions.Types.TryGetDomain(name, out var domain)
+        string? reason = !functions.Types.TryGetDomain(name, out var domain)
             ? "which this engine does not register"
             : domain.Storage.Type != column.Type.Type
                 || domain.Storage.MaxLength != column.Type.MaxLength
@@ -347,7 +357,7 @@ internal sealed class SqlBoundTableCache
         }
 
         var call = new SqlBoundCall(check, [new SqlBoundColumn(ordinal)], SqlFunctionResolver.CoercionTargets(check, 1),
-            new SqlBoundCollation(column.Collation ?? _catalog.DefaultCollation), Functions.Database, cancellationToken);
+            new SqlBoundCollation(column.Collation ?? _catalog.DefaultCollation), functions.Database, cancellationToken);
         return new SqlBoundDomain(ordinal, domain.Name, call, null);
     }
 
@@ -359,13 +369,7 @@ internal sealed class SqlBoundTableCache
     /// <returns>The first unresolved domain, or null when every column's domain resolves.</returns>
     /// <exception cref="DatabaseException">A persisted definition of a table does not load.</exception>
     internal SqlUnresolvedDomain? FindUnresolvedDomain(CancellationToken cancellationToken = default)
-    {
-        lock (_sync)
-        {
-            EnsureValidated(cancellationToken);
-            return _unresolvedDomain;
-        }
-    }
+        => GetValidation(cancellationToken).Domain;
 
     /// <summary>
     /// Binds one persisted CHECK: its tree when every call resolves, or an unresolved binding that
@@ -376,7 +380,7 @@ internal sealed class SqlBoundTableCache
     /// </summary>
     /// <exception cref="DatabaseException">The predicate does not bind and no call explains it.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the predicate.</exception>
-    private SqlBoundCheck BindCheck(SqlCatalogTable table, SqlCatalogConstraint constraint, SqlExpression predicate, string subject, CancellationToken cancellationToken)
+    private SqlBoundCheck BindCheck(SqlCatalogTable table, SqlCatalogConstraint constraint, SqlExpression predicate, string subject, SqlFunctionEnvironment functions, CancellationToken cancellationToken)
     {
         DatabaseException failure;
         try
@@ -384,7 +388,7 @@ internal sealed class SqlBoundTableCache
             // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind. The bound
             // tree is what every write to this version evaluates, so a write resolves no column,
             // function or collation of the predicate again.
-            var bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation, Functions, constraint.CheckFunctionCalls, cancellationToken);
+            var bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation, functions, constraint.CheckFunctionCalls, cancellationToken);
             return new SqlBoundCheck(constraint, predicate, ColumnOrdinals(table, predicate), bound);
         }
         catch (DatabaseException exception)
@@ -396,12 +400,12 @@ internal sealed class SqlBoundTableCache
         // predicate binds as unresolved, the table opens and its reads proceed, and each write that
         // would evaluate the predicate fails with COHSQLE009. Looked for only once binding failed, so
         // a predicate that binds costs nothing more.
-        var unresolved = FindUnresolvedCall(table, predicate, subject, constraint.CheckFunctionCalls);
+        var unresolved = FindUnresolvedCall(table, predicate, subject, constraint.CheckFunctionCalls, functions);
         if (unresolved is null && failure is SqlFunctionResultMismatchException mismatch)
         {
             // An application function the engine registers, with a result that no longer fits where
             // the stored predicate uses it: its registration changed after the predicate was stored.
-            unresolved = new SqlUnresolvedDefinition(subject, Signature(table, mismatch.Call),
+            unresolved = new SqlUnresolvedDefinition(subject, Signature(table, mismatch.Call, functions),
                 $"which this engine registers returning {mismatch.Returned}, where the CHECK needs {mismatch.Needed}");
         }
 
@@ -439,9 +443,9 @@ internal sealed class SqlBoundTableCache
     /// </summary>
     /// <returns>The unresolved call, or null when every call resolves.</returns>
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the predicate.</exception>
-    private SqlUnresolvedDefinition? FindUnresolvedCall(SqlCatalogTable table, SqlExpression predicate, string subject, IReadOnlyList<string> identities)
+    private SqlUnresolvedDefinition? FindUnresolvedCall(SqlCatalogTable table, SqlExpression predicate, string subject, IReadOnlyList<string> identities, SqlFunctionEnvironment functions)
     {
-        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: Functions);
+        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: functions);
         SqlDefinitionBinder.PinCalls(predicate, scope, identities);
         return Find(predicate);
 
@@ -467,7 +471,7 @@ internal sealed class SqlBoundTableCache
 
         string? Unresolved(SqlFunctionCallExpression call)
         {
-            if (!Functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
+            if (!functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
             {
                 return "which this engine does not register";
             }
@@ -482,7 +486,7 @@ internal sealed class SqlBoundTableCache
                 if (resolved is null)
                 {
                     // Resolve only to explain the missing identity; never use the replacement.
-                    var diagnostic = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: Functions);
+                    var diagnostic = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: functions);
                     _ = diagnostic.ResolveFunction(call);
                     return $"whose recorded identity '{SqlDefinitionBinder.DescribeIdentity(scope.RecordedIdentity(call)!)}' this engine does not register";
                 }
@@ -502,8 +506,8 @@ internal sealed class SqlBoundTableCache
     }
 
     /// <summary>A call as a persisted definition makes it, its arguments typed over the table: <c>slugify(TEXT)</c>.</summary>
-    private string Signature(SqlCatalogTable table, SqlFunctionCallExpression call)
-        => Signature(new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: Functions), call);
+    private string Signature(SqlCatalogTable table, SqlFunctionCallExpression call, SqlFunctionEnvironment functions)
+        => Signature(new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: functions), call);
 
     private static string Signature(SqlExpressionEvaluator scope, SqlFunctionCallExpression call)
     {
@@ -526,13 +530,7 @@ internal sealed class SqlBoundTableCache
     /// <returns>The first unresolved definition, or null when every definition binds.</returns>
     /// <exception cref="DatabaseException">A persisted definition of a table does not load.</exception>
     internal SqlUnresolvedDefinition? FindUnresolved(CancellationToken cancellationToken = default)
-    {
-        lock (_sync)
-        {
-            EnsureValidated(cancellationToken);
-            return _unresolvedDefinition;
-        }
-    }
+        => GetValidation(cancellationToken).Definition;
 
     private static int[] ColumnOrdinals(SqlCatalogTable table, SqlExpression predicate)
     {
@@ -564,5 +562,33 @@ internal sealed class SqlBoundTableCache
                 Collect(child);
             }
         }
+    }
+
+    private sealed record Validation(SqlUnresolvedDefinition? Definition, SqlUnresolvedDomain? Domain);
+
+    // A refresh replaces the whole state. A slow binding retains its original environment and
+    // table map and cannot publish an old result into the replacement generation.
+    private sealed class CacheState
+    {
+        private readonly SqlBoundTableCache _owner;
+        internal readonly ConditionalWeakTable<SqlCatalogTable, SqlBindingEntry<SqlBoundTable>> Bound = new();
+        internal readonly SqlFunctionEnvironment Functions;
+        internal ulong ValidatedGeneration;
+        internal SqlBindingEntry<Validation>? Validation;
+
+        internal CacheState(SqlBoundTableCache owner, SqlFunctionEnvironment functions)
+        {
+            _owner = owner;
+            Functions = functions;
+        }
+
+        internal SqlBoundTable Get(SqlCatalogTable table, CancellationToken cancellationToken)
+        {
+            if (!Bound.TryGetValue(table, out var entry)) { entry = Bound.GetValue(table, CreateEntry); }
+            return entry.Get(cancellationToken);
+        }
+
+        private SqlBindingEntry<SqlBoundTable> CreateEntry(SqlCatalogTable table)
+            => new(token => _owner.Bind(table, Functions, token));
     }
 }

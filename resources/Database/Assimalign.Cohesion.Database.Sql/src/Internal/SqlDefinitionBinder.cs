@@ -167,6 +167,7 @@ internal static class SqlDefinitionBinder
 
         void Visit(string key)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             RuntimeHelpers.EnsureSufficientExecutionStack();
             if (done.Contains(key) || !functions.ContainsKey(key) && !domains.ContainsKey(key))
             {
@@ -214,37 +215,41 @@ internal static class SqlDefinitionBinder
         var expression = SqlPersistedExpression.Load(function.Body, $"Function '{function.Name}'");
         string? unavailableDomain = types.Append(result).Select(UnresolvedDomainReason).FirstOrDefault(reason => reason is not null);
         string? unresolved = null;
-        SqlBoundExpression body = BindBody(collation, cancellationToken);
+        SqlBoundExpression? body = null;
+        // Resolve metadata and dependencies without folding. The complete environment can then
+        // be published before any body preparation calls application code; unrelated statements
+        // need only this metadata. Each body/collation owns its own retryable binding entry.
+        var scope = CreateScope(collation, cancellationToken);
+        try
+        {
+            if (unavailableDomain is not null) { throw Refuse(unavailableDomain); }
+            SqlPersistedExpression.Bind(expression, scope);
+            SqlPlanner.ValidateExpression(expression, scope);
+            _ = Dependencies(expression, scope, Volatility(function.Volatility));
+        }
+        catch (DatabaseException failure) when (unavailableDomain is not null || failure is SqlFunctionResultMismatchException ||
+            HasUnavailableCall(expression, scope, Volatility(function.Volatility)))
+        {
+            unresolved = $"Function '{function.Name}': {failure.Message}";
+            string reason = unresolved;
+            body = new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
+        }
         return new SqlExpressionFunction(function.Name, types, result, Volatility(function.Volatility), function.IsStrict,
-            body, unresolved, notNullCheck, bodyCollation: collation, bindBody: BindBody);
+            body, unresolved, notNullCheck, bodyCollation: collation, bindBody: body is null ? BindBody : null);
 
         SqlBoundExpression BindBody(Collation inputCollation, CancellationToken bindingToken)
+            => CreateScope(inputCollation, bindingToken).Bind(expression);
+
+        SqlExpressionEvaluator CreateScope(Collation inputCollation, CancellationToken bindingToken)
         {
             // A parameter inherits the invocation's collation; literals retain the database default.
             // PostgreSQL: src/backend/executor/functions.c:496-505.
             var columns = function.ParameterNames.Select((name, index) => new SqlCatalogColumn(name, types[index].Storage,
                 collation: types[index].Storage.Type == DatabaseType.String ? inputCollation : null,
                 domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
-            var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment, cancellationToken: bindingToken);
-            PinCalls(expression, scope, function.BodyFunctionCalls);
-            try
-            {
-                if (unavailableDomain is not null)
-                {
-                    throw Refuse(unavailableDomain);
-                }
-                SqlPersistedExpression.Bind(expression, scope);
-                SqlPlanner.ValidateExpression(expression, scope);
-                _ = Dependencies(expression, scope, Volatility(function.Volatility));
-                return scope.Bind(expression);
-            }
-            catch (DatabaseException failure) when (unavailableDomain is not null || failure is SqlFunctionResultMismatchException ||
-                HasUnavailableCall(expression, scope, Volatility(function.Volatility)))
-            {
-                unresolved = $"Function '{function.Name}': {failure.Message}";
-                string reason = unresolved;
-                return new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
-            }
+            var bodyScope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment, cancellationToken: bindingToken);
+            PinCalls(expression, bodyScope, function.BodyFunctionCalls);
+            return bodyScope;
         }
     }
 

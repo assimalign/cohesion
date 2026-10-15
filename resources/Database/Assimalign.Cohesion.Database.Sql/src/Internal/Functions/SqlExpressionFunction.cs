@@ -11,17 +11,17 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>A SQL body, bound once per input collation, called through the same ABI as native scalar functions.</summary>
 internal sealed class SqlExpressionFunction : SqlScalarFunction
 {
-    private readonly SqlBoundExpression _body;
+    private readonly SqlBoundExpression? _body;
+    private readonly SqlBindingEntry<SqlBoundExpression>? _defaultBody;
     private readonly Collation? _bodyCollation;
     private readonly Func<Collation, CancellationToken, SqlBoundExpression>? _bindBody;
-    private readonly ConcurrentDictionary<Collation, SqlBoundExpression> _bodies = new();
-    private readonly object _bodySync = new();
+    private readonly ConcurrentDictionary<Collation, SqlBindingEntry<SqlBoundExpression>> _bodies = new();
     private readonly SqlCatalogColumn _result;
     private readonly DatabaseType _resultCheckTarget;
     private readonly bool _notNullCheck;
 
     internal SqlExpressionFunction(string name, SqlType[] parameters, SqlType returnType,
-        SqlFunctionVolatility volatility, bool strict, SqlBoundExpression body, string? unresolved = null, bool notNullCheck = false,
+        SqlFunctionVolatility volatility, bool strict, SqlBoundExpression? body, string? unresolved = null, bool notNullCheck = false,
         Collation? bodyCollation = null, Func<Collation, CancellationToken, SqlBoundExpression>? bindBody = null)
         : base(name, parameters, returnType, volatility,
             strict ? SqlNullBehavior.ReturnsNullOnNullInput : SqlNullBehavior.CalledOnNullInput)
@@ -29,6 +29,10 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
         _body = body;
         _bodyCollation = bodyCollation;
         _bindBody = bindBody;
+        if (body is null)
+        {
+            _defaultBody = new SqlBindingEntry<SqlBoundExpression>(token => bindBody!(bodyCollation!, token));
+        }
         _result = new SqlCatalogColumn(name, returnType.Storage);
         _resultCheckTarget = returnType.Check is { } check && SqlFunctionResolver.CoercionTargets(check, 1) is { } targets
             ? targets[0] : DatabaseType.Null;
@@ -39,8 +43,7 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
     internal string? Unresolved { get; }
 
     // Fixed call collations prepare this during binding. Deferred collations use the same cache.
-    // Serialize cache misses without retaining a caller's token or caching its cancellation:
-    // another statement waiting for this collation must bind with its own token after a failure.
+    // Coordinate only this collation. Other variants never wait on its application callbacks.
     internal SqlBoundExpression PrepareBody(Collation collation, CancellationToken cancellationToken)
     {
         if (ReturnType.Check is SqlExpressionFunction resultCheck)
@@ -49,22 +52,14 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
         }
         if (_bindBody is null || ReferenceEquals(collation, _bodyCollation))
         {
-            return _body;
+            return _body ?? _defaultBody!.Get(cancellationToken);
         }
         if (_bodies.TryGetValue(collation, out var body))
         {
-            return body;
+            return body.Get(cancellationToken);
         }
-        lock (_bodySync)
-        {
-            if (!_bodies.TryGetValue(collation, out body))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                body = _bindBody(collation, cancellationToken);
-                _bodies.TryAdd(collation, body);
-            }
-            return body;
-        }
+        return _bodies.GetOrAdd(collation, key => new SqlBindingEntry<SqlBoundExpression>(token => _bindBody(key, token)))
+            .Get(cancellationToken);
     }
 
     protected override SqlValue InvokeCore(scoped in SqlArguments arguments)

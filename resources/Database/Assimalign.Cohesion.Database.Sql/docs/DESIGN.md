@@ -3663,6 +3663,36 @@ plan shape and evaluation order. Shared definitions also retain constant folding
 bound trees; the token is passed into each binding request, not captured by the reusable binder.
 The change adds no public signature, stored token in a shared definition or per-row allocation.
 
+Shared binding waits use the waiting statement's token (#1419 second review). A canceled waiter
+leaves immediately while the computing statement continues with its own token. Each SQL body and
+effective collation, table version, and validation generation has a retryable `SqlBindingEntry`.
+Its monitor only selects a producer and signals completion; binding and immutable application
+callbacks run outside it. A successful tree is published after checking the producer's token.
+An attempt that throws or is canceled publishes nothing, and a remaining or later caller retries
+with its own token. Ordinary folding faults still retain the call for evaluation under the
+existing deferral rule; they are a successful binding, not a cached compilation exception.
+
+Definition refresh first resolves and validates immutable metadata without executing callbacks,
+then publishes that environment and its empty table cache together. Open and definition DDL
+still prepare default-collation bodies eagerly, now after metadata publication and per body.
+A concurrent statement that needs a body waits only for that body; an INFORMATION_SCHEMA query
+or another collation can proceed. If preparation fails after DDL committed, the metadata remains
+current and only the needed bindings retry. A table computation retains its original environment
+and cache map, so completing after a refresh cannot populate the replacement map with an old tree.
+Table and body hits read published values without taking a compilation monitor. Validation retains
+only the latest generation's entry and takes a short lock to select it, never to walk the catalog.
+
+The related statement-path audit found no other shared application compilation monitor:
+`SqlFunctionCatalog` and `SqlTypeCatalog` use frozen dictionaries, collation names resolve to fixed
+instances, and planner/evaluator expression maps are statement-local. The catalog and DDL admission
+locks protect metadata and counters, without calling SQL binding or application functions. Schema
+validation's cached hash is protected by the existing apply gate, which refuses competing applies
+without queuing and is not taken by ordinary statements. SQL's
+separate engine registry lock still spans database opening, including open-time binding; it is a
+lifecycle limitation, outside an existing session's statement path. PostgreSQL similarly separates
+function metadata from execution state and defers plan preparation (`src/backend/executor/functions.c:80-105`);
+its session-local cache is not a cross-thread coordination implementation to copy here.
+
 A write that would evaluate a
 stored CHECK whose function the engine does not resolve throws it with `COHSQLE009`
 (E2 part 2). Character assignment overflow throws it with `COHSQLE012` (SQLSTATE 22001);

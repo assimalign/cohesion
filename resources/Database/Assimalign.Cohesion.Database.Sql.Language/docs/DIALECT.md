@@ -1556,6 +1556,12 @@ seek-bound evaluation and constant folding during planning. Actual cancellation 
 immediately; it is never deferred and retried as a function failure. The coded error
 leaves the wire connection usable; actual statement cancellation retains its cancellation behavior.
 
+A statement waiting for another statement to bind the same shared function body, collation variant
+or table definition can cancel its own wait. It does not cancel the computing statement. Different
+entries and unrelated metadata queries proceed independently. Canceled or failed binding attempts
+are not cached; a subsequent caller retries using its own token. Definition DDL remains committed
+if its following body preparation fails, and later statements prepare only the entries they need.
+
 **A stored CHECK whose function is gone.** A CHECK stores canonical SQL and each call's
 resolved function identity. A later engine build may omit that exact signature, change
 its volatility from Immutable, or register a result type that no longer fits where the
