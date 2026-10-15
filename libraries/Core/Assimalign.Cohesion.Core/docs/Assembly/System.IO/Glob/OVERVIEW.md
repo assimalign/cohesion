@@ -23,6 +23,7 @@ In addition, `Glob` also supports:
 | Wildcard | Description                                                                                                         | Example      | Matches                                               | Does not match               |
 | -------- | ------------------------------------------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------- | ---------------------------- |
 | `**`     | Matches across zero or more hierarchical segments. Must be the only content of a segment when used with separators. | `/**/some.*` | `/foo/bar/baz/some.txt`, `/some.txt`, `/foo/some.txt` | `some.txt`, `C:/foo/som.txt` |
+| `{a,b}`  | Matches one of the comma-separated alternatives, trying them in order. Each alternative is literal text, `?`, or a `[...]` set or range. | `**/*.{md,cs}` | `README.md`, `docs/README.md`, `src/Glob.cs` | `src/Glob.txt`, `src/Glob.c` |
 
 Notes:
 - When you use `**` with path-like inputs, treat `/` as the segment separator in examples. If your domain uses a different separator, normalize input accordingly.
@@ -33,7 +34,9 @@ Notes:
 
 | Scenario | What happens | How to fix |
 | --- | --- | --- |
-| `**/*.{md,cs}` | Brace expansion is not interpreted as a single pattern. | Provide multiple patterns, e.g., `**/*.md` and `**/*.cs` (two separate globs). |
+| A brace alternative is a prefix of a later one, e.g. `*.{js,json}` | The first alternative that matches is kept, even when the rest of the match then fails, so `*.{js,json}` matches `a.js` but not `a.json`. | Put the longer alternative first: `*.{json,js}`. |
+| An empty brace alternative, e.g. `a{,c}d` or `a{b,}d` | Not supported. The parser drops the empty alternative, so `a{,c}d` matches `acd` but not `ad`, and an empty group, `{}`, fails to parse. | Spell each alternative out in full: `{ad,acd}`. |
+| A brace alternative with a wildcard, a nested group or more than one element, e.g. `{*.cs,*.ts}` | Each alternative must be a single element: literal text, `?`, or a `[...]` set or range. `{*.cs,*.ts}` matches neither `a.cs` nor `a.ts`, and `{a?,b}` is read as the three alternatives `a`, `?` and `b`. | Keep wildcards outside the group, as in `*.{cs,ts}`, or use separate globs. |
 | Mixing OS-specific path rules | Assuming Windows or POSIX case/separator rules applies universally. | Normalize your input and be explicit about separators before matching. |
 | Segment `**` misuse | Using `**` as part of a segment (e.g., `foo**bar`). | Use `**` as its own segment or prefer `*` within a segment. |
 
