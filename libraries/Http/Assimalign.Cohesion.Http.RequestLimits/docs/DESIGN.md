@@ -31,7 +31,7 @@ with zero optional packages installed.
 
 ## How it works
 
-`HttpMaxRequestBodySizeInterceptor.Create()` returns a stateless
+`new HttpMaxRequestBodySizeInterceptor()` creates a stateless
 `IHttpExchangeInterceptor` the composition root registers on the server's listener options. Per
 request, its `AfterRequestHead` hook attaches an internal `HttpMaxRequestBodySizeFeature` to the
 exchange's feature collection.
@@ -76,13 +76,13 @@ lower rate) before it starts its response. Kestrel's `IHttpMinResponseDataRateFe
 
 ### One object for every limit
 
-`HttpRequestLimitsInterceptor.Create()` attaches every contract on **one** object
+`new HttpRequestLimitsInterceptor()` attaches every contract on **one** object
 (`HttpRequestLimitsFeature`): the feature collection is keyed by name, and a typed lookup returns the
 first feature implementing the contract asked for, so `Get<IHttpMaxRequestBodySizeFeature>()`,
 `Get<IHttpMinRequestBodyDataRateFeature>()` and `Get<IHttpMinResponseDataRateFeature>()` all find it.
 An exchange pays one allocation and one slot for every limit, as it did for the body-size feature
 alone, so the web host's presized feature collection (#1381) does not grow.
-`HttpMaxRequestBodySizeInterceptor.Create()` still attaches the body-size feature alone; the two register
+`new HttpMaxRequestBodySizeInterceptor()` still attaches the body-size feature alone; the two register
 under the same name, so a host registers one or the other.
 
 ### Why a typed seam here, rather than an Items-key bridge
@@ -107,7 +107,7 @@ capability that only needs one-way post-parse publication can still use an `Item
 Register this package's interceptor **first**. Its `AfterRequestHead` hook attaches the feature;
 later interceptors' `AfterRequestHead` hooks may then look it up (or simply write the context
 knob — same store).
-The web host (`Assimalign.Cohesion.Web.Hosting`) installs `HttpRequestLimitsInterceptor.Create()` by default so every
+The web host (`Assimalign.Cohesion.Web.Hosting`) installs `new HttpRequestLimitsInterceptor()` by default so every
 request carries the typed features — the seam is now invoked on all three parse paths (h1, h2, h3; #819), so the
 feature is attached uniformly regardless of protocol (the cap is enforced on all three — see
 "Protocol coverage" below). The raw transport remains lean (zero interceptors ⇒ no
@@ -118,7 +118,7 @@ per-request context or feature allocation).
 `Name` is `"Assimalign.Cohesion.Http.MaxRequestBodySize"` — kept byte-identical to the value the
 transport historically used, because the string is the feature collection's dictionary key and
 any name-keyed consumer would otherwise silently miss. The combined feature
-`HttpRequestLimitsInterceptor.Create()` attaches registers under the same name for the same reason.
+`new HttpRequestLimitsInterceptor()` attaches registers under the same name for the same reason.
 
 ## Transport integration (as implemented)
 
@@ -148,7 +148,7 @@ The migration from the original in-core placement is complete; the pieces sit as
    `TransportHttpContext` and the Connections `DESIGN.md` were replaced by the interceptor
    documentation.
 4. **Web.Hosting installs by default.** `WebApplicationServerBuilder` registers
-   `HttpRequestLimitsInterceptor.Create()` (the body-size cap and, since #1383 and #1384, the
+   `new HttpRequestLimitsInterceptor()` (the body-size cap and, since #1383 and #1384, the
    request-body and response rates) ahead of all user configuration, so it holds interceptor slot 0.
 5. **Tests.** The transport suite exercises the seam with local doubles on all three protocols
    (h1: attach / cap-raise / cap-lower / wrap / reject / freeze / read-only headers / CONNECT skip
@@ -210,16 +210,18 @@ allocation per request, only when the interceptor is registered.
 
 `HttpRequestLimitsInterceptor` and `HttpMaxRequestBodySizeInterceptor` are public sealed
 implementations of the existing `IHttpExchangeInterceptor` contract through
-`HttpExchangeInterceptor`. Each has a private constructor and its own `Create()` returning its
-concrete type. The interface remains the listener registration contract; the per-exchange feature
+`HttpExchangeInterceptor`. Decision 59 introduced a private constructor and a parameterless
+static factory returning the concrete type for each. The interface remains the listener registration contract; the per-exchange feature
 implementations remain internal. This is the factory-to-implementation convention approved by
 owner decision 59. Register one interceptor or the other, first in the listener's list.
+Owner decision 61, 2026-10-15 amends that creation shape to public parameterless constructors
+with no `Create()`, a source and binary break for callers of the intervening factories.
 
 The `v10.0.0-preview.1` tag shipped `HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()`;
-consumers replace it with `HttpMaxRequestBodySizeInterceptor.Create()` and rebuild. Removing the
+consumers replace it with `new HttpMaxRequestBodySizeInterceptor()` and rebuild. Removing the
 old static class and factory is a **source- and binary-breaking change**, accepted during previews
 on decision 15's terms. The combined `HttpRequestLimits.CreateInterceptor()` was added after that
-tag by #1383/#1384; its replacement, `HttpRequestLimitsInterceptor.Create()`, is likewise source-
-and binary-breaking for consumers of the intervening branch. Both new factories remain assignable
+tag by #1383/#1384; its replacement, `new HttpRequestLimitsInterceptor()`, is likewise source-
+and binary-breaking for consumers of the intervening branch. Both constructed interceptors remain assignable
 to `IHttpExchangeInterceptor`. Their scope, registration order, limits, freeze rules, and feature
 identity are unchanged.

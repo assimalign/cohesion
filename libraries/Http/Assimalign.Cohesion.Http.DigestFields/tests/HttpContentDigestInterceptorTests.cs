@@ -23,7 +23,7 @@ public class HttpContentDigestInterceptorTests
         byte[] content = Encoding.UTF8.GetBytes("payload that matches its digest");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, version);
-        HttpContentDigestInterceptor verifier = HttpContentDigestInterceptor.Create();
+        HttpContentDigestInterceptor verifier = new HttpContentDigestInterceptor();
         using var body = new MemoryStream(content);
 
         Stream result = verifier.AfterRequestBody(context, body);
@@ -47,7 +47,7 @@ public class HttpContentDigestInterceptorTests
         byte[] actual = Encoding.UTF8.GetBytes("the tampered payload");
         string digest = HttpDigestField.ForContent(declared, HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, version);
-        IHttpExchangeInterceptor verifier = HttpContentDigestInterceptor.Create();
+        IHttpExchangeInterceptor verifier = new HttpContentDigestInterceptor();
 
         HttpRequestRejectedException ex = Should.Throw<HttpRequestRejectedException>(
             () => verifier.AfterRequestBody(context, new MemoryStream(actual)));
@@ -59,7 +59,7 @@ public class HttpContentDigestInterceptorTests
     public void AfterRequestBody_NoDigest_PassesThrough()
     {
         HttpExchangeInterceptorRequestContext context = CreateContext(contentDigest: null);
-        IHttpExchangeInterceptor verifier = HttpContentDigestInterceptor.Create();
+        IHttpExchangeInterceptor verifier = new HttpContentDigestInterceptor();
         using var body = new MemoryStream(new byte[] { 1, 2, 3 });
 
         Stream result = verifier.AfterRequestBody(context, body);
@@ -71,7 +71,7 @@ public class HttpContentDigestInterceptorTests
     public void AfterRequestBody_DeprecatedOnly_PassesThrough()
     {
         HttpExchangeInterceptorRequestContext context = CreateContext("md5=:1B2M2Y8AsgTpgAmY7PhCfg==:");
-        IHttpExchangeInterceptor verifier = HttpContentDigestInterceptor.Create();
+        IHttpExchangeInterceptor verifier = new HttpContentDigestInterceptor();
         using var body = new MemoryStream(new byte[] { 1, 2, 3 });
 
         Stream result = verifier.AfterRequestBody(context, body);
@@ -87,7 +87,7 @@ public class HttpContentDigestInterceptorTests
         HttpExchangeInterceptorRequestContext context = CreateContext(digest);
         var original = new TrackingStream(content);
 
-        Stream result = HttpContentDigestInterceptor.Create().AfterRequestBody(context, original);
+        Stream result = new HttpContentDigestInterceptor().AfterRequestBody(context, original);
         result.Dispose();
 
         original.IsDisposed.ShouldBeTrue();
@@ -107,7 +107,7 @@ public class HttpContentDigestInterceptorTests
         byte[] content = Encoding.UTF8.GetBytes("still arriving");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, version);
-        IHttpExchangeInterceptor verifier = HttpContentDigestInterceptor.Create();
+        IHttpExchangeInterceptor verifier = new HttpContentDigestInterceptor();
 
         // The eager path would throw from ReadForbiddenStream here; returning at all proves the
         // hook stayed CPU-only.
@@ -126,7 +126,7 @@ public class HttpContentDigestInterceptorTests
         byte[] content = Encoding.UTF8.GetBytes("a streamed body verified as the application reads");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, version);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(content, maxChunk: 7));
 
         byte[] observed = await ReadToEndAsync(wrapped);
@@ -145,7 +145,7 @@ public class HttpContentDigestInterceptorTests
         byte[] actual = Encoding.UTF8.GetBytes("the tampered payload");
         string digest = HttpDigestField.ForContent(declared, HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, version);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(actual, maxChunk: 5));
 
         // Every content octet flows to the application unimpeded — the verdict cannot exist until
@@ -165,7 +165,7 @@ public class HttpContentDigestInterceptorTests
         byte[] content = Encoding.UTF8.GetBytes("content hashed with two algorithms");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256, HttpDigestAlgorithm.Sha512).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(content, maxChunk: 11));
 
         byte[] observed = await ReadToEndAsync(wrapped);
@@ -182,7 +182,7 @@ public class HttpContentDigestInterceptorTests
         HttpDigestField sha512 = HttpDigestField.ForContent(Encoding.UTF8.GetBytes("other"), HttpDigestAlgorithm.Sha512);
         string digest = $"{sha256.Serialize()}, {sha512.Serialize()}";
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(content, maxChunk: 9));
 
         await ReadExactAsync(wrapped, content.Length);
@@ -198,7 +198,7 @@ public class HttpContentDigestInterceptorTests
         byte[] actual = Encoding.UTF8.GetBytes("tampered");
         string digest = HttpDigestField.ForContent(Encoding.UTF8.GetBytes("original"), HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(actual, maxChunk: 3));
         await ReadExactAsync(wrapped, actual.Length);
         await Should.ThrowAsync<HttpContentDigestMismatchException>(() => ReadTerminalAsync(wrapped));
@@ -214,7 +214,7 @@ public class HttpContentDigestInterceptorTests
         // Parsing is CPU-only, so the fail-closed pre-dispatch rejection survives on h2 — only the
         // body-dependent verdict moves to the application's reads.
         HttpExchangeInterceptorRequestContext context = CreateContext("sha-256=12345", HttpVersion.Http20);
-        IHttpExchangeInterceptor verifier = HttpContentDigestInterceptor.Create();
+        IHttpExchangeInterceptor verifier = new HttpContentDigestInterceptor();
 
         HttpRequestRejectedException ex = Should.Throw<HttpRequestRejectedException>(
             () => verifier.AfterRequestBody(context, new ReadForbiddenStream()));
@@ -228,7 +228,7 @@ public class HttpContentDigestInterceptorTests
     public void AfterRequestBody_OnHttp2NothingVerifiable_PassesThroughSameStream(string? contentDigest)
     {
         HttpExchangeInterceptorRequestContext context = CreateContext(contentDigest, HttpVersion.Http20);
-        IHttpExchangeInterceptor verifier = HttpContentDigestInterceptor.Create();
+        IHttpExchangeInterceptor verifier = new HttpContentDigestInterceptor();
         using var body = new MemoryStream(new byte[] { 1, 2, 3 });
 
         Stream result = verifier.AfterRequestBody(context, body);
@@ -241,7 +241,7 @@ public class HttpContentDigestInterceptorTests
     {
         string digest = HttpDigestField.ForContent(ReadOnlySpan<byte>.Empty, HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(Array.Empty<byte>(), maxChunk: 4));
 
         (await wrapped.ReadAsync(new byte[8])).ShouldBe(0);
@@ -252,7 +252,7 @@ public class HttpContentDigestInterceptorTests
     {
         string digest = HttpDigestField.ForContent(Encoding.UTF8.GetBytes("expected content"), HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(Array.Empty<byte>(), maxChunk: 4));
 
         await Should.ThrowAsync<HttpContentDigestMismatchException>(() => ReadTerminalAsync(wrapped));
@@ -264,7 +264,7 @@ public class HttpContentDigestInterceptorTests
         byte[] content = Encoding.UTF8.GetBytes("body");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(content, maxChunk: 64));
 
         // A zero-length read returns 0 by definition; the verdict must wait for real end-of-body.
@@ -281,7 +281,7 @@ public class HttpContentDigestInterceptorTests
         byte[] actual = Encoding.UTF8.GetBytes("the tampered payload");
         string digest = HttpDigestField.ForContent(declared, HttpDigestAlgorithm.Sha256).Serialize();
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
-        Stream wrapped = HttpContentDigestInterceptor.Create()
+        Stream wrapped = new HttpContentDigestInterceptor()
             .AfterRequestBody(context, new ChunkedReadStream(actual, maxChunk: 6));
 
         byte[] buffer = new byte[actual.Length];
@@ -304,14 +304,14 @@ public class HttpContentDigestInterceptorTests
         // Disposed mid-body — no verdict was ever resolved.
         HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
         var unread = new TrackingStream(content);
-        Stream wrapped = HttpContentDigestInterceptor.Create().AfterRequestBody(context, unread);
+        Stream wrapped = new HttpContentDigestInterceptor().AfterRequestBody(context, unread);
         wrapped.Dispose();
         unread.IsDisposed.ShouldBeTrue();
 
         // Disposed after a verified end-of-body.
         context = CreateContext(digest, HttpVersion.Http20);
         var drained = new TrackingStream(content);
-        wrapped = HttpContentDigestInterceptor.Create().AfterRequestBody(context, drained);
+        wrapped = new HttpContentDigestInterceptor().AfterRequestBody(context, drained);
         await ReadToEndAsync(wrapped);
         wrapped.Dispose();
         drained.IsDisposed.ShouldBeTrue();

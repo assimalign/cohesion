@@ -12,9 +12,9 @@ feature is present regardless of protocol, and all three enforce the wire-level 
   (`Assimalign.Cohesion.Http.Connections`) never references this package; it invokes the
   interceptor through the core `IHttpExchangeInterceptor` seam.
 - **Registered by:** the composition root (for example `Assimalign.Cohesion.Web.Hosting`, which
-  installs it by default) via `HttpRequestLimitsInterceptor.Create()` on the listener options, which
+  installs it by default) via `new HttpRequestLimitsInterceptor()` on the listener options, which
   attaches all three features (the body-size cap, the request-body rate and the response rate) on one
-  object (`HttpMaxRequestBodySizeInterceptor.Create()` attaches the body-size feature alone).
+  object (`new HttpMaxRequestBodySizeInterceptor()` attaches the body-size feature alone).
 - **Consumed by:** endpoints and middleware via `context.MaxRequestBodySize` (an
   `IHttpContext` extension member) or `Features.Get<IHttpMaxRequestBodySizeFeature>()` — read
   the effective cap any time; adjust it until the transport starts reading the body.

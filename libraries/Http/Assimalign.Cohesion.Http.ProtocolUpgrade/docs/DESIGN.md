@@ -51,7 +51,7 @@ crosses seams only through the feature collection, per the interceptor contract.
 the whole capability by registering the interceptor:
 
 ```csharp
-options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
+options.Interceptors.Add(new HttpProtocolUpgradeInterceptor());
 ```
 
 The transport installs nothing: a host registers the interceptor on each listener it wants
@@ -98,8 +98,8 @@ on an upgrade; the Web.Hosting DESIGN records the measured allocations.
 - `HttpContextProtocolUpgradeExtensions` — `context.Upgrade`, a plain nullable feature read (the
   interceptors install the feature eagerly, so the accessor allocates nothing and never throws
   for ordinary exchanges).
-- `HttpProtocolUpgradeInterceptor` — the public sealed implementation: `Create()` (mirrors
-  `HttpResponseStreamingInterceptor.Create()`); the one instance declares the request
+- `HttpProtocolUpgradeInterceptor` — the public sealed implementation with a public parameterless
+  constructor (like `HttpResponseStreamingInterceptor`); the one instance declares the request
   scope (`HttpInterceptorScopes.Request`) and joins the response phase of a transition's
   exchange only (see "The cost of a default-on interceptor").
 - Internal: `HttpProtocolUpgradeCandidate`
@@ -197,15 +197,17 @@ the surrendered stream. Trimming- and NativeAOT-safe.
 ## Public interceptor and breaking changes since 10.0.0-preview.1 (#1465)
 
 `HttpProtocolUpgradeInterceptor` is the public sealed implementation of the existing
-`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its constructor is private;
-`HttpProtocolUpgradeInterceptor.Create()` creates a new stateless instance and returns its concrete type.
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Decision 59 introduced a private constructor
+and a parameterless static factory returning the concrete type.
 The interface remains the contract for listener registration and custom interceptors. Feature
 implementations remain internal. This is the factory-to-implementation convention approved by
 owner decision 59.
+Owner decision 61, 2026-10-15 amends that creation shape to a public parameterless constructor
+with no `Create()`, a source and binary break for callers of the intervening factory.
 
 The `v10.0.0-preview.1` tag shipped `HttpProtocolUpgrade.CreateInterceptor()` returning
 `IHttpExchangeInterceptor`. That static factory class is removed. Consumers must replace the call
-with `HttpProtocolUpgradeInterceptor.Create()` and rebuild. Removing the old type and method is a
+with `new HttpProtocolUpgradeInterceptor()` and rebuild. Removing the old type and method is a
 **source- and binary-breaking change**, accepted during previews on decision 15's terms.
 Assignments to `IHttpExchangeInterceptor` continue to work after the call is renamed. The
 interceptor's registration order, scopes, feature installation, and request/response behavior

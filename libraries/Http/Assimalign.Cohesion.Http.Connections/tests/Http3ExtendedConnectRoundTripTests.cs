@@ -67,7 +67,7 @@ public class Http3ExtendedConnectRoundTripTests
             }
         },
         configure: null,
-        configureListener: static options => options.Interceptors.Add(HttpExtendedConnectInterceptor.Create()),
+        configureListener: static options => options.Interceptors.Add(new HttpExtendedConnectInterceptor()),
         cancellationToken);
 
         await using QuicConnection connection = await QuicConnection.ConnectAsync(CreateClientOptions(server.BaseUri.Port), cancellationToken);
@@ -132,7 +132,7 @@ public class Http3ExtendedConnectRoundTripTests
             }
         },
         configure: null,
-        configureListener: static options => options.Interceptors.Add(HttpExtendedConnectInterceptor.Create()),
+        configureListener: static options => options.Interceptors.Add(new HttpExtendedConnectInterceptor()),
         cancellationToken);
 
         await using QuicConnection connection = await QuicConnection.ConnectAsync(CreateClientOptions(server.BaseUri.Port), cancellationToken);

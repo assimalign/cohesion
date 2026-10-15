@@ -944,19 +944,20 @@ HTTP policy defaults does not remove response starting or client-fault reporting
 
 ## Default interceptors
 
-### Public HTTP interceptor factories (#1465)
+### Public HTTP interceptor construction (#1465)
 
 `ApplyDefaultInterceptors` constructs the same three HTTP policy interceptors with
-`HttpRequestLimitsInterceptor.Create()`, `HttpProtocolUpgradeInterceptor.Create()`, and
-`HttpExtendedConnectInterceptor.Create()`, in that order. These are the public sealed
-implementations with private constructors approved by owner decision 59. The server's own
+`new HttpRequestLimitsInterceptor()`, `new HttpProtocolUpgradeInterceptor()`, and
+`new HttpExtendedConnectInterceptor()`, in that order. These are the public sealed
+implementations introduced with private constructors by owner decision 59.
+Owner decision 61, 2026-10-15 replaces their parameterless factories with public constructors. The server's own
 client-fault and response-starting interceptors keep their existing descriptive names and behavior.
 No default, ordering, or listener option changes in this cleanup.
 
 The removed Http factory calls are source- and binary-breaking API changes on decision 15's preview
 terms; their package DESIGN files record exactly which calls shipped in `10.0.0-preview.1` and the
 replacement spellings. Hosted applications using only `WebApplicationServerBuilder` keep the same
-source calls. Applications registering those Http factories themselves must rename the calls and
+source calls. Applications constructing those Http interceptors themselves must update the calls and
 rebuild against the updated packages.
 
 The bootstrap credential verifier also uses `EcdsaJsonWebTokenSignatureVerifier.Create` and

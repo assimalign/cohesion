@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// A request-parse interceptor that verifies an inbound <c>Content-Digest</c> against the request
 /// body. Opt-in: the composition root installs it via
-/// <see cref="HttpContentDigestInterceptor.Create"/>.
+/// <see cref="HttpContentDigestInterceptor()"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -45,10 +45,6 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
 {
-    private HttpContentDigestInterceptor()
-    {
-    }
-
     /// <summary>
     /// Creates the stateless <see cref="IHttpExchangeInterceptor"/> that verifies an inbound
     /// <c>Content-Digest</c> against the request body. On HTTP/1.1 verification is eager and a
@@ -67,8 +63,9 @@ public sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
     /// <see cref="HttpContentDigestMismatchException"/> must treat the body as corrupt and abort
     /// the exchange (<see cref="IHttpContext.Cancel"/>).
     /// </remarks>
-    /// <returns>The content-digest verification interceptor.</returns>
-    public static HttpContentDigestInterceptor Create() => new HttpContentDigestInterceptor();
+    public HttpContentDigestInterceptor()
+    {
+    }
 
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;

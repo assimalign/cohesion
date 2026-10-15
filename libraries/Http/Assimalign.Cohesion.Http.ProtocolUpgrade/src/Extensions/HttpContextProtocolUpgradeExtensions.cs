@@ -25,7 +25,7 @@ public static class HttpContextProtocolUpgradeExtensions
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         /// <remarks>
         /// The feature is installed at parse time by the interceptor registered through
-        /// <see cref="HttpProtocolUpgradeInterceptor.Create"/>, so this accessor is a
+        /// <see cref="HttpProtocolUpgradeInterceptor()"/>, so this accessor is a
         /// plain feature read: without that registration — or on transports that cannot
         /// surrender their connection (HTTP/2, HTTP/3) — it reads <see langword="null"/> rather
         /// than throwing.

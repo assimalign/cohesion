@@ -31,14 +31,14 @@ package removes that coupling, mirroring the streaming/upgrade split:
   that installs it, and the ergonomic accessors. It depends only on the core.
 
 Interim responses are therefore **opt-in**: a host enables them by registering
-`HttpInterimResponseInterceptor.Create()` on the transport's response
+`new HttpInterimResponseInterceptor()` on the transport's response
 interceptors. Where it is not registered, the transport uses its normal response
 path with zero interim overhead (the exchange control is created only when at
 least one response interceptor is registered).
 
 ## How it works
 
-1. A host adds `HttpInterimResponseInterceptor.Create()` to
+1. A host adds `new HttpInterimResponseInterceptor()` to
    `HttpConnectionListenerOptions.Interceptors`.
 2. Per exchange, the transport creates its per-protocol exchange control and runs
    the registered response interceptors, exposing it as
@@ -87,15 +87,17 @@ exchange control; the extensions build a small `HttpHeaderCollection` for the
 ## Public interceptor and breaking changes since 10.0.0-preview.1 (#1465)
 
 `HttpInterimResponseInterceptor` is the public sealed implementation of the existing
-`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its constructor is private;
-`HttpInterimResponseInterceptor.Create()` creates a new stateless instance and returns its concrete type.
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Decision 59 introduced a private constructor
+and a parameterless static factory returning the concrete type.
 The interface remains the contract for listener registration and custom interceptors. Feature
 implementations remain internal. This is the factory-to-implementation convention approved by
 owner decision 59.
+Owner decision 61, 2026-10-15 amends that creation shape to a public parameterless constructor
+with no `Create()`, a source and binary break for callers of the intervening factory.
 
 The `v10.0.0-preview.1` tag shipped `HttpInterimResponses.CreateInterceptor()` returning
 `IHttpExchangeInterceptor`. That static factory class is removed. Consumers must replace the call
-with `HttpInterimResponseInterceptor.Create()` and rebuild. Removing the old type and method is a
+with `new HttpInterimResponseInterceptor()` and rebuild. Removing the old type and method is a
 **source- and binary-breaking change**, accepted during previews on decision 15's terms.
 Assignments to `IHttpExchangeInterceptor` continue to work after the call is renamed. The
 interceptor's registration order, scopes, feature installation, and request/response behavior

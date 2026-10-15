@@ -104,7 +104,7 @@ public class Http3ExtendedConnectClientFaultTests
 
     private static void ConfigureInterceptors(HttpConnectionListenerOptions options)
     {
-        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+        options.Interceptors.Add(new HttpExtendedConnectInterceptor());
         options.Interceptors.Add(new CaptureControlInterceptor());
     }
 

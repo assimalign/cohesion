@@ -672,11 +672,11 @@ public class HttpResponseDataRateTests
 
     private static void AddRequestLimits(HttpConnectionListenerOptions options, bool streaming = false)
     {
-        options.Interceptors.Add(HttpRequestLimitsInterceptor.Create());
+        options.Interceptors.Add(new HttpRequestLimitsInterceptor());
 
         if (streaming)
         {
-            options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+            options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         }
     }
 

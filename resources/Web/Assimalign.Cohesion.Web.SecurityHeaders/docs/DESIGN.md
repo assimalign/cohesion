@@ -378,7 +378,7 @@ grammar rule in isolation.
 
 ## HTTP interceptor consumer compatibility (#1465)
 
-The streamed-response test hosts now register `HttpResponseStreamingInterceptor.Create()` in place
+The streamed-response test hosts now register `new HttpResponseStreamingInterceptor()` in place
 of `HttpResponseStreaming.CreateInterceptor()`. Applications that register this Http.Streaming
 interceptor directly make the same replacement and rebuild for its upstream source and binary
 break against `10.0.0-preview.1`, accepted on decision 15's terms and documented in
