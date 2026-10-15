@@ -76,7 +76,8 @@ serialization. Diagnostic data is handled through a closed primitive-value switc
 fallback. Custom behavior is available through `IHealthResponseWriter`.
 
 The registration, evaluation, and default response path remains trim- and NativeAOT-compatible.
-The optional contributor adapter has its own hosting-family package and tests.
+The contributor adapter and its tests live in `Assimalign.Cohesion.Web.Hosting` under
+`src/Health/` and `tests/Health/`, respectively (owner decision 57, 2026-10-13).
 
 ## Exception detail
 
