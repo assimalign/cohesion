@@ -1,6 +1,8 @@
-﻿using System.Text;
+﻿using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace System.IO;
 
@@ -20,16 +22,17 @@ public sealed partial class Glob
     /// <summary>
     /// Gets the number of tokens in the glob.
     /// </summary>
-    public int Count => Tokens.Length;
+    public int Count => _tokens.Length;
 
     /// <summary>
-    /// The parsed tokens
+    /// Gets the parsed tokens, in pattern order.
     /// </summary>
     /// <remarks>
-    /// Globs parsed from the same pattern share this array through the parse cache, so treat it
-    /// as read-only.
+    /// Globs parsed from the same pattern share one token array through the parse cache. The
+    /// returned <see cref="ImmutableArray{T}"/> wraps that array without copying it and exposes no
+    /// way to change it, so reading the tokens allocates nothing and cannot alter another glob.
     /// </remarks>
-    public Token[] Tokens => _tokens;
+    public ImmutableArray<Token> Tokens => ImmutableArray<Token>.CastUp(ImmutableCollectionsMarshal.AsImmutableArray(_tokens));
 
     #region Methods
 
