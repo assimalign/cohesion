@@ -8,10 +8,8 @@ namespace System.IO;
 /// The glob type is base implementation for utilizing wildcards to for single pattern match of strings values.
 /// </summary>
 [DebuggerDisplay("{ToString()}")]
-public sealed partial class Glob 
+public sealed partial class Glob
 {
-    private static readonly Parser _parser = new Parser();
-
     private readonly TokenBase[] _tokens;
 
     internal Glob(TokenBase[] tokens)
@@ -27,6 +25,10 @@ public sealed partial class Glob
     /// <summary>
     /// The parsed tokens
     /// </summary>
+    /// <remarks>
+    /// Globs parsed from the same pattern share this array through the parse cache, so treat it
+    /// as read-only.
+    /// </remarks>
     public Token[] Tokens => _tokens;
 
     #region Methods
@@ -125,12 +127,18 @@ public sealed partial class Glob
     /// Returns a Glob object from the provided pattern.
     /// </summary>
     /// <param name="pattern">The glob pattern to parse.</param>
-    /// <returns></returns>
+    /// <returns>A glob that matches <paramref name="pattern"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="pattern"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="pattern"/> is empty.</exception>
+    /// <remarks>
+    /// Safe to call from any number of threads at once. Parsed patterns are cached process-wide,
+    /// so parsing a cached pattern again allocates only the returned glob.
+    /// </remarks>
     public static Glob Parse(string pattern)
     {
         ArgumentNullException.ThrowIfNullOrEmpty(pattern);
 
-        TokenBase[] tokens = _parser.Tokenize(pattern);
+        TokenBase[] tokens = Parser.Tokenize(pattern);
 
         return new Glob(tokens);
     }
