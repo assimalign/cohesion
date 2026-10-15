@@ -39,7 +39,7 @@ Notes:
 
 ## Thread Safety
 
-`Glob.Parse` and the implicit conversion from `string` can be called from any number of threads at once, and a parsed `Glob` never changes, so one instance can be shared across threads. Parsed patterns are cached for the process: parsing a cached pattern again allocates only the new `Glob`. Globs parsed from the same pattern share one token array, so treat `Tokens` as read-only.
+`Glob.Parse` and the implicit conversion from `string` can be called from any number of threads at once, and a parsed `Glob` never changes, so one instance can be shared across threads. Parsed patterns are cached for the process: parsing a cached pattern again allocates only the new `Glob`. Globs parsed from the same pattern share one token array. `Tokens` returns it as an `ImmutableArray<Token>`, which wraps the array without copying it and exposes no way to change it, so reading the tokens allocates nothing and cannot affect another `Glob`.
 
 ## Design Rationale: Keep `Glob` Generic
 

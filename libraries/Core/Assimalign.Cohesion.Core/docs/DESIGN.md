@@ -209,14 +209,24 @@ threads at once. A parsed `Glob` never changes, so one instance can be shared ac
   cache that kept every distinct pattern would grow for the life of the process. Clearing keeps the
   recent working set without the per-hit bookkeeping an LRU needs; a cleared pattern is parsed
   again on its next use.
-- **Globs parsed from one pattern share a token array.** `Glob.Tokens` returns that array, so
-  callers treat it as read-only.
+- **Globs parsed from one pattern share a token array, and `Glob.Tokens` cannot change it.**
+  `Tokens` returns an `ImmutableArray<Token>` that wraps the shared array without copying it
+  (`ImmutableArray<Token>.CastUp` over `ImmutableCollectionsMarshal.AsImmutableArray`), so a read
+  allocates nothing and a cached parse still allocates only the `Glob`. It used to return the
+  `Token[]` itself, so one caller's write changed every glob of that pattern until the cache next
+  cleared. A copy was rejected because it allocates on every read, the case CA1819 warns about.
+  `ReadOnlySpan<Token>` allocates nothing either, but callers cannot store it, capture it in a
+  lambda, hold it across `await` or query it with LINQ. An `IReadOnlyList<Token>` wrapper would
+  add a field to every `Glob` and allocate on first read. Only marshalling APIs such as
+  `ImmutableCollectionsMarshal.AsArray`, and reflection, still reach the array.
 
 `GlobConcurrencyTests` pins both halves. Workers parse distinct range, set, brace and wildcard
 patterns at once, re-parse earlier ones while the cache fills and clears, and check each glob's
 matches and `ToString()` round trip. The run ends once 2,000 parses have overlapped another parse,
 not after a fixed time, and fails if that never happens. A second test asserts that parsing a
-cached pattern allocates exactly one `Glob`.
+cached pattern allocates exactly one `Glob`. `GlobTokensTests` asserts that writes through
+`Tokens` throw `NotSupportedException` and leave the shared array intact, and that reading the
+tokens allocates nothing.
 
 ## AOT posture
 
