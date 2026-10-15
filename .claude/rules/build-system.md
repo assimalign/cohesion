@@ -424,12 +424,17 @@ waiting 66 to 108 minutes on average. The settings that follow from that:
   had used 56 job-minutes. `release.yml` still validates one package per leg through the action's
   `project` input.
 - **The action restores and builds once.** It writes the projects and their test projects into a
-  transient `.slnx` for `dotnet restore` and a transient traversal project for `dotnet build`, both
-  in `$RUNNER_TEMP`. The build does not go through the solution: a solution build unsets
-  `Configuration` for references outside it (`ShouldUnsetParentConfigurationAndPlatform`), so
-  they would build as Debug. The traversal's `MSBuild` task hands each project the global
-  properties `dotnet build <project> --configuration Release` would. Both cover test projects that
-  do not reference their library.
+  transient `.slnx` for `dotnet restore` and a transient traversal project in `$RUNNER_TEMP` for
+  `dotnet build`. The solution goes in `obj/` under the projects' deepest common folder, because a
+  solution restore resolves `msbuild-sdks` pins from the `global.json` nearest the solution, not
+  the project. Database.Testing's E2E fixture resolves its Cohesion SDKs only through the
+  generated `resources/Database/global.json`. The step fails if a planned project's nearest
+  `global.json` differs from the solution's. The build does not go through the solution: a
+  solution build unsets `Configuration` for references outside it
+  (`ShouldUnsetParentConfigurationAndPlatform`), so they would build as Debug. The traversal's
+  `MSBuild` task hands each project the global properties
+  `dotnet build <project> --configuration Release` would. Both cover test projects that do not
+  reference their library.
 - **Every project still reports.** The test step runs each test project in turn, continues past
   a failure, and also runs after a failed build, so a test project that did not build reports as
   failed. It writes a per-project table (result, test counts, seconds) to the job summary and an

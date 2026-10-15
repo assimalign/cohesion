@@ -93,6 +93,13 @@ runs:
       # Configuration for references outside it (ShouldUnsetParentConfigurationAndPlatform), so
       # they would build as Debug. The traversal hands every project exactly the global
       # properties `dotnet build <project> --configuration Release` would.
+      #
+      # The solution lives in obj/ under the projects' deepest common folder, not in RUNNER_TEMP:
+      # a solution restore resolves msbuild-sdks pins (NuGetSdkResolver) from the global.json
+      # nearest the solution, not the project. Database.Testing's E2E fixture pins its Cohesion
+      # SDKs through resources/Database/global.json, which Install-Local.ps1 generates, and fails
+      # to resolve them from anywhere else. The step fails if a planned project's nearest
+      # global.json differs from the solution's.
       run: |
         $hasProject = -not [string]::IsNullOrWhiteSpace($env:COHESION_PROJECT)
         $hasProjects = -not [string]::IsNullOrWhiteSpace($env:COHESION_PROJECTS)
@@ -124,9 +131,39 @@ runs:
           }
         }
 
-        $paths = @($plan.Source) + @($plan | Where-Object Tests | ForEach-Object Tests)
+        $paths = @(@($plan.Source) + @($plan | Where-Object Tests | ForEach-Object Tests) |
+          ForEach-Object { [System.IO.Path]::GetFullPath($_) })
+
+        $folder = [System.IO.Path]::GetDirectoryName($paths[0])
+        foreach ($path in $paths) {
+          $directory = [System.IO.Path]::GetDirectoryName($path)
+          while (-not "$directory$([System.IO.Path]::DirectorySeparatorChar)".StartsWith(
+              "$folder$([System.IO.Path]::DirectorySeparatorChar)", [System.StringComparison]::Ordinal)) {
+            $folder = [System.IO.Path]::GetDirectoryName($folder)
+          }
+        }
+
+        $nearestGlobalJson = {
+          param([string] $Directory)
+          for ($current = $Directory; $current; $current = [System.IO.Path]::GetDirectoryName($current)) {
+            $candidate = [System.IO.Path]::Combine($current, 'global.json')
+            if ([System.IO.File]::Exists($candidate)) {
+              return $candidate
+            }
+          }
+        }
+        $solutionDirectory = [System.IO.Path]::Combine($folder, 'obj')
+        $solutionGlobalJson = & $nearestGlobalJson $solutionDirectory
+        foreach ($path in $paths) {
+          $projectGlobalJson = & $nearestGlobalJson ([System.IO.Path]::GetDirectoryName($path))
+          if ($projectGlobalJson -ne $solutionGlobalJson) {
+            throw "$path resolves global.json '$projectGlobalJson', but a solution in $solutionDirectory resolves '$solutionGlobalJson'. Restore these projects separately."
+          }
+        }
+
         $entries = $paths | ForEach-Object { '  <Project Path="{0}" />' -f [System.Security.SecurityElement]::Escape($_) }
-        $solution = Join-Path $env:RUNNER_TEMP 'cohesion-build.slnx'
+        $null = New-Item -ItemType Directory -Path $solutionDirectory -Force
+        $solution = [System.IO.Path]::Combine($solutionDirectory, 'cohesion-build.slnx')
         Set-Content -LiteralPath $solution -Value (@('<Solution>') + $entries + @('</Solution>')) -Encoding utf8
 
         $items = $paths | ForEach-Object { '    <CohesionBuildProject Include="{0}" />' -f [System.Security.SecurityElement]::Escape($_) }
