@@ -98,6 +98,7 @@ public sealed class SqlTableReclamationTests
         using var captured = new ManualResetEventSlim();
         using var pause = new ManualResetEventSlim();
         ulong oldId;
+        ulong replacementId;
         long pages;
         await using (var engine = await Builder(strategy).BuildAsync(timeout.Token))
         {
@@ -111,7 +112,6 @@ public sealed class SqlTableReclamationTests
             {
                 if (!midBatch || Volatile.Read(ref batches) > 0)
                 {
-                    image = strategy.CaptureDurableImages();
                     captured.Set();
                     pause.Wait(token);
                 }
@@ -127,6 +127,10 @@ public sealed class SqlTableReclamationTests
             captured.Wait(timeout.Token);
             if (midBatch) { database.TableReclamation.ReclaimedPages.ShouldBe(SqlTableReclamation.BatchSize); }
             else { database.TableReclamation.ReclaimedPages.ShouldBe(0); }
+            await SeedAsync(session, "t", 1, timeout.Token);
+            replacementId = TableId(database, "t");
+            replacementId.ShouldBeGreaterThan(oldId);
+            image = strategy.CaptureDurableImages();
         }
 
         // Assert: recovery replays committed frees exactly once and preserves the retired id.
@@ -140,20 +144,20 @@ public sealed class SqlTableReclamationTests
         await using var reopened = await recovering.BuildAsync(timeout.Token);
         var recovered = await reopened.OpenDatabaseAsync("db", timeout.Token);
         await using var replacement = await recovered.CreateSessionAsync(timeout.Token);
-        recovered.Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
-        await replacement.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, payload VARCHAR(2000))", cancellationToken: timeout.Token);
-        TableId(recovered, "t").ShouldBeGreaterThan(oldId);
+        TableId(recovered, "t").ShouldBe(replacementId);
+        (await CountAsync(replacement, "t", timeout.Token)).ShouldBe(1);
         recovered.TableReclamation.ReclaimedPages.ShouldBe(0);
         resume.Set();
         await WaitDoneAsync(recovered, timeout.Token);
         recovered.DataStorage.GetOwnerPages(oldId).ShouldBeEmpty();
         recovered.CatalogStorage.GetOwnerPages(oldId).ShouldBeEmpty();
         long free = recovered.DataStorage.FreeSpaceMap.FreePageCount;
-        free.ShouldBe(recovered.DataStorage.PageManager.PageCount - 3); // two header slots and replacement's empty primary-key root
+        free.ShouldBe(recovered.DataStorage.PageManager.PageCount - 4); // two header slots, replacement's row page and primary-key root
         recovered.TableReclamation.RunBatch(timeout.Token);
         recovered.DataStorage.FreeSpaceMap.FreePageCount.ShouldBe(free);
+        await replacement.ExecuteAsync("DELETE FROM t", cancellationToken: timeout.Token);
         await FillAsync(replacement, "t", 300, timeout.Token);
-        recovered.DataStorage.PageManager.PageCount.ShouldBeLessThanOrEqualTo(pages + 1);
+        recovered.DataStorage.PageManager.PageCount.ShouldBeLessThanOrEqualTo(pages + 2);
         (await CountAsync(replacement, "t", timeout.Token)).ShouldBe(300);
         if (wire) { await ExecuteWireAsync(reopened, "SELECT * FROM t", timeout.Token); }
     }
@@ -228,6 +232,9 @@ public sealed class SqlTableReclamationTests
             table.Column(row => row.Id);
             table.Column(row => row.Payload);
         }));
+        ulong retired;
+        int ownedPages;
+        long freePages;
         await using (var engine = await Builder(strategy).BuildAsync(timeout.Token))
         {
             var database = await engine.CreateDatabaseAsync("db", timeout.Token);
@@ -239,6 +246,9 @@ public sealed class SqlTableReclamationTests
             else { await database.ApplySchemaAsync(original.Compile(), timeout.Token); }
             await using var session = await database.CreateSessionAsync(timeout.Token);
             await FillAsync(session, "t", rows, timeout.Token);
+            retired = TableId(database, "t");
+            ownedPages = database.DataStorage.GetOwnerPages(retired).Count;
+            freePages = database.DataStorage.FreeSpaceMap.FreePageCount;
             strategy = strategy.CaptureDurableImages();
         }
         using var pause = new ManualResetEventSlim();
@@ -271,6 +281,8 @@ public sealed class SqlTableReclamationTests
         // Assert
         result.Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
         result.TableReclamation.ReclaimedPages.ShouldBe(0);
+        result.DataStorage.GetOwnerPages(retired).Count.ShouldBe(ownedPages);
+        result.DataStorage.FreeSpaceMap.FreePageCount.ShouldBe(freePages);
         if (!scripted) { insideBuild.ShouldBeGreaterThan(0); }
         pause.Set();
         await WaitDoneAsync(result, timeout.Token);
