@@ -249,3 +249,34 @@ preserves those inputs locally. Existing validation guards remain in place. This
 public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
 signatures require rebuilding; the source and binary breaks are recorded in the JWT and
 DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.
+
+## Validated declaration values (#1482)
+
+The declaring package owns generated command source, command path, certificate leaf name and
+subject alternative name values. This runtime compiles its stateless `SecretStoreCommandGrammar`
+from that package's `shared/` folder, so delivery and composition use the same predicates.
+The client likewise owns the certificate reference predicate compiled here for certificate reads.
+These are source dependencies, not assembly references: COHAM001, COHRES002 and COHRES004 still
+separate the declaring, hosting and client packages. The generated values' `IsValid` methods
+forward to these shared predicates; the runtime never constructs a certificate merely to validate.
+
+Command paths exclude exact `trusted-issuers.json` and ordinal `certs/`; resource sources have one
+colon and an ASCII resource prefix. The exact `parameter:` branch preserves nonblank parameter
+names, including colons. Certificate leaf names are nonblank segments, excluding `.`, `..`, slash
+and backslash. SANs use IP parsing or the same default IDN conversion and ASCII representation
+as `SubjectAlternativeNameBuilder.AddDnsName`, including supported wildcards. Certificate references
+are exact `ca/root` or `certs/<leaf>` with a valid leaf segment. Original spelling is preserved.
+Malformed SAN strings keep the issuance path's rejected-command result; malformed JSON elements
+and blank strings keep their JSON-validation error, even though both are checked before issuance.
+
+`AddSecret` takes the root's generated `SecretStoreSeedPath`. Seed paths retain their distinct
+rule: nonblank except exact `trusted-issuers.json`; `certs/` remains permitted. The builder rejects
+`default`, and the repository validates raw seed dictionary keys with that same `IsValid`.
+
+Compared with 10.0.0-preview.1, the public builder's seed parameter changes from `string` to
+`SecretStoreSeedPath` (binary and interface-implementation source break; string calls still convert).
+Malformed raw command sources are now rejected before persistence, and whitespace-only leaf
+segments are refused consistently. Invalid declarations and client references fail at composition
+or before sending HTTP instead of failing at delivery. Valid wire payloads and storage keys retain
+their spelling and representation. The declaration and client package designs list their signature
+changes. Existing seed refusals are compatibility coverage, not a newly discovered defect.

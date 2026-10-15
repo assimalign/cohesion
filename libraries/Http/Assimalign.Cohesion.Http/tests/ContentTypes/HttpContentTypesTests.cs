@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 
@@ -173,6 +174,31 @@ public class HttpContentTypesTests
     }
 
     // ---------------------------------------------------------------- overlay tables
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpContentTypes: CreateMap rejects keys its extension lookup cannot match")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData(".tar.gz")]
+    [InlineData("tar.gz")]
+    [InlineData("a/b")]
+    [InlineData(".a/b")]
+    [InlineData("a\\b")]
+    [InlineData(".a\\b")]
+    [InlineData(".css/")]
+    public void CreateMap_UnmatchableExtension_ShouldThrowAtComposition(string? extension)
+    {
+        // Arrange
+        var mappings = new[] { new KeyValuePair<string, string>(extension!, "application/x-custom") };
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => HttpContentTypes.CreateMap(mappings));
+
+        // Assert
+        exception.ParamName.ShouldBe("additionalMappings");
+        exception.Message.ShouldContain("extension");
+    }
 
     [Fact(DisplayName = "Cohesion Test [Http] - HttpContentTypes: CreateMap overlays and overrides the defaults")]
     public void CreateMap_Overrides_ShouldOverlayAndOverrideDefaults()

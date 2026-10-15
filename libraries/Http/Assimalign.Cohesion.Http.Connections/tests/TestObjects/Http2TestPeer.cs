@@ -140,13 +140,14 @@ internal sealed class Http2TestPeer : IAsyncDisposable
     /// frame pump has stopped and aborted whatever it was going to abort — and asserts it dispatched
     /// nothing more.
     /// </summary>
-    public async Task WaitForReceiveEndAsync()
+    /// <param name="timeout">The observation watchdog, or ten seconds when omitted.</param>
+    public async Task WaitForReceiveEndAsync(TimeSpan? timeout = null)
     {
         bool dispatched;
 
         try
         {
-            dispatched = await _contexts.MoveNextAsync().AsTask().WaitAsync(_timeout);
+            dispatched = await _contexts.MoveNextAsync().AsTask().WaitAsync(timeout ?? _timeout);
         }
         catch (OperationCanceledException)
         {

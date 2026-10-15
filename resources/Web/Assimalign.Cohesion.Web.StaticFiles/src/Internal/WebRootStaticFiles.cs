@@ -21,6 +21,10 @@ internal static class WebRootStaticFiles
     /// <returns>The middleware, or <see langword="null"/>.</returns>
     public static StaticFilesMiddleware? TryCreate(IWebApplicationContext context, StaticFilesOptions options, string consumer)
     {
+        // Web-root registrations defer their snapshot until pipeline build. A captured options
+        // instance may have changed since registration; validate before opening the mount.
+        FileName[] defaultDocuments = WebApplicationStaticFilesExtensions.Validate(options);
+
         if (context.WebRootPath is not { IsEmpty: false } webRoot || !Directory.Exists(webRoot.ToString()))
         {
             StaticFilesEventSource.Log.WebRootUnavailable(context.WebRootPath, consumer);
@@ -34,7 +38,7 @@ internal static class WebRootStaticFiles
             Name = "StaticFiles",
         });
 
-        StaticFilesMiddleware middleware = new(fileSystem, options);
+        StaticFilesMiddleware middleware = new(fileSystem, options, defaultDocuments);
         StaticFilesEventSource.Log.WebRootMounted(webRoot, options.RequestPath);
         return middleware;
     }

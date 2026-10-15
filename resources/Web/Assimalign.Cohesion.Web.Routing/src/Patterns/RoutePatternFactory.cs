@@ -224,13 +224,6 @@ public static class RoutePatternFactory
     /// <returns>A new <see cref="RoutePatternLiteralSegment"/>.</returns>
     public static RoutePatternLiteralSegment LiteralPart(string content)
     {
-        ArgumentException.ThrowIfNullOrEmpty(content);
-
-        if (content.Contains('?'))
-        {
-            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.LiteralRouteSegmentInvalid, content), nameof(content));
-        }
-
         return LiteralPartCore(content);
     }
 

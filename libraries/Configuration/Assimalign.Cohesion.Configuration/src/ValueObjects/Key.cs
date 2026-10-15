@@ -174,7 +174,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     {
         return ArgumentException.ThrowIfEnumNotDefined(comparison) switch
         {
-            KeyComparison.Ordinal => _value?.GetHashCode() ?? 0,
+            KeyComparison.Ordinal => string.GetHashCode(AsSpan(), StringComparison.Ordinal),
             KeyComparison.OrdinalIgnoreCase => string.GetHashCode(AsSpan(), StringComparison.OrdinalIgnoreCase),
             KeyComparison.CurrentCulture => StringComparer.CurrentCulture.GetHashCode(_value ?? string.Empty),
             KeyComparison.CurrentCultureIgnoreCase => StringComparer.CurrentCultureIgnoreCase.GetHashCode(_value ?? string.Empty),
@@ -199,7 +199,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public override int GetHashCode()
     {
-        return _value?.GetHashCode() ?? 0;
+        return GetHashCode(KeyComparison.Ordinal);
     }
 
     /// <summary>

@@ -9,6 +9,10 @@ namespace Assimalign.Cohesion.Connections.NamedPipes;
 /// </summary>
 public sealed class NamedPipeConnectionListenerOptions
 {
+    private int _maxServerInstances = NamedPipeServerStream.MaxAllowedServerInstances;
+    private int _inputBufferSize = DefaultBufferSize;
+    private int _outputBufferSize = DefaultBufferSize;
+
     /// <summary>
     /// Gets or sets the endpoint the listener binds to. The endpoint must name a pipe on the local
     /// host (<see cref="NamedPipeEndPoint.IsLocal"/>); a server cannot be created on a remote host.
@@ -26,8 +30,23 @@ public sealed class NamedPipeConnectionListenerOptions
     /// keeps one instance waiting for the next client. Defaults to
     /// <see cref="NamedPipeServerStream.MaxAllowedServerInstances"/> (unlimited), so the connection
     /// count is bounded by the consumer, not the transport.
+    /// Accepts <c>1</c> through <c>254</c>, or <see cref="NamedPipeServerStream.MaxAllowedServerInstances"/>.
     /// </remarks>
-    public int MaxServerInstances { get; set; } = NamedPipeServerStream.MaxAllowedServerInstances;
+    /// <exception cref="ArgumentOutOfRangeException">The value is neither <c>-1</c> nor between <c>1</c> and <c>254</c>.</exception>
+    public int MaxServerInstances
+    {
+        get => _maxServerInstances;
+        set
+        {
+            if (value != NamedPipeServerStream.MaxAllowedServerInstances)
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+                ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 254);
+            }
+
+            _maxServerInstances = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets whether the pipe is created in write-through mode, so a write does not return until
@@ -66,7 +85,16 @@ public sealed class NamedPipeConnectionListenerOptions
     /// without this end actively reading, giving the pipe socket-like semantics; a value of <c>0</c>
     /// requests the operating-system default, under which a write can block until the reader drains it.
     /// </remarks>
-    public int InputBufferSize { get; set; } = DefaultBufferSize;
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public int InputBufferSize
+    {
+        get => _inputBufferSize;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _inputBufferSize = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the size, in bytes, of the outbound (server-to-client) pipe buffer.
@@ -75,7 +103,16 @@ public sealed class NamedPipeConnectionListenerOptions
     /// Defaults to <see cref="DefaultBufferSize"/>. See <see cref="InputBufferSize"/> for the effect of
     /// the buffer size on write behavior.
     /// </remarks>
-    public int OutputBufferSize { get; set; } = DefaultBufferSize;
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public int OutputBufferSize
+    {
+        get => _outputBufferSize;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _outputBufferSize = value;
+        }
+    }
 
     /// <summary>
     /// The default inbound and outbound pipe buffer size, in bytes (4&#160;KiB).

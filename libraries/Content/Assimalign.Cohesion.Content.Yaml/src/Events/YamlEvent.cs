@@ -47,8 +47,8 @@ public readonly struct YamlEvent
         int line,
         int column,
         string? value = null,
-        string? anchor = null,
-        string? tag = null,
+        YamlAnchorName? anchor = null,
+        YamlTag? tag = null,
         YamlScalarStyle scalarStyle = YamlScalarStyle.Plain,
         YamlCollectionStyle collectionStyle = YamlCollectionStyle.Block,
         bool isExplicit = false)
@@ -77,10 +77,10 @@ public readonly struct YamlEvent
     public string? Value { get; }
 
     /// <summary>Gets the anchor declared on the node, without the leading <c>&amp;</c>.</summary>
-    public string? Anchor { get; }
+    public YamlAnchorName? Anchor { get; }
 
     /// <summary>Gets the resolved tag declared on the node.</summary>
-    public string? Tag { get; }
+    public YamlTag? Tag { get; }
 
     /// <summary>Gets the scalar presentation style for <see cref="YamlEventKind.Scalar"/> events.</summary>
     public YamlScalarStyle ScalarStyle { get; }

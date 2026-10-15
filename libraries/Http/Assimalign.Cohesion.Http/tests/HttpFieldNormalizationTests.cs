@@ -129,6 +129,24 @@ public class HttpFieldNormalizationTests
         violation.ShouldContain("':protocol'");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A non-token :protocol is refused before constructing the request context")]
+    [InlineData("web socket")]
+    [InlineData("web/socket")]
+    [InlineData("web\tsocket")]
+    [InlineData("web:socket")]
+    [InlineData("web\r\nsocket")]
+    [InlineData("web\u00e9socket")]
+    public void ValidateExtendedConnect_InvalidToken_ShouldReturnViolation(string protocol)
+    {
+        // Arrange / Act
+        string? violation = HttpFieldNormalization.ValidateExtendedConnect("CONNECT", "https", "/chat", "api.test", protocol);
+
+        // Assert
+        violation.ShouldNotBeNull();
+        violation.ShouldContain(":protocol");
+        HttpFieldNormalization.IsExtendedConnect("CONNECT", protocol).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: An absent :protocol is not validated")]
     public void ValidateExtendedConnect_OnAbsentProtocol_ShouldReturnNull()
     {

@@ -51,6 +51,20 @@ Design points:
   and omitted from the typed view, because a recipient cannot act on an unknown algorithm (RFC 9530
   says to ignore unknown algorithms — not to reject the whole field).
 
+### Want-Digest integer range (#1478)
+
+`HttpWantDigestPreference` retains a primitive `long` preference, with constructor guards for
+the inclusive -999,999,999,999,999 through 999,999,999,999,999 wire range from RFC 9651 §3.3.1.
+Values outside that range throw `ArgumentOutOfRangeException` for `preference` before an instance
+can escape. The same range is already enforced by the structured-fields parser and integer
+factory; both boundary values still round-trip through `HttpWantDigestField.Create`, `Serialize`,
+and `TryParse`.
+
+This is a behavioral breaking change against 10.0.0-preview.1 on decision 15's terms: construction
+previously accepted any `long`, deferring rejection until the preference was used to create a
+want-digest field. Callers handling invalid preferences must now catch the exception at
+construction. The constructor signature and valid wire representations are unchanged.
+
 ## The algorithm registry
 
 `HttpDigestAlgorithm` models the RFC 9530 §5.2 registry as a small readonly struct keyed by the

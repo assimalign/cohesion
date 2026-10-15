@@ -1,3 +1,5 @@
+using System;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
@@ -12,9 +14,18 @@ public readonly struct HttpWantDigestPreference
     /// Initializes a new <see cref="HttpWantDigestPreference"/>.
     /// </summary>
     /// <param name="algorithm">The algorithm the preference applies to.</param>
-    /// <param name="preference">The integer preference (0 = not acceptable, higher = more preferred).</param>
+    /// <param name="preference">
+    /// The integer preference, from -999,999,999,999,999 to 999,999,999,999,999 inclusive
+    /// (0 = not acceptable, higher = more preferred).
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="preference"/> is outside the RFC 9651 &#167; 3.3.1 Integer range.
+    /// </exception>
     public HttpWantDigestPreference(HttpDigestAlgorithm algorithm, long preference)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(preference, -999_999_999_999_999L);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(preference, 999_999_999_999_999L);
+
         Algorithm = algorithm;
         Preference = preference;
     }

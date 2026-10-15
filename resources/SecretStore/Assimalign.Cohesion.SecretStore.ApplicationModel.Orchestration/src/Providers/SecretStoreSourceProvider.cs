@@ -133,7 +133,10 @@ public sealed class SecretStoreSourceProvider : IResourceSourceProvider
     /// <exception cref="ArgumentException">
     /// <see cref="ResourceSourceRequest.Store"/> is <see langword="null"/> or connects to a resource
     /// that is not a SecretStore; its control-plane address is not an HTTP(S) endpoint; its bearer
-    /// credential is blank; or <see cref="ResourceSourceRequest.Key"/> is blank.
+    /// credential is blank; or <see cref="ResourceSourceRequest.Key"/> is not exactly <c>ca/root</c>
+    /// or <c>certs/</c> followed by a nonblank leaf name containing neither <c>/</c> nor <c>\</c>
+    /// and unequal to <c>.</c> or <c>..</c>. References are case-sensitive; invalid references
+    /// are rejected locally before any HTTP request is sent.
     /// </exception>
     /// <exception cref="NotSupportedException">
     /// <see cref="ResourceSourceRequest.Kind"/> is not <see cref="ResourceMountKind.Secret"/>.

@@ -331,6 +331,12 @@ public abstract partial class ApplicationGateway
     private async ValueTask<ResourceMountInput> ResolveCommandSourceAsync(
         ModelResource item, string commandId, string source, ResourceMountKind kind, CancellationToken cancellationToken)
     {
+        if (!ResourceMountSource.TryCreate(source, out ResourceMountSource expression))
+        {
+            return ResourceMountInput.Unresolved(source,
+                $"Command '{commandId}' source must use parameter:<name>, literal:<value>, or <source>:<key>.");
+        }
+
         IApplicationResourceStateManager state = GetApplicationState(item.Model);
         var context = new ResourceControlContext(item.Descriptor, item.Model, state,
             ResolveDependencies(item.Descriptor), _artifacts[item.Key],
@@ -338,7 +344,7 @@ public abstract partial class ApplicationGateway
         return await ResolveMountSourceAsync(
                 context,
                 item.Descriptor.Plan!,
-                new MountBinding("command:" + commandId, "/", kind, source),
+                new MountBinding("command:" + commandId, "/", kind, expression),
                 cancellationToken)
             .ConfigureAwait(false);
     }

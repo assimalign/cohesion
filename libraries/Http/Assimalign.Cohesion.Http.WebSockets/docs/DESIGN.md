@@ -195,6 +195,13 @@ ASP.NET Core has, and the reason the policy layer's drain close is tied to the e
 
 ## Subprotocols
 
+`HttpWebSocketAcceptOptions.SubProtocol` refuses a non-null value that is not an RFC 9110
+token at assignment, using `HttpFieldName.IsValid` and an `ArgumentException` (#1477).
+`null` selects none; a valid token retains its case and is checked against the client's offers
+at accept time. Invalid selections can no longer survive composition or policy copying.
+This is a behavioral break from the intervening branch; this options type did not ship in
+10.0.0-preview.1. It adds no public member or value type.
+
 The client's offer is exposed as `RequestedProtocols`, in its order of preference; the application
 chooses. No helper picks for it: the right order (the client's preference or the server's) is the
 application's decision, and a one-line loop over `RequestedProtocols` expresses either.

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     Microsoft ResX Schema
@@ -134,5 +134,11 @@
   </data>
   <data name="OutputCachePolicyNotRegistered" xml:space="preserve">
     <value>No output cache policy named &apos;{0}&apos; has been registered. Register it with options.AddPolicy(name, configure) in UseOutputCache.</value>
+  </data>
+  <data name="CacheFieldNameInvalid" xml:space="preserve">
+    <value>A cache header name must be a non-empty RFC 9110 field-name token.</value>
+  </data>
+  <data name="CacheFieldValueInvalid" xml:space="preserve">
+    <value>A present cache header value must contain initialized HTTP field content.</value>
   </data>
 </root>

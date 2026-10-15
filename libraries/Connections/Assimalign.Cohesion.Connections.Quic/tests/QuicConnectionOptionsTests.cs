@@ -13,6 +13,108 @@ namespace Assimalign.Cohesion.Connections.Quic.Tests;
 [SupportedOSPlatform("macos")]
 public class QuicConnectionOptionsTests
 {
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - Backlog: Negative assignments should be rejected before binding")]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    public void Backlog_WhenNegative_ShouldThrowAndPreservePreviousValue(int value)
+    {
+        // Arrange
+        QuicConnectionListenerOptions options = new() { Backlog = 32 };
+
+        // Act
+        ArgumentOutOfRangeException exception = Should.Throw<ArgumentOutOfRangeException>(
+            () => options.Backlog = value);
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.ActualValue.ShouldBe(value);
+        options.Backlog.ShouldBe(32);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - Backlog: Nonnegative assignments should preserve zero and the full integer range")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(int.MaxValue)]
+    public void Backlog_WhenNonnegative_ShouldPreserveValue(int value)
+    {
+        // Arrange
+        QuicConnectionListenerOptions options = new();
+
+        // Act
+        options.Backlog = value;
+
+        // Assert
+        options.Backlog.ShouldBe(value);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - MaxBidirectionalStreamCount: Out-of-range assignments should be rejected before a handshake")]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    [InlineData(65536)]
+    [InlineData(int.MaxValue)]
+    public void MaxBidirectionalStreamCount_WhenOutsideRuntimeRange_ShouldThrowAndPreservePreviousValue(int value)
+    {
+        // Arrange
+        QuicConnectionListenerOptions options = new() { MaxBidirectionalStreamCount = 7 };
+
+        // Act
+        ArgumentOutOfRangeException exception = Should.Throw<ArgumentOutOfRangeException>(
+            () => options.MaxBidirectionalStreamCount = value);
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.ActualValue.ShouldBe(value);
+        options.MaxBidirectionalStreamCount.ShouldBe(7);
+        options.CreateConnectionOptions(options.MaxBidirectionalStreamCount).MaxInboundBidirectionalStreams.ShouldBe(7);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - MaxUnidirectionalStreamCount: Out-of-range assignments should be rejected before a handshake")]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    [InlineData(65536)]
+    [InlineData(int.MaxValue)]
+    public void MaxUnidirectionalStreamCount_WhenOutsideRuntimeRange_ShouldThrowAndPreservePreviousValue(int value)
+    {
+        // Arrange
+        QuicConnectionListenerOptions options = new() { MaxUnidirectionalStreamCount = 7 };
+
+        // Act
+        ArgumentOutOfRangeException exception = Should.Throw<ArgumentOutOfRangeException>(
+            () => options.MaxUnidirectionalStreamCount = value);
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.ActualValue.ShouldBe(value);
+        options.MaxUnidirectionalStreamCount.ShouldBe(7);
+        options.CreateConnectionOptions(options.MaxBidirectionalStreamCount).MaxInboundUnidirectionalStreams.ShouldBe(7);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - Inbound stream counts: Runtime boundary values should flow to handshake options")]
+    [InlineData(0, 0, 1)]
+    [InlineData(0, 65535, 65535)]
+    [InlineData(1, 0, 0)]
+    [InlineData(65535, 0, 0)]
+    [InlineData(65535, 65535, 65535)]
+    public void CreateConnectionOptions_WithValidStreamCounts_ShouldPreserveAllowancesAndIdleCloseFallback(
+        int bidirectional, int unidirectional, int expectedUnidirectional)
+    {
+        // Arrange
+        QuicConnectionListenerOptions options = new()
+        {
+            MaxBidirectionalStreamCount = bidirectional,
+            MaxUnidirectionalStreamCount = unidirectional
+        };
+
+        // Act
+        QuicServerConnectionOptions connectionOptions = options.CreateConnectionOptions(options.MaxBidirectionalStreamCount);
+
+        // Assert
+        options.MaxBidirectionalStreamCount.ShouldBe(bidirectional);
+        options.MaxUnidirectionalStreamCount.ShouldBe(unidirectional);
+        connectionOptions.MaxInboundBidirectionalStreams.ShouldBe(bidirectional);
+        connectionOptions.MaxInboundUnidirectionalStreams.ShouldBe(expectedUnidirectional);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Handshake timeout: Listener options should preserve the System.Net.Quic ten-second default")]
     public void HandshakeTimeout_OnDefaultListenerOptions_ShouldMatchQuicDefault()
     {

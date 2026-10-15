@@ -22,6 +22,15 @@ key ring, and pluggable persistence — so consumers stop hand-rolling key manag
 private constructors. Their `Create` methods return the concrete type; application code can
 continue to use `IDataProtectionProvider` and `IKeyRepository` contracts.
 
+Custom repositories receive `KeyDocument` values with a validated `KeyDocumentName`.
+Valid strings convert implicitly (`new KeyDocument("key-123", content)`); invalid names are
+refused before construction. Use `KeyDocumentName.TryCreate(input, out var name)` when
+invalid input should return a failure without throwing. The rule retains the current
+platform's file-name restrictions, rejects empty/rooted names and any `..` substring, and
+compares names ordinally with case preserved. `default(KeyDocumentName)` is not a document
+name and is refused by the constructor. When using the file-system repository, foreign files
+with invalid document names are skipped during loading.
+
 ## Quick use
 
 ```csharp

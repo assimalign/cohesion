@@ -66,6 +66,8 @@ internal static partial class AmqpEncoding
 
     internal static byte[] EncodeFrame(AmqpFrame frame, AmqpFrameType frameType, uint maxFrameSize)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxFrameSize, 512u);
+
         ArrayBufferWriter<byte> bodyWriter = new();
 
         WritePerformative(bodyWriter, frame.Performative);
@@ -374,6 +376,12 @@ internal static partial class AmqpEncoding
         if (descriptor is not ulong descriptorCode)
         {
             throw new AmqpProtocolException("AMQP performative descriptors must be numeric.");
+        }
+
+        if (descriptorCode == OpenDescriptor && frameType == AmqpFrameType.Amqp &&
+            AsUIntNullable(GetField(fields, 2)) is uint maxFrameSize && maxFrameSize < 512u)
+        {
+            throw new AmqpProtocolException(ErrorMessages.FrameSizeInvalid);
         }
 
         return descriptorCode switch

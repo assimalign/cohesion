@@ -15,6 +15,9 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Security.DataProtection;
 
+using Assimalign.Cohesion.ApplicationModel.Internal;
+using Assimalign.Cohesion.SecretStore.Client.Internal;
+
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 internal sealed class CertificateAuthorityManager : IDisposable
@@ -174,7 +177,10 @@ internal sealed class CertificateAuthorityManager : IDisposable
         IReadOnlyList<string>? subjectAlternativeNames,
         CancellationToken cancellationToken)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (!SecretStoreCertificateReferenceGrammar.IsValid(name))
+        {
+            throw new ArgumentException(ErrorMessages.CertificateReferenceInvalid, nameof(name));
+        }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -752,7 +758,10 @@ internal sealed class CertificateAuthorityManager : IDisposable
         var names = new SubjectAlternativeNameBuilder();
         foreach (string value in values.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal))
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(value);
+            if (!SecretStoreCommandGrammar.IsValidSubjectAlternativeName(value))
+            {
+                throw new ArgumentException(ErrorMessages.AlternativeNameInvalid, nameof(values));
+            }
             if (IPAddress.TryParse(value, out IPAddress? address)) { names.AddIpAddress(address); }
             else { names.AddDnsName(value); }
         }
@@ -1049,11 +1058,11 @@ internal sealed class CertificateAuthorityManager : IDisposable
 
     private static string NormalizeLeafName(string name)
     {
-        if (!name.StartsWith(CertificatePrefix, StringComparison.Ordinal) ||
-            name.Length == CertificatePrefix.Length)
+        if (!SecretStoreCertificateReferenceGrammar.IsValid(name) ||
+            !name.StartsWith(CertificatePrefix, StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                "Certificate names must use the 'certs/<name>' namespace.",
+                ErrorMessages.CertificateReferenceInvalid,
                 nameof(name));
         }
 
@@ -1064,11 +1073,9 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 "Certificate='public' uses ACME or another public CA and is not implemented by this design item.");
         }
 
-        if (leafName.Contains('/', StringComparison.Ordinal) ||
-            leafName.Contains('\\', StringComparison.Ordinal) ||
-            leafName is "." or "..")
+        if (!SecretStoreCommandGrammar.IsValidCertificateName(leafName))
         {
-            throw new ArgumentException("A certificate leaf name must be one path segment.", nameof(name));
+            throw new ArgumentException(ErrorMessages.CertificateNameInvalid, nameof(name));
         }
 
         return leafName;

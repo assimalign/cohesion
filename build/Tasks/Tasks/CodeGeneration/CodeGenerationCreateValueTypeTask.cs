@@ -107,6 +107,8 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         context.HasImplicitOperators = implicitOperators;
         valid &= ReadBoolean(item, "ObjectHasIsValidMethod", out bool validation);
         context.HasValidation = validation;
+        valid &= ReadBoolean(item, "ObjectHasCustomToString", out bool customToString);
+        context.HasCustomToString = customToString;
         valid &= ReadChoice(item, "ObjectComparison", "COHVT006", ObjectComparison.Ordinal, out ObjectComparison comparison);
         context.Comparison = comparison.ToString();
         if (!string.IsNullOrEmpty(item.GetMetadata("ObjectComparison")) && runtimeType != ObjectRuntimeType.String)
@@ -170,6 +172,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         public bool IsClass { get; set; }
         public bool HasValidation { get; set; }
         public bool HasImplicitOperators { get; set; }
+        public bool HasCustomToString { get; set; }
         public bool IsString => RuntimeType == ObjectRuntimeType.String;
         public string NullableName => Name + (IsClass ? "?" : "");
         public string Type => RuntimeType == ObjectRuntimeType.Guid || RuntimeType == ObjectRuntimeType.Ulid
@@ -194,7 +197,10 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         builder.AppendLine();
         builder.AppendLine("/// <summary>Represents a strongly typed " + context.Type + " value.</summary>");
         builder.AppendLine("[global::System.Text.Json.Serialization.JsonConverter(typeof(" + context.Name + "JsonConverter))]");
-        builder.AppendLine("[global::System.Diagnostics.DebuggerDisplay(\"{Value}\")]");
+        if (!context.HasCustomToString)
+        {
+            builder.AppendLine("[global::System.Diagnostics.DebuggerDisplay(\"{Value}\")]");
+        }
         builder.AppendLine(context.Access + (context.IsClass ? "sealed partial class " : "readonly partial struct ") + context.Name + " :");
         builder.AppendTabbedLine(1, $$"""
             global::System.Numerics.IEqualityOperators<{{context.Name}}, {{context.Name}}, bool>,
@@ -302,11 +308,16 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 
             /// <inheritdoc/>
             public override int GetHashCode() => {{hash}};
-
-            /// <summary>Returns the value's text, or an empty string for a default string value.</summary>
-            /// <returns>The non-null textual representation.</returns>
-            public override string ToString() => {{display}};
             """);
+        if (!context.HasCustomToString)
+        {
+            builder.AppendTabbedLine(1, $$"""
+
+                /// <summary>Returns the value's text, or an empty string for a default string value.</summary>
+                /// <returns>The non-null textual representation.</returns>
+                public override string ToString() => {{display}};
+                """);
+        }
     }
 
     private static void GenerateOperators(StringBuilder builder, ValueTypeContext context)

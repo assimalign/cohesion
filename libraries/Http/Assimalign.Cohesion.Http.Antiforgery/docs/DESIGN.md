@@ -284,3 +284,15 @@ Formatted diagnostics use `string.Format(CultureInfo.CurrentCulture, ErrorMessag
 The invariant messages, exception types, error codes and existing input-redaction rules stay
 unchanged; this introduces no public API or breaking behavior against 10.0.0-preview.1.
 EventSource templates, log messages and HTTP response bodies keep their existing owners.
+
+## Configured header names (#1476)
+
+`HttpAntiforgeryOptions.HeaderName` is an `HttpFieldName`: its generated conversion validates
+RFC 9110 section 5.1 token syntax once at assignment, and the setter rejects `default`, including
+mutations after the service has been created. Pseudo-headers are refused. Request lookup still uses
+`HttpHeaderKey` without adding validation to the request parsing path.
+
+**Breaking from 10.0.0-preview.1:** `HeaderName` changes from `string` to `HttpFieldName`.
+Malformed and absent names now fail at configuration instead of never matching a request header.
+String assignments continue through the implicit conversion; use `.Value` when a header-key API
+needs the configured name. The token-set output remains a string.

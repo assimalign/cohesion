@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 
 namespace Assimalign.Cohesion.Content.Yaml.Internal;
@@ -80,7 +81,7 @@ internal sealed class YamlEventParser
         }
         else if (hasDirectives)
         {
-            throw Error("Directives must be followed by a '---' document start marker.");
+            throw Error(ErrorMessages.DocumentStartMissing);
         }
 
         Emit(new YamlEvent(YamlEventKind.DocumentStart, _line, Column, isExplicit: explicitStart));
@@ -121,14 +122,14 @@ internal sealed class YamlEventParser
         {
             if (sawYamlDirective)
             {
-                throw Error("Only one %YAML directive is allowed per document.");
+                throw Error(ErrorMessages.YamlDirectiveDuplicate);
             }
 
             sawYamlDirective = true;
             var version = ReadWhile(static c => c is not ' ' and not '\t' and not '\n' and not '#');
             if (version is not ("1.1" or "1.2"))
             {
-                throw Error($"Unsupported YAML version '{version}'; this parser supports the 1.2 line.");
+                throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.YamlVersionUnsupported, version));
             }
         }
         else if (name == "TAG")
@@ -138,7 +139,7 @@ internal sealed class YamlEventParser
             var prefix = ReadWhile(static c => c is not ' ' and not '\t' and not '\n' and not '#');
             if (handle.Length == 0 || prefix.Length == 0)
             {
-                throw Error("A %TAG directive requires a handle and a prefix.");
+                throw Error(ErrorMessages.TagDirectiveIncomplete);
             }
 
             _tagHandles ??= [];
@@ -234,7 +235,7 @@ internal sealed class YamlEventParser
             {
                 if (!singleLine)
                 {
-                    throw Error("A mapping key must not span multiple lines.");
+                    throw Error(ErrorMessages.MappingKeyMultiline);
                 }
 
                 var startIndex = _events.Count;
@@ -256,7 +257,7 @@ internal sealed class YamlEventParser
             var (firstLine, endedAtColon) = ScanPlainFirstLine(inFlow: false);
             if (firstLine.Length == 0 && !endedAtColon)
             {
-                throw Error($"Unexpected character '{Peek()}'.");
+                throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CharacterUnexpected, Peek()));
             }
 
             if (endedAtColon)
@@ -361,7 +362,7 @@ internal sealed class YamlEventParser
             SkipSpacesAndTabs();
             if (Peek() != ':' || !IsSpaceLikeOrEnd(Peek(1)))
             {
-                throw Error("Expected ':' after a flow-collection mapping key.");
+                throw Error(ErrorMessages.FlowCollectionKeySeparatorMissing);
             }
 
             Advance();
@@ -376,13 +377,13 @@ internal sealed class YamlEventParser
                 : ScanSingleQuoted(column, ref singleLine);
             if (!singleLine)
             {
-                throw Error("A mapping key must not span multiple lines.");
+                throw Error(ErrorMessages.MappingKeyMultiline);
             }
 
             SkipSpacesAndTabs();
             if (Peek() != ':' || !IsSpaceLikeOrEnd(Peek(1)))
             {
-                throw Error("Expected ':' after a quoted mapping key.");
+                throw Error(ErrorMessages.QuotedKeySeparatorMissing);
             }
 
             Emit(new YamlEvent(
@@ -442,7 +443,7 @@ internal sealed class YamlEventParser
 
         if (Peek() == '-' && IsSpaceLikeOrEnd(Peek(1)))
         {
-            throw Error("A block sequence entry is not allowed on the same line as a mapping key.");
+            throw Error(ErrorMessages.SequenceEntryUnexpected);
         }
 
         ParseInlineValue(keyColumn);
@@ -533,7 +534,7 @@ internal sealed class YamlEventParser
             {
                 if (!singleLine)
                 {
-                    throw Error("A mapping key must not span multiple lines.");
+                    throw Error(ErrorMessages.MappingKeyMultiline);
                 }
 
                 var startIndex = _events.Count;
@@ -570,7 +571,7 @@ internal sealed class YamlEventParser
     }
 
     /// <summary>Parses a block node whose anchor/tag properties were consumed on an earlier line.</summary>
-    private void ParsePropertiedBlockNode(int minIndent, string? anchor, string? tag)
+    private void ParsePropertiedBlockNode(int minIndent, YamlAnchorName? anchor, YamlTag? tag)
     {
         var column = Column;
         var c = Peek();
@@ -609,7 +610,7 @@ internal sealed class YamlEventParser
         }
     }
 
-    private void ParseBlockSequence(int column, string? anchor, string? tag)
+    private void ParseBlockSequence(int column, YamlAnchorName? anchor, YamlTag? tag)
     {
         Emit(new YamlEvent(YamlEventKind.SequenceStart, _line, column + 1, anchor: anchor, tag: tag));
 
@@ -655,7 +656,7 @@ internal sealed class YamlEventParser
 
     // ------------------------------------------------------------ flow nodes
 
-    private void ParseFlowNode(string? anchor, string? tag)
+    private void ParseFlowNode(YamlAnchorName? anchor, YamlTag? tag)
     {
         var c = Peek();
         if (c == '[')
@@ -672,7 +673,7 @@ internal sealed class YamlEventParser
         }
     }
 
-    private void ParseFlowSequence(string? anchor, string? tag)
+    private void ParseFlowSequence(YamlAnchorName? anchor, YamlTag? tag)
     {
         Emit(new YamlEvent(YamlEventKind.SequenceStart, _line, Column + 1, anchor: anchor, tag: tag, collectionStyle: YamlCollectionStyle.Flow));
         Advance(); // '['
@@ -682,7 +683,7 @@ internal sealed class YamlEventParser
             SkipFlowSeparation();
             if (AtEnd)
             {
-                throw Error("Unterminated flow sequence.");
+                throw Error(ErrorMessages.FlowSequenceUnterminated);
             }
 
             if (Peek() == ']')
@@ -706,7 +707,7 @@ internal sealed class YamlEventParser
                 break;
             }
 
-            throw Error("Expected ',' or ']' in a flow sequence.");
+            throw Error(ErrorMessages.FlowSequenceSeparatorMissing);
         }
 
         Emit(new YamlEvent(YamlEventKind.SequenceEnd, _line, Column + 1, collectionStyle: YamlCollectionStyle.Flow));
@@ -741,7 +742,7 @@ internal sealed class YamlEventParser
         }
     }
 
-    private void ParseFlowMapping(string? anchor, string? tag)
+    private void ParseFlowMapping(YamlAnchorName? anchor, YamlTag? tag)
     {
         Emit(new YamlEvent(YamlEventKind.MappingStart, _line, Column + 1, anchor: anchor, tag: tag, collectionStyle: YamlCollectionStyle.Flow));
         Advance(); // '{'
@@ -751,7 +752,7 @@ internal sealed class YamlEventParser
             SkipFlowSeparation();
             if (AtEnd)
             {
-                throw Error("Unterminated flow mapping.");
+                throw Error(ErrorMessages.FlowMappingUnterminated);
             }
 
             if (Peek() == '}')
@@ -812,13 +813,13 @@ internal sealed class YamlEventParser
                 break;
             }
 
-            throw Error("Expected ',' or '}' in a flow mapping.");
+            throw Error(ErrorMessages.FlowMappingSeparatorMissing);
         }
 
         Emit(new YamlEvent(YamlEventKind.MappingEnd, _line, Column + 1, collectionStyle: YamlCollectionStyle.Flow));
     }
 
-    private void ParseFlowScalarOrAlias(string? anchor, string? tag)
+    private void ParseFlowScalarOrAlias(YamlAnchorName? anchor, YamlTag? tag)
     {
         var c = Peek();
         var line = _line;
@@ -852,7 +853,7 @@ internal sealed class YamlEventParser
         var (text, _) = ScanPlainFirstLine(inFlow: true);
         if (text.Length == 0)
         {
-            throw Error($"Unexpected character '{Peek()}' in flow context.");
+            throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FlowCharacterUnexpected, Peek()));
         }
 
         // Multi-line plain scalars fold in flow context as well.
@@ -1007,7 +1008,7 @@ internal sealed class YamlEventParser
         {
             if (AtEnd)
             {
-                throw Error("Unterminated double-quoted scalar.");
+                throw Error(ErrorMessages.DoubleQuotedScalarUnterminated);
             }
 
             var c = Peek();
@@ -1023,7 +1024,7 @@ internal sealed class YamlEventParser
                 Advance();
                 if (AtEnd)
                 {
-                    throw Error("Unterminated escape sequence.");
+                    throw Error(ErrorMessages.EscapeSequenceUnterminated);
                 }
 
                 var escape = Peek();
@@ -1095,7 +1096,7 @@ internal sealed class YamlEventParser
             'x' => ReadHexEscape(2),
             'u' => ReadHexEscape(4),
             'U' => ReadHexEscape(8),
-            _ => throw Error($"Unknown escape sequence '\\{c}'.")
+            _ => throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EscapeSequenceUnknown, c))
         };
     }
 
@@ -1106,7 +1107,7 @@ internal sealed class YamlEventParser
         {
             if (AtEnd || !char.IsAsciiHexDigit(Peek()))
             {
-                throw Error("Invalid hexadecimal escape sequence.");
+                throw Error(ErrorMessages.HexEscapeInvalid);
             }
 
             value = (value << 4) + Convert.ToInt32(Peek().ToString(), 16);
@@ -1117,7 +1118,7 @@ internal sealed class YamlEventParser
         // scope surfaces them as a replacement pair through string.Append below when needed.
         if (value > char.MaxValue)
         {
-            throw Error("Escape sequences beyond U+FFFF are not supported in this parser revision.");
+            throw Error(ErrorMessages.EscapeCodePointUnsupported);
         }
 
         return (char)value;
@@ -1132,7 +1133,7 @@ internal sealed class YamlEventParser
         {
             if (AtEnd)
             {
-                throw Error("Unterminated single-quoted scalar.");
+                throw Error(ErrorMessages.SingleQuotedScalarUnterminated);
             }
 
             var c = Peek();
@@ -1178,7 +1179,7 @@ internal sealed class YamlEventParser
         }
     }
 
-    private void ParseBlockScalar(int minIndent, bool folded, string? anchor, string? tag)
+    private void ParseBlockScalar(int minIndent, bool folded, YamlAnchorName? anchor, YamlTag? tag)
     {
         var line = _line;
         var startColumn = Column;
@@ -1214,7 +1215,7 @@ internal sealed class YamlEventParser
         }
         else if (!AtEnd)
         {
-            throw Error("Unexpected content after a block scalar header.");
+            throw Error(ErrorMessages.BlockScalarHeaderInvalid);
         }
 
         var contentIndent = explicitIndent > 0 ? minIndent + 1 + (explicitIndent - 1) : -1;
@@ -1350,7 +1351,7 @@ internal sealed class YamlEventParser
 
     // -------------------------------------------------------------- properties
 
-    private (string? Anchor, string? Tag, bool HadProperties) ParseNodeProperties(int minIndent)
+    private (YamlAnchorName? Anchor, YamlTag? Tag, bool HadProperties) ParseNodeProperties(int minIndent)
     {
         var (anchor, tag, had) = ParseInlineProperties();
 
@@ -1368,10 +1369,10 @@ internal sealed class YamlEventParser
         return (anchor, tag, had);
     }
 
-    private (string? Anchor, string? Tag, bool HadProperties) ParseInlineProperties()
+    private (YamlAnchorName? Anchor, YamlTag? Tag, bool HadProperties) ParseInlineProperties()
     {
-        string? anchor = null;
-        string? tag = null;
+        YamlAnchorName? anchor = null;
+        YamlTag? tag = null;
         var had = false;
 
         while (!AtEnd)
@@ -1381,10 +1382,6 @@ internal sealed class YamlEventParser
             {
                 Advance();
                 anchor = ReadAnchorName();
-                if (anchor.Length == 0)
-                {
-                    throw Error("An anchor requires a name.");
-                }
 
                 had = true;
                 SkipSpacesAndTabs();
@@ -1404,7 +1401,7 @@ internal sealed class YamlEventParser
         return (anchor, tag, had);
     }
 
-    private string ReadAnchorName()
+    private YamlAnchorName ReadAnchorName()
     {
         var builder = new StringBuilder();
         while (!AtEnd)
@@ -1424,15 +1421,25 @@ internal sealed class YamlEventParser
             Advance();
         }
 
-        if (builder.Length == 0)
+        if (!YamlAnchorName.TryCreate(builder.ToString(), out var name))
         {
-            throw Error("An anchor or alias requires a name.");
+            throw Error(ErrorMessages.AnchorNameInvalid);
         }
 
-        return builder.ToString();
+        return name;
     }
 
-    private string ReadTag()
+    private YamlTag ReadTag()
+    {
+        if (!YamlTag.TryCreate(ReadTagValue(), out var tag))
+        {
+            throw Error(ErrorMessages.TagInvalid);
+        }
+
+        return tag;
+    }
+
+    private string ReadTagValue()
     {
         Advance(); // '!'
 
@@ -1442,7 +1449,7 @@ internal sealed class YamlEventParser
             var uri = ReadWhile(static c => c is not '>' and not '\n');
             if (AtEnd || Peek() != '>')
             {
-                throw Error("Unterminated verbatim tag.");
+                throw Error(ErrorMessages.VerbatimTagUnterminated);
             }
 
             Advance();
@@ -1469,7 +1476,7 @@ internal sealed class YamlEventParser
             var handle = "!" + token[..(separator + 1)];
             if (_tagHandles is null || !_tagHandles.TryGetValue(handle, out var prefix))
             {
-                throw Error($"Unknown tag handle '{handle}'.");
+                throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TagHandleUnknown, handle));
             }
 
             return prefix + token[(separator + 1)..];
@@ -1611,7 +1618,7 @@ internal sealed class YamlEventParser
         SkipSpacesAndTabs();
         if (!AtEnd && Peek() != '\n' && Peek() != '#')
         {
-            throw Error($"Unexpected content '{Peek()}' after a node.");
+            throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.NodeTrailingContent, Peek()));
         }
     }
 
@@ -1670,7 +1677,7 @@ internal sealed class YamlEventParser
 
     private void Emit(YamlEvent yamlEvent) => _events.Add(yamlEvent);
 
-    private void EmitNullScalar(string? anchor, string? tag) =>
+    private void EmitNullScalar(YamlAnchorName? anchor, YamlTag? tag) =>
         Emit(new YamlEvent(YamlEventKind.Scalar, _line, Column + 1, value: null, anchor: anchor, tag: tag));
 
     private YamlException Error(string message) => new(message, _line, Column + 1);

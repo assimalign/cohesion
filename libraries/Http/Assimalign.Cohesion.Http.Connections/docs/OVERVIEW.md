@@ -37,6 +37,12 @@ sequentially; HTTP/2 and HTTP/3 permit concurrent exchanges. Web applications no
 `Web.Hosting` own this lifecycle. Per-version callbacks configure limits; shared policies and
 interceptors live on `HttpConnectionListenerOptions`.
 
+For HTTP/3, `QPack.MaxTableCapacity` and `QPack.MaxBlockedStreams` accept values
+from 0 through 2^62 - 1. Assigning a value outside that wire range throws
+`ArgumentOutOfRangeException` immediately. Capacity 0 keeps the default static-only
+profile; a positive capacity enables dynamic decoding. See
+[QPACK configuration](DESIGN.md#dynamic-table-opt-in) for the wire limits.
+
 Applications may assign any status code from 100 through 599. An unregistered
 final code such as 299 is sent with an empty HTTP/1.1 reason phrase; HTTP/2 and
 HTTP/3 carry only its digits in `:status`. Codes from 100 through 199 belong to
@@ -67,3 +73,9 @@ with the Web host.
 HTTP connections implement `IConnection` and expose their single `Protocol` and the wrapped
 transport's `Features`. Await `listener.BindAsync(token)` before reading its `EndPoints`;
 `AcceptAsync(token)` yields a connection and adds it to `Connections` until it closes.
+
+## Alternative-service authority
+
+`AdvertiseAltService` accepts an optional `Authority`, for example `"alt.example:443"`.
+Null or empty derives the port from the HTTP/3 listener. An authority containing
+controls, spaces or tabs is rejected at assignment, before binding.

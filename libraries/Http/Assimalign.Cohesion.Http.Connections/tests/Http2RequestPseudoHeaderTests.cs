@@ -98,6 +98,22 @@ public class Http2RequestPseudoHeaderTests
         await AssertResetBeforeDispatchAsync(peer, next);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: A non-token protocol resets only its stream")]
+    [InlineData("web socket")]
+    [InlineData("websocket/1")]
+    public async Task ReceiveAsync_OnNonTokenProtocol_ShouldResetStreamWithProtocolError(string protocol)
+    {
+        // Arrange
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        (string Name, string Value)[] fields = Http2TestPeer.Request("CONNECT", "/chat", (":protocol", protocol));
+
+        // Act
+        IHttpContext next = await SendMalformedThenValidAsync(peer, fields);
+
+        // Assert
+        await AssertResetBeforeDispatchAsync(peer, next);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: A :protocol on a request other than CONNECT should reset only its stream")]
     public async Task ReceiveAsync_OnProtocolWithoutConnect_ShouldResetStreamWithProtocolError()
     {

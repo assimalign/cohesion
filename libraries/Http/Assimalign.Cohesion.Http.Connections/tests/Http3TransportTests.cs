@@ -254,7 +254,14 @@ public class Http3TransportTests
         using CancellationTokenRegistration registration = reserved.ConnectionClosed.Register(() => stopped.TrySetResult());
 
         // Act — the reserved stream, then a request on the same connection.
-        await reserved.Output.WriteAsync(new byte[] { 0x21, 0x00, 0x00 });
+        try
+        {
+            await reserved.Output.WriteAsync(new byte[] { 0x21, 0x00, 0x00 });
+        }
+        catch (ConnectionResetException exception) when (exception.ApplicationErrorCode == (long)Http3ErrorCode.StreamCreationError)
+        {
+            // The server can stop this reserved stream before its flush completes.
+        }
 
         IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/after", "https", "a"));
@@ -645,6 +652,37 @@ public class Http3TransportTests
         bool dispatched = await enumerator.MoveNextAsync();
 
         // Assert — the malformed stream never became an exchange; the sibling was the first dispatched.
+        dispatched.ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/ok");
+        malformed.AbortReason.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.MessageError);
+        connection.State.ShouldBe(ConnectionState.Open);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3: A non-token protocol resets only its stream")]
+    [InlineData("web socket")]
+    [InlineData("websocket/1")]
+    public async Task Http3_OnNonTokenProtocol_ShouldResetStreamWithMessageErrorAndServeOthers(string protocol)
+    {
+        // Arrange
+        TestConnection malformed = new(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "CONNECT"),
+            (":protocol", protocol),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test")));
+        TestConnection sibling = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ok", "https", "a"));
+        TestMultiplexedConnection connection = new(malformed, sibling);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext context = await (await listener.AcceptAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
+
+        // Act
+        bool dispatched = await enumerator.MoveNextAsync();
+
+        // Assert
         dispatched.ShouldBeTrue();
         enumerator.Current.Request.Path.Value.ShouldBe("/ok");
         malformed.AbortReason.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.MessageError);

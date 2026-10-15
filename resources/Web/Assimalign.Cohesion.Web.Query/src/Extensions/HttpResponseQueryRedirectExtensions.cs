@@ -26,6 +26,16 @@ using Assimalign.Cohesion.Http;
 /// </remarks>
 public static class HttpResponseQueryRedirectExtensions
 {
+    private static void ValidateLocation(HttpFieldValue location)
+    {
+        if (string.IsNullOrEmpty(location.Value)
+            || location.Value.AsSpan().ContainsAny(' ', '\t')
+            || location.Value.AsSpan().ContainsAnyInRange('\u0080', '\u009f'))
+        {
+            throw new ArgumentException(ErrorMessages.RedirectLocationInvalid, nameof(location));
+        }
+    }
+
     extension(IHttpResponse response)
     {
         /// <summary>
@@ -35,15 +45,15 @@ public static class HttpResponseQueryRedirectExtensions
         /// </summary>
         /// <param name="location">The redirect target — an absolute URI or a relative reference, emitted as the <c>Location</c> field.</param>
         /// <param name="permanent"><see langword="true"/> to emit <c>308</c>; otherwise <c>307</c>.</param>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="response"/> or <paramref name="location"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">Thrown when <paramref name="location"/> is empty.</exception>
-        public void RedirectQuery(string location, bool permanent = false)
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="response"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="location"/> is empty, default, or contains a control character or space.</exception>
+        public void RedirectQuery(HttpFieldValue location, bool permanent = false)
         {
             ArgumentNullException.ThrowIfNull(response);
-            ArgumentException.ThrowIfNullOrEmpty(location);
+            ValidateLocation(location);
 
             response.StatusCode = permanent ? HttpStatusCode.PermanentRedirect : HttpStatusCode.RedirectKeepVerb;
-            response.Headers[HttpHeaderKey.Location] = location;
+            response.Headers[HttpHeaderKey.Location] = location.Value;
         }
 
         /// <summary>
@@ -52,15 +62,15 @@ public static class HttpResponseQueryRedirectExtensions
         /// sanctions for a query (for example, handing off to a stored result resource).
         /// </summary>
         /// <param name="location">The resource to retrieve with GET, emitted as the <c>Location</c> field.</param>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="response"/> or <paramref name="location"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">Thrown when <paramref name="location"/> is empty.</exception>
-        public void RedirectQueryToGet(string location)
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="response"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="location"/> is empty, default, or contains a control character or space.</exception>
+        public void RedirectQueryToGet(HttpFieldValue location)
         {
             ArgumentNullException.ThrowIfNull(response);
-            ArgumentException.ThrowIfNullOrEmpty(location);
+            ValidateLocation(location);
 
             response.StatusCode = HttpStatusCode.SeeOther;
-            response.Headers[HttpHeaderKey.Location] = location;
+            response.Headers[HttpHeaderKey.Location] = location.Value;
         }
     }
 }

@@ -37,9 +37,10 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   root by default, resolved by the hosting runtime — and passes every request through when the
   application has no web root. Until 2026-09 it mounted `ContentRootPath`, which Web.Hosting
   never set, so it fell back to the process working directory; `.json` is a served content type,
-  which exposed `appsettings*.json`. Its options are configured and validated once, when the
+  which exposed `appsettings*.json`. Its options are configured once and validated when the
   verb is called, exactly like the explicit `UseStaticFiles(IFileSystem, ...)` overloads (they
-  used to be rebuilt on every request).
+  used to be rebuilt on every request). Web-root options are validated again at pipeline build
+  before the deferred snapshot, so mutations made after registration cannot bypass validation.
 - **Middleware-first, no result types.** The 2026-07-10 direction withdrew `IResult`; this
   package writes status, headers, and body directly on `IHttpResponse`. The `#864` edge
   (serializer registry / `OnError`) was dropped from this item accordingly — errors here are
@@ -143,6 +144,20 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
 - **Unknown extensions blocked by default.** Serving unmapped types as `octet-stream` invites
   accidental exposure (config files, dotfiles); the default passes them through so the
   application decides. `ServeUnknownContentTypes` + `FallbackContentType` opt in explicitly.
+- **Configured content types are HTTP field values (#1476).** Every `ContentTypeMappings`
+  value and `FallbackContentType` is checked through `HttpFieldValue.TryCreate` at composition,
+  with a separate non-empty requirement for a content type. This refuses RFC CTLs other than
+  interior HTAB and leading or trailing SP/HTAB before a value can reach `Content-Type`.
+  Case, valid interior whitespace and obs-text (including C1 characters) are preserved; a
+  quoted media-type parameter can contain obs-text. The fallback is checked even when unknown
+  types are disabled, so every supplied configuration value is safe. The dictionary and fallback
+  retain their string signatures; validation uses the shared core grammar without adding checks
+  to `HttpHeaderValue` or per-request response writing. This is a behavior break against
+  10.0.0-preview.1: malformed mappings and fallbacks formerly passed registration, and empty
+  mapping values were silently ignored. They now throw `ArgumentException` during composition.
+  Web-root registrations (`UseStaticFiles` and `MapFallbackToFile`) check again immediately
+  before their deferred snapshot at pipeline build, including when the web root is unavailable;
+  mutating a captured options object after registration cannot bypass the field-value check.
 - **A name with no extension has no type (#1186).** The gate asks
   `HttpContentTypes.TryGetFromFileName` for the logical file name, and a name with no dot
   (`html`, `json`) or a dotfile (`.json`) maps to nothing, so it is blocked like any unmapped
@@ -375,7 +390,7 @@ over the same engine and add nothing AOT-relevant. The package inherits `IsAotCo
 
 No package-specific exception types. `FileSystemException` from mount lookups is absorbed
 into not-found/pass-through semantics; `ArgumentException` from `UseStaticFiles` validation
-(bad prefix, bad default-document name, unparseable `Cache-Control`, missing fallback type)
+(bad prefix, bad default-document name, unparseable `Cache-Control`, invalid content-type field)
 surfaces at composition time. A file that shrinks mid-copy, whether a range or the full body, aborts
 the response with `EndOfStreamException` rather than silently serving wrong bytes (matching the h2
 truncated-body abort posture); one that grew is cut at its declared length.
@@ -456,3 +471,26 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Composition-time path validation (#1477)
+
+Default documents retain their public string collection, but composition parses them into the
+existing `System.IO.FileName` snapshot consumed by the middleware. The existing bare-name and
+dot-name restrictions run before parsing; invalid file characters and names over 255 characters
+now fail with a resource-backed `ArgumentException` before a directory request can reach the
+resolver. Web-root registrations repeat this validation before their deferred snapshot, so a
+captured options object cannot introduce an invalid name after registration.
+
+`MapFallbackToFile` applies the traversal gate and parses the configured mount-relative path
+with `FileSystemPath.Parse` when the route is registered. The normalized relative path is retained
+for serving. The existing optional leading forward slash still denotes the web-root mount;
+root-only and backslash-rooted paths are refused. Unparseable text such as `bad?.html` now throws
+an `ArgumentException` using the package's error resource instead of becoming a request-time 404.
+No new public type or member is added.
+
+**Breaking from 10.0.0-preview.1 (decision 15):** invalid and overlong default-document names
+formerly passed registration and now throw. The fallback registration refusal is a change from
+the branch base only: `MapFallbackToFile` was introduced after preview.1. The released default-name
+defect requires application-controlled invalid configuration; an unauthenticated directory request
+can trigger the resulting failure, but cannot supply the configured name. It is an input-validation
+availability defect (CWE-20), with low severity conditional on that misconfiguration.

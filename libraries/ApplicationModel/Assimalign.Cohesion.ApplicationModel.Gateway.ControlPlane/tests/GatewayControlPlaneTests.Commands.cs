@@ -393,7 +393,7 @@ public sealed partial class GatewayControlPlaneTests
             .UseGateway(gateway);
         IApplicationResourceDescriptor api = builder.AddResource(CreateManifest("appa", "api", "test", 43110) with
         {
-            ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = "cohesion/v1/" },
+            ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = "/cohesion/v1/" },
         });
         using JsonDocument payload = JsonDocument.Parse("{\"value\":\"local\"}");
         builder.AddCommand(ResourceCommands.Create("test.apply", "local-setting", api.Resource, "appa",
@@ -444,7 +444,7 @@ public sealed partial class GatewayControlPlaneTests
             .UseGateway(gateway);
         builder.AddResource(CreateManifest("appa", "api", "test", 43111) with
         {
-            ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = "cohesion/v1/" },
+            ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = "/cohesion/v1/" },
         });
         IApplicationModel model = builder.Build().Model;
         IApplicationGateway control = gateway;

@@ -19,6 +19,9 @@ package owns the handshake.
 The surface is the same on every protocol; an endpoint does not branch on the version (see
 [DESIGN.md](./DESIGN.md)).
 
+A configured non-null `SubProtocol` must be a non-empty HTTP token; its setter rejects invalid
+spellings before the handshake. Selection still has to match a client offer case-sensitively.
+
 ## Usage
 
 On a Web application, map the endpoint with `MapWebSocket` (`Assimalign.Cohesion.Web.WebSockets`).

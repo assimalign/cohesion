@@ -16,6 +16,7 @@ public static class AmqpFrameCodec
     /// <param name="frameType">The AMQP frame type for the current protocol phase.</param>
     /// <param name="maxFrameSize">The maximum encoded AMQP frame size.</param>
     /// <returns>The encoded AMQP frame bytes.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxFrameSize"/> is less than 512 bytes.</exception>
     public static byte[] Encode(AmqpFrame frame, AmqpFrameType frameType = AmqpFrameType.Amqp, uint maxFrameSize = 262_144u)
     {
         ArgumentNullException.ThrowIfNull(frame);

@@ -149,6 +149,24 @@ direction. Protocols retain their own bounded storage as a backstop. No reflecti
 or HTTP-specific semantics are added. The facet is an additive API relative to
 10.0.0-preview.1; changing the bound listener's bidirectional option is now explicitly ineffective.
 
+## Listener option ranges (#1488)
+
+The listener options reject invalid numeric assignments with `ArgumentOutOfRangeException` before
+binding or accepting connections. Both `MaxBidirectionalStreamCount` and
+`MaxUnidirectionalStreamCount` accept 0 through 65535 inclusive, matching
+[.NET 10's `QuicConnectionOptions.Validate`](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Quic/src/System/Net/Quic/QuicConnectionOptions.cs#L136-L145).
+This is the runtime's concurrent stream allowance limit, distinct from QUIC's cumulative stream-ID
+limit. The existing bind-time bidirectional snapshot and all-zero idle-close fallback are preserved.
+
+`Backlog` accepts nonnegative integers. Zero still selects
+[the runtime's default backlog](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Quic/src/System/Net/Quic/QuicListenerOptions.cs#L38-L49).
+The .NET 10 listener does not reject a negative backlog at bind time; its
+[incoming-connection capacity check](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Quic/src/System/Net/Quic/QuicListener.cs#L295-L310)
+then refuses incoming connections. Guarding assignment avoids that apparently healthy listener and
+also prevents invalid stream allowances from reaching the per-connection handshake callback.
+Rejected assignments retain the previous value, including when callers retain and mutate options.
+The setter tests run without a native QUIC provider; real-QUIC tests retain `QuicFact`/`QuicTheory`.
+
 ## Handshake facts
 
 QUIC runs a TLS 1.3 handshake inside its own (RFC 9001), so a QUIC connection is a TLS-terminating
@@ -475,6 +493,12 @@ break is accepted during the previews and recorded here.
    still interrupts the delivery wait and changes the state to `Aborted`, preserving bounded
    host shutdown. Earlier code allowed the later abort to choose the wire close. The coded
    overload postdates preview.1, so this code-selection rule changes only unreleased behavior.
+
+8. **Invalid listener limits fail at assignment (#1488).** Negative `Backlog` values and
+   either inbound stream count outside 0 through 65535 now throw `ArgumentOutOfRangeException`
+   immediately and preserve the previous option value. In 10.0.0-preview.1 these assignments
+   succeeded, deferring failure until binding or incoming connections. Valid values and defaults
+   retain their behavior; callers must fix configuration before assigning it.
 
 Completing a half also no longer blocks the completing thread until the
 peer acknowledges the FIN; that is not expected to break a consumer.

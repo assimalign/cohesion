@@ -35,6 +35,20 @@ UDP is connectionless, so there is no listener and no accept loop. The factory h
 The async overloads exist for call-site symmetry with the stream drivers; binding a UDP socket is
 synchronous, so they complete synchronously (or return a canceled task for an already-canceled token).
 
+## Socket buffer validation (#1488)
+
+`UdpBindOptions` and `UdpConnectOptions` reject negative `ReceiveBufferSize` and `SendBufferSize`
+assignments with `ArgumentOutOfRangeException`, before socket creation. A rejected assignment leaves
+its previous value intact, including when the factory retains the options. Both remain nullable
+integers: `null` leaves the operating system default untouched, and zero through `int.MaxValue` are
+passed through to the socket. The nonnegative range follows the
+[.NET 10 `Socket.ReceiveBufferSize` and `Socket.SendBufferSize` setters](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Sockets/src/System/Net/Sockets/Socket.cs#L468-L493).
+Platform socket limits and allocation failures still surface when binding or connecting.
+
+This is a behavior break from 10.0.0-preview.1 under decision 15: invalid buffer sizes previously
+survived assignment and failed later in the socket setters during bind or connect. Callers must now
+handle `ArgumentOutOfRangeException` at option assignment. No public signature changes.
+
 ## Data path
 
 `ReceiveAsync` receives one datagram into the caller's buffer and returns its length and sender.

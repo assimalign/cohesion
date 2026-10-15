@@ -11,4 +11,4 @@ public sealed record MountBinding(
     string Mount,
     string ContainerPath,
     ResourceMountKind Kind,
-    string? Source);
+    ResourceMountSource? Source);

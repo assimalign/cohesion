@@ -5,6 +5,22 @@ Cohesion clients, transports, and Web features. The package depends on Core;
 feature-specific contracts live in the corresponding Http feature packages.
 See [DESIGN](DESIGN.md) for protocol semantics and compatibility decisions.
 
+## Structured fields and forwarding nodes
+
+`StructuredFieldBareItem` factories validate values before retaining them.
+Integers accept ±999,999,999,999,999. Decimals must remain within
+±999,999,999,999.999 after rounding to three fractional digits with
+round-half-to-even; `AsDecimal()` still returns the original input.
+`FromDisplayString` accepts Unicode scalar values, including valid UTF-16
+surrogate pairs, and rejects unpaired surrogates with `ArgumentException`.
+Numeric range failures throw `ArgumentOutOfRangeException`.
+
+`HttpForwardedNode.FromIPAddress(address, port)` accepts no port or a port
+from 0 through 65535. Its parser enforces that range for IP nodes; `unknown`
+and obfuscated names preserve numeric ports of one through five digits, such
+as `unknown:99999`. Obfuscated ports remain supported. See DESIGN for the
+earlier validation and stricter IP-node parsing changes from preview.1.
+
 ## Status codes
 
 Construct `new HttpStatusCode(299)` or assign `HttpStatusCode status = 299` for
@@ -30,3 +46,26 @@ These behaviors replace preview.1's last-value parsing; see the compatibility
 and caller audit in DESIGN before upgrading code that sends duplicate keys.
 
 Transport integrations distinguish the `IConnection` identity/lifetime root from `IDuplexConnection` byte pipes and `IMultiplexedConnectionStream` streams. Core HTTP request/response and connection-info contracts do not acquire a transport dependency.
+
+## Configured fields
+
+Use `HttpFieldName name = "X-Trace"` and `HttpFieldValue value = "enabled"`
+for validated configuration; use `TryCreate` when invalid text is expected. Names
+compare without case sensitivity; values preserve case. Nullable string assignments
+keep null as absence. A required consumer still refuses `default`.
+Values retain all RFC obs-text (`U+0080-U+00FF`), including C1 controls; RFC CTLs
+other than internal HTAB and surrounding SP/HTAB are rejected.
+
+`HttpAltService` accepts null/empty same-host values and rejects hosts containing
+controls, spaces or tabs before an advertisement can be formatted.
+
+The public media-type/forwarded parameter, cache extension directive and weighted
+preference constructors require RFC 9110 token names or values. Invalid non-empty
+tokens throw `ArgumentException` immediately. `HttpContentTypes.CreateMap` accepts
+bare or dotted single extensions such as `css` and `.css`; empty keys, extra dots
+and path separators throw during map creation. These are stricter construction
+rules than preview.1; see DESIGN for compatibility details.
+
+`HttpExchangeInterceptorRequestContext.Protocol` accepts null for absence or an
+RFC 9110 token, such as `websocket`. Invalid values throw during initialization;
+transport validation rejects malformed peer protocol names before creating the context.

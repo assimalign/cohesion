@@ -70,12 +70,15 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
     /// <summary>
     /// Creates a Decimal bare item (RFC 9651 &#167; 3.3.2).
     /// </summary>
-    /// <param name="value">The decimal value; its integer component must have at most 12 digits.</param>
+    /// <param name="value">The decimal value; after rounding to three fractional digits using
+    /// round-half-to-even, its integer component must have at most 12 digits. The original value is retained.</param>
     /// <returns>The Decimal bare item.</returns>
-    /// <exception cref="ArgumentOutOfRangeException">The integer component of <paramref name="value"/> has more than 12 digits.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The rounded integer component of <paramref name="value"/> has more than 12 digits.</exception>
     public static StructuredFieldBareItem FromDecimal(decimal value)
     {
-        decimal integerPart = decimal.Truncate(Math.Abs(value));
+        // Validate the representation WriteDecimal will emit (RFC 9651 §4.1.5).
+        decimal rounded = Math.Round(value, 3, MidpointRounding.ToEven);
+        decimal integerPart = decimal.Truncate(Math.Abs(rounded));
         if (integerPart >= 1_000_000_000_000m)
         {
             throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.DecimalIntegerLimitExceeded);
@@ -166,9 +169,22 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
     /// <param name="value">The Unicode string; it is conveyed as percent-encoded UTF-8 on the wire.</param>
     /// <returns>The Display String bare item.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="value"/> contains an unpaired UTF-16 surrogate.</exception>
     public static StructuredFieldBareItem FromDisplayString(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (!char.IsSurrogate(value[i]))
+            {
+                continue;
+            }
+            if (!char.IsHighSurrogate(value[i]) || i + 1 == value.Length || !char.IsLowSurrogate(value[i + 1]))
+            {
+                throw new ArgumentException(ErrorMessages.DisplayStringSurrogateUnpaired, nameof(value));
+            }
+            i++;
+        }
         return new StructuredFieldBareItem(StructuredFieldType.DisplayString, 0L, 0m, value);
     }
 
@@ -244,8 +260,7 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
     /// Serializes this bare item to its RFC 9651 &#167; 4.1.3.1 canonical form.
     /// </summary>
     /// <returns>The canonical textual representation.</returns>
-    /// <exception cref="HttpException">The item cannot be serialized (for example, a Display String
-    /// containing an unpaired surrogate).</exception>
+    /// <exception cref="HttpException">The item has an unsupported type or cannot be serialized.</exception>
     public string Serialize()
     {
         var builder = new StringBuilder();

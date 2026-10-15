@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -231,9 +232,9 @@ public sealed record ResourceManifest
                 $"Resource manifest control-plane endpoint '{ControlPlane.Endpoint}' does not name a declared endpoint.");
         }
 
-        if (string.IsNullOrWhiteSpace(ControlPlane.Path))
+        if (!ResourceHttpPath.IsValid(ControlPlane.Path, out _))
         {
-            throw new InvalidDataException("Resource manifest control-plane path must not be empty.");
+            throw new InvalidDataException(ErrorMessages.ResourceHttpPathInvalid);
         }
 
         string propertyPrefix = Kind.ToLowerInvariant() + ".";
@@ -401,45 +402,20 @@ public sealed record ResourceManifest
 
         if (mount.Kind == ResourceMountKind.Volume)
         {
-            throw new InvalidDataException(
-                $"Volume mount '{mount.Name}' cannot declare Source.");
+            throw new InvalidDataException(string.Format(
+                CultureInfo.CurrentCulture, ErrorMessages.VolumeMountSourceInvalid, mount.Name));
         }
 
-        if (string.IsNullOrWhiteSpace(mount.Source))
+        if (!ResourceMountSource.TryCreate(mount.Source, out ResourceMountSource source))
         {
-            throw new InvalidDataException(
-                $"Mount '{mount.Name}' Source must not be empty.");
+            throw new InvalidDataException(ErrorMessages.ResourceMountSourceInvalid);
         }
 
-        if (mount.Source.StartsWith("literal:", StringComparison.Ordinal))
+        if (source.Value.StartsWith("literal:", StringComparison.Ordinal) &&
+            mount.Kind != ResourceMountKind.Configuration)
         {
-            if (mount.Kind != ResourceMountKind.Configuration)
-            {
-                throw new InvalidDataException(
-                    $"Mount '{mount.Name}' uses literal:, which is allowed only for Configuration mounts.");
-            }
-
-            return;
-        }
-
-        if (mount.Source.StartsWith("parameter:", StringComparison.Ordinal))
-        {
-            if (mount.Source.Length == "parameter:".Length)
-            {
-                throw new InvalidDataException(
-                    $"Mount '{mount.Name}' parameter source must name a parameter.");
-            }
-
-            return;
-        }
-
-        int separator = mount.Source.IndexOf(':');
-        if (separator <= 0 || separator == mount.Source.Length - 1 ||
-            mount.Source.IndexOf(':', separator + 1) >= 0)
-        {
-            throw new InvalidDataException(
-                $"Mount '{mount.Name}' Source '{mount.Source}' must use parameter:<name>, " +
-                "literal:<value>, or <resource>:<key>.");
+            throw new InvalidDataException(string.Format(
+                CultureInfo.CurrentCulture, ErrorMessages.LiteralMountKindInvalid, mount.Name));
         }
     }
 
@@ -540,10 +516,9 @@ public sealed record ResourceManifest
                 $"Resource manifest {role} probe endpoint '{probe.Endpoint}' does not name a declared endpoint.");
         }
 
-        if (probe.Http is not null && string.IsNullOrWhiteSpace(probe.Http))
+        if (probe.Http is not null && !ResourceHttpPath.IsValid(probe.Http, out _))
         {
-            throw new InvalidDataException(
-                $"Resource manifest {role} HTTP probe path must not be empty.");
+            throw new InvalidDataException(ErrorMessages.ResourceHttpPathInvalid);
         }
 
         if (probe.Tcp is false)

@@ -26,6 +26,19 @@ path. This distinction is deliberate: composition must not roll back a value lat
 rotation or a command. Duplicate declarations are rejected instead of making call order an
 implicit overwrite policy.
 
+The path parameter is the generated `SecretStoreSeedPath`. Its `IsValid` owns the seed rule:
+nonblank text excluding exact `trusted-issuers.json`. The builder rejects `default`, and the
+runtime validates seed registrations through the same predicate before persistence. Logical
+seed paths are not file-system paths; they retain separators, spaces around nonblank text, and
+the `certs/` prefix. The seed protocol and durable repository use ordinal identity, so the
+generated value object uses `ObjectComparison="Ordinal"` and never normalizes spelling.
+Command write paths have a separate rule that reserves `certs/` as well.
+
+Replacing the `string` parameter on `ISecretStoreApplicationBuilder.AddSecret` with
+`SecretStoreSeedPath` is a source and binary compatibility change from `10.0.0-preview.1` for
+implementations and bound method signatures. Ordinary string arguments remain supported through
+the generated checked conversion. The seed acceptance grammar is unchanged.
+
 ## Certificate-authority bootstrap
 
 `AddCertificateAuthority` captures one `CertificateAuthorityOptions` declaration. Existing durable

@@ -17,6 +17,9 @@ namespace Assimalign.Cohesion.Web.Authentication.Cookie;
 /// </remarks>
 public sealed class CookieAuthenticationOptions
 {
+    private HttpFieldValue _loginPath = CookieAuthenticationDefaults.LoginPath;
+    private HttpFieldValue _accessDeniedPath = CookieAuthenticationDefaults.AccessDeniedPath;
+
     /// <summary>
     /// Gets or sets the scheme's human-readable display name.
     /// </summary>
@@ -69,7 +72,17 @@ public sealed class CookieAuthenticationOptions
     /// Gets or sets the path a browser challenge redirects to. Defaults to
     /// <see cref="CookieAuthenticationDefaults.LoginPath"/>.
     /// </summary>
-    public string LoginPath { get; set; } = CookieAuthenticationDefaults.LoginPath;
+    /// <remarks>The path is a non-empty HTTP field value with no control character or space.</remarks>
+    /// <exception cref="ArgumentException">The path is empty, default, or contains a control character or space.</exception>
+    public HttpFieldValue LoginPath
+    {
+        get => _loginPath;
+        set
+        {
+            ValidateRedirectPath(value);
+            _loginPath = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the logout path. Defaults to <see cref="CookieAuthenticationDefaults.LogoutPath"/>.
@@ -80,7 +93,17 @@ public sealed class CookieAuthenticationOptions
     /// Gets or sets the path a browser forbid redirects to. Defaults to
     /// <see cref="CookieAuthenticationDefaults.AccessDeniedPath"/>.
     /// </summary>
-    public string AccessDeniedPath { get; set; } = CookieAuthenticationDefaults.AccessDeniedPath;
+    /// <remarks>The path is a non-empty HTTP field value with no control character or space.</remarks>
+    /// <exception cref="ArgumentException">The path is empty, default, or contains a control character or space.</exception>
+    public HttpFieldValue AccessDeniedPath
+    {
+        get => _accessDeniedPath;
+        set
+        {
+            ValidateRedirectPath(value);
+            _accessDeniedPath = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the query-string parameter that carries the post-login return URL on a
@@ -112,4 +135,14 @@ public sealed class CookieAuthenticationOptions
     /// expiry deterministically.
     /// </summary>
     public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    private static void ValidateRedirectPath(HttpFieldValue path)
+    {
+        if (string.IsNullOrEmpty(path.Value)
+            || path.Value.AsSpan().ContainsAny(' ', '\t')
+            || path.Value.AsSpan().ContainsAnyInRange('\u0080', '\u009f'))
+        {
+            throw new ArgumentException(ErrorMessages.RedirectPathInvalid, "value");
+        }
+    }
 }

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     Microsoft ResX Schema
@@ -155,5 +155,8 @@
   </data>
   <data name="ValidIssuersRequired" xml:space="preserve">
     <value>JwtBearerOptions requires at least one entry in ValidIssuers while ValidateIssuer is true. Add the issuer (the token&apos;s &apos;iss&apos;) the scheme accepts, or set ValidateIssuer = false to accept any issuer a signing key verifies.</value>
+  </data>
+  <data name="BearerRealmInvalid" xml:space="preserve">
+    <value>The bearer realm must not contain control characters.</value>
   </data>
 </root>

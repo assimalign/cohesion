@@ -36,6 +36,11 @@ await client.SendAsync(payload, server.LocalEndPoint!, cancellationToken);
 DatagramReceiveResult result = await server.ReceiveAsync(buffer, cancellationToken);
 ```
 
+`ReceiveBufferSize` and `SendBufferSize` on either options type accept `null` (keep the operating
+system default) or any nonnegative byte count, including zero. A negative assignment immediately
+throws `ArgumentOutOfRangeException` and preserves the previous value. This moves validation earlier
+than in 10.0.0-preview.1; see [the buffer contract and compatibility note](DESIGN.md#socket-buffer-validation-1488).
+
 ## Diagnostics
 
 Datagram connection lifecycle events and counters are reported through the driver's internal event

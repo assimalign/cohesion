@@ -24,10 +24,10 @@ public interface ISecretStoreApplicationBuilder
     /// <param name="value">The secret bytes to seed.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentException">
-    /// <paramref name="path"/> is empty or whitespace, or names an implementation-reserved path.
+    /// <paramref name="path"/> is <see langword="default"/>.
     /// </exception>
     /// <exception cref="InvalidOperationException">The path has already been declared on this builder.</exception>
-    ISecretStoreApplicationBuilder AddSecret(string path, ReadOnlyMemory<byte> value);
+    ISecretStoreApplicationBuilder AddSecret(SecretStoreSeedPath path, ReadOnlyMemory<byte> value);
 
     /// <summary>
     /// Declares the certificate authority owned by this secret store.

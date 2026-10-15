@@ -44,6 +44,21 @@ below). An unflagged kind with no resolver is delivered as declared.
 See [DESIGN.md](DESIGN.md) for identity, validation, ownership, external references, lifecycle,
 and NativeAOT boundaries; see the [package README](../README.md) for model and set composition.
 
+Application identities, resource HTTP paths, mount-source expressions, and credential schemes
+and values have generated value objects. Manifest probe `Http`, control-plane `Path`, and mount
+`Source` properties keep their string types for the owner's Database freeze (#1168), with the
+typed DTO change deferred to #1470. `ResourceManifest.Validate` checks their text through the
+value types' `IsValid`/`TryCreate` rules and throws `InvalidDataException` before reconcile.
+Plan `MountBinding.Source` and credential components use value types; valid string assignments
+remain supported through implicit conversions. Use `TryCreate` for nonthrowing validation and
+`.Value` when passing a value object's raw text to a transport. HTTP paths begin with `/` and
+contain no query or fragment. Mount expressions use `parameter:<name>`, `literal:<payload>`,
+or `<source>:<key>` without trimming or case changes; only literal payloads may be empty.
+Credential values redact their text in string/debugger displays. Invalid value-object inputs,
+including credential `with` assignments, fail immediately. See
+[validated values](DESIGN.md#validated-resource-and-credential-values-1481) for grammar,
+default-value checks, legacy plan compatibility, and remaining preview.1 breaking changes.
+
 ## Provider registrations
 
 This package also defines the seams a gateway uses to reach resource-area behaviour it must not

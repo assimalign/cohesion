@@ -16,7 +16,7 @@ internal static class OtlpJsonEncoder
             .Select(group => new ScopeLogs(new InstrumentationScope(group.Key, "1"), group.Select(record =>
                 new LogRecord(Nanoseconds(record.Timestamp), observed, record.SeverityNumber, record.SeverityText,
                     new AnyValue { StringValue = record.Body }, Map(record.Attributes),
-                    Hex(record.TraceId, 32), Hex(record.SpanId, 16))).ToArray())).ToArray();
+                    record.TraceId?.Value?.ToLowerInvariant(), record.SpanId?.Value?.ToLowerInvariant())).ToArray())).ToArray();
         var resource = new OtlpResource(attributes.Select(pair =>
             new KeyValue(pair.Key, new AnyValue { StringValue = pair.Value })).ToArray());
         return JsonSerializer.SerializeToUtf8Bytes(new ExportLogsServiceRequest([new ResourceLogs(resource, scopes)]),
@@ -28,24 +28,9 @@ internal static class OtlpJsonEncoder
         decimal nanoseconds = (decimal)(value.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) * 100;
         if (nanoseconds < 0 || nanoseconds > ulong.MaxValue)
         {
-            throw new ArgumentOutOfRangeException(nameof(value), "OTLP timestamps must fit unsigned nanoseconds since the Unix epoch.");
+            throw new ArgumentOutOfRangeException(nameof(value), ErrorMessages.TimestampOutOfRange);
         }
         return nanoseconds.ToString("0", CultureInfo.InvariantCulture);
-    }
-
-    private static string? Hex(string? value, int length)
-    {
-        if (value is null)
-        {
-            return null;
-        }
-
-        if (value.Length != length || !value.All(Uri.IsHexDigit))
-        {
-            throw new ArgumentException("OTLP trace and span identifiers must be fixed-width hexadecimal.");
-        }
-
-        return value.ToLowerInvariant();
     }
 
     private static KeyValue[] Map(IReadOnlyDictionary<string, object?>? values, int depth = 0)

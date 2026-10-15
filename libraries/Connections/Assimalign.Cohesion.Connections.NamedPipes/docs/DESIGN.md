@@ -47,6 +47,11 @@ connected instance; the next `AcceptAsync` creates the next instance. A continuo
 stays live between connections. `MaxServerInstances` (default: unlimited) bounds how many instances may
 share the name; the practical bound is the consumer's concurrency, not the transport.
 
+`MaxServerInstances` accepts `NamedPipeServerStream.MaxAllowedServerInstances` (`-1`) or `1` through
+`254`, matching the [.NET 10 `NamedPipeServerStream` parameter validation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.IO.Pipes/src/System/IO/Pipes/NamedPipeServerStream.cs#L99-L106).
+Its setter throws `ArgumentOutOfRangeException` before replacing a valid value, including when the
+caller retains the options after listener creation. No invalid limit can reach a later pipe creation.
+
 The in-flight listening instance is tracked so `DisposeAsync` can dispose it, which unblocks a pending
 `WaitForConnectionAsync` (it observes `ObjectDisposedException`) and surfaces as
 `OperationCanceledException` from the pending `AcceptAsync` — the same disposal contract the other
@@ -62,6 +67,17 @@ operating-system default, under which — on Windows — a write can block until
 synchronous rendezvous), which is surprising for a connection abstraction. The default is deliberately
 non-zero so write-then-read on a single task does not deadlock; consumers that want strict flow-control
 realism can lower it.
+
+Both buffer setters accept nonnegative byte counts, including `0`, and throw
+`ArgumentOutOfRangeException` on a negative value without replacing the previous value. This matches
+the same BCL validation used by ordinary and Windows ACL server-pipe creation. The numeric options
+remain primitives with assignment guards (value-object adoption decision V3).
+
+**Compatibility with 10.0.0-preview.1 (#1488).** Invalid `MaxServerInstances`, `InputBufferSize`, and
+`OutputBufferSize` assignments now throw immediately. Preview.1 accepted these assignments and failed
+later during `BindAsync` or creation of a server instance for a subsequent accept. This is an
+intentional behavioral break under decision 15; public signatures, valid ranges, defaults, and the
+unlimited-instance and operating-system-buffer sentinels are unchanged.
 
 ## Access Control
 

@@ -18,6 +18,10 @@ Implements the core configuration object model, builder pipeline, provider abstr
 - ConfigurationManager extends that flow for longer-lived provider orchestration.
 - Keys, paths, sections, values, and provider abstractions keep the rest of the configuration family consistent.
 
+`default(Key)` and a constructed empty key compare and hash equally. Either spelling can
+retrieve the same dictionary entry; `KeyComparer.Ordinal` also supports lookup by an empty
+character span. Key segments still reject path delimiters (`\`, `/`, `:`, and `.`).
+
 ## Key Types
 
 - Configuration

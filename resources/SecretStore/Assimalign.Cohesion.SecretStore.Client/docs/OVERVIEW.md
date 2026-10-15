@@ -14,6 +14,7 @@ BCL HTTP implementation behind `ISecretStoreClient`.
 - `SecretStoreClient.Create(Uri, ClientCredential)` creates the internal protocol
   implementation without performing network I/O.
 - `ClientCredential` carries the opaque bootstrap token and redacts it when formatted.
+- `SecretStoreCertificateReference` validates certificate retrieval references before HTTP.
 - `ResourceCommand` is the generic command envelope; item 31c adds typed SecretStore commands.
 
 ## Usage
@@ -28,6 +29,13 @@ ISecretStoreClient client = SecretStoreClient.Create(endpoint, credential);
 ReadOnlyMemory<byte> value = await client.GetSecretAsync("apps/api/password", cancellationToken);
 string certificate = await client.GetCertificateAsync("certs/appa-api", cancellationToken);
 ```
+
+`GetCertificateAsync` accepts `SecretStoreCertificateReference`; string arguments convert
+implicitly. Supported references are exact `ca/root`, or `certs/` plus a nonblank leaf name with
+neither slash nor backslash and unequal to `.` or `..`. References preserve case and compare
+ordinally. Use `SecretStoreCertificateReference.TryCreate` for untrusted input without exceptions.
+Invalid references and `default` are refused before sending a request. The typed parameter replaces
+the preview.1 string signature, so implementations and precompiled consumers must be updated.
 
 The certificate response is a PEM bundle containing the persistent first-issued leaf, its PKCS#8
 private key, and the issuer chain. A `parameter:` source bypasses this client and is mounted by the

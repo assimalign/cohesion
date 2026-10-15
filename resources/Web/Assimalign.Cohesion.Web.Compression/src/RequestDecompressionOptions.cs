@@ -1,3 +1,5 @@
+using System;
+
 namespace Assimalign.Cohesion.Web.Compression;
 
 /// <summary>
@@ -14,6 +16,8 @@ namespace Assimalign.Cohesion.Web.Compression;
 /// </remarks>
 public sealed class RequestDecompressionOptions
 {
+    private long _maxDecompressedSizeBytes = 100L * 1024 * 1024;
+
     /// <summary>
     /// Gets or sets the maximum number of bytes a request body may decompress to. When a handler's
     /// read of the decompressed body would exceed this many bytes, the read fails and the request is
@@ -21,5 +25,18 @@ public sealed class RequestDecompressionOptions
     /// <c>104857600</c> (100&#8239;MiB). The limit is applied to the fully decoded output, including
     /// across a multi-coding chain.
     /// </summary>
-    public long MaxDecompressedSizeBytes { get; set; } = 100L * 1024 * 1024;
+    /// <exception cref="ArgumentOutOfRangeException">The assigned limit is negative.</exception>
+    public long MaxDecompressedSizeBytes
+    {
+        get => _maxDecompressedSizeBytes;
+        set
+        {
+            if (value < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.RequestDecompressionLimitInvalid);
+            }
+
+            _maxDecompressedSizeBytes = value;
+        }
+    }
 }

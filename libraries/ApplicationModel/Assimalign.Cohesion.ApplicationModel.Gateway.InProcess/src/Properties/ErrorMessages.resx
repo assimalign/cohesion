@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="StateDirectoryEmpty" xml:space="preserve">
+    <value>StateDirectory must not be empty when specified.</value>
+  </data>
+  <data name="ProbeIntervalInvalid" xml:space="preserve">
+    <value>ProbeInterval must be greater than zero.</value>
+  </data>
+  <data name="ProbeTimeoutInvalid" xml:space="preserve">
+    <value>ProbeTimeout must be greater than zero.</value>
+  </data>
+  <data name="InitialRestartBackoffInvalid" xml:space="preserve">
+    <value>InitialRestartBackoff must be zero or greater.</value>
+  </data>
+  <data name="MaximumRestartBackoffInvalid" xml:space="preserve">
+    <value>MaximumRestartBackoff must be at least InitialRestartBackoff.</value>
+  </data>
+</root>

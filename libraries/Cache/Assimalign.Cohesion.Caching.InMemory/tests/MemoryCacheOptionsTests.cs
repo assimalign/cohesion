@@ -1,10 +1,28 @@
 using System;
+using Shouldly;
 using Assimalign.Cohesion.Caching.InMemory;
 
 namespace Assimalign.Cohesion.Caching.InMemory.Tests;
 
 public class MemoryCacheOptionsTests
 {
+    [Theory(DisplayName = "Cohesion Test [Caching.InMemory] - CompactionPercentage: rejects non-finite fractions")]
+    [InlineData(double.NaN)]
+    [InlineData(double.NegativeInfinity)]
+    [InlineData(double.PositiveInfinity)]
+    public void CompactionPercentage_NonFiniteValue_ShouldThrowWithoutChangingOptions(double value)
+    {
+        // Arrange
+        var options = new MemoryCacheOptions { CompactionPercentage = 0.5 };
+
+        // Act
+        var exception = Should.Throw<ArgumentOutOfRangeException>(() => options.CompactionPercentage = value);
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        options.CompactionPercentage.ShouldBe(0.5);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Caching.InMemory] - MemoryCacheOptions: defaults are sensible")]
     public void Defaults_AreSensible()
     {

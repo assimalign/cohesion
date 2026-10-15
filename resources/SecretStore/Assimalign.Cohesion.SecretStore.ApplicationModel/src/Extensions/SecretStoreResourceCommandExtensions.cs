@@ -32,23 +32,18 @@ public static partial class SecretStoreResourceCommandExtensions
         /// <exception cref="ArgumentNullException">A required argument is null.</exception>
         /// <exception cref="ArgumentException">The path or source is invalid or contains a literal.</exception>
         /// <exception cref="InvalidOperationException">The descriptor belongs to a built model.</exception>
-        public ISecretStoreResourceDescriptor AddSecret(string path, string source, bool optional = false)
+        public ISecretStoreResourceDescriptor AddSecret(SecretStoreCommandPath path, SecretStoreCommandSource source, bool optional = false)
         {
             ArgumentNullException.ThrowIfNull(descriptor);
-            ArgumentException.ThrowIfNullOrWhiteSpace(path);
-            ArgumentException.ThrowIfNullOrWhiteSpace(source);
-            int separator = source.IndexOf(':');
-            if (separator <= 0 || separator == source.Length - 1 ||
-                string.IsNullOrWhiteSpace(source[(separator + 1)..]) ||
-                source[..separator].Any(static character => !char.IsAsciiLetterOrDigit(character) && character is not '-' and not '_' and not '.'))
+            if (path.Value is null)
             {
-                throw new ArgumentException("A secret source must use parameter:<name> or <resource>:<key>.", nameof(source));
+                throw new ArgumentException(ErrorMessages.CommandPathInvalid, nameof(path));
             }
-            if (source.StartsWith("literal:", StringComparison.OrdinalIgnoreCase))
+            if (source.Value is null)
             {
-                throw new ArgumentException("secretstore.add-secret forbids literal sources; use parameter:<name> or <resource>:<key> so declarations contain no secret material.", nameof(source));
+                throw new ArgumentException(ErrorMessages.CommandSourceInvalid, nameof(source));
             }
-            descriptor.AddCommand("secretstore.add-secret", path, new AddSecretCommandPayload(path, source),
+            descriptor.AddCommand("secretstore.add-secret", path.Value, new AddSecretCommandPayload(path.Value, source.Value),
                 SecretStoreCommandJsonContext.Default.AddSecretCommandPayload, optional);
             return descriptor;
         }
@@ -62,23 +57,25 @@ public static partial class SecretStoreResourceCommandExtensions
         /// <exception cref="ArgumentNullException">A required argument is null.</exception>
         /// <exception cref="ArgumentException">The name, subject, or an alternative name is invalid.</exception>
         /// <exception cref="InvalidOperationException">The descriptor belongs to a built model.</exception>
-        public ISecretStoreResourceDescriptor IssueCertificate(string name, string subject,
-            IEnumerable<string>? subjectAlternativeNames = null, bool optional = false)
+        public ISecretStoreResourceDescriptor IssueCertificate(SecretStoreCertificateName name, string subject,
+            IEnumerable<SecretStoreSubjectAlternativeName>? subjectAlternativeNames = null, bool optional = false)
         {
             ArgumentNullException.ThrowIfNull(descriptor);
-            ArgumentException.ThrowIfNullOrWhiteSpace(name);
-            ArgumentException.ThrowIfNullOrWhiteSpace(subject);
-            if (name.Contains('/'))
+            if (name.Value is null)
             {
-                throw new ArgumentException("Certificate names must not contain '/'.", nameof(name));
+                throw new ArgumentException(ErrorMessages.CertificateNameInvalid, nameof(name));
             }
+            ArgumentException.ThrowIfNullOrWhiteSpace(subject);
             string[] alternatives = subjectAlternativeNames?.Select(static value =>
             {
-                ArgumentException.ThrowIfNullOrWhiteSpace(value, nameof(subjectAlternativeNames));
-                return value;
+                if (value.Value is null)
+                {
+                    throw new ArgumentException(ErrorMessages.SubjectAlternativeNameInvalid, nameof(subjectAlternativeNames));
+                }
+                return value.Value;
             }).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray() ?? [];
-            descriptor.AddCommand("secretstore.issue-certificate", name,
-                new IssueCertificateCommandPayload(name, subject, alternatives),
+            descriptor.AddCommand("secretstore.issue-certificate", name.Value,
+                new IssueCertificateCommandPayload(name.Value, subject, alternatives),
                 SecretStoreCommandJsonContext.Default.IssueCertificateCommandPayload, optional);
             return descriptor;
         }

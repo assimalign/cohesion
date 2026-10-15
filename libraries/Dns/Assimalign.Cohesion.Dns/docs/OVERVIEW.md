@@ -84,7 +84,13 @@ resolver &#8211; lands in PR 3.
 
 ### Wire-level types
 - `DnsName` — RFC 1035 §2.3.3 case-insensitive name, validates
-  label/total-length limits at construction.
+  label/total-length limits and rejects empty non-root labels at construction.
+  The root `.` and `default(DnsName)` are equivalent; an optional trailing dot
+  does not change equality. This is not an IDNA converter or a full presentation
+  parser; existing non-ASCII input remains accepted.
+- `DnsTxtRecord` — snapshots its input strings and exposes a read-only collection.
+  Each string may contain 0–255 UTF-8 octets. Later edits to the source collection
+  have no effect; construct a new record to change the text.
 - `DnsQuestion(name, type, class = IN)` — readonly value type.
 - `DnsHeader` — 12-octet header (RFC 1035 §4.1.1) with field-level
   parse/write. Carries `Id`, `Flags`, `OpCode`, `ResponseCode`, and
@@ -119,10 +125,12 @@ By design, this package owns contracts only. It does NOT:
 
 ## Test coverage
 
-- 58 tests in `Assimalign.Cohesion.Dns.Tests`:
+- `Assimalign.Cohesion.Dns.Tests`:
   - `DnsExceptionTests` — every `Throw*` helper + ordinal-stability theory.
   - `DnsNameTests` — validation, label extraction, case-insensitive
     equality, implicit conversions.
+  - `DnsTxtRecordTests` — source-list mutation isolation, read-only exposure and
+    per-string UTF-8 octet limits with wire round-trips.
   - `DnsQuestionTests` — equality and ToString.
   - `DnsClientLifecycleTests` — Dispose idempotency,
     DisposeAsync fallback to DisposeCore, DisposeAsyncCore override

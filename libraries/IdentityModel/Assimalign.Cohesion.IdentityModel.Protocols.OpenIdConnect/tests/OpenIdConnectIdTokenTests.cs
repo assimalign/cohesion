@@ -192,6 +192,62 @@ public sealed class OpenIdConnectIdTokenTests
             .Errors.ShouldContain(d => d.Code == OpenIdConnectValidationCodes.AuthTimeMissing);
     }
 
+    [Theory(DisplayName = "Cohesion Test [IdentityModel] - OIDC: A negative maximum authentication age is refused at assignment")]
+    [InlineData(-1L)]
+    [InlineData(long.MinValue)]
+    public void MaxAge_WhenNegative_ShouldThrowAndPreservePreviousValue(long maxAge)
+    {
+        // Arrange
+        var options = CreateOptions();
+        options.MaxAge = 60;
+
+        // Act
+        var exception = Should.Throw<ArgumentOutOfRangeException>(() => options.MaxAge = maxAge);
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.ActualValue.ShouldBe(maxAge);
+        options.MaxAge.ShouldBe(60);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [IdentityModel] - OIDC: Zero maximum authentication age accepts only fresh authentication without skew")]
+    public void Validate_WhenMaxAgeIsZero_ShouldAcceptOnlyFreshAuthentication()
+    {
+        // Arrange
+        var descriptor = CreateConformantDescriptor();
+        descriptor.AuthTime = _now;
+        var options = CreateOptions();
+        options.ClockSkew = TimeSpan.Zero;
+        options.MaxAge = 0;
+
+        // Act
+        var fresh = new OpenIdConnectIdToken(descriptor).Validate(options);
+        descriptor.AuthTime = _now.AddSeconds(-1);
+        var stale = new OpenIdConnectIdToken(descriptor).Validate(options);
+
+        // Assert
+        fresh.Succeeded.ShouldBeTrue();
+        stale.Errors.ShouldContain(d => d.Code == OpenIdConnectValidationCodes.MaxAgeExceeded);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [IdentityModel] - OIDC: Clearing maximum authentication age removes the authentication-time requirement")]
+    public void Validate_WhenMaxAgeIsCleared_ShouldNotRequireAuthTime()
+    {
+        // Arrange
+        var descriptor = CreateConformantDescriptor();
+        descriptor.AuthTime = null;
+        var options = CreateOptions();
+        options.MaxAge = 0;
+
+        // Act
+        options.MaxAge = null;
+        var result = new OpenIdConnectIdToken(descriptor).Validate(options);
+
+        // Assert
+        options.MaxAge.ShouldBeNull();
+        result.Succeeded.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - OIDC: Unresolved claims sources are preserved outside the claim collection")]
     public void ClaimsSources_WhenPresent_ShouldBePreservedOutsideTheClaims()
     {

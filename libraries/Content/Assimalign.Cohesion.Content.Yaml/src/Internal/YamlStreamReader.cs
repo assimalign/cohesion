@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,6 +30,7 @@ internal sealed class YamlStreamWriter : IContentWriter<YamlStream>
     /// <param name="options">The writer options applied to every document written.</param>
     public YamlStreamWriter(YamlWriterOptions options)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.IndentSize, nameof(options.IndentSize));
         _options = options;
     }
 

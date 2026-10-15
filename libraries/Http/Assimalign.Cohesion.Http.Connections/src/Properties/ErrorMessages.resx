@@ -1134,4 +1134,7 @@
   <data name="Http1ProtocolDescription" xml:space="preserve">
     <value>HTTP/1.1</value>
   </data>
+  <data name="AltSvcAuthorityFieldInvalid" xml:space="preserve">
+    <value>An alternative-service authority must not contain control characters or spaces.</value>
+  </data>
 </root>

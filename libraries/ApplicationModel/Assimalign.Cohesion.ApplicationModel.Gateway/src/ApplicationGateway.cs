@@ -181,13 +181,13 @@ public abstract partial class ApplicationGateway :
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (string.IsNullOrEmpty(mount.Source))
+            if (mount.Source is null)
             {
                 resolved.Add(
                     mount.Mount,
                     mount.Kind == ResourceMountKind.Secret && IsCertificateMount(context, mount.Mount)
                         ? await ResolveDefaultCertificateAsync(context, plan, mount, cancellationToken).ConfigureAwait(false)
-                        : ResourceMountInput.Resolved(mount.Source, ReadOnlyMemory<byte>.Empty));
+                        : ResourceMountInput.Resolved(null, ReadOnlyMemory<byte>.Empty));
                 continue;
             }
 

@@ -14,10 +14,15 @@ public readonly struct HttpCacheControlExtension : IEquatable<HttpCacheControlEx
     /// </summary>
     /// <param name="name">The directive name (lower-cased by convention).</param>
     /// <param name="value">The directive argument, or <see langword="null"/> when the directive has none.</param>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="null"/> or empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is not an RFC 9110 token.</exception>
     public HttpCacheControlExtension(string name, string? value)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
+        if (!HttpFieldName.IsValid(name, out _))
+        {
+            throw new ArgumentException(ErrorMessages.TokenNameInvalid, nameof(name));
+        }
+
         Name = name;
         Value = value;
     }

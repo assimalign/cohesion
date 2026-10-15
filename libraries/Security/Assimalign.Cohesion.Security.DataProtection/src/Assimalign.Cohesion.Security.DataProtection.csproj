@@ -3,4 +3,13 @@
 		<RootNamespace>Assimalign.Cohesion.Security.DataProtection</RootNamespace>
 		<Description>Purpose-bound data protection for Cohesion: interface-first protector contracts (purpose-chain derivation, Protect/Unprotect over spans), AES-256-GCM payloads with versioned key-id headers, HKDF-SHA256 subkey derivation, and a rotating key ring with grace-period unprotect over a pluggable IKeyRepository (file-system default). BCL System.Security.Cryptography only; AOT/trim-safe with zero reflection.</Description>
 	</PropertyGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\KeyDocumentName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.Security.DataProtection"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+	</ItemGroup>
 </Project>

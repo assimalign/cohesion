@@ -13,16 +13,16 @@ internal sealed class ApplicationNameJsonConverter : JsonConverter<ApplicationNa
     {
         if (reader.TokenType is not JsonTokenType.String)
         {
-            throw new JsonException("An application name must be a JSON string.");
+            throw new JsonException(ErrorMessages.ApplicationNameJsonString);
         }
 
         string? value = reader.GetString();
-        if (string.IsNullOrWhiteSpace(value))
+        if (!ApplicationName.TryCreate(value, out ApplicationName name))
         {
-            throw new JsonException("An application name cannot be empty.");
+            throw new JsonException(ErrorMessages.ApplicationNameInvalid);
         }
 
-        return value;
+        return name;
     }
 
     public override void Write(
@@ -31,9 +31,9 @@ internal sealed class ApplicationNameJsonConverter : JsonConverter<ApplicationNa
         JsonSerializerOptions options)
     {
         string? text = value.ToString();
-        if (string.IsNullOrWhiteSpace(text))
+        if (!ApplicationName.TryCreate(text, out _))
         {
-            throw new JsonException("An application name cannot be empty.");
+            throw new JsonException(ErrorMessages.ApplicationNameInvalid);
         }
 
         writer.WriteStringValue(text);

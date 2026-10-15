@@ -53,3 +53,9 @@ app.Use(async (context, next) =>
 
 Design rationale (why middleware and not a transport interceptor, snapshot semantics, status
 choices, non-goals) lives in [DESIGN.md](DESIGN.md).
+
+Redirect locations use `HttpFieldValue`; string calls use its implicit conversion.
+Pass a non-empty absolute or relative reference with no control character or
+space (`%20` represents a space). Invalid or default locations throw
+`ArgumentException` before changing the response. The helper parameters changed
+from `string` in 10.0.0-preview.1, so rebuild consumers.

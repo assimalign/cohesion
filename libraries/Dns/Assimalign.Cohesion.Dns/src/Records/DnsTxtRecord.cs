@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Text;
 using Assimalign.Cohesion.Dns.Internal;
 
@@ -16,7 +18,7 @@ public sealed class DnsTxtRecord : DnsRecord
     /// Initializes a new <c>TXT</c> record with one or more strings.
     /// </summary>
     /// <param name="name">The owner name.</param>
-    /// <param name="strings">The text strings. Each must be 0&#8211;255 octets in UTF-8.</param>
+    /// <param name="strings">The text strings, copied at construction. Each must be 0&#8211;255 octets in UTF-8.</param>
     /// <param name="timeToLive">The TTL in seconds.</param>
     /// <param name="class">The DNS class. Defaults to <see cref="DnsClass.IN"/>.</param>
     public DnsTxtRecord(
@@ -27,26 +29,27 @@ public sealed class DnsTxtRecord : DnsRecord
         : base(name, DnsRecordType.TXT, @class, timeToLive)
     {
         ArgumentNullException.ThrowIfNull(strings);
-        if (strings.Count == 0)
+        var snapshot = strings.ToArray();
+        if (snapshot.Length == 0)
         {
-            throw new ArgumentException("TXT record must carry at least one string.", nameof(strings));
+            throw new ArgumentException(ErrorMessages.TxtStringsEmpty, nameof(strings));
         }
 
-        foreach (var s in strings)
+        foreach (var s in snapshot)
         {
             if (s is null)
             {
-                throw new ArgumentException("TXT record strings cannot be null.", nameof(strings));
+                throw new ArgumentException(ErrorMessages.TxtStringNull, nameof(strings));
             }
             int byteCount = Encoding.UTF8.GetByteCount(s);
             if (byteCount > 255)
             {
                 throw new ArgumentException(
-                    $"TXT record string exceeds the RFC 1035 limit of 255 octets (got {byteCount}).",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TxtStringTooLong, byteCount),
                     nameof(strings));
             }
         }
-        Strings = strings;
+        Strings = Array.AsReadOnly(snapshot);
     }
 
     /// <summary>
@@ -57,7 +60,7 @@ public sealed class DnsTxtRecord : DnsRecord
     {
     }
 
-    /// <summary>The strings carried in the RDATA, in their declared order.</summary>
+    /// <summary>A read-only snapshot of the strings carried in the RDATA, in their declared order.</summary>
     public IReadOnlyList<string> Strings { get; }
 
     /// <inheritdoc />
@@ -90,11 +93,11 @@ public sealed class DnsTxtRecord : DnsRecord
         if (consumed != rdLength)
         {
             DnsException.ThrowMalformed(
-                $"TXT RDATA: declared length {rdLength} but consumed {consumed} octets");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TxtRDataLengthMismatch, rdLength, consumed));
         }
         if (strings.Count == 0)
         {
-            DnsException.ThrowMalformed("TXT record must contain at least one string");
+            DnsException.ThrowMalformed(ErrorMessages.TxtRDataEmpty);
         }
         return new DnsTxtRecord(name, strings, ttl, @class);
     }

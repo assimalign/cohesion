@@ -204,7 +204,7 @@ internal static class LocalPlanSetWriter
             writer.WriteString("name", mount.Mount);
             writer.WriteString("kind", mount.Kind.ToString());
             writer.WriteString("targetPath", mount.ContainerPath);
-            writer.WriteString("source", mount.Source);
+            writer.WriteString("source", mount.Source?.Value);
             string? size = FindVolumeSize(volumes, mount.Mount);
             if (size is not null)
             {

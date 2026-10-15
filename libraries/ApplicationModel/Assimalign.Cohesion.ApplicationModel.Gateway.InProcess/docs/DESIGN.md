@@ -129,6 +129,17 @@ flattens a member mount as `<member>-<mount>`; the outer carrier named
 Every member receives its own absolute content root. File lookup must never fall back to the
 Composite's working directory merely because all hosts share a process.
 
+## Validated resource paths (#1481)
+
+The invocation context reads the manifest's control-plane path string before appending the default
+readiness/liveness suffix. The DTO keeps its string type for the owner's Database freeze (#1168),
+with typed DTO adoption deferred to #1470. Manifest validation uses `ResourceHttpPath.IsValid`
+and throws `InvalidDataException`
+for relative paths or query/fragment delimiters; plan validation applies the same grammar before
+in-process context preparation. Relative manifest paths accepted by 10.0.0-preview.1 now fail at
+composition; valid path text and default probe routes remain unchanged. The value type is owned by
+the ApplicationModel contract package and introduces no new dependency here.
+
 ## Readiness, liveness, and health
 
 Entry-point host surrender and child-host adoption must complete within the configured readiness
@@ -166,6 +177,23 @@ attempts by default. A
 restart transitions `Degraded -> Stopping -> Starting -> Running`, requests graceful host stop,
 awaits completion within the member's stop grace, disposes the adopted host, and invokes the same
 registered entry point again under a fresh scope carrying the same context values and ports.
+
+`InProcessGatewayOptions.LivenessFailureThreshold` remains an `int` greater than zero (default
+3), and `MaximumRestartAttempts` remains a nonnegative `int` (default 5; zero disables restarts).
+Each setter uses an `ArgumentOutOfRangeException` guard before storing the value. The gateway
+retains the caller's options, so valid later assignments remain supported, while an invalid
+assignment leaves the previous value intact and cannot reach the supervisor. This follows
+numeric-range rule V3 without adding a value type or changing the public property signatures.
+The remaining options are validated by the `InProcessGateway` constructor. Their validation
+messages use build-generated `ErrorMessages` resources with their existing text preserved.
+
+**Compatibility with 10.0.0-preview.1 (#1495).** Assigning a nonpositive liveness threshold or a
+negative restart limit now throws immediately, including in an object initializer and after
+gateway construction. Previously those assignments succeeded, initial invalid values failed at
+gateway construction, and later invalid values could reach supervision. This is a behavioral
+breaking change; source and binary signatures are unchanged. These two guards now use BCL
+exception messages and populate `ArgumentOutOfRangeException.ActualValue`; `ParamName` remains
+the property name.
 
 Restart never re-admits dependencies. A successful later liveness check may restore `Running`
 before the threshold is reached. In-process invocation preserves `cohesion/sysexits/v1` through

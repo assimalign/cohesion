@@ -172,10 +172,11 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// Advances the server's receive enumeration, failing the test instead of hanging when nothing
     /// arrives in time.
     /// </summary>
+    /// <param name="timeout">The observation watchdog, or ten seconds when omitted.</param>
     /// <returns><see langword="true"/> when a context was yielded.</returns>
-    public async Task<bool> MoveNextAsync()
+    public async Task<bool> MoveNextAsync(TimeSpan? timeout = null)
     {
-        return await _receive.MoveNextAsync().AsTask().WaitAsync(_timeout);
+        return await _receive.MoveNextAsync().AsTask().WaitAsync(timeout ?? _timeout);
     }
 
     /// <summary>

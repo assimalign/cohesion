@@ -105,31 +105,25 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// <param name="value">The secret bytes to seed.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentException">
-    /// <paramref name="path"/> is empty or whitespace, or names an implementation-reserved path.
+    /// <paramref name="path"/> is <see langword="default"/>.
     /// </exception>
     /// <exception cref="InvalidOperationException">The path has already been declared on this builder.</exception>
     public SecretStoreApplicationBuilder AddSecret(
-        string path,
+        SecretStoreSeedPath path,
         ReadOnlyMemory<byte> value)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        if (string.Equals(path, "trusted-issuers.json", StringComparison.Ordinal))
-        {
-            throw new ArgumentException(
-                "Secret path 'trusted-issuers.json' is reserved for the trust-grant document.",
-                nameof(path));
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(path.Value, nameof(path));
 
         foreach (ServiceDescriptor descriptor in Services.Container)
         {
             if (descriptor.ImplementationInstance is SecretSeed declared &&
-                string.Equals(declared.Path, path, StringComparison.Ordinal))
+                string.Equals(declared.Path, path.Value, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException($"Secret path '{path}' is already declared.");
             }
         }
 
-        Services.AddSingleton(new SecretSeed(path, value.ToArray()));
+        Services.AddSingleton(new SecretSeed(path.Value, value.ToArray()));
         return this;
     }
 
@@ -318,7 +312,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     }
 
     ISecretStoreApplicationBuilder ISecretStoreApplicationBuilder.AddSecret(
-        string path,
+        SecretStoreSeedPath path,
         ReadOnlyMemory<byte> value) => AddSecret(path, value);
 
     ISecretStoreApplicationBuilder ISecretStoreApplicationBuilder.AddCertificateAuthority(

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -84,7 +85,7 @@ public static class YamlText
         var stream = Parse(text);
         return stream.Count == 1
             ? stream[0]
-            : throw new YamlException($"Expected exactly one document but found {stream.Count}.", 1, 1);
+            : throw new YamlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DocumentCountInvalid, stream.Count), 1, 1);
     }
 
     /// <summary>
@@ -106,6 +107,7 @@ public static class YamlText
     /// <param name="stream">The documents to write.</param>
     /// <param name="options">The writer options, or <see langword="null"/> for defaults.</param>
     /// <returns>The YAML text.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The indentation size is not positive.</exception>
     public static string Write(YamlStream stream, YamlWriterOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -118,6 +120,7 @@ public static class YamlText
     /// <param name="document">The document to write.</param>
     /// <param name="options">The writer options, or <see langword="null"/> for defaults.</param>
     /// <returns>The YAML text.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The indentation size is not positive.</exception>
     public static string Write(YamlDocument document, YamlWriterOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -130,6 +133,7 @@ public static class YamlText
     /// <param name="output">The writable output stream. Not disposed.</param>
     /// <param name="stream">The documents to write.</param>
     /// <param name="options">The writer options, or <see langword="null"/> for defaults.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The indentation size is not positive.</exception>
     public static void Write(Stream output, YamlStream stream, YamlWriterOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(output);
@@ -148,5 +152,6 @@ public static class YamlText
     /// </summary>
     /// <param name="options">The writer options, or <see langword="null"/> for defaults.</param>
     /// <returns>A writer consuming <see cref="YamlStream"/> documents.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The indentation size is not positive.</exception>
     public static IContentWriter<YamlStream> CreateWriter(YamlWriterOptions? options = null) => new YamlStreamWriter(options ?? YamlWriterOptions.Default);
 }

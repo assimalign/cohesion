@@ -111,20 +111,11 @@ public abstract partial class ApplicationGateway
             }
         }
 
-        // The headers document is line-oriented: a scheme with whitespace or a value with a line
-        // break would forge further header lines, so such a credential is refused.
-        if (credential.Scheme.AsSpan().IndexOfAny(" \t\r\n") >= 0 ||
-            credential.Value.AsSpan().IndexOfAny("\r\n") >= 0)
-        {
-            throw new InvalidOperationException(
-                $"The registered credential issuer returned a telemetry credential for emitter '{emitter.Name}' " +
-                "whose scheme contains whitespace or whose value contains a line break; it cannot be carried " +
-                "in the telemetry headers document.");
-        }
-
+        // Construction validates the single-line credential before it can enter the cache.
+        // Transport deliberately unwraps the value; its string and debugger displays are redacted.
         return new ResourceTelemetryInjection(
             endpoint,
-            Encoding.UTF8.GetBytes("Authorization: " + credential.Scheme + " " + credential.Value + "\n"));
+            Encoding.UTF8.GetBytes("Authorization: " + credential.Scheme.Value + " " + credential.Value.Value + "\n"));
     }
 
     // The sink's observed endpoint once it is Running (or, in Local, its declared DevPort), and

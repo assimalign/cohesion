@@ -166,6 +166,33 @@ advertised kind, canonical payload, deterministic id, and uniqueness of the targ
 The default control plane handles id replay and owner isolation; each area handler also accepts
 an identical reapplication with a different id. Conflicts return named Rejected details.
 
+The command signatures use generated values whose `IsValid` methods delegate to the stateless
+`shared/SecretStoreCommandGrammar.cs` predicates. Hosting and Orchestration compile that same
+source through `CohesionSharedSource`; no runtime assembly reference crosses the declarative
+boundary. Values are validated during construction and implicit string conversion. The verbs
+also reject `default`, which bypasses value construction.
+
+| Value | Grammar and comparison |
+|---|---|
+| `SecretStoreCommandSource` | Exact `parameter:` with a nonblank remainder, or an ASCII letters/digits/`-`/`_`/`.` resource prefix followed by exactly one colon and a nonblank key. `literal:` is forbidden without regard to case. Identity is ordinal. |
+| `SecretStoreCommandPath` | Nonblank logical path excluding exact `trusted-issuers.json` and ordinal `certs/`. Identity is ordinal. |
+| `SecretStoreCertificateName` | Nonblank single segment other than `.` or `..`, with neither slash nor backslash. Storage identity is ordinal; this is not a DNS grammar. |
+| `SecretStoreSubjectAlternativeName` | An IP address or a DNS name accepted by the BCL certificate encoder's default IDN mapping. Comparison ignores case per RFC 1035 section 2.3.3; RFC 5280 section 4.2.1.6 specifies SAN representation. |
+
+DNS validation parses with `IdnMapping.GetAscii` and checks the resulting IA5 repertoire, matching
+[`SubjectAlternativeNameBuilder.AddDnsName`](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Security.Cryptography/src/System/Security/Cryptography/X509Certificates/SubjectAlternativeNameBuilder.cs)
+without constructing a certificate to validate. This preserves wildcard and internationalized
+certificate names. The command snapshots alternative names, removes duplicates and sorts the
+stored spellings ordinally to preserve existing command identities. Value equality and runtime
+issuance compare alternative names without regard to case.
+
+Relative to 10.0.0-preview.1, the command method signatures replace path, source, leaf name and
+alternative-name strings with generated value objects. Existing scalar strings and collection
+expressions convert implicitly, but an `IEnumerable<string>` must be projected to
+`IEnumerable<SecretStoreSubjectAlternativeName>`. Invalid source separators, reserved paths,
+malformed leaf names and unencodable alternative names now throw during composition. Constructor
+failures name `value`; default boundary failures still name the method argument.
+
 AddSecret declarations carry only a source reference. The gateway resolves it before delivery only
 through a registered `secretstore.add-secret` input resolver, normally the one `UseSecretStore(...)`
 registers (`SecretStore.ApplicationModel.Orchestration`): `parameter:<name>` from the application's

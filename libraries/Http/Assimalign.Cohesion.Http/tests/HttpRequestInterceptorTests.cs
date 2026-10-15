@@ -280,7 +280,39 @@ public class HttpRequestInterceptorTests
         Should.Throw<ArgumentOutOfRangeException>(() => new HttpRequestRejectedException(new HttpStatusCode(status)));
     }
 
-    private static HttpExchangeInterceptorRequestContext CreateContext(long? maxRequestBodySize)
+    [Theory(DisplayName = "Cohesion Test [Http] - InterceptorContext: A configured extended CONNECT protocol must be a token")]
+    [InlineData("")]
+    [InlineData("web socket")]
+    [InlineData("web/socket")]
+    [InlineData("web\tsocket")]
+    [InlineData("web:socket")]
+    [InlineData("web\r\nsocket")]
+    [InlineData("web\u00e9socket")]
+    public void Protocol_InvalidToken_ShouldThrowAtInitialization(string protocol)
+    {
+        // Arrange / Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => CreateContext(null, protocol));
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.Message.ShouldContain(":protocol");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - InterceptorContext: A valid extended CONNECT protocol preserves its spelling")]
+    [InlineData(null)]
+    [InlineData("websocket")]
+    [InlineData("X-Protocol")]
+    [InlineData("!#$%&'*+-.^_`|~09AZaz")]
+    public void Protocol_ValidTokenOrAbsent_ShouldRoundTrip(string? protocol)
+    {
+        // Arrange / Act
+        HttpExchangeInterceptorRequestContext context = CreateContext(null, protocol);
+
+        // Assert
+        context.Protocol.ShouldBe(protocol);
+    }
+
+    private static HttpExchangeInterceptorRequestContext CreateContext(long? maxRequestBodySize, string? protocol = null)
     {
         return new HttpExchangeInterceptorRequestContext
         {
@@ -293,6 +325,7 @@ public class HttpRequestInterceptorTests
             Features = new HttpFeatureCollection(),
             ConnectionInfo = HttpConnectionInfo.Empty,
             MaxRequestBodySize = maxRequestBodySize,
+            Protocol = protocol,
         };
     }
 

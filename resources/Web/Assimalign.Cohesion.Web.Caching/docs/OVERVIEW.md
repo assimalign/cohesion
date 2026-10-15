@@ -39,6 +39,10 @@ It never references `Assimalign.Cohesion.Web.Hosting` (the resource hosting-isol
 
 ## Usage
 
+A policy's `MaximumBodySize` override must be positive or null. Zero and negative values throw
+`ArgumentOutOfRangeException` on assignment; null uses the middleware-wide limit. Use a disabled
+policy to turn caching off.
+
 ```csharp
 var routes = app.UseRouting();
 
@@ -82,3 +86,24 @@ through and existing cache hits can still be served.
 
 - `docs/DESIGN.md` — the store seam, policy model, bypass matrix, the Vary decision and ordering rationale,
   the QUERY posture, size accounting, and non-goals.
+
+## Typed cache field configuration
+
+`policy.VaryByHeader("Accept-Language")` still accepts individual string arguments through
+`HttpFieldName` conversions. Prebuilt arrays and `VaryByHeaders` entries use `HttpFieldName`;
+invalid names and `default` are refused when added or replaced.
+
+Custom stores construct headers with `new OutputCacheHeader("Content-Type", ["text/plain"])`.
+The constructor now takes `HttpFieldName` and `HttpFieldValue?[]`; `Name` and `Values` expose
+those types. Use `.Value` to read text. Null entries remain absent and empty strings remain
+valid. Field grammar is checked before replay, and the constructor snapshots the value array.
+These are source and binary changes from 10.0.0-preview.1.
+
+Capture after successful completion trims only surrounding SP/HTAB from response values before
+storing them. Internal whitespace and obs-text (including C1 characters) are preserved, null and
+empty entries remain distinct, and OWS-only entries become empty. The response collection is
+unchanged. Custom stores supply field values without surrounding SP/HTAB.
+
+`OutputCacheEntry` still accepts `IReadOnlyList<string>` for `varyBy`. It validates each name
+through `HttpFieldName` and snapshots the list, so a custom store must provide valid names before
+lookup and cannot change an entry's vary dimensions by mutating the original list.

@@ -16,6 +16,57 @@ namespace Assimalign.Cohesion.OpenTelemetry.Tests;
 
 public sealed class LogExporterTests
 {
+    [Theory(DisplayName = "Cohesion Test [OpenTelemetry] - Record: rejects malformed identifiers before enqueue")]
+    [InlineData("bad", null)]
+    [InlineData(null, "bad")]
+    [InlineData("GBCDEF0123456789ABCDEF0123456789", null)]
+    [InlineData(null, "GBCDEF0123456789")]
+    [InlineData("", null)]
+    [InlineData(null, "")]
+    public void Constructor_WithMalformedIdentifier_ShouldThrow(string? traceId, string? spanId)
+    {
+        // Arrange
+        DateTimeOffset timestamp = DateTimeOffset.UtcNow;
+
+        // Act
+        Action construct = () => new OtlpLogRecord(timestamp, 9, "INFO", "bad", "test", null, traceId, spanId);
+
+        // Assert
+        Should.Throw<ArgumentException>(construct);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [OpenTelemetry] - Flush: malformed identifiers cannot discard valid queued records")]
+    [InlineData("bad", null)]
+    [InlineData(null, "bad")]
+    public async Task FlushAsync_AfterMalformedIdentifier_ShouldExportValidRecords(string? traceId, string? spanId)
+    {
+        // Arrange
+        var handler = new CaptureHandler();
+        await using IOtlpLogExporter exporter = OtlpExporter.CreateLogExporter(Options(handler));
+        exporter.TryEnqueue(Record("first")).ShouldBeTrue();
+
+        // Act
+        try
+        {
+            exporter.TryEnqueue(new OtlpLogRecord(DateTimeOffset.UtcNow, 9, "INFO", "bad", "test", null, traceId, spanId));
+        }
+        catch (ArgumentException)
+        {
+            // The producer refuses this record and can continue logging.
+        }
+        exporter.TryEnqueue(Record("second")).ShouldBeTrue();
+        await exporter.FlushAsync(CancellationToken.None);
+
+        // Assert
+        handler.Bodies.Count.ShouldBe(1);
+        using JsonDocument document = JsonDocument.Parse(handler.Bodies.Single());
+        JsonElement records = document.RootElement.GetProperty("resourceLogs")[0].GetProperty("scopeLogs")[0].GetProperty("logRecords");
+        records.EnumerateArray().Select(record => record.GetProperty("body").GetProperty("stringValue").GetString())
+            .ShouldBe(new[] { "first", "second" });
+        exporter.FailedExportCount.ShouldBe(0);
+        exporter.DroppedCount.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [OpenTelemetry] - JSON: preserves protobuf mapping and category scopes")]
     public async Task ExportAsync_WithStructuredRecords_ShouldWriteOtlpJson()
     {
@@ -57,6 +108,32 @@ public sealed class LogExporterTests
         values["array"].GetRawText().ShouldBe("{\"arrayValue\":{\"values\":[{\"stringValue\":\"item\"},{\"boolValue\":false}]}}");
         values["map"].GetRawText().ShouldBe("{\"kvlistValue\":{\"values\":[{\"key\":\"key\",\"value\":{\"intValue\":\"42\"}}]}}");
         values["nil"].GetRawText().ShouldBe("{\"stringValue\":\"null\"}");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [OpenTelemetry] - JSON: default identifiers are omitted")]
+    public async Task ExportAsync_WithDefaultIdentifiers_ShouldOmitIdentifiers()
+    {
+        // Arrange
+        var handler = new CaptureHandler();
+        await using IOtlpLogExporter exporter = OtlpExporter.CreateLogExporter(Options(handler));
+        var record = Record("default") with { TraceId = default(OtlpTraceId), SpanId = default(OtlpSpanId) };
+        string? absent = null;
+        var cleared = record with { TraceId = absent, SpanId = absent };
+
+        // Act
+        bool accepted = await exporter.ExportAsync(new[] { record, cleared }, CancellationToken.None);
+
+        // Assert
+        accepted.ShouldBeTrue();
+        cleared.TraceId.ShouldBeNull();
+        cleared.SpanId.ShouldBeNull();
+        using JsonDocument document = JsonDocument.Parse(handler.Bodies.Single());
+        JsonElement records = document.RootElement.GetProperty("resourceLogs")[0].GetProperty("scopeLogs")[0].GetProperty("logRecords");
+        foreach (JsonElement log in records.EnumerateArray())
+        {
+            log.TryGetProperty("traceId", out _).ShouldBeFalse();
+            log.TryGetProperty("spanId", out _).ShouldBeFalse();
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenTelemetry] - Queue: overflow drops oldest and disposal flushes")]

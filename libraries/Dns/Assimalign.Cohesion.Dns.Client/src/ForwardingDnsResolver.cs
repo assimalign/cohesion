@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,7 +51,10 @@ namespace Assimalign.Cohesion.Dns;
 /// </remarks>
 public sealed class ForwardingDnsResolver : DnsResolver
 {
-    private readonly ForwardingDnsResolverOptions _options;
+    private readonly TimeSpan _queryTimeout;
+    private readonly ushort _ednsPayloadSize;
+    private readonly IReadOnlyList<DnsTransport> _forwarders;
+    private readonly IReadOnlyDictionary<DnsTransport, DnsTransport> _tcpFallbacks;
     private readonly DnsAnswerCache? _cache;
     private readonly DnsCookieStore? _cookies;
 
@@ -60,39 +64,39 @@ public sealed class ForwardingDnsResolver : DnsResolver
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="options"/>.<c>Forwarders</c> is empty
     /// or contains <see langword="null"/>, or a timeout / cache parameter is invalid.</exception>
+    /// <remarks>Configuration values are captured at construction. Later option assignments do not change this instance.</remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A numeric limit or timeout is outside its supported range.</exception>
     public ForwardingDnsResolver(ForwardingDnsResolverOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (options.Forwarders.Count == 0)
+        _queryTimeout = options.QueryTimeout;
+        _ednsPayloadSize = options.EdnsPayloadSize;
+        _forwarders = new List<DnsTransport>(options.Forwarders).ToArray();
+        _tcpFallbacks = new Dictionary<DnsTransport, DnsTransport>(options.TcpFallbacks);
+        if (_forwarders.Count == 0)
         {
             throw new ArgumentException(
-                $"{nameof(ForwardingDnsResolverOptions)}.{nameof(ForwardingDnsResolverOptions.Forwarders)} must contain at least one transport.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForwardersRequired, nameof(ForwardingDnsResolverOptions), nameof(ForwardingDnsResolverOptions.Forwarders)),
                 nameof(options));
         }
-        foreach (DnsTransport t in options.Forwarders)
+        foreach (DnsTransport t in _forwarders)
         {
             if (t is null)
             {
                 throw new ArgumentException(
-                    "Forwarder list contains a null entry.",
+                    ErrorMessages.ForwarderNull,
                     nameof(options));
             }
         }
-        if (options.QueryTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentException(
-                $"{nameof(ForwardingDnsResolverOptions)}.{nameof(ForwardingDnsResolverOptions.QueryTimeout)} must be positive.",
-                nameof(options));
-        }
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_queryTimeout, TimeSpan.Zero, nameof(options));
 
         if (options.EdnsClientCookie is { } cc && cc.Length != 8)
         {
             throw new ArgumentException(
-                $"{nameof(ForwardingDnsResolverOptions)}.{nameof(ForwardingDnsResolverOptions.EdnsClientCookie)} must be exactly 8 octets when set.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientCookieLength, nameof(ForwardingDnsResolverOptions), nameof(ForwardingDnsResolverOptions.EdnsClientCookie)),
                 nameof(options));
         }
 
-        _options = options;
         _cache = options.EnableCache
             ? new DnsAnswerCache(options.CacheCapacity, options.MinCacheTtl, options.MaxCacheTtl, options.TimeProvider)
             : null;
@@ -123,7 +127,7 @@ public sealed class ForwardingDnsResolver : DnsResolver
         ThrowIfDisposed();
         if (question.Type == default)
         {
-            throw new ArgumentException("Question type must be set.", nameof(question));
+            throw new ArgumentException(ErrorMessages.QuestionTypeRequired, nameof(question));
         }
 
         // Cache check first. We invoke ThrowIfNonSuccess on the cached message so a cached
@@ -134,10 +138,10 @@ public sealed class ForwardingDnsResolver : DnsResolver
         }
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(_options.QueryTimeout);
+        timeoutCts.CancelAfter(_queryTimeout);
 
         DnsException? lastFailure = null;
-        foreach (DnsTransport forwarder in _options.Forwarders)
+        foreach (DnsTransport forwarder in _forwarders)
         {
             DnsMessage response;
             try
@@ -155,7 +159,7 @@ public sealed class ForwardingDnsResolver : DnsResolver
             // TC fallback: if the answer is truncated and we have a TCP transport for this
             // forwarder, retry the exchange over TCP.
             if ((response.Header.Flags & DnsHeaderFlags.Truncated) != 0
-                && _options.TcpFallbacks.TryGetValue(forwarder, out DnsTransport? tcp))
+                && _tcpFallbacks.TryGetValue(forwarder, out DnsTransport? tcp))
             {
                 try
                 {
@@ -196,7 +200,7 @@ public sealed class ForwardingDnsResolver : DnsResolver
             throw lastFailure;
         }
         // Defensive — empty forwarder list is rejected in the constructor.
-        DnsException.ThrowTransport("no forwarders attempted");
+        DnsException.ThrowTransport(ErrorMessages.ForwardersNotAttempted);
         throw new InvalidOperationException();
     }
 
@@ -215,7 +219,7 @@ public sealed class ForwardingDnsResolver : DnsResolver
     {
         System.Net.IPAddress? serverIp = TryGetServerIp(transport.Endpoint);
         IReadOnlyList<DnsEdnsOption>? options = null;
-        if (_cookies is not null && serverIp is not null && _options.EdnsPayloadSize > 0)
+        if (_cookies is not null && serverIp is not null && _ednsPayloadSize > 0)
         {
             options = new DnsEdnsOption[] { _cookies.BuildOption(serverIp) };
         }
@@ -224,7 +228,7 @@ public sealed class ForwardingDnsResolver : DnsResolver
             DnsQueryHelper.NewTransactionId(),
             question,
             recursionDesired: true,
-            ednsPayloadSize: _options.EdnsPayloadSize,
+            ednsPayloadSize: _ednsPayloadSize,
             ednsOptions: options);
 
         DnsMessage response = await DnsQueryHelper.ExchangeAsync(transport, query, timeoutCts, externalToken).ConfigureAwait(false);

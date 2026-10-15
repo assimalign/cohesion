@@ -33,6 +33,12 @@ endpoints, environment helpers, glob support, and low-level extensions shared ac
 - AsyncExtensions
 - CertificateManager
 
+## Adaptive memory-pool configuration
+
+Set `AdaptiveMemoryPoolPressurePolicy.PeakRetentionRatio` to a finite fraction from zero to one,
+inclusive. Invalid assignments throw `ArgumentOutOfRangeException` and preserve the previous
+value. NaN is rejected starting with the #1490 fix; preview.1 accepted it.
+
 ## ULID parsing
 
 `System.Ulid.Parse` and `TryParse` accept exactly 26 characters from

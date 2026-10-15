@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Web.StaticFiles;
 
 /// <summary>
 /// Builder-time configuration for <c>UseStaticFiles</c>. All values are snapshotted when the
-/// middleware is composed — mutating an options instance after registration has no effect, and
+/// middleware is composed — mutating an options instance after that snapshot has no effect, and
 /// nothing is resolved or re-read per request.
 /// </summary>
 public sealed class StaticFilesOptions
@@ -41,7 +41,8 @@ public sealed class StaticFilesOptions
     /// <see cref="HttpContentTypes.Default"/> when the middleware is composed. Keys are extensions;
     /// they may be given with or without a leading dot and are case-insensitive, and a key matching
     /// a default extension replaces the default value. A key maps an extension only: the key
-    /// <c>gltf</c> maps <c>model.gltf</c>, never a file named <c>gltf</c>.
+    /// <c>gltf</c> maps <c>model.gltf</c>, never a file named <c>gltf</c>. Every value must be a
+    /// non-empty <see cref="HttpFieldValue"/>; the field grammar is checked at composition.
     /// </summary>
     /// <remarks>
     /// No key can type a file without an extension, such as
@@ -66,7 +67,8 @@ public sealed class StaticFilesOptions
     /// <summary>
     /// Gets or sets the content type used for files with no mapped extension when
     /// <see cref="ServeUnknownContentTypes"/> is enabled. The default is
-    /// <c>application/octet-stream</c>.
+    /// <c>application/octet-stream</c>. The value must be a non-empty <see cref="HttpFieldValue"/>;
+    /// the field grammar is checked at composition even when unknown content types are not served.
     /// </summary>
     public string FallbackContentType { get; set; } = HttpContentTypes.Fallback;
 

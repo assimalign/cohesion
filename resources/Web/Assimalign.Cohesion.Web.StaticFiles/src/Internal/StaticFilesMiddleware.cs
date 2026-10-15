@@ -33,7 +33,7 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
 
     private readonly IFileSystem _fileSystem;
     private readonly string _prefix;
-    private readonly string[] _defaultDocuments;
+    private readonly FileName[] _defaultDocuments;
     private readonly string? _cacheControl;
     private readonly FrozenDictionary<string, string> _contentTypes;
     private readonly bool _serveUnknownContentTypes;
@@ -41,12 +41,17 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
     private readonly bool _servePrecompressedAssets;
 
     public StaticFilesMiddleware(IFileSystem fileSystem, StaticFilesOptions options)
+        : this(fileSystem, options, WebApplicationStaticFilesExtensions.Validate(options))
+    {
+    }
+
+    public StaticFilesMiddleware(IFileSystem fileSystem, StaticFilesOptions options, FileName[] defaultDocuments)
     {
         _fileSystem = fileSystem;
         // "/" mounts at the site root (empty prefix); anything else is stored without a
         // trailing slash so segment-aligned matching stays uniform.
         _prefix = options.RequestPath.Value == "/" ? string.Empty : options.RequestPath.Value.TrimEnd('/');
-        _defaultDocuments = [.. options.DefaultDocuments];
+        _defaultDocuments = defaultDocuments;
         _cacheControl = string.IsNullOrEmpty(options.CacheControl) ? null : options.CacheControl;
         _contentTypes = options.ContentTypeMappings.Count == 0
             ? HttpContentTypes.Default
@@ -222,7 +227,7 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         }
 
         string directoryPrefix = directory == "/" ? "/" : directory.TrimEnd('/') + "/";
-        foreach (string name in _defaultDocuments)
+        foreach (FileName name in _defaultDocuments)
         {
             if (TryGetInfo(FileSystemPath.Parse(directoryPrefix + name), out IFileSystemInfo? info)
                 && info is IFileSystemFile candidate)

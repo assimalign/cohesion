@@ -145,6 +145,9 @@ public static class ResourcePlanValidator
         ControlPlaneSpec controlPlane,
         ResourceManifestControlPlane manifestControlPlane)
     {
+        Require(
+            ResourceHttpPath.TryCreate(manifestControlPlane.Path, out _),
+            ErrorMessages.ResourceHttpPathInvalid);
         string endpoint = RequireNotNull(
             controlPlane.Endpoint,
             "Plan control-plane endpoint must not be null.");
@@ -167,8 +170,8 @@ public static class ResourcePlanValidator
             !string.IsNullOrWhiteSpace(endpoint),
             "Plan control-plane endpoint must not be whitespace.");
         Require(
-            !string.IsNullOrWhiteSpace(path),
-            "Plan control-plane path must not be whitespace.");
+            ResourceHttpPath.TryCreate(path, out _),
+            ErrorMessages.ResourceHttpPathInvalid);
         Require(
             string.Equals(endpoint, manifestControlPlane.Endpoint, StringComparison.Ordinal),
             $"Plan control-plane endpoint '{endpoint}' does not match manifest control-plane " +
@@ -293,6 +296,9 @@ public static class ResourcePlanValidator
                 mountNames.Add(mount.Name),
                 $"Manifest mount '{mount.Name}' is declared more than once.");
 
+            Require(
+                mount.Source is null || ResourceMountSource.TryCreate(mount.Source, out _),
+                ErrorMessages.ResourceMountSourceInvalid);
             MountBinding binding = FindMount(plan.Container.Mounts, mount.Name, plan.Resource);
             Require(
                 string.Equals(binding.ContainerPath, mount.ContainerPath, StringComparison.Ordinal),
@@ -302,7 +308,10 @@ public static class ResourcePlanValidator
                 binding.Kind == mount.Kind,
                 $"Mount '{mount.Name}' kind '{binding.Kind}' does not match manifest kind '{mount.Kind}'.");
             Require(
-                string.Equals(binding.Source, mount.Source, StringComparison.Ordinal),
+                binding.Source is null || ResourceMountSource.TryCreate(binding.Source.Value.Value, out _),
+                ErrorMessages.ResourceMountSourceInvalid);
+            Require(
+                string.Equals(binding.Source?.Value, mount.Source, StringComparison.Ordinal),
                 $"Mount '{mount.Name}' source does not match its manifest source.");
         }
     }
@@ -483,6 +492,9 @@ public static class ResourcePlanValidator
         {
             expectedKind = ProbeKind.Http;
             expectedValue = manifestProbe.Http;
+            Require(
+                ResourceHttpPath.TryCreate(expectedValue, out _),
+                ErrorMessages.ResourceHttpPathInvalid);
             shapeCount++;
         }
         else
@@ -518,6 +530,9 @@ public static class ResourcePlanValidator
 
         Require(shapeCount is 1, $"Manifest {role} probe must declare exactly one mechanism.");
         Require(actual.Kind == expectedKind, $"Plan {role} probe mechanism does not match the manifest.");
+        Require(
+            actual.Kind is not ProbeKind.Http || ResourceHttpPath.TryCreate(actual.Value, out _),
+            ErrorMessages.ResourceHttpPathInvalid);
         Require(
             string.Equals(actual.Value, expectedValue, StringComparison.Ordinal),
             $"Plan {role} probe value does not match the manifest.");

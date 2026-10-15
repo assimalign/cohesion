@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
@@ -44,7 +45,14 @@ namespace Assimalign.Cohesion.Dns;
 /// </remarks>
 public sealed class IterativeDnsResolver : DnsResolver
 {
-    private readonly IterativeDnsResolverOptions _options;
+    private readonly TimeSpan _queryTimeout;
+    private readonly ushort _ednsPayloadSize;
+    private readonly int _maxReferralDepth;
+    private readonly int _maxQueriesPerResolve;
+    private readonly int _maxNsResolutionDepth;
+    private readonly bool _enableQNameMinimization;
+    private readonly Func<IPEndPoint, DnsTransport> _udpTransportFactory;
+    private readonly Func<IPEndPoint, DnsTransport>? _tcpTransportFactory;
     private readonly DnsAnswerCache? _cache;
     private readonly DnsDelegationCache? _delegationCache;
     private readonly DnsCookieStore? _cookies;
@@ -53,53 +61,43 @@ public sealed class IterativeDnsResolver : DnsResolver
     /// <summary>
     /// Initializes a new <see cref="IterativeDnsResolver"/>.
     /// </summary>
+    /// <remarks>Configuration values are captured at construction. Later option assignments do not change this instance.</remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A numeric limit or timeout is outside its supported range.</exception>
     public IterativeDnsResolver(IterativeDnsResolverOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (options.RootEndpoints.Count == 0)
+        _queryTimeout = options.QueryTimeout;
+        _ednsPayloadSize = options.EdnsPayloadSize;
+        _maxReferralDepth = options.MaxReferralDepth;
+        _maxQueriesPerResolve = options.MaxQueriesPerResolve;
+        _maxNsResolutionDepth = options.MaxNsResolutionDepth;
+        _enableQNameMinimization = options.EnableQNameMinimization;
+        _udpTransportFactory = options.UdpTransportFactory;
+        _tcpTransportFactory = options.TcpTransportFactory;
+        _rootEndpoints = new List<IPEndPoint>(options.RootEndpoints).ConvertAll(DnsEndpointSnapshot.Copy);
+        if (_rootEndpoints.Count == 0)
         {
             throw new ArgumentException(
-                $"{nameof(IterativeDnsResolverOptions)}.{nameof(IterativeDnsResolverOptions.RootEndpoints)} must contain at least one endpoint.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RootEndpointsRequired, nameof(IterativeDnsResolverOptions), nameof(IterativeDnsResolverOptions.RootEndpoints)),
                 nameof(options));
         }
-        if (options.UdpTransportFactory is null)
+        if (_udpTransportFactory is null)
         {
             throw new ArgumentException(
-                $"{nameof(IterativeDnsResolverOptions)}.{nameof(IterativeDnsResolverOptions.UdpTransportFactory)} is required.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionRequired, nameof(IterativeDnsResolverOptions), nameof(IterativeDnsResolverOptions.UdpTransportFactory)),
                 nameof(options));
         }
-        if (options.QueryTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentException(
-                $"{nameof(IterativeDnsResolverOptions)}.{nameof(IterativeDnsResolverOptions.QueryTimeout)} must be positive.",
-                nameof(options));
-        }
-        if (options.MaxReferralDepth <= 0)
-        {
-            throw new ArgumentException(
-                $"{nameof(IterativeDnsResolverOptions)}.{nameof(IterativeDnsResolverOptions.MaxReferralDepth)} must be positive.",
-                nameof(options));
-        }
-        if (options.MaxQueriesPerResolve <= 0)
-        {
-            throw new ArgumentException(
-                $"{nameof(IterativeDnsResolverOptions)}.{nameof(IterativeDnsResolverOptions.MaxQueriesPerResolve)} must be positive.",
-                nameof(options));
-        }
-        if (options.MaxNsResolutionDepth < 0)
-        {
-            throw new ArgumentException(
-                $"{nameof(IterativeDnsResolverOptions)}.{nameof(IterativeDnsResolverOptions.MaxNsResolutionDepth)} must be non-negative.",
-                nameof(options));
-        }
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_queryTimeout, TimeSpan.Zero, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_maxReferralDepth, 0, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_maxQueriesPerResolve, 0, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfNegative(_maxNsResolutionDepth, nameof(options));
         if (options.EdnsClientCookie is { } cc && cc.Length != 8)
         {
             throw new ArgumentException(
-                $"{nameof(IterativeDnsResolverOptions)}.{nameof(IterativeDnsResolverOptions.EdnsClientCookie)} must be exactly 8 octets when set.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientCookieLength, nameof(IterativeDnsResolverOptions), nameof(IterativeDnsResolverOptions.EdnsClientCookie)),
                 nameof(options));
         }
 
-        _options = options;
         _cache = options.EnableCache
             ? new DnsAnswerCache(options.CacheCapacity, options.MinCacheTtl, options.MaxCacheTtl, options.TimeProvider)
             : null;
@@ -111,7 +109,6 @@ public sealed class IterativeDnsResolver : DnsResolver
                 ? new DnsCookieStore(seed)
                 : DnsCookieStore.CreateRandom()
             : null;
-        _rootEndpoints = new List<IPEndPoint>(options.RootEndpoints);
     }
 
     /// <summary>Number of entries in the answer cache, or zero when caching is disabled.</summary>
@@ -130,7 +127,7 @@ public sealed class IterativeDnsResolver : DnsResolver
         ThrowIfDisposed();
         if (question.Type == default)
         {
-            throw new ArgumentException("Question type must be set.", nameof(question));
+            throw new ArgumentException(ErrorMessages.QuestionTypeRequired, nameof(question));
         }
 
         if (_cache is not null && _cache.TryGet(question, out DnsMessage? cached))
@@ -139,9 +136,9 @@ public sealed class IterativeDnsResolver : DnsResolver
         }
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(_options.QueryTimeout);
+        timeoutCts.CancelAfter(_queryTimeout);
 
-        var context = new ResolveContext(_options.MaxQueriesPerResolve);
+        var context = new ResolveContext(_maxQueriesPerResolve);
         DnsMessage response = await ResolveCoreAsync(question, context, timeoutCts, cancellationToken).ConfigureAwait(false);
         _cache?.Put(question, response);
         return ThrowIfNonSuccess(response, question);
@@ -174,7 +171,7 @@ public sealed class IterativeDnsResolver : DnsResolver
         // resolution requires the first.
         if (!context.MarkInFlight(question))
         {
-            DnsException.ThrowTransport($"resolution cycle detected for {question}");
+            DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResolutionCycle, question));
         }
         try
         {
@@ -210,7 +207,7 @@ public sealed class IterativeDnsResolver : DnsResolver
 
         DnsException? lastFailure = null;
 
-        for (int depth = 0; depth < _options.MaxReferralDepth; depth++)
+        for (int depth = 0; depth < _maxReferralDepth; depth++)
         {
             DnsQuestion step = NextStepQuestion(question, currentZone);
 
@@ -235,7 +232,7 @@ public sealed class IterativeDnsResolver : DnsResolver
                 {
                     throw lastFailure;
                 }
-                DnsException.ThrowTransport($"no reachable authority for zone {currentZone}");
+                DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthorityUnavailable, currentZone));
             }
 
             DnsResponseCode rcode = DnsQueryHelper.EffectiveRcode(response!);
@@ -276,7 +273,7 @@ public sealed class IterativeDnsResolver : DnsResolver
             if (newZone is null || !DnsBailiwick.IsInBailiwick(newZone.Value, currentZone) || newZone.Value.Equals(currentZone))
             {
                 DnsException.ThrowSpoofed(
-                    $"referral from zone {currentZone} delegates to {newZone?.ToString() ?? "<unknown>"} which is not strictly below it");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReferralOutsideBailiwick, currentZone, newZone?.ToString() ?? ErrorMessages.UnknownZone));
             }
 
             // Collect in-bailiwick glue.
@@ -284,7 +281,7 @@ public sealed class IterativeDnsResolver : DnsResolver
 
             // Out-of-bailiwick or missing glue: recursively resolve NS names, charging the
             // shared budget. Skipped at depth limit to avoid runaway recursion.
-            if (newAuthorities.Count == 0 && context.NsResolutionDepth < _options.MaxNsResolutionDepth)
+            if (newAuthorities.Count == 0 && context.NsResolutionDepth < _maxNsResolutionDepth)
             {
                 newAuthorities = await ResolveOutOfBailiwickNsAsync(
                     nsRecords, question.Class, context, timeoutCts, externalToken).ConfigureAwait(false);
@@ -293,7 +290,7 @@ public sealed class IterativeDnsResolver : DnsResolver
             if (newAuthorities.Count == 0)
             {
                 DnsException.ThrowTransport(
-                    $"could not resolve any NS for delegation to {newZone}");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.NameServersUnresolved, newZone));
             }
 
             // Update delegation cache with the (zone, endpoints) we just learned.
@@ -307,7 +304,7 @@ public sealed class IterativeDnsResolver : DnsResolver
             currentAuthorities = newAuthorities;
         }
 
-        DnsException.ThrowTransport($"referral depth limit ({_options.MaxReferralDepth}) exceeded resolving {question}");
+        DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ReferralDepthExceeded, _maxReferralDepth, question));
         throw new InvalidOperationException(); // unreachable
     }
 
@@ -371,7 +368,7 @@ public sealed class IterativeDnsResolver : DnsResolver
 
     private DnsQuestion NextStepQuestion(DnsQuestion question, DnsName currentZone)
     {
-        if (!_options.EnableQNameMinimization)
+        if (!_enableQNameMinimization)
         {
             return question;
         }
@@ -405,10 +402,10 @@ public sealed class IterativeDnsResolver : DnsResolver
         CancellationToken externalToken)
     {
         context.IncrementQueryCount();
-        if (context.QueryCount > _options.MaxQueriesPerResolve)
+        if (context.QueryCount > _maxQueriesPerResolve)
         {
             DnsException.ThrowTransport(
-                $"iterative query budget exhausted ({_options.MaxQueriesPerResolve})");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.QueryBudgetExceeded, _maxQueriesPerResolve));
         }
 
         DnsMessage response = await ExchangeAtEndpointAsync(endpoint, step, timeoutCts, externalToken).ConfigureAwait(false);
@@ -431,7 +428,7 @@ public sealed class IterativeDnsResolver : DnsResolver
         CancellationToken externalToken)
     {
         IReadOnlyList<DnsEdnsOption>? options = null;
-        if (_cookies is not null && _options.EdnsPayloadSize > 0)
+        if (_cookies is not null && _ednsPayloadSize > 0)
         {
             options = new DnsEdnsOption[] { _cookies.BuildOption(endpoint.Address) };
         }
@@ -440,10 +437,10 @@ public sealed class IterativeDnsResolver : DnsResolver
             DnsQueryHelper.NewTransactionId(),
             step,
             recursionDesired: false,
-            ednsPayloadSize: _options.EdnsPayloadSize,
+            ednsPayloadSize: _ednsPayloadSize,
             ednsOptions: options);
 
-        DnsTransport udp = _options.UdpTransportFactory(endpoint);
+        DnsTransport udp = _udpTransportFactory(endpoint);
         DnsMessage response;
         try
         {
@@ -454,9 +451,9 @@ public sealed class IterativeDnsResolver : DnsResolver
             await udp.DisposeAsync().ConfigureAwait(false);
         }
 
-        if ((response.Header.Flags & DnsHeaderFlags.Truncated) != 0 && _options.TcpTransportFactory is not null)
+        if ((response.Header.Flags & DnsHeaderFlags.Truncated) != 0 && _tcpTransportFactory is not null)
         {
-            DnsTransport tcp = _options.TcpTransportFactory(endpoint);
+            DnsTransport tcp = _tcpTransportFactory(endpoint);
             try
             {
                 response = await DnsQueryHelper.ExchangeAsync(tcp, query, timeoutCts, externalToken).ConfigureAwait(false);

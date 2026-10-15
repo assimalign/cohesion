@@ -384,6 +384,24 @@ public class ForwardedHeadersResolverTests
         feature.OriginalHost.Value.ShouldBe("internal");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: An unknown node with a five-digit port should preserve its trusted scheme and host")]
+    public void Resolve_UnknownForwardedNodeWithFiveDigitPort_ShouldApplySchemeAndHost()
+    {
+        // Arrange
+        var resolver = CreateResolver(o => o.Headers = ForwardedHeaderNames.Forwarded);
+        var headers = CreateHeaders(forwarded: "for=\"unknown:99999\";proto=https;host=example.com");
+
+        // Act
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("internal"));
+
+        // Assert
+        feature.Scheme.ShouldBe(HttpScheme.Https);
+        feature.Host.Value.ShouldBe("example.com");
+        feature.TrustedHopCount.ShouldBe(1);
+        feature.RemoteEndPoint.ShouldBe(_loopbackRemote);
+        feature.OriginalRemoteEndPoint.ShouldBe(_loopbackRemote);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: An RFC 7239 chain should walk rightmost-first under the same trust boundary")]
     public void Resolve_ForwardedChain_ShouldWalkRightmostFirst()
     {

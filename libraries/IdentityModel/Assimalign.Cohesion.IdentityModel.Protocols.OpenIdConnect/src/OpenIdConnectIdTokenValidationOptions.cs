@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect;
 /// </summary>
 public sealed class OpenIdConnectIdTokenValidationOptions
 {
+    private long? _maxAge;
+
     /// <summary>
     /// Initializes a new instance of the
     /// <see cref="OpenIdConnectIdTokenValidationOptions" /> class.
@@ -62,9 +64,23 @@ public sealed class OpenIdConnectIdTokenValidationOptions
 
     /// <summary>
     /// Gets or sets the maximum authentication age in seconds the request asked for.
-    /// When set, <c>auth_time</c> is required and its age is enforced.
+    /// Null skips the age requirement. When set to a nonnegative value,
+    /// <c>auth_time</c> is required and its age is enforced, including zero.
     /// </summary>
-    public long? MaxAge { get; set; }
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public long? MaxAge
+    {
+        get => _maxAge;
+        set
+        {
+            if (value is not null)
+            {
+                ArgumentOutOfRangeException.ThrowIfNegative(value.Value, nameof(value));
+            }
+
+            _maxAge = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets whether <c>auth_time</c> is required regardless of

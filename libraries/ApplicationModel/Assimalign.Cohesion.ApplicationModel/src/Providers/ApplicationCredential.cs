@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Text;
 
 namespace Assimalign.Cohesion.ApplicationModel;
@@ -10,22 +11,39 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <param name="Value">The credential value.</param>
 /// <param name="ExpiresAt">The instant after which the credential is no longer valid.</param>
 /// <exception cref="ArgumentException">
-/// <paramref name="Scheme"/> or <paramref name="Value"/> is <see langword="null"/>, empty, or whitespace.
+/// <paramref name="Scheme"/> or <paramref name="Value"/> is <see langword="default"/>.
 /// </exception>
 /// <remarks>
 /// <see cref="object.ToString"/> redacts <see cref="Value"/>; never log the credential itself.
 /// </remarks>
-public sealed record ApplicationCredential(string Scheme, string Value, DateTimeOffset ExpiresAt)
+[DebuggerDisplay("{Scheme,nq} <redacted>")]
+public sealed record ApplicationCredential(
+    ApplicationCredentialScheme Scheme,
+    ApplicationCredentialValue Value,
+    DateTimeOffset ExpiresAt)
 {
+    private ApplicationCredentialScheme _scheme = RequireScheme(Scheme);
+    private ApplicationCredentialValue _value = RequireValue(Value);
+
     /// <summary>
     /// Gets the HTTP authentication scheme the credential is presented with.
     /// </summary>
-    public string Scheme { get; init; } = RequireText(Scheme, nameof(Scheme));
+    /// <exception cref="ArgumentException">The assigned scheme is <see langword="default"/>.</exception>
+    public ApplicationCredentialScheme Scheme
+    {
+        get => _scheme;
+        init => _scheme = RequireScheme(value);
+    }
 
     /// <summary>
     /// Gets the credential value.
     /// </summary>
-    public string Value { get; init; } = RequireText(Value, nameof(Value));
+    /// <exception cref="ArgumentException">The assigned value is <see langword="default"/>.</exception>
+    public ApplicationCredentialValue Value
+    {
+        get => _value;
+        init => _value = RequireValue(value);
+    }
 
     private bool PrintMembers(StringBuilder builder)
     {
@@ -34,9 +52,23 @@ public sealed record ApplicationCredential(string Scheme, string Value, DateTime
         return true;
     }
 
-    private static string RequireText(string value, string name)
+    private static ApplicationCredentialScheme RequireScheme(ApplicationCredentialScheme value)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value, name);
+        if (value.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.ApplicationCredentialSchemeInvalid, nameof(Scheme));
+        }
+
+        return value;
+    }
+
+    private static ApplicationCredentialValue RequireValue(ApplicationCredentialValue value)
+    {
+        if (value.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.ApplicationCredentialValueInvalid, nameof(Value));
+        }
+
         return value;
     }
 }

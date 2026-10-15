@@ -20,6 +20,7 @@ internal sealed class YamlNodeEmitter
 
     private YamlNodeEmitter(YamlWriterOptions options)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.IndentSize, nameof(options.IndentSize));
         _options = options;
     }
 
@@ -110,7 +111,7 @@ internal sealed class YamlNodeEmitter
                 break;
 
             default:
-                throw new InvalidOperationException($"Unknown node type '{node.GetType().Name}'.");
+                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.NodeTypeUnknown, node.GetType().Name));
         }
 
         _ = isMappingValuePosition;
@@ -549,7 +550,7 @@ internal sealed class YamlNodeEmitter
             {
                 if (!_sharedAnchors.ContainsKey(node))
                 {
-                    _sharedAnchors[node] = node.Anchor ?? $"a{++_autoAnchor}";
+                    _sharedAnchors[node] = node.Anchor?.Value ?? $"a{++_autoAnchor}";
                 }
 
                 return;
@@ -608,9 +609,9 @@ internal sealed class YamlNodeEmitter
             _output.Append('&').Append(name).Append(' ');
         }
 
-        if (node.Tag is { } tag && tag != "!")
+        if (node.Tag is { } tag && tag.Value != "!")
         {
-            _output.Append(FormatTag(tag)).Append(' ');
+            _output.Append(FormatTag(tag.Value)).Append(' ');
         }
     }
 
@@ -625,18 +626,24 @@ internal sealed class YamlNodeEmitter
 
     private static string FormatTag(string tag)
     {
-        if (tag.StartsWith("tag:yaml.org,2002:", StringComparison.Ordinal))
+        const string corePrefix = "tag:yaml.org,2002:";
+        if (tag.StartsWith(corePrefix, StringComparison.Ordinal) && CanUseTagShorthand(tag.AsSpan(corePrefix.Length)))
         {
-            return "!!" + tag["tag:yaml.org,2002:".Length..];
+            return "!!" + tag[corePrefix.Length..];
         }
 
-        if (tag.StartsWith('!'))
+        if (tag.StartsWith('!') && CanUseTagShorthand(tag.AsSpan(1)))
         {
             return tag;
         }
 
         return "!<" + tag + ">";
     }
+
+    // YAML 1.2.2 section 5.6: ns-tag-char excludes handle and flow indicators.
+    // The tag is already validated; this only selects its presentation form.
+    private static bool CanUseTagShorthand(ReadOnlySpan<char> suffix) =>
+        !suffix.IsEmpty && suffix.IndexOfAny("![],{}".AsSpan()) < 0;
 
     // ----------------------------------------------------------------- output
 

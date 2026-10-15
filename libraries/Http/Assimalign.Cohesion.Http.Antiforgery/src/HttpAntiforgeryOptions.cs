@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpAntiforgeryOptions
 {
+    private HttpFieldName _headerName = "X-CSRF-TOKEN";
+
     /// <summary>
     /// Gets or sets the name of the cookie that stores the cookie token.
     /// Defaults to <c>__cohesion-antiforgery</c>.
@@ -52,7 +54,21 @@ public sealed class HttpAntiforgeryOptions
     /// Gets or sets the request header that carries the request token for
     /// AJAX/SPA clients. Defaults to <c>X-CSRF-TOKEN</c>.
     /// </summary>
-    public string HeaderName { get; set; } = "X-CSRF-TOKEN";
+    /// <remarks>Names must be RFC 9110 field-name tokens; pseudo-headers and <see langword="default"/> are refused.</remarks>
+    /// <exception cref="ArgumentException">The assigned name is <see langword="default"/>.</exception>
+    public HttpFieldName HeaderName
+    {
+        get => _headerName;
+        set
+        {
+            if (value.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.HeaderNameInvalid, nameof(value));
+            }
+
+            _headerName = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the symmetric key used by the built-in HMAC-SHA256 protector to sign

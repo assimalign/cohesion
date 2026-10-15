@@ -174,7 +174,7 @@ public class YamlParserTests
 
         var root = (YamlMapping)YamlText.ParseDocument(text).Root!;
 
-        root["value"].Tag.ShouldBe("tag:example.com,2026:widget");
+        (root["value"].Tag?.Value).ShouldBe("tag:example.com,2026:widget");
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Yaml] - Parse: directives without a document marker are rejected")]

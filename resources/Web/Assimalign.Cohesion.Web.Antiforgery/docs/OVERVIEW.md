@@ -106,3 +106,9 @@ which matters for endpoints that stream large uploads.
 
 See `docs/DESIGN.md` for the token flow, the protector selection, the generator integration, the
 fail-closed rule, and the non-goals.
+
+## Header-name configuration
+
+`antiforgery.Options.HeaderName = "X-CSRF-TOKEN"` uses the implicit `HttpFieldName` conversion.
+Malformed field-name tokens, pseudo-headers and `default` fail during configuration. The option
+was a `string` in 10.0.0-preview.1; `.Value` exposes its text for raw header-key APIs.

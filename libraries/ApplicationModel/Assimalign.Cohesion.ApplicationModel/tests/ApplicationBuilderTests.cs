@@ -47,21 +47,22 @@ public class ApplicationBuilderTests
         builder.Build().Model.Name.ShouldBe((ApplicationName)"orders");
     }
 
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Build rejects invalid RFC1123 application names")]
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - UseName rejects invalid RFC1123 application names")]
     [InlineData("")]
     [InlineData("AppA")]
     [InlineData("-appa")]
     [InlineData("appa-")]
     [InlineData("app_a")]
-    public void Build_InvalidApplicationName_Throws(string name)
+    public void UseName_InvalidApplicationName_Throws(string name)
     {
-        IApplicationBuilder builder = Application.CreateBuilder()
-            .UseName(name)
-            .UseGateway(new FakeGateway());
-        builder.AddResource(new FakeResource("dns"));
+        // Arrange
+        IApplicationBuilder builder = Application.CreateBuilder();
 
-        InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
+        // Act
+        Action configure = () => builder.UseName(name);
 
+        // Assert
+        ArgumentException error = Should.Throw<ArgumentException>(configure);
         error.Message.ShouldContain("RFC1123");
     }
 

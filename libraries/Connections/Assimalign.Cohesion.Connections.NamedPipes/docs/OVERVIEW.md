@@ -57,6 +57,14 @@ await using HttpConnectionListener http = HttpConnectionListener.Create(o => o.U
 
 See [DESIGN.md](DESIGN.md) for the stream bridge, accept model, buffer sizing, and access-control design.
 
+Listener options reject invalid numeric values when assigned with `ArgumentOutOfRangeException`.
+`MaxServerInstances` accepts `1` through `254` or `NamedPipeServerStream.MaxAllowedServerInstances`
+(`-1`, the default). `InputBufferSize` and `OutputBufferSize` accept nonnegative byte counts; `0`
+continues to select the operating-system default, and both default to 4 KiB. The ranges follow the
+[.NET 10 server-pipe API](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.IO.Pipes/src/System/IO/Pipes/NamedPipeServerStream.cs#L99-L106).
+Relative to 10.0.0-preview.1, invalid values fail during configuration rather than bind or a later
+accept, including invalid changes to retained options.
+
 The driver participates in the common `IConnection` identity, feature, and lifecycle hierarchy.
 Listeners expose a stable `Id` and live `Connections`. Entries disappear on closure; disposing
 the listener leaves accepted connections open for their owners to dispose. `ConnectionClosed`
