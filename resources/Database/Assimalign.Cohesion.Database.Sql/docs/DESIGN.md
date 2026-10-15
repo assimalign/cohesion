@@ -419,9 +419,11 @@ flowchart LR
   fails like any coded failure: it writes nothing and an explicit transaction stays
   usable, the session's statement-atomic rule. `OperationCanceledException` passes through only
   when the statement's own token is canceled, regardless of the token the exception carries.
-  Scalars use the existing `SqlArguments.Context.CancellationToken`; aggregates retain the
-  creation context's token once per accumulator, for creation, every Add path and Finish,
-  including an empty group. No public signature changes or per-row allocations are needed.
+  Scalars and aggregate Add use the existing `SqlArguments.Context.CancellationToken`;
+  aggregate creation uses its `SqlFunctionContext`. The executor passes its token to an internal
+  Finish overload, including for an empty group. No public signature changes, extra accumulator
+  state or per-row allocations are needed. Direct public Finish has no statement and codes
+  application cancellation as a function failure, even if creation supplied a canceled token.
   Direct public calls with the default context have no statement to cancel, so application
   cancellation is `COHSQLE007`; callers can already supply a token through `SqlFunctionContext`.
   No token-taking Invoke overload is added. Domain checks, SQL function bodies and SQL domain

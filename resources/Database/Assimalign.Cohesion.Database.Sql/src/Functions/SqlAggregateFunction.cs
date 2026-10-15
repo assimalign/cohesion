@@ -43,7 +43,7 @@ public abstract class SqlAggregateFunction : SqlFunction
 
     /// <summary>Creates the accumulator of one group.</summary>
     /// <remarks>
-    /// The context's token governs cancellation during creation, addition and finishing. With the
+    /// The context's token governs cancellation during creation. With the
     /// default context, cancellation thrown by application code is a function failure (<c>COHSQLE007</c>).
     /// </remarks>
     /// <param name="context">The context of the statement and the aggregate call.</param>
@@ -71,7 +71,7 @@ public abstract class SqlAggregateFunction : SqlFunction
                 new InvalidOperationException($"Aggregate '{Name}' returned no accumulator."));
         }
 
-        if (!accumulator.TryAttach(this, context.CancellationToken))
+        if (!accumulator.TryAttach(this))
         {
             throw SqlEvaluationException.FunctionFailed(Name,
                 new InvalidOperationException($"Aggregate '{Name}' returned an accumulator that is already in use; create a new one for every group."));

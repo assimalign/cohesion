@@ -45,14 +45,14 @@ public sealed class SqlFunctionCancellationTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregate: every phase uses the creation context")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregate: each phase uses the supplied statement token")]
     [InlineData("seed", false)]
     [InlineData("add", false)]
     [InlineData("finish", false)]
     [InlineData("seed", true)]
     [InlineData("add", true)]
     [InlineData("finish", true)]
-    public void CreateAccumulator_ApplicationCancellation_ShouldUseCreationToken(string phase, bool canceled)
+    public void CreateAccumulator_ApplicationCancellation_ShouldUseStatementToken(string phase, bool canceled)
     {
         // Arrange
         var original = new OperationCanceledException("application cancellation");
@@ -68,11 +68,9 @@ public sealed class SqlFunctionCancellationTests
             var accumulator = function.CreateAccumulator(context);
             if (phase != "seed")
             {
-                // A different row context must not change which statement owns the accumulator.
-                var other = new SqlFunctionContext(default, null, new CancellationToken(!canceled));
-                accumulator.Add(new SqlArguments([SqlValue.FromInt32(1)], other));
+                accumulator.Add(new SqlArguments([SqlValue.FromInt32(1)], context));
             }
-            accumulator.Finish();
+            accumulator.Finish(context.CancellationToken);
         });
 
         // Assert
@@ -86,6 +84,25 @@ public sealed class SqlFunctionCancellationTests
             failure.Message.ShouldContain("Function 'cancel_aggregate'", Case.Sensitive);
             failure.InnerException.ShouldBeSameAs(original);
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Finish: a direct call has no statement to cancel")]
+    public void Finish_DirectCall_ShouldCodeApplicationCancellation()
+    {
+        // Arrange
+        var original = new OperationCanceledException(new CancellationToken(true));
+        var function = SqlAggregateFunction.Create<int, int, int>("direct_finish", () => 0,
+            (state, value) => state + value, _ => throw original);
+        var context = new SqlFunctionContext(default, null, new CancellationToken(true));
+        var accumulator = function.CreateAccumulator(context);
+        accumulator.Add(new SqlArguments([SqlValue.FromInt32(1)]));
+
+        // Act
+        var failure = Should.Throw<DatabaseException>(() => accumulator.Finish());
+
+        // Assert
+        failure.Message.ShouldStartWith("COHSQLE007: Function 'direct_finish' failed:", Case.Sensitive);
+        failure.InnerException.ShouldBeSameAs(original);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Invoke: default arguments have no statement to cancel")]
