@@ -52,34 +52,41 @@ public class Http3InterimResponseOrderingTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 interim: A large within-rate 103 should finish before the final head receives its own rate allowance")]
     public async Task WriteInterimResponseAsync_LargeWithinRateInterimRacingFinalHead_ShouldPreserveBothAllowances()
     {
-        // Arrange — the 2 KB interim earns more than the grace period at 1,000 B/s.
-        using CancellationTokenSource cancellation = new(_timeout);
-        HttpMinDataRate rate = new(1_000, TimeSpan.FromMilliseconds(300));
+        // Arrange — 4 KiB at 1,024 B/s earns four seconds in addition to the three-second grace:
+        // at least seven seconds for the interim. The twenty-second watchdog also allows slow setup.
+        using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(20));
+        HttpMinDataRate rate = new(1_024, TimeSpan.FromSeconds(3));
         await using Exchange exchange = await Exchange.OpenAsync(cancellation.Token, rate: rate);
         HttpHeaderCollection hints = new();
-        hints.Add("link", new string('a', 2_048));
+        // QPACK keeps '~' literal: Huffman encoding would make it longer and must not shrink the credit.
+        hints.Add("link", new string('~', 4_096));
         exchange.Writer.Stall();
 
-        // Act — final waits longer than its own grace, but within the active interim's allowance.
+        // Act — hold the interim for five seconds: two beyond the final head's three-second grace,
+        // and at least two short of the interim's allowance. Both sides tolerate scheduling slip.
         Task interim = exchange.Interim.SendInterimResponseAsync(HttpStatusCode.EarlyHints, hints, cancellation.Token).AsTask();
         await WaitForAsync(() => exchange.Writer.IsFlushWaiting, cancellation.Token);
         long interimOctets = exchange.Writer.Written;
+        interimOctets.ShouldBeGreaterThanOrEqualTo(4_096L);
         Task head = exchange.Context.Response.Streaming.FlushAsync(cancellation.Token).AsTask();
         await WaitForAsync(() => exchange.Context.HasResponseStarted, cancellation.Token);
-        await Task.Delay(800, cancellation.Token);
+        await Task.Delay(TimeSpan.FromSeconds(5), cancellation.Token);
         bool finalWaited = !head.IsCompleted;
         exchange.Writer.Grant(interimOctets);
         await interim.WaitAsync(cancellation.Token);
 
-        // The final head must also get a fresh allowance once the interim releases the writer.
+        // After handoff, hold the final head for one second, leaving at least two seconds of its
+        // fresh grace for scheduling slip. Charging the five-second claim wait to this gate would
+        // already have exhausted it. Waiting for the actual write keeps this check after handoff.
         await WaitForAsync(() => exchange.Writer.Written > interimOctets || head.IsCompleted, cancellation.Token);
-        await Task.Delay(100, cancellation.Token);
+        await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token);
         bool finalWaitedForOwnCredit = !head.IsCompleted;
         exchange.Writer.Grant(1 << 20);
         await head.WaitAsync(cancellation.Token);
         await exchange.Peer.ConnectionContext.SendAsync(exchange.Context, cancellation.Token);
 
-        // Assert
+        // Assert — both allowances survived, the writer stayed exclusive, and both heads reached
+        // the wire in order. The passing test takes about six seconds total.
         finalWaited.ShouldBeTrue();
         finalWaitedForOwnCredit.ShouldBeTrue();
         exchange.Context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();

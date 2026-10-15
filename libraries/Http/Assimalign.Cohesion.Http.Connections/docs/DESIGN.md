@@ -1501,8 +1501,8 @@ final head before writing it.
 Each interim flush uses the response minimum data rate, including its per-request
 override, through the same helper as automatic `100` (#1384). Reading that setting
 does not freeze it. The active interim's own rate gate bounds the final head's
-claim wait, including the interim frame's byte credit: a 2 KB `103` at 1,000 B/s
-with 300 ms grace can legitimately wait 800 ms for credit. The final head must not
+claim wait, including the interim frame's byte credit: a 4 KiB `103` at 1,024 B/s
+with three seconds of grace can legitimately wait five seconds for credit. The final head must not
 impose a separate zero-byte gate that expires after grace alone. Caller and
 exchange cancellation still end the claim wait, and an interim that exceeds its
 allowance resets the request stream and cancels the waiting head. With the rate
@@ -1514,6 +1514,15 @@ corrects a post-preview.1 regression in the claim's rate enforcement; preview.1
 had neither the claim nor the response rate gate. Automatic `100 Continue` uses
 the same handoff and accounting, superseding the separate final-wait gate
 described in the earlier #1385 section above.
+
+The allowance regression (#1499) uses those numbers, with a value QPACK leaves
+uncompressed and an assertion on the encoded credit: five seconds is two beyond
+the final head's grace and at least two short of the interim's allowance. After
+the interim releases the writer, the test withholds the final head's credit for
+one second, leaving at least two seconds of its fresh grace for scheduling slip.
+Charging the claim wait to the final gate exhausts it before that write. Both
+heads must reach the wire in order without cancellation or concurrent writer use.
+The test takes about six seconds, with a twenty-second overall watchdog.
 
 **Breaking behavior from 10.0.0-preview.1 (decision 15):** concurrent application
 interims and final heads now serialize or reject the interim cleanly instead of
@@ -2516,6 +2525,22 @@ The below-rate tests retain the short grace period: they withhold DATA (or trick
 one octet per 100 ms) and require an I/O failure plus the protocol's 408/reset outcome.
 A test deadline is not an acceptable substitute for that rejection. This changes
 test scheduling only; no transport behavior or preview.1 compatibility changes.
+
+### Malformed-stream keep-alive test scheduling (#1499)
+
+The HTTP/2 and HTTP/3 regressions use a six-second keep-alive and send a malformed
+stream after four seconds, leaving two seconds to deliver it before the original
+deadline. They measure from before opening/sending the stream through receive-loop
+completion. A correct close is about two seconds later; restarting the deadline
+would take six. The four-second assertion bound leaves two seconds on either
+side for timer and scheduling slip, while the reset and graceful GOAWAY assertions
+still verify the protocol outcome. Each passing test takes about six seconds.
+These calls opt into a twenty-second observation watchdog in the test peers so
+even the defective ten-second total close reaches the timing assertion.
+
+The connection contexts use `TimeProvider.System` without an injectable clock.
+These tests therefore retain real timers and scale their margins; no product API,
+dependency or behavior changes, including against 10.0.0-preview.1.
 
 ### Not covered
 

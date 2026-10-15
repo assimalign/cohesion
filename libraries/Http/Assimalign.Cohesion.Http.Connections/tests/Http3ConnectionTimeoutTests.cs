@@ -142,30 +142,33 @@ public class Http3ConnectionTimeoutTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Timeouts: A malformed request stream on an idle connection should not restart the keep-alive deadline")]
     public async Task ReceiveAsync_OnMalformedRequestStreamWhileIdle_ShouldKeepTheKeepAliveDeadline()
     {
-        // Arrange — the connection is idle from the start of its receive loop under a one-second keep-alive.
-        TimeSpan keepAlive = TimeSpan.FromSeconds(1);
+        // Arrange — six seconds of keep-alive leave two seconds to open/send the malformed stream
+        // after the four-second delay. Allow twenty seconds to observe even the defective close.
+        TimeSpan keepAlive = TimeSpan.FromSeconds(6);
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 =>
         {
             http3.Limits.KeepAliveTimeout = keepAlive;
             http3.Limits.RequestHeadersTimeout = _longTimeout;
         });
-        Task<bool> next = peer.MoveNextAsync();
+        Task<bool> next = peer.MoveNextAsync(TimeSpan.FromSeconds(20));
 
-        // Act — at 0.8 × the keep-alive, a request stream whose head lacks :method, which the server resets
-        // as malformed (RFC 9114 §4.1.2) without dispatching it.
-        await Task.Delay(keepAlive * 0.8);
+        // Act — after four seconds, open a request stream whose head lacks :method. The server resets
+        // it as malformed (RFC 9114 §4.1.2) without dispatching it. Measure before opening/sending so
+        // delayed continuations cannot hide a restarted deadline.
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        Stopwatch sinceMalformed = Stopwatch.StartNew();
         IDuplexConnection malformed = await peer.OpenRequestStreamAsync();
         await malformed.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw((":scheme", "https"), (":path", "/malformed"), (":authority", "a")));
         malformed.Output.Complete();
-        Stopwatch sinceMalformed = Stopwatch.StartNew();
         await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(malformed));
         bool dispatched = await next;
         TimeSpan closedAfter = sinceMalformed.Elapsed;
 
-        // Assert — the connection closed gracefully at about 1 × the keep-alive from its start, not a whole
-        // keep-alive after the malformed stream.
+        // Assert — the reset is followed by a graceful close about two seconds after the malformed
+        // stream; restarting the deadline would take six. The four-second bound leaves two seconds
+        // on either side for timer/scheduling slip. The passing test takes about six seconds total.
         dispatched.ShouldBeFalse();
-        closedAfter.ShouldBeLessThan(keepAlive * 0.6);
+        closedAfter.ShouldBeLessThan(TimeSpan.FromSeconds(4));
         (await peer.ReadGoAwayAsync()).ShouldBe(4L);
     }
 }
