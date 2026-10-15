@@ -379,3 +379,75 @@ The final best medians are **0.0051 ms** for reconciliation and **0.0061 ms** fo
 provisioning. Every invocation remains below 1 ms; opening/recovery remains a separate budget.
 The same host and flags were used, with concurrent tests, so these are gate measurements rather
 than a speedup comparison between the campaigns.
+
+## Shared binding cancellation (#1419, second review, 2026-10-15)
+
+Baseline: `89d3f9606`; implementation: `e80dc957b`. Release NativeAOT, `win-arm64`,
+.NET SDK 10.0.401, Windows 10.0.28000, workstation GC. Both use the unchanged Q1-Q5 harness,
+100,000 rows, one warm-up and five measured iterations in each of five fresh processes.
+The baseline Release assemblies were built and copied before implementation; the identical
+`Program.cs` and `Q8Schema.cs` were subsequently NativeAOT-published against those saved assemblies
+using the isolated `baseline-harness/Baseline.Benchmarks.csproj`. Both publications use optimized
+Release code and the same default ILC settings. No branch was switched or source restored.
+
+The first campaign alternated baseline then implementation with the default 12-processor affinity.
+Because elapsed times varied substantially, the second alternated implementation then baseline,
+setting each benchmark process's affinity to `0x800` (logical processor 11) before its setup.
+Every second-campaign executable reported `cpus=1`. No builds or tests from this task ran during
+either campaign; other applications shared the host. No global scheduling setting was changed.
+
+Best of the five invocation medians, elapsed nanoseconds per row:
+
+| Case | Default before | Default after | Pinned before | Pinned after | Bytes/row, before and after |
+|---|---:|---:|---:|---:|---:|
+| Q1 | 1445.6 | 1666.1 | 1476.6 | 1816.3 | 1015.6 |
+| Q2 | 1240.8 | 1264.9 | 1437.7 | 1329.3 | 927.5-927.6 |
+| Q3 | 1823.4 | 1730.0 | 1803.3 | 1897.2 | 1040.4 |
+| Q4 | 1360.4 | 1676.7 | 1601.7 | 1681.0 | 1015.6 |
+| Q5L | 1361.2 | 1458.6 | 1742.9 | 1539.6 | 951.5-951.6 |
+| Q5T | 1413.6 | 1284.6 | 1558.4 | 1525.2 | 951.5-951.6 |
+
+These elapsed timings do **not** establish the absence of a timing regression: Q1's best median
+rose 15.3% in the default campaign and 23.0% in the pinned campaign, while other cases moved in
+both directions. The same binaries varied by more than 2x across invocations, and process CPU
+measurements were coarse and variable too. A quiet-host rerun is needed to quantify timing cost.
+Allocations remained equal within the harness's 0.1-byte rounding. Table and function-body hits
+now read published values without entering compilation monitors; no per-row allocation was added.
+
+All five invocation medians, in process order, in elapsed ns/row:
+
+| Campaign | Case | Before | After |
+|---|---|---|---|
+| aot | Q1 | 1445.6, 3352.7, 2829.6, 2680.4, 1941.9 | 3414.8, 2804.8, 2889.8, 2804.8, 1666.1 |
+| aot | Q2 | 1240.8, 1931.4, 2327.8, 2441.6, 4608.9 | 3462.3, 2136.9, 2156, 3992, 1264.9 |
+| aot | Q3 | 1823.4, 2513, 3377, 3099.8, 2768 | 5213.6, 3396.6, 3143, 5367.8, 1730 |
+| aot | Q4 | 1360.4, 1866.9, 2927.4, 2384.4, 2167.6 | 3063.7, 2753.5, 2705.4, 3228.3, 1676.7 |
+| aot | Q5L | 1361.2, 1491.2, 2678.2, 2499.4, 1603 | 1831.8, 2511.7, 2564.5, 1829.3, 1458.6 |
+| aot | Q5T | 1515.2, 1659.4, 2687.7, 2225.6, 1413.6 | 2424.2, 2526, 2445.9, 2046.4, 1284.6 |
+| pinned | Q1 | 2604, 1817.8, 1476.6, 3024.3, 3672.3 | 2281.2, 1816.3, 3668.5, 4425.4, 3490.9 |
+| pinned | Q2 | 3757.6, 1537.6, 1437.7, 2857.7, 4328.5 | 1905, 1329.3, 3326.4, 2593.2, 4514.3 |
+| pinned | Q3 | 3770.2, 1803.3, 1870.2, 6282.2, 3001.6 | 2176.4, 1897.2, 3016.9, 4511, 6868.2 |
+| pinned | Q4 | 2055.2, 2020.5, 1601.7, 3165.3, 2909.4 | 3389.4, 1681, 2330.9, 4355.9, 2438.3 |
+| pinned | Q5L | 2328.7, 1752.6, 1742.9, 1890.5, 2448.6 | 3949, 2423, 1539.6, 3747.2, 2613.8 |
+| pinned | Q5T | 1793, 1558.4, 1596.4, 2545.6, 2104.3 | 2211.9, 2019, 1525.2, 3263.8, 2398 |
+
+Publications of both the benchmark and `Sql.AotSample` produced zero IL2xxx/IL3xxx diagnostics.
+The published sample passed all 19 checks in process and over the wire.
+
+The worktree's `_out/1419-round2` retains the saved baseline assemblies, snapshot project,
+NativeAOT executables, publication logs, all twenty process reports, `benchmark-all-results.json`
+(including process CPU and allocation medians), and both campaign runners. Exact commands:
+
+```powershell
+$env:MSBUILDDISABLENODEREUSE='1'
+$env:PATH += ';C:\Program Files (x86)\Microsoft Visual Studio\Installer'
+dotnet publish _out/1419-round2/baseline-harness/Baseline.Benchmarks.csproj -c Release -r win-arm64 -p:UseSharedCompilation=false -o _out/1419-round2/before-aot
+dotnet publish resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/Assimalign.Cohesion.Database.Sql.Benchmarks.csproj -c Release -r win-arm64 -p:UseSharedCompilation=false -o _out/1419-round2/after-aot
+pwsh -NoProfile -File _out/1419-round2/run-benchmark.ps1
+pwsh -NoProfile -File _out/1419-round2/run-pinned-benchmark.ps1
+```
+
+Each executable receives `--cases Q1,Q2,Q3,Q4,Q5L,Q5T --rows 100000 --iterations 5`, with a
+unique label. The pinned runner sets `Process.ProcessorAffinity` to 2048 and joins and disposes
+every process. The earlier managed baseline reports (`bench-before-*.log`) are not mixed into
+these NativeAOT comparisons.
