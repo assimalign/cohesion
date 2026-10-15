@@ -67,7 +67,7 @@ internal sealed partial class SqlPlanExecutor
                 break;
             }
         }
-        _definitions.RefreshDefinitions();
+        _definitions.RefreshDefinitions(cancellationToken);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 

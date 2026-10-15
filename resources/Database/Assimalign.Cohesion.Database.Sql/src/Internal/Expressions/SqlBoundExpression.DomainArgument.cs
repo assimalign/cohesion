@@ -16,7 +16,7 @@ internal sealed class SqlBoundDomainArgument : SqlBoundExpression
     private readonly DatabaseType _checkTarget;
 
     internal SqlBoundDomainArgument(SqlBoundExpression operand, SqlType domain, string functionName,
-        SqlBoundCollation collation, DatabaseName database) : base(SqlBoundExpressionKind.DomainArgument)
+        SqlBoundCollation collation, DatabaseName database, CancellationToken cancellationToken) : base(SqlBoundExpressionKind.DomainArgument)
     {
         Operand = operand;
         _domain = domain;
@@ -28,7 +28,7 @@ internal sealed class SqlBoundDomainArgument : SqlBoundExpression
             ? targets[0] : DatabaseType.Null;
         if (domain.Check is SqlExpressionFunction expression && collation.IsFixed)
         {
-            expression.PrepareBody(collation.Resolve(null));
+            expression.PrepareBody(collation.Resolve(null), cancellationToken);
         }
     }
 

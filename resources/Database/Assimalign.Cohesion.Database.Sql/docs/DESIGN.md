@@ -428,12 +428,13 @@ flowchart LR
   cancellation is `COHSQLE007`; callers can already supply a token through `SqlFunctionContext`.
   No token-taking Invoke overload is added. Domain checks, SQL function bodies and SQL domain
   CHECKs retain the same token through nested calls; a native failure keeps the native function's
-  name. A failed attempt to fold an immutable call remains a call and is retried during execution,
-  with the statement context. PostgreSQL likewise distinguishes cancellation using backend state
+  name. A coded failure while folding an immutable call remains a call and is retried during execution.
+  Statement cancellation stops binding immediately without retry.
+  PostgreSQL likewise distinguishes cancellation using backend state
   (`src/backend/tcop/postgres.c:3575-3631`, `QueryCancelPending` and timeout indicators); E3's
   `IsCastFailure` is the local precedent and now shares the function predicate.
 - **Folding.** An `Immutable` call whose arguments are all constants or parameters is
-  computed while binding and replaced by its value (`evaluate_function`,
+  computed while binding with the operation's token and replaced by its value (`evaluate_function`,
   `src/backend/optimizer/util/clauses.c`); one that throws is kept and fails when a row
   reaches it. A sign over a constant binds as the constant it spells (part 2), as
   PostgreSQL's grammar reads `-5` as the constant -5 (`doNegate`, `src/backend/parser/gram.y`),
@@ -441,6 +442,14 @@ flowchart LR
   is kept and fails per row, over an empty table not at all, as before. `Stable` and
   `Volatile` calls run per row. An index seek is never bounded by a comparand that calls a
   `Volatile` function, whose value could change between the plan and a row.
+  Shared SQL bodies (including each cached collation), domain/table CHECKs and DEFAULT expressions
+  fold with the token of the declaring statement, opening operation or first use that binds them.
+  The cached trees retain no token; calls that remain use the evaluating statement's token.
+  Collation cache misses serialize compilation and publish only successful bodies, so a canceled
+  binding cannot cache its exception or token for a waiting or later statement. Literal DEFAULT
+  conversion remains cached and applies only built-in storage coercion; a domain check runs when
+  the value is assigned. A canceled refresh after definition DDL has published leaves the cache
+  pending; the next statement or provisioning operation rebuilds it with its own token.
 - **Aggregates.** The planner recognizes an aggregate call by its name in the catalog and
   resolves its overload over the input row (`SUM` and `AVG` take the numeric pseudo-type
   `SqlType.AnyNumeric`, so `SUM(text)` is `COHSQLE006` while planning). `SqlGroupAggregate` carries
@@ -3637,7 +3646,24 @@ a default or unrelated token on the exception does not change that rule. It cove
 aggregate creation/addition/finishing, engine domain checks and application calls inside SQL
 functions and SQL domain CHECKs. An uncanceled statement's application cancellation is a coded
 wire execution error, so the client's connection stays usable. A genuinely canceled wire statement
-retains the existing session-cancellation behavior. A write that would evaluate a
+retains the existing session-cancellation behavior.
+
+Planning uses the executor's existing token in every expression scope (#1419 review):
+
+| Evaluation site | Cancellation context |
+| --- | --- |
+| LIMIT/OFFSET, including grouped and nested SELECTs | The statement's token in the scopeless evaluator |
+| Index-seek comparands, including constant CASTs and domain checks | The statement's token while computing the bound |
+| Immutable calls over constants or parameters in projections, predicates, joins, ordering, grouping, aggregate arguments, HAVING, VALUES and UPDATE assignments | The statement's token while folding, including function-domain argument/result checks and nested SQL calls |
+| Shared SQL function/domain bodies, collation variants, table CHECKs and function-call DEFAULTs | The declaring/opening/first-use operation's token while folding; the current statement's token during later evaluation |
+| Literal parsing, parameter binding, static typing and literal DEFAULT storage coercion | No application callback; domain checks and registered CAST conversions run through the evaluating scope |
+
+Counts and seek bounds remain plan-time evaluations: threading the token preserves the existing
+plan shape and evaluation order. Shared definitions also retain constant folding and their cached
+bound trees; the token is passed into each binding request, not captured by the reusable binder.
+The change adds no public signature, stored token in a shared definition or per-row allocation.
+
+A write that would evaluate a
 stored CHECK whose function the engine does not resolve throws it with `COHSQLE009`
 (E2 part 2). Character assignment overflow throws it with `COHSQLE012` (SQLSTATE 22001);
 numeric modifier overflow, after scale rounding, reuses `COHSQLE002` (SQLSTATE 22003),

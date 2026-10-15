@@ -1538,7 +1538,9 @@ its type, not a string literal. Inside a grouping, a grouping key or an aggregat
 has its type for that choice (`describe(COUNT(*))` calls `describe(BIGINT)`). A strict
 function (the default) returns NULL over a NULL argument without being called, and a strict
 aggregate skips the row. An `IMMUTABLE` call whose arguments are constants or parameters is
-computed once, while the statement is planned. A `CHECK` admits only `IMMUTABLE` functions,
+computed once, while the statement is planned. Immutable constant calls in shared SQL function/domain
+bodies, table CHECKs and DEFAULT expressions can also fold when the definition is bound, using that
+operation's cancellation token. Remaining calls use the evaluating statement's token. A `CHECK` admits only `IMMUTABLE` functions,
 so a function registered with the default `VOLATILE` volatility is refused there, naming its
 volatility; one returning BOOLEAN is a predicate by itself, and DDL refuses a CHECK that
 compares an application function's result with a value of a type it does not compare with,
@@ -1549,7 +1551,9 @@ nothing and an explicit transaction stays usable, as for every coded failure. A 
 constant is itself a constant, so `ABS(-5)` is computed once too. An application function's
 `OperationCanceledException` is also `COHSQLE007` unless the statement's own token is
 canceled, regardless of the exception's token. This applies to every aggregate phase and
-to engine/SQL domain checks and application calls inside SQL functions. The coded error
+to engine/SQL domain checks and application calls inside SQL functions, including LIMIT/OFFSET,
+seek-bound evaluation and constant folding during planning. Actual cancellation stops folding
+immediately; it is never deferred and retried as a function failure. The coded error
 leaves the wire connection usable; actual statement cancellation retains its cancellation behavior.
 
 **A stored CHECK whose function is gone.** A CHECK stores canonical SQL and each call's

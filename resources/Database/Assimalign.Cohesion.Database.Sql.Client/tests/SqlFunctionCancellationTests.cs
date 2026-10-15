@@ -279,15 +279,23 @@ public sealed class SqlFunctionCancellationTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var connection = await client.ConnectAsync(timeout.Token);
         var serverSession = server.Sessions.ShouldHaveSingleItem();
-        Task? closing = null;
-        if (canceled) { functions.BeforeThrow = _ => closing = serverSession.DisposeAsync().AsTask(); }
+        var closing = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (canceled)
+        {
+            functions.BeforeThrow = _ =>
+            {
+                Task completion = serverSession.DisposeAsync().AsTask();
+                closing.TrySetResult(completion);
+            };
+        }
 
         // Act
         if (canceled)
         {
             var failure = await Should.ThrowAsync<SqlClientException>(async () =>
                 await connection.ExecuteAsync(declaration, cancellationToken: timeout.Token));
-            await closing.ShouldNotBeNull().WaitAsync(timeout.Token);
+            Task closedSession = await closing.Task.WaitAsync(timeout.Token);
+            await closedSession.WaitAsync(timeout.Token);
             failure.ConnectionUsable.ShouldBeFalse();
         }
         else

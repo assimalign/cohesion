@@ -452,7 +452,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// the catalog or an aggregate outside the grouping plan that binds it to a slot — and its
     /// arguments, which never run, are not bound. <c>COALESCE</c> is a special form, evaluated lazily.
     /// An <see cref="SqlFunctionVolatility.Immutable"/> call whose arguments are all constants or
-    /// parameters is folded here into its value (PostgreSQL's <c>evaluate_function</c>,
+    /// parameters is folded here into its value using this binding operation's token (PostgreSQL's <c>evaluate_function</c>,
     /// <c>src/backend/optimizer/util/clauses.c</c>); one that fails is left to fail when it is reached.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -506,11 +506,11 @@ internal sealed partial class SqlExpressionEvaluator
         {
             if (scalar.ParameterAt(index) is { IsDomain: true } domain)
             {
-                arguments[index] = new SqlBoundDomainArgument(arguments[index], domain, scalar.Name, callCollation, _functions.Database);
+                arguments[index] = new SqlBoundDomainArgument(arguments[index], domain, scalar.Name, callCollation, _functions.Database, _cancellationToken);
             }
         }
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
-            callCollation, _functions.Database);
+            callCollation, _functions.Database, _cancellationToken);
         return scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
     }
 

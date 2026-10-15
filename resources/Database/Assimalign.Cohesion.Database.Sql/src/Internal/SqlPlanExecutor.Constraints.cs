@@ -455,7 +455,7 @@ internal sealed partial class SqlPlanExecutor
         // The table version's CHECK predicates were parsed and bound once, when the catalog
         // loaded or the DDL that produced this version ran; a write only evaluates the bound
         // trees, which carry their column ordinals, functions and collations.
-        var bound = _definitions.Get(table);
+        var bound = _definitions.Get(table, cancellationToken);
         var evaluator = ExecutionEvaluator(null, cancellationToken);
         foreach (var constraint in table.Constraints)
         {
@@ -921,9 +921,9 @@ internal sealed partial class SqlPlanExecutor
     /// </returns>
     /// <exception cref="DatabaseException">The predicate cannot be evaluated against the table's rows.</exception>
     internal static SqlBoundExpression BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls)
+        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls, CancellationToken cancellationToken)
     {
-        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions);
+        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions, cancellationToken: cancellationToken);
         SqlDefinitionBinder.PinCalls(expression, scope, functionCalls);
         SqlPersistedExpression.Bind(expression, scope);
         new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
