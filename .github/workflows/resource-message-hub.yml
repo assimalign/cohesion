@@ -6,6 +6,21 @@ on:
       - "!resources/MessageHub/**/*.slnx"
       - "!resources/MessageHub/**/*.md"
       - ".github/workflows/resource-message-hub.yml" # When Pipeline File Changes
+      # Shared build infrastructure that every project in this workflow compiles with.
+      - ".github/actions/build/**"
+      - "global.json"
+      - "Directory.Build.props"
+      - "Directory.Build.targets"
+      - "build/Build.props"
+      - "build/Build.targets"
+      - "build/Targets/**"
+      - "build/Tasks/**"
+  workflow_dispatch:
+    inputs:
+      all-os:
+        description: Also run the Windows and macOS legs, which otherwise run only on main.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,6 +34,7 @@ concurrency:
 
 jobs:
   build:
+    name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -26,15 +42,19 @@ jobs:
       # matrix and leaves the other projects without a signal (#1093).
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        projects: ["Assimalign.Cohesion.MessageHub", "Assimalign.Cohesion.MessageHub.ApplicationModel", "Assimalign.Cohesion.MessageHub.Hosting"]
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes run
+        # Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        # One leg per OS builds and tests the whole area: the inner list is a single matrix value
+        # that .github/actions/build receives whole. The release inventory guard reads this list.
+        projects: [["Assimalign.Cohesion.MessageHub", "Assimalign.Cohesion.MessageHub.ApplicationModel", "Assimalign.Cohesion.MessageHub.Hosting"]]
     steps:
       - uses: actions/checkout@v7
-        name: "Checkout: ${{ matrix.projects }}"
+        name: Checkout
 
       - uses: ./.github/actions/build
-        name: "Running Build & Tests: ${{ matrix.projects }}"
+        name: Build and test
         with:
           area: "resources"
           category: "MessageHub"
-          project: ${{ matrix.projects }}
+          projects: ${{ toJSON(matrix.projects) }}

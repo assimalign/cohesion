@@ -9,14 +9,27 @@ on:
       - 'sdks/Assimalign.Cohesion.Sdk.Web/**'
       - 'build/TestSupport/**'
       - 'build/ResourceGenerationCheck/**'
-      - 'build/Build.targets'
-      - 'build/Targets/Build.ErrorMessages.targets'
-      - 'build/Tasks/**'
-      - 'build/Targets/Build.CodeGeneration.*'
       - '!resources/Web/**/*.slnx'
       - '!resources/Web/**/*.md'
       - 'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/**'
       - '.github/workflows/resource-web.yml'        # When Pipeline File Changes
+      # Shared build infrastructure that every project in this workflow compiles with.
+      - '.github/actions/build/**'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'resources/Directory.Build.props'
+      - 'resources/Directory.Build.targets'
+      - 'build/Build.props'
+      - 'build/Build.targets'
+      - 'build/Targets/**'
+      - 'build/Tasks/**'
+  workflow_dispatch:
+    inputs:
+      all-os:
+        description: Also run the Windows and macOS legs, which otherwise run only on main.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,6 +43,7 @@ concurrency:
 
 jobs:
   build:
+    name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -37,12 +51,16 @@ jobs:
       # of the matrix and left a branch with no signal for the other Web libraries (#1093).
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes run
+        # Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         # Every buildable Web project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Web.Hosting and the NuGet-only
         # Web.ApplicationModel control-plane package.
-        projects: [
+        # One leg per OS builds and tests the whole area: the inner list is a single matrix value
+        # that .github/actions/build receives whole. The release inventory guard reads this list.
+        projects: [[
             'Assimalign.Cohesion.Web',
             'Assimalign.Cohesion.Web.Antiforgery',
             'Assimalign.Cohesion.Web.ApplicationModel',
@@ -80,24 +98,26 @@ jobs:
             'Assimalign.Cohesion.Web.Testing',
             'Assimalign.Cohesion.Web.Validation',
             'Assimalign.Cohesion.Web.WebSockets'
-        ]
+        ]]
     steps:
       - uses: actions/checkout@v7
-        name: "Checkout: ${{ matrix.projects }}"
+        name: Checkout
 
       - uses: ./.github/actions/build
-        name: "Running Build & Tests: ${{ matrix.projects }}"
+        name: Build and test
         with:
           area: 'resources'
           category: 'Web'
-          project: ${{ matrix.projects }}
+          projects: ${{ toJSON(matrix.projects) }}
 
   https-sample:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes run
+        # Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         projects: ['Assimalign.Cohesion.Web.HttpsHost']
     steps:
       - uses: actions/checkout@v7

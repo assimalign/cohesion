@@ -408,13 +408,39 @@ Per-area CI and the publish-less SDK consumer smoke prove the branch; **the rele
 
 ### Per-area CI — `library-*.yml`, `resource-*.yml`
 
-Path-filtered on push, each a thin matrix over project names calling the shared composite action at `.github/actions/build/action.yml` across ubuntu/windows/macos. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.
+Path-filtered on push, each workflow lists its area's projects and hands the whole list to the shared composite action at `.github/actions/build/action.yml`, one job per OS. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.
 
 Runner slots, not job time, bound CI latency. The organization's plan runs at most 20 jobs at
-once, 5 of them macOS, and one push touching every workflow fans out to about 700 jobs. In run
-`38714836423`, Web's legs ran 1.5 to 2.5 minutes each after waiting 66 to 108 minutes on average.
-Three settings follow from that:
+once, 5 of them macOS. Before the settings below, one push touching every workflow fanned out to
+about 700 single-project jobs. In run `38714836423`, Web's legs ran 1.5 to 2.5 minutes each after
+waiting 66 to 108 minutes on average. The settings that follow from that:
 
+- **One job per area per OS.** The workflow's `strategy.matrix.projects` is a list holding one
+  list (`projects: [[ ... ]]`), so it is a single matrix value. The action receives it whole as
+  `projects: ${{ toJSON(matrix.projects) }}`. The release inventory guard reads the same list, so
+  a project is still added to CI by adding one line there. Building each project in its own job
+  rebuilt the shared reference closure once per project. The whole Web area (36 projects, 4,153
+  tests) restores, builds and tests in 5.6 minutes on a 4-core Linux machine; its 38 Linux jobs
+  had used 56 job-minutes. `release.yml` still validates one package per leg through the action's
+  `project` input.
+- **The action restores and builds once.** It writes the projects and their test projects into a
+  transient `.slnx` for `dotnet restore` and a transient traversal project for `dotnet build`, both
+  in `$RUNNER_TEMP`. The build does not go through the solution: a solution build unsets
+  `Configuration` for references outside it (`ShouldUnsetParentConfigurationAndPlatform`), so
+  they would build as Debug. The traversal's `MSBuild` task hands each project the global
+  properties `dotnet build <project> --configuration Release` would. Both cover test projects that
+  do not reference their library.
+- **Every project still reports.** The test step runs each test project in turn, continues past
+  a failure, and also runs after a failed build, so a test project that did not build reports as
+  failed. It writes a per-project table (result, test counts, seconds) to the job summary and an
+  error annotation per failed project. No check consumes per-project check runs: `main` has no
+  required status checks, and `release.yml` validates every package itself.
+- **Windows and macOS run on `main`.** Each matrix selects its OS list with
+  `fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && <all three> || <ubuntu>)`.
+  Other pushes and pull requests run Linux only. Every workflow takes `workflow_dispatch` with a
+  boolean `all-os` input, so a branch with platform-specific changes (paths, sockets, TLS,
+  processes) can run all three before it merges. `release.yml`'s `validate-consumer` job stays
+  three-OS unconditionally.
 - **Superseded runs are cancelled.** Each per-area workflow's `concurrency` group is the workflow
   plus the ref, with `cancel-in-progress: true`, so a newer push to a branch or pull request
   cancels the older run. Every `main` commit gets its own group (the run id), so no `main` run is
@@ -422,10 +448,11 @@ Three settings follow from that:
   job-minutes, 570 of them macOS, from 2026-10-11 to 2026-10-15.
 - **Every matrix sets `fail-fast: false`** (#1093). One failing Http leg on macOS cancelled 21
   queued legs in run `38714836433`, so the rerun repeated them all.
-- **The action restores once.** It restores the library and its test project with one
-  `dotnet restore` of a transient two-project `.slnx` in `$RUNNER_TEMP`. Restoring them
-  separately evaluated the shared reference graph twice: 7 s on Linux and 15 s on Windows per
-  Web.Hosting leg. The solution also covers test projects that do not reference their library.
+- **Shared build infrastructure triggers every area.** Each per-area workflow's path filter lists
+  `.github/actions/build/**`, `global.json`, the root and area `Directory.Build.props`/`.targets`,
+  `build/Build.props`/`.targets`, `build/Targets/**`, and `build/Tasks/**`. Before, a change to
+  the action, the SDK pin, or a package version in `Build.References.Packages.targets` ran only
+  the Database workflow.
 
 No job caches NuGet packages or the .NET SDK, because a cache would cost about what it saves.
 Package downloads took about 2 s per leg on Linux and macOS and about 15 s on Windows. Restore
@@ -435,23 +462,25 @@ unpacked, and downloading and extracting it costs about as much as downloading t
 extraction, which a cache restore repeats. Revisit if a job starts restoring large packages on
 every run.
 
-The Database workflow keeps its own settings until #1470 rewrites it.
+The Database workflow keeps its per-project shape and three-OS matrix until #1470 rewrites it.
 
 The shared test step uses a five-minute blame hang timeout and mini dumps. Recent healthy runs
 completed the Http.Connections test step in at most 78 seconds and Web.Hosting's in 41 seconds
 (runs `38563034652` and `38558592445`).
 
 Job limits are sized from whole jobs, not from test steps, because restore and build dominate.
-Across the last six successful runs of each per-area workflow, the slowest job took 6.0 minutes
-(IdentityHub), so non-Database per-area test jobs have `timeout-minutes: 30`. That leaves room
-for restore, builds, dump collection and upload.
+Per-area jobs keep `timeout-minutes: 30`. The largest consolidated area, Web, took 5.6 minutes on
+Linux locally; Windows legs ran about 1.55 times as long as Linux legs in run `38714836423`, which
+puts Web on Windows near 10 minutes with setup. Re-measure from the first `main` runs of the
+consolidated jobs and resize under the rule below if any leg passes 15 minutes.
 
 Templates is the exception. Its job packs the local feed, and the slowest successful job took
 32m30s (run `38563045950`), so it has `timeout-minutes: 75` under the rule below. The first 30-minute
 limit cut off a healthy macOS job.
 Database workflow timeouts are deferred to #1470 while the owner rewrites that workflow.
-On failure, the action uploads `TestResults/<project>/**/Sequence_*.xml` and dumps as a
-project/OS/architecture/job/attempt-specific artifact retained for seven days. Ordinary failures
+On failure, the action uploads `TestResults/<project>/**/Sequence_*.xml` and dumps as one
+artifact per job, named for the project (release legs) or the area category, OS, architecture,
+job, and attempt, and retained for seven days. Ordinary failures
 without blame output do not create an artifact. The hang timeout diagnoses a stuck test; the job
 limit also bounds a stuck restore or build.
 
@@ -470,7 +499,7 @@ comment explaining the missing evidence. The SDK sample (`38567999606`, `3856799
 There are two entry paths. A **published GitHub Release** whose tag is `v$(CohesionVersion)`, prerelease suffix included, always validates, packs, and stages. Public promotion is a separate `workflow_dispatch` from the default branch that names the already-published tag and explicitly sets the Boolean `promote` input to `true`; its default is `false`. Both paths run the same six jobs:
 
 1. **prepare** — resolves the tag to a commit, proves it is reachable from `main`, validates the version against `Get-CohesionVersion.ps1`, and emits the validation matrix from `Get-ReleaseMatrix.ps1`. Fails fast, before the large build matrix runs. Every downstream job checks out **that commit**, not the tag, so a tag moved mid-run cannot publish something no job built.
-2. **validate-release** — one leg per shipping package (Linux only; the per-area workflows already carry the three-OS matrix), running the same `.github/actions/build` recipe at the release commit.
+2. **validate-release** — one leg per shipping package (Linux only; the per-area workflows run Windows and macOS on `main`), running the same `.github/actions/build` recipe at the release commit.
 3. **pack-packages** — runs `Pack-Release.ps1`, asserts the inventory-derived package set and its metadata, writes the exact release count to `package-order.txt`, and uploads `_out/release/packages` as the `Assimalign.Cohesion.Packages` artifact.
 4. **validate-consumer** — downloads that exact artifact and, on Ubuntu, Windows, and macOS, builds package-only SDK consumers, publishes them self-contained for the host RID, runs them, and asserts framework-analyzer generated output. It never repacks or publishes.
 5. **publish-github-packages** — stages the consumer-validated artifact in GitHub Packages with `--skip-duplicate`. This is unconditional after a matching published release validates; the manual promotion path safely restages the same immutable version as a no-op.

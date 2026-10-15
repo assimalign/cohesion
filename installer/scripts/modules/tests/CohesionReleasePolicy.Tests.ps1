@@ -173,7 +173,12 @@ Describe 'Cohesion release policy wiring' {
         $releasePacker | Should -Match '(?m)^\$supportedRuntimeIdentifier = Get-CohesionReleaseRuntimeIdentifier\r?$'
         $releasePacker | Should -Match 'Unsupported release runtime identifier\(s\)'
         $sdkSmokeWorkflow | Should -Match '(?m)^  pull_request:\r?$'
-        $sdkSmokeWorkflow | Should -Match '(?m)^        os: \[ubuntu-latest, windows-latest, macos-latest\]\r?$'
+        # main, and a manual run with all-os, cover all three OSes; other pushes and pull requests
+        # run Linux only. The release's validate-consumer job below stays three-OS unconditionally.
+        $allOsOnMain = @'
+os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+'@
+        $sdkSmokeWorkflow | Should -Match ('(?m)^        ' + [regex]::Escape($allOsOnMain) + '\r?$')
         $sdkSmokeWorkflow | Should -Match '\./installer/scripts/Pack-Release\.ps1'
         $sdkSmokeWorkflow | Should -Match '(?m)^\s*-SkipLibraries\r?$'
         $sdkSmokeWorkflow | Should -Match 'Invoke-SdkConsumerSmoke\.ps1'
