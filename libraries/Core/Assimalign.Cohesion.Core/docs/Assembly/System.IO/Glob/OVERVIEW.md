@@ -37,6 +37,10 @@ Notes:
 | Mixing OS-specific path rules | Assuming Windows or POSIX case/separator rules applies universally. | Normalize your input and be explicit about separators before matching. |
 | Segment `**` misuse | Using `**` as part of a segment (e.g., `foo**bar`). | Use `**` as its own segment or prefer `*` within a segment. |
 
+## Thread Safety
+
+`Glob.Parse` and the implicit conversion from `string` can be called from any number of threads at once, and a parsed `Glob` never changes, so one instance can be shared across threads. Parsed patterns are cached for the process: parsing a cached pattern again allocates only the new `Glob`. Globs parsed from the same pattern share one token array, so treat `Tokens` as read-only.
+
 ## Design Rationale: Keep `Glob` Generic
 
 Keeping the `Glob` type generic (not tied to the file system) has a few clear benefits:

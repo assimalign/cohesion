@@ -187,6 +187,37 @@ so it is rejected rather than silently turned into a share named `.` or `?`. `?`
 everywhere except the prefix, and the NT `\??\` prefix is still rejected. Error indexes refer to
 the caller's original string.
 
+## `Glob.Parse` is thread-safe
+
+`Glob.Parse`, and the implicit conversion from `string` that calls it, may run on any number of
+threads at once. A parsed `Glob` never changes, so one instance can be shared across threads.
+
+- **Tokenizer state belongs to one parse.** Each cache miss creates its own `Glob.Parser`, which
+  owns the `StringBuilder` that collects literal, set and range text. Every parse used to go
+  through one static parser and share that buffer. Two parses at once spliced each other's text,
+  so `/file[0-9].txt` could come back as a range such as `[0-x]` that matches `/filea.txt`, or the
+  parse threw `IndexOutOfRangeException`. That was the intermittent FileSystem.Globbing failure
+  on PR #1168 (run 38792058025).
+- **The pattern cache is process-wide and concurrent.** Token arrays are cached in a
+  `ConcurrentDictionary<string, TokenBase[]>` with ordinal keys. A lookup takes no lock and
+  allocates nothing, so parsing a cached pattern allocates only the returned `Glob`. When first
+  parses of one pattern race, each tokenizes it and `GetOrAdd` gives every caller the array that
+  was stored. The old cache was a `Dictionary` that `Tokenize` read but never wrote, so no parse
+  had ever been served from it.
+- **The cache is bounded by clearing it.** It is cleared after every 1,024 misses. Patterns come
+  from callers, and the FileSystem providers' `Watch` parses each watched path as a pattern, so a
+  cache that kept every distinct pattern would grow for the life of the process. Clearing keeps the
+  recent working set without the per-hit bookkeeping an LRU needs; a cleared pattern is parsed
+  again on its next use.
+- **Globs parsed from one pattern share a token array.** `Glob.Tokens` returns that array, so
+  callers treat it as read-only.
+
+`GlobConcurrencyTests` pins both halves. Workers parse distinct range, set, brace and wildcard
+patterns at once, re-parse earlier ones while the cache fills and clears, and check each glob's
+matches and `ToString()` round trip. The run ends once 2,000 parses have overlapped another parse,
+not after a fixed time, and fails if that never happens. A second test asserts that parsing a
+cached pattern allocates exactly one `Glob`.
+
 ## AOT posture
 
 Runtime-contract parsing uses direct string, integer, and URI operations. It performs no
