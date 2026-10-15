@@ -132,7 +132,7 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
             return null;
         }
 
-        error = SqlTypeModifiers.GetError(name, first, second);
+        error = SqlTypeModifiers.GetError(name, first, second, isDelimited: text.TrimStart().StartsWith('"'));
         if (error is not null)
         {
             return null;

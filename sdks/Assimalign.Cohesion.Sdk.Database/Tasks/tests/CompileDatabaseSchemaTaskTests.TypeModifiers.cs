@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
 public partial class CompileDatabaseSchemaTaskTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Temporal precision: extraction names the unsupported modifier and column")]
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Temporal modifiers: extraction names the unsupported modifier and column")]
     [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
-    public void Execute_TemporalPrecision_ShouldRefuseUnsupportedModifier(string type, string member)
+    public void Execute_TemporalModifiers_ShouldRefuseUnsupportedModifier(string type, string member)
     {
         // Arrange
         using var directory = new TemporaryDirectory();

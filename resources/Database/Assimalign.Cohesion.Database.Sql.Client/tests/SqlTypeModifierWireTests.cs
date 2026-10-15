@@ -42,9 +42,9 @@ public sealed class SqlTypeModifierWireTests
         (await connection.QueryAsync("SELECT value FROM items", cancellationToken: timeout.Token)).ShouldHaveSingleItem()["value"].ShouldBe(12m);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Temporal precision: every site reports unsupported and keeps the connection usable")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Temporal modifiers: every site reports unsupported and keeps the connection usable")]
     [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
-    public async Task ExecuteAsync_TemporalPrecision_ShouldPreserveCodeAndObject(string type, string member)
+    public async Task ExecuteAsync_TemporalModifiers_ShouldPreserveCodeAndObject(string type, string member)
     {
         // Arrange: host declarations are refused before any listener starts.
         var builder = SqlDatabaseEngine.CreateBuilder("temporal-wire");
@@ -62,7 +62,7 @@ public sealed class SqlTypeModifierWireTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var connection = await harness.Client.ConnectAsync(timeout.Token);
         await connection.ExecuteAsync("CREATE TABLE added (id INT)", cancellationToken: timeout.Token);
-        await connection.ExecuteAsync($"CREATE TABLE altered (value {type[..type.IndexOf('(')]})", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync($"CREATE TABLE altered (value {type.Split(' ', '(')[0]})", cancellationToken: timeout.Token);
 
         foreach (var (sql, subject) in SqlTypeModifierCases.Statements(type).Append(($"DROP FUNCTION parameter_function({type})", "parameter type")))
         {

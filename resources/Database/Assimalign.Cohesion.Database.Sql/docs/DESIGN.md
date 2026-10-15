@@ -974,6 +974,12 @@ is recognized but lacks fractional-second rounding, so declarations, scripts and
 with COHDBL001 naming the object and modifier. Malformed arguments still use SQL0005. The wire
 keeps its ParseFailure category and usable connection. See DIALECT.md for the PostgreSQL difference.
 
+INTERVAL field qualifiers (the six individual fields and seven PostgreSQL X TO Y ranges), with
+optional precision on SECOND, follow the same unsupported-modifier path. The parser consumes the
+complete qualifier at columns, domain bases, function signatures and CAST; shared validation
+reports COHDBL001 with the object and qualifier before provisioning or script execution. Typed
+SQL names and SDK extraction use that rule too. Delimited domain names remain identifiers.
+
 ## Declared column bounds (#1418)
 
 `SqlCastConverter.ParseNumericText(text, target)` is the shared text-to-NUMERIC conversion:

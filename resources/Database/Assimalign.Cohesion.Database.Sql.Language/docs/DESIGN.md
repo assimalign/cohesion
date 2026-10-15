@@ -373,7 +373,8 @@ modifiers on every type spelling, including a domain given arguments. SQL0003 re
 surrounding syntax errors. SqlTypeNames.TryResolve returns false for an unknown name or invalid
 modifiers; name-only resolution still distinguishes known built-ins. The shared splitter preserves
 quoted identifiers and reads at most two unsigned Int32 arguments; typed schemas retain their
-identifier-only spelling. DIALECT.md records the exact ranges and unbounded defaults.
+identifier-only supported spelling and recognize interval qualifiers for the unsupported-modifier
+diagnostic. DIALECT.md records the exact ranges and unbounded defaults.
 
 `NormalizeScale` is the shared decimal default: an explicit precision with no scale means zero;
 a bare decimal stays unconstrained. Compiled-schema snapshots, their validation, the typed
@@ -387,3 +388,11 @@ is not implemented here: the shared rule returns COHDBL001 with the modifier, an
 attach the declaration or CAST target. The rule distinguishes these unsupported modifiers from
 malformed argument lists, which remain SQL0005. A single unsigned precision above six is also
 recognized, because PostgreSQL clamps it with a warning; DIALECT.md records the difference.
+
+The declaration parser and CAST share interval-field consumption before argument parsing.
+SqlTypeModifiers owns the six fields and seven accepted X TO Y ranges, following PostgreSQL
+`src/backend/parser/gram.y:15197-15267`. Only SECOND (alone or at a range's end) takes precision.
+Every valid qualifier reports one COHDBL001 naming the declaration and complete modifier, including
+forms without precision. Invalid ranges remain SQL0003; malformed arguments remain SQL0005 and
+suppress a secondary unsupported diagnostic. Case and token trivia do not change admission.
+Delimited names retain their lexical identity so a domain named `"INTERVAL DAY"` is still a domain.

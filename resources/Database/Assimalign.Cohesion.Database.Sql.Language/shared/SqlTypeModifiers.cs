@@ -62,20 +62,55 @@ internal static class SqlTypeModifiers
         return true;
     }
 
-    // Typed schemas retain their identifier-only spelling; SQL separately supports delimiters.
+    // Typed schemas recognize interval qualifiers to diagnose them, but never emit them as DDL.
+    // Other typed names retain identifier-only spelling; SQL separately supports delimiters.
     internal static bool IsTypeName(string text)
     {
         int open = text.IndexOf('(');
-        return open < 0 ? IsIdentifier(text) :
-            IsIdentifier(text.AsSpan(0, open).TrimEnd()) && TrySplit(text, out _, out _, out _);
+        string name = open < 0 ? text : text[..open].TrimEnd();
+        return (IsIdentifier(name) || IsIntervalQualifiedName(name)) &&
+            (open < 0 || TrySplit(text, out _, out _, out _));
     }
 
-    internal static string? GetError(string name, int? first, int? second)
-        => GetError(name, first, second, out string code) is { } error ? $"{code}: {error}" : null;
+    internal static bool IsIntervalField(string name)
+        => name.ToUpperInvariant() is "YEAR" or "MONTH" or "DAY" or "HOUR" or "MINUTE" or "SECOND";
 
-    internal static string? GetError(string name, int? first, int? second, out string code)
+    internal static bool IsIntervalRange(string first, string last)
+        => (first.ToUpperInvariant(), last.ToUpperInvariant()) is
+            ("YEAR", "MONTH") or ("DAY", "HOUR" or "MINUTE" or "SECOND") or
+            ("HOUR", "MINUTE" or "SECOND") or ("MINUTE", "SECOND");
+
+    private static bool IsIntervalQualifiedName(string name)
+    {
+        if (name.Length <= 8 || !name.AsSpan(0, 8).Equals("INTERVAL", StringComparison.OrdinalIgnoreCase) ||
+            !char.IsWhiteSpace(name[8]))
+        {
+            return false;
+        }
+        // PostgreSQL src/backend/parser/gram.y:15197-15267, opt_interval/interval_second.
+        string[] words = name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return words.Length == 2 && IsIntervalField(words[1]) ||
+            words.Length == 4 && words[2].Equals("TO", StringComparison.OrdinalIgnoreCase) &&
+            IsIntervalRange(words[1], words[3]);
+    }
+
+    internal static string? GetError(string name, int? first, int? second, bool isDelimited = false)
+        => GetError(name, first, second, out string code, isDelimited) is { } error ? $"{code}: {error}" : null;
+
+    internal static string? GetError(string name, int? first, int? second, out string code, bool isDelimited = false)
     {
         code = DiagnosticCode;
+        if (!isDelimited && IsIntervalQualifiedName(name))
+        {
+            if (second is not null || first < 0 ||
+                first is not null && !name.TrimEnd().EndsWith("SECOND", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Only the SECOND interval field accepts one nonnegative precision argument.";
+            }
+            code = "COHDBL001";
+            string modifier = first is null ? name : string.Create(CultureInfo.InvariantCulture, $"{name}({first})");
+            return $"Interval field modifier '{modifier}' is recognized but not supported by the SQL model surface.";
+        }
         DatabaseType? type = StorageType(name);
         if (string.Equals(name, "FLOAT", StringComparison.OrdinalIgnoreCase))
         {

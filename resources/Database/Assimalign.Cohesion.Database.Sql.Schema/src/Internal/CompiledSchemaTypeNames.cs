@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
 /// parentheses (<c>email</c>, <c>VARCHAR(320)</c>, <c>DECIMAL(18, 2)</c>). The SQL engine resolves domain registrations; modifier validation is shared separately.
 /// The shape is what makes the name safe to write
 /// into DDL text.
+/// INTERVAL field qualifiers are recognized only to report their unsupported-modifier diagnostic.
 /// </summary>
 internal static class CompiledSchemaTypeNames
 {

@@ -284,3 +284,8 @@ engine resolution). Temporal precision is recognized but unsupported and reports
 with COHDBL001 in its detail, naming the column and modifier; malformed or invalid modifiers
 retain SQL0005 in that detail. No artifact is written on either refusal. The existing diagnostic
 ids and runtime/SDK canonical-document parity remain unchanged.
+
+INTERVAL field qualifiers and ranges, with optional precision on SECOND, are recognized by the
+same linked grammar. Extraction reports COHDBSDK106 with COHDBL001, naming the column and full
+qualifier, even without precision; no artifact is written. DIALECT.md lists all accepted spellings
+and the unimplemented field restriction/rounding semantics.

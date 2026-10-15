@@ -218,4 +218,6 @@ host declaration/Build, before a server starts; these host APIs have no remote d
 Recognized but unsupported temporal precision uses COHDBL001 in the same ParseFailure exchange,
 including CAST, naming the declaration and modifier. FLOAT(p) returns the resolved Float32
 (1..24 bits) or Float64 (25..53 bits) in catalog queries and result headers; bare FLOAT stays
-Float64. Invalid FLOAT precision remains SQL0005. Neither path changes the wire format.
+Float64. Invalid FLOAT precision remains SQL0005. INTERVAL field/range qualifiers, including
+SECOND(p), likewise report COHDBL001 at every declaration site and CAST, naming the complete
+qualifier; no-precision forms are also unsupported. Neither path changes the wire format.

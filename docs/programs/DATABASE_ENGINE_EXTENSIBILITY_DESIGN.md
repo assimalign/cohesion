@@ -1233,8 +1233,12 @@ sqlLiteral)` retains the raw literal escape hatch (owner decision, 2026-10-11, B
 and SDK compilation use one internal renderer owned by `Database.Sql.Schema`; the SDK accepts
 compile-time constants and reports a coded diagnostic for a value it cannot evaluate, naming
 `DefaultSql`. The document still records only `DefaultLiteral`, so a typed value and the same
-literal supplied through `DefaultSql` have identical documents and hashes. The format stays
-`cohesion/database-schema/v4`: this changes declaration syntax, not the document shape.
+literal supplied through `DefaultSql` have identical documents and hashes. B2 kept format v4;
+#1438 later advances runtime and SDK documents to `cohesion/database-schema/v5` because decimal
+scale normalization changes v4 identities. Earlier artifacts, applied markers and pending targets
+are refused through the document format gate before hash comparison; rebuild artifacts and recreate
+affected databases. Both catalog records retain the versioned document, so catalog format 10
+does not change. There is no old-hash reconciliation or upgrade path.
 Crash-storage tests recover every committed prefix of all eight executable
 add/drop operation kinds and assert the exact remaining plan and final marker. Provisioning name
 collisions refuse before compensation can claim another session's object. Format-7 counters reach

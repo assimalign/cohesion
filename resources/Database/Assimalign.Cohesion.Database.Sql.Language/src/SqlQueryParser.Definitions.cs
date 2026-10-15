@@ -29,16 +29,52 @@ public sealed partial class SqlQueryParser
         }
         // Type text retains lexical delimiters so a quoted '(' cannot become a type argument.
         int start = lexer.Current.Position;
+        int diagnosticsBeforeType = _parseDiagnostics.Count;
         string type = CurrentText(ref lexer);
         Advance(ref lexer);
+        type = ParseIntervalQualifier(ref lexer, type, out _);
         if (lexer.Current.Type == TokenType.LeftParen)
         {
             type += ParseTypeArguments(ref lexer, subject);
         }
-        if (SqlTypeModifiers.TrySplit(type, out string name, out int? first, out int? second) &&
-            SqlTypeModifiers.GetError(name, first, second, out string code) is { } error)
+        if (_parseDiagnostics.Count == diagnosticsBeforeType &&
+            SqlTypeModifiers.TrySplit(type, out string name, out int? first, out int? second) &&
+            SqlTypeModifiers.GetError(name, first, second, out string code, isDelimited: type.StartsWith('"')) is { } error)
         {
             AddTypeModifierDiagnostic(subject, error, start, _lastTokenEnd, code);
+        }
+        return type;
+    }
+
+    private string ParseIntervalQualifier(ref TokenLexer lexer, string type, out int? end)
+    {
+        end = null;
+        if (!type.Equals("INTERVAL", StringComparison.OrdinalIgnoreCase) ||
+            !SqlTypeModifiers.IsIntervalField(CurrentText(ref lexer)))
+        {
+            return type;
+        }
+        string first = CurrentText(ref lexer);
+        type += " " + first;
+        end = lexer.Current.Position + lexer.Current.Value.Length;
+        Advance(ref lexer);
+        if (IsWord(ref lexer, "TO"))
+        {
+            type += " " + CurrentText(ref lexer);
+            Advance(ref lexer);
+            string last = CurrentText(ref lexer);
+            if (!SqlTypeModifiers.IsIntervalField(last))
+            {
+                AddExpectedDiagnostic(ref lexer, "an interval field after TO");
+                return type;
+            }
+            if (!SqlTypeModifiers.IsIntervalRange(first, last))
+            {
+                AddSyntaxDiagnostic(ref lexer, $"Invalid INTERVAL field range '{first} TO {last}'.");
+            }
+            type += " " + last;
+            end = lexer.Current.Position + lexer.Current.Value.Length;
+            Advance(ref lexer);
         }
         return type;
     }

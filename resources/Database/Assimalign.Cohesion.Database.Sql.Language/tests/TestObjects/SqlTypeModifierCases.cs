@@ -13,7 +13,9 @@ public static class SqlTypeModifierCases
     public static IEnumerable<object[]> Types => All.Select(row => new[] { row[0], row[1] });
     public static IEnumerable<object[]> Sql => All.Select(row => new[] { row[0], row[1], row[2] });
     public static IEnumerable<object[]> Columns => All.Select(row => new[] { row[0], row[1], row[3] });
-    public static IEnumerable<object[]> UnsupportedTemporalSql => UnsupportedTemporal.Select(row => new[] { row[0] });
+    public static IEnumerable<object[]> UnsupportedTemporalStatements => UnsupportedTemporal.SelectMany(row =>
+        Statements((string)row[0]).Append(($"DROP FUNCTION parameter_function({row[0]})", "parameter type"))
+            .Select(statement => new object[] { row[0], statement.Item1, statement.Item2 }));
 
     public static IEnumerable<object[]> Floating
     {
@@ -37,6 +39,20 @@ public static class SqlTypeModifierCases
                 foreach (int precision in new[] { 0, 2, 3, 6, 7, int.MaxValue })
                 {
                     yield return [$"{name}({precision})", member];
+                }
+            }
+            // PostgreSQL gram.y:15197-15267: every field/range, plus SECOND precision.
+            foreach (string qualifier in new[] { "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND",
+                "YEAR TO MONTH", "DAY TO HOUR", "DAY TO MINUTE", "DAY TO SECOND",
+                "HOUR TO MINUTE", "HOUR TO SECOND", "MINUTE TO SECOND" })
+            {
+                yield return [$"INTERVAL {qualifier}", "Duration"];
+                if (qualifier.EndsWith("SECOND", StringComparison.Ordinal))
+                {
+                    foreach (int precision in new[] { 0, 3, 6, 7, int.MaxValue })
+                    {
+                        yield return [$"INTERVAL {qualifier}({precision})", "Duration"];
+                    }
                 }
             }
         }
@@ -94,6 +110,12 @@ public static class SqlTypeModifierCases
                 {
                     yield return [name + suffix, false, name, member];
                 }
+            }
+            foreach (string type in new[] { "INTERVAL SECOND(-1)", "INTERVAL SECOND()", "INTERVAL SECOND(2147483648)",
+                "INTERVAL SECOND(1,2)", "INTERVAL SECOND(foo)", "INTERVAL DAY TO SECOND(1,2)",
+                "INTERVAL DAY(3)", "INTERVAL DAY TO HOUR(3)" })
+            {
+                yield return [type, false, "INTERVAL", "Duration"];
             }
         }
     }

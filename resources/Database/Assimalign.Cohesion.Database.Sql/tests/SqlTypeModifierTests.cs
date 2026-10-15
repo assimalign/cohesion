@@ -15,16 +15,45 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlTypeModifierTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Temporal precision: every declaration and script refuses unsupported semantics")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Interval qualifier: a delimited domain name remains an identifier")]
+    public async Task ExecuteAsync_DelimitedIntervalDomainName_ShouldPreserveIdentifierAtEverySite()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("quoted-types", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE DOMAIN \"INTERVAL DAY\" AS INT", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE added (id INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE altered (value \"INTERVAL DAY\")", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        foreach (var (sql, subject) in SqlTypeModifierCases.Statements("\"INTERVAL DAY\""))
+        {
+            if (subject == "Domain 'bounded'")
+            {
+                // A domain name resolves, but nested domains retain their existing refusal.
+                var error = await Should.ThrowAsync<DatabaseException>(async () =>
+                    await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+                error.Message.ShouldBe("COHSQLD001: Domain 'bounded' must have a built-in base type.");
+                continue;
+            }
+            var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+            if (result is QueryResultSet rows) { await rows.DisposeAsync(); }
+        }
+        database.Catalog.TryGetTable("dbo", "created", out var table).ShouldBeTrue();
+        table.FindColumn("value").ShouldNotBeNull().DomainName.ShouldBe("INTERVAL DAY");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Temporal modifiers: every declaration and script refuses unsupported semantics")]
     [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
-    public async Task ExecuteAsync_TemporalPrecision_ShouldFailClosedAtEverySite(string type, string member)
+    public async Task ExecuteAsync_TemporalModifiers_ShouldFailClosedAtEverySite(string type, string member)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("temporal", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE added (id INT)", cancellationToken: CancellationToken.None);
-        await session.ExecuteAsync($"CREATE TABLE altered (value {type[..type.IndexOf('(')]})", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"CREATE TABLE altered (value {type.Split(' ', '(')[0]})", cancellationToken: CancellationToken.None);
 
         foreach (var (sql, subject) in SqlTypeModifierCases.Statements(type).Append(($"DROP FUNCTION parameter_function({type})", "parameter type")))
         {

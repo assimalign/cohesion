@@ -38,6 +38,7 @@ public sealed partial class SqlQueryParser
         }
 
         int targetStart = lexer.Current.Position;
+        int diagnosticsBeforeTarget = _parseDiagnostics.Count;
         int targetEnd = targetStart;
         string targetName = string.Empty;
         int? firstArgument = null;
@@ -48,6 +49,8 @@ public sealed partial class SqlQueryParser
             targetName = CurrentText(ref lexer);
             targetEnd = lexer.Current.Position + lexer.Current.Value.Length;
             Advance(ref lexer);
+            targetName = ParseIntervalQualifier(ref lexer, targetName, out int? qualifierEnd);
+            targetEnd = qualifierEnd ?? targetEnd;
             if (lexer.Current.Type == TokenType.LeftParen)
             {
                 Advance(ref lexer);
@@ -81,7 +84,7 @@ public sealed partial class SqlQueryParser
 
         string targetType = targetName.Length == 0 ? string.Empty : _sourceText[targetStart..targetEnd];
         DatabaseTypeInfo? targetTypeInfo = null;
-        if (targetName.Length > 0)
+        if (targetName.Length > 0 && _parseDiagnostics.Count == diagnosticsBeforeTarget)
         {
             targetTypeInfo = ResolveCastTarget(targetName, firstArgument, secondArgument,
                 validArguments, targetStart, targetEnd);
@@ -128,7 +131,7 @@ public sealed partial class SqlQueryParser
         SqlTypeModifiers.TrySplit(name, out string identifier, out _, out _);
         string code = SqlTypeModifiers.DiagnosticCode;
         string? error = validArguments
-            ? SqlTypeModifiers.GetError(identifier, firstArgument, secondArgument, out code)
+            ? SqlTypeModifiers.GetError(identifier, firstArgument, secondArgument, out code, isDelimited: name.StartsWith('"'))
             : SqlTypeModifiers.ArgumentShape;
         if (error is not null)
         {

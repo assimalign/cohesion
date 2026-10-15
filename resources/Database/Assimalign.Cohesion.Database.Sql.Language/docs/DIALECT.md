@@ -1311,6 +1311,7 @@ CAST, declared scripts, and typed schemas (including SDK extraction).
 | BINARY, VARBINARY, BLOB, BYTEA | One length n = 1..10485760 bytes | No declared length limit |
 | FLOAT | One binary precision p = 1..53: 1..24 resolves to REAL (Float32), 25..53 to DOUBLE PRECISION (Float64) | Float64 |
 | TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL; DATETIME alias | One nonnegative precision is recognized but unsupported (COHDBL001) | The type's normal meaning |
+| INTERVAL field qualifiers | YEAR, MONTH, DAY, HOUR, MINUTE, SECOND and the ranges below are recognized but unsupported (COHDBL001); only SECOND accepts `(p)` | Bare INTERVAL keeps its normal meaning |
 | Every other built-in type and every domain | None (INT(5), BOOLEAN(1) and domain(1) are invalid) | The type's normal meaning |
 
 Arguments are one or two unsigned integer literals within Int32; negative, fractional,
@@ -1340,6 +1341,17 @@ with a warning (date.c:57-81; timestamp.c:110-132). A single unsigned Int32 prec
 is therefore also unsupported here. Malformed argument lists remain SQL0005. Typed declarations
 retain UnsupportedType and SDK diagnostics retain COHDBSDK106, with COHDBL001 in their detail.
 Fractional-second rounding is a separate follow-up.
+
+**PostgreSQL difference: interval field qualifiers are recognized but unsupported.** The complete
+recognized set is YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, YEAR TO MONTH, DAY TO HOUR,
+DAY TO MINUTE, DAY TO SECOND, HOUR TO MINUTE, HOUR TO SECOND, and MINUTE TO SECOND.
+SECOND, including the last field of a range, may carry one unsigned Int32 precision `(p)`.
+PostgreSQL accepts these forms (`src/backend/parser/gram.y:15197-15267`); Cohesion does not yet
+implement their field restriction/truncation or precision rounding. Every declaration site and
+CAST therefore reports COHDBL001 naming the object and complete qualifier, with or without
+precision. The same refusal reaches declared scripts, typed SQL names and SDK extraction.
+Malformed arguments remain SQL0005; invalid ranges such as YEAR TO DAY remain SQL0003 in SQL.
+Delimited domain names such as `"INTERVAL DAY"` remain identifiers, not field qualifiers.
 
 Invalid modifiers produce SQL0005 before execution, naming the column, domain, function
 parameter or return type, or CAST target. In process the text execution API throws
@@ -1644,7 +1656,7 @@ function names are lexed but not supported (see the statement matrix).
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `COHDBL001` | Error | Recognized clause, keyword, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101) and temporal precision in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
+| `COHDBL001` | Error | Recognized clause, keyword, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
 | `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |

@@ -10,9 +10,9 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public sealed class SqlTypeModifierTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql.Schema] - Temporal precision: typed and raw declarations report unsupported modifiers")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Schema] - Temporal modifiers: typed and raw declarations report unsupported modifiers")]
     [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
-    public void Compile_TemporalPrecision_ShouldNameUnsupportedModifier(string type, string member)
+    public void Compile_TemporalModifiers_ShouldNameUnsupportedModifier(string type, string member)
     {
         // Arrange / Act
         var typed = Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Create("app", schema =>

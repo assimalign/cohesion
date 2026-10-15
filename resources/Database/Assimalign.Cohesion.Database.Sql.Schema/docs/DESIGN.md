@@ -144,7 +144,8 @@ The optional `defaultLiteral` member is omitted when null. Adding it changes the
 contract, so B2 introduced `cohesion/database-schema/v4` for every schema, with or without defaults.
 Earlier documents are refused; no v3 compatibility reader or upgrade is provided. Provisioning
 refuses their recorded documents before any hash comparison or catalog reconstruction. The SDK compiler
-and migration baseline writer use this same format. `NULL` text remains part of a declaration's identity even
+and migration baseline writer share the current v5 format with runtime schema compilation.
+`NULL` text remains part of a declaration's identity even
 though SQL gives it the same database behavior as an absent default. Adding or removing a
 default changes column equivalence, so the planner carries both definitions in `AlterColumn`
 instead of reporting false convergence; the current dialect still refuses that operation.
@@ -274,7 +275,8 @@ validated when a SqlCompiledSchema is constructed or deserialized, closing the r
 
 Precision is 1..28, scale 0..precision (an omitted scale means zero with an explicit precision),
 and explicit string/binary lengths are 1..10485760; omitted bounds remain unbounded. Domains take
-no modifiers at use sites. The identifier-only typed syntax stays unchanged; integer arguments
+no modifiers at use sites. Supported typed names remain identifiers; interval field qualifiers are
+also recognized solely to report COHDBL001. Integer arguments
 now use the parser's Int32 rule rather than the previous nine-digit shape check. DIALECT.md is the
 range contract. C# int/string parameters and the raw compiled
 records cannot express these ranges at compile time; runtime declaration validation and the SDK's
@@ -301,3 +303,7 @@ Float64 and verifies that it matches the member's CLR storage; the compiled decl
 its SQL text. Temporal precision is recognized but unsupported: the existing UnsupportedType
 exception carries COHDBL001 and names the table/column and modifier, for builders and raw compiled
 CustomType metadata alike. Invalid FLOAT precision retains SQL0005 in the validation detail.
+
+INTERVAL field qualifiers use the shared PostgreSQL field/range grammar, including SECOND(p).
+Builders and raw CustomType metadata report UnsupportedType with COHDBL001 naming table/column
+and the full qualifier, with or without precision. Field restrictions and rounding do not execute.
