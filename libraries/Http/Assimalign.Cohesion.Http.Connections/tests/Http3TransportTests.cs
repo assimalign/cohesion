@@ -254,7 +254,14 @@ public class Http3TransportTests
         using CancellationTokenRegistration registration = reserved.ConnectionClosed.Register(() => stopped.TrySetResult());
 
         // Act — the reserved stream, then a request on the same connection.
-        await reserved.Output.WriteAsync(new byte[] { 0x21, 0x00, 0x00 });
+        try
+        {
+            await reserved.Output.WriteAsync(new byte[] { 0x21, 0x00, 0x00 });
+        }
+        catch (ConnectionResetException exception) when (exception.ApplicationErrorCode == (long)Http3ErrorCode.StreamCreationError)
+        {
+            // The server can stop this reserved stream before its flush completes.
+        }
 
         IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/after", "https", "a"));

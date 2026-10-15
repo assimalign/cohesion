@@ -158,7 +158,14 @@ public class Http3ConnectionTimeoutTests
         await Task.Delay(TimeSpan.FromSeconds(4));
         Stopwatch sinceMalformed = Stopwatch.StartNew();
         IDuplexConnection malformed = await peer.OpenRequestStreamAsync();
-        await malformed.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw((":scheme", "https"), (":path", "/malformed"), (":authority", "a")));
+        try
+        {
+            await malformed.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw((":scheme", "https"), (":path", "/malformed"), (":authority", "a")));
+        }
+        catch (ConnectionResetException exception) when (exception.ApplicationErrorCode == (long)Http3ErrorCode.MessageError)
+        {
+            // The malformed head can reset its stream before its flush completes.
+        }
         malformed.Output.Complete();
         await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(malformed));
         bool dispatched = await next;

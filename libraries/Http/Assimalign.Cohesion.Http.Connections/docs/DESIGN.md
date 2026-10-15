@@ -3121,6 +3121,19 @@ application's fault observer, and recorded a `500` on the server span for a stre
   Web.Hosting consequently records `request_canceled`, without an Error log, `OnException`, or a
   staged `500`. The transport supplies the cancellation; the host's existing boundary handles it.
 
+**Test trigger scheduling (#1501).** A client write that deliberately causes a connection close or
+stream reset can observe that reset before its flush completes. The live in-memory tests accept only
+`ConnectionResetException` with the triggering case's exact `ApplicationErrorCode`; raw QUIC tests
+also require the expected `QuicError` (`ConnectionAborted` or `StreamAborted`). Other exceptions,
+missing codes and different codes still fail. The abort-code, cancellation, read and response
+assertions after the trigger remain independent and unchanged. This covers forbidden control DATA,
+invalid QPACK encoder instructions and priority IDs, malformed request heads, reserved streams and
+the raw QUIC unread-upload stop. In the connection-loss theory, control FIN completes synchronously
+without checking connection loss; control reset and driver abort likewise only signal the failure.
+Those three triggers need no exception handling. A temporary post-flush barrier reproduced all four
+forbidden-control cases failing with `0x105` before the filter and passing after it; the barrier was
+removed. This is test reliability only, with no shipped behavior, dependency or preview.1 break.
+
 **Behavior and advisory triage (#1430).** This replaces the post-preview streaming body's former
 `IOException` contract. The scoped defect is absent from 10.0.0-preview.1, which buffered the complete
 HTTP/3 body before publishing an exchange. On the current streaming implementation an unauthenticated

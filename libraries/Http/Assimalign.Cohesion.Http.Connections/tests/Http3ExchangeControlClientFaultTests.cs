@@ -314,7 +314,14 @@ public class Http3ExchangeControlClientFaultTests
                 break;
             case ConnectionFailure.ForbiddenControlFrame:
                 expectedCode = Http3ErrorCode.UnexpectedFrame;
-                await controlStream.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x00, []), timeout.Token);
+                try
+                {
+                    await controlStream.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x00, []), timeout.Token);
+                }
+                catch (ConnectionResetException exception) when (exception.ApplicationErrorCode == (long)expectedCode)
+                {
+                    // The forbidden frame can close the connection before its flush completes.
+                }
                 break;
             case ConnectionFailure.DriverFailure:
                 expectedCode = Http3ErrorCode.ProtocolError;
