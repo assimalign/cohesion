@@ -97,9 +97,15 @@ Its own mapping calls use the raw middleware overloads, so its compilation emits
 Web.Routing declares no generator-dependent overload and does not bundle a second copy. The JSON
 property resolver for Web.Validation shares the generator assembly; NuGet validation-only consumers
 currently need a direct Web.Api reference, with independent delivery left as a follow-up.
-A duplicate-path probe with .NET SDK 10.0.401 passes both byte-identical generator DLLs to `csc`
-and fails with CS0433 for the generated interceptor attribute. Mixed App.Web/direct-package delivery
-needs an analyzer deduplication guard before compilation; that guard remains a follow-up.
+The package also ships `buildTransitive/Assimalign.Cohesion.Web.Api.targets`. Its
+`_CohesionWebApiRemoveDuplicateGenerator` target runs before `CoreCompile`, after package and
+targeting-pack analyzers resolve, in real and design-time builds. When more than one `Analyzer`
+has the file name `Assimalign.Cohesion.SourceGeneration.Web.dll`, it removes only the items tagged
+with `NuGetPackageId="Assimalign.Cohesion.Web.Api"`. The other source's copy wins: in Sdk.Web
+applications this deliberately keeps App.Web's generator, matching the reference assemblies the
+application compiles against. A lone package copy is unchanged. This guard is necessary because
+.NET SDK 10.0.401 passes distinct paths to byte-identical generators through to `csc`, causing
+CS0433 for the generated interceptor attribute without it.
 See the generator's own `docs/DESIGN.md` for emission internals and delivery constraints.
 
 ## Binding Sources and Inference

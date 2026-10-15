@@ -11,8 +11,11 @@ generator DLL and a `buildTransitive` props file that appends `Assimalign.Cohesi
 to `InterceptorsNamespaces`. Analyzers do not flow through a transitive Web.Api dependency.
 In-repository consumers activate it with
 `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />` and add that
-namespace to `InterceptorsNamespaces` themselves. Mixed App.Web/direct-package delivery still needs
-an analyzer deduplication guard; see [Delivery](DESIGN.md#delivery) for the duplicate-path constraint.
+namespace to `InterceptorsNamespaces` themselves. Web.Api's `buildTransitive` targets file removes its
+package copy before compilation, including design-time builds, when another source also supplies
+the generator. In Sdk.Web applications App.Web's copy wins because it matches the framework
+reference assemblies; a lone package copy stays active. See [Delivery](DESIGN.md#delivery) for
+the guard's selection rules.
 
 The same assembly supplies `JsonValidationPropertyResolverGenerator` for Web.Validation. NuGet
 consumers receive it only through a direct Web.Api package reference; separate delivery for

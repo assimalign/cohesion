@@ -377,11 +377,17 @@ Web.Api's own mapping calls use the `WebApplicationMiddleware` overloads, so run
 while building that library emits no interceptors. The package's namespace append composes with the
 same append in Sdk.Web: repeating an allowed namespace is harmless.
 
-**Mixed framework/package delivery needs a guard.** With .NET SDK 10.0.401, a probe that supplies
-byte-identical generator DLLs through two distinct `Analyzer` paths passes both to `csc` and fails
-with CS0433 for the generated `InterceptsLocationAttribute`. Deduplicating the resolved analyzer
-items before compilation remains a follow-up for Sdk.Web applications that also reference Web.Api
-directly; the namespace opt-in alone does not cause this failure.
+**Duplicate delivery.** Web.Api also ships
+`buildTransitive/Assimalign.Cohesion.Web.Api.targets`. Its
+`_CohesionWebApiRemoveDuplicateGenerator` target runs before `CoreCompile`, after package and
+targeting-pack analyzers resolve, in real and design-time builds. When more than one `Analyzer`
+has the file name `Assimalign.Cohesion.SourceGeneration.Web.dll`, the target removes only items
+whose `NuGetPackageId` is `Assimalign.Cohesion.Web.Api`. The other source's copy wins: in Sdk.Web
+applications, keeping App.Web's generator deliberately matches the framework reference assemblies
+the application compiles against. A lone Web.Api package copy is unchanged. Without the guard,
+.NET SDK 10.0.401 passes two distinct paths to byte-identical generators through to `csc`, causing
+CS0433 for the generated `InterceptsLocationAttribute`. Repeating the namespace opt-in does not
+cause this failure.
 
 `JsonValidationPropertyResolverGenerator` shares this assembly. A NuGet consumer that uses only
 Web.Validation currently needs a direct Web.Api package reference to receive it; independent delivery
