@@ -19,6 +19,8 @@
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
 		<PublishAot>true</PublishAot>
+		<!-- Q8D times the Build provisioning phase through its existing EventSource event. -->
+		<EventSourceSupport>true</EventSourceSupport>
 	</PropertyGroup>
 	<!--
 	    A baseline before phase E2 has no function ABI: -p:SqlBenchmarkBaseline=true compiles out the

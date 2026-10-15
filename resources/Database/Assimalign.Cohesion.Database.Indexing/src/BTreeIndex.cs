@@ -121,9 +121,9 @@ public sealed class BTreeIndex
     /// <summary>
     /// Allocates the root leaf of a new tree inside the given storage transaction.
     /// </summary>
-    internal static long CreateRoot(Storage.Storage storage, StorageTransaction transaction)
+    internal static long CreateRoot(Storage.Storage storage, StorageTransaction transaction, ulong objectId)
     {
-        using var handle = storage.AllocatePageForWrite(transaction, PageType.Index);
+        using var handle = storage.AllocatePageForWrite(transaction, PageType.Index, objectId);
         BTreeNode.Initialize(handle.Page.AsBodySpan(), BTreeNode.LeafKind);
         handle.MarkDirty();
         return (long)handle.Id;
@@ -897,7 +897,7 @@ public sealed class BTreeIndex
         int count;
 
         using (var leafHandle = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch))
-        using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch))
+        using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch, _objectId))
         {
             var leaf = OpenNode(leafHandle.Page.AsBodySpan(), leafId);
             count = leaf.EntryCount;
@@ -1054,7 +1054,7 @@ public sealed class BTreeIndex
         long leftId;
 
         using (var rootHandle = _storage.OpenPageForWrite(transaction, (PageId)RootPageId, _latch))
-        using (var leftHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch))
+        using (var leftHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch, _objectId))
         {
             var rootBody = rootHandle.Page.AsBodySpan();
             var leftBody = leftHandle.Page.AsBodySpan();
@@ -1116,7 +1116,7 @@ public sealed class BTreeIndex
         int count;
 
         using (var nodeHandle = _storage.OpenPageForWrite(transaction, (PageId)nodeId, _latch))
-        using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch))
+        using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch, _objectId))
         {
             var node = OpenNode(nodeHandle.Page.AsBodySpan(), nodeId);
             count = node.EntryCount;

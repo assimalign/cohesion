@@ -423,6 +423,32 @@ internal sealed class SqlDatabaseEventSource : EventSource
     private void ScriptApplied(string engineName, string database, string script, string hash)
         => WriteEvent(22, engineName, database, script, hash);
 
+    [NonEvent]
+    internal void TableReclamationStarted(SqlDatabase database, ulong objectId)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            TableReclamationStarted(database.Engine.Name, database.Name.ToString(), objectId);
+        }
+    }
+
+    [Event(23, Level = EventLevel.Informational, Message = "Reclaiming dropped table {2} in {0}/{1}.")]
+    private void TableReclamationStarted(string engineName, string database, ulong objectId)
+        => WriteEvent(23, engineName, database, objectId);
+
+    [NonEvent]
+    internal void TableReclamationCompleted(SqlDatabase database, ulong objectId, long pages)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            TableReclamationCompleted(database.Engine.Name, database.Name.ToString(), objectId, pages);
+        }
+    }
+
+    [Event(24, Level = EventLevel.Informational, Message = "Reclaimed dropped table {2} in {0}/{1}: {3} pages in this process.")]
+    private void TableReclamationCompleted(string engineName, string database, ulong objectId, long pages)
+        => WriteEvent(24, engineName, database, objectId, pages);
+
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
         => WriteEvent(1, engineName, sessionId, activeSessions);

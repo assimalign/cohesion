@@ -36,16 +36,18 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
         Action<SqlDatabaseServerOptions>? configureServer = null,
         Action<DatabaseConnectionSettings>? configureSettings = null,
         SqlClientObserver? observer = null,
-        Action<SqlDatabaseEngineOptions>? configureEngine = null)
+        Action<SqlDatabaseEngineOptions>? configureEngine = null,
+        bool reopen = false)
     {
         var engineOptions = new SqlDatabaseEngineOptions();
         configureEngine?.Invoke(engineOptions);
         var engine = SqlDatabaseEngine.Create("sql-typed-client-e2e", engineOptions);
 
-        var database = await engine.CreateDatabaseAsync(DatabaseName);
+        var database = reopen ? await engine.OpenDatabaseAsync(DatabaseName) : await engine.CreateDatabaseAsync(DatabaseName);
 
-        await using (var session = await database.CreateSessionAsync())
+        if (!reopen)
         {
+            await using var session = await database.CreateSessionAsync();
             await session.ExecuteAsync("CREATE TABLE users (id INT NOT NULL, name VARCHAR(100), score BIGINT)");
             await session.ExecuteAsync("INSERT INTO users (id, name, score) VALUES (1, 'ada', 100), (2, 'grace', 200)");
         }

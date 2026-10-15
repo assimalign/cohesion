@@ -1730,11 +1730,10 @@ Numbering continues the plan of record's table. Each line is the question, then 
     query exposes less information than `GetOwnerPages`, without a model reference, copied SQL
     allocation state, reflection or assembly-access grants. Recommend keeping this native operation.
 
-    **Existing drop-cost discrepancy:** all drops remain inline as requested, but `DROP TABLE`
-    still calls `Storage.FreeOwnerPages` (`Database.Storage/src/Storage.cs:2111`), clearing and
-    WAL-logging each owned page. It therefore retains data-scaling physical cleanup in Build.
-    Recommend a separate decision to move page reclamation out of Build; neither silently
-    removing reclamation nor changing the accepted drop classification was included here.
+    **Drop-cost discrepancy resolved by decision 77 (#1443):** drops still unpublish inline,
+    but physical reclamation now runs afterwards on the version-purge worker. The original B2
+    implementation reclaimed pages inside the statement; the current implementation and
+    re-derived source locations are recorded under 77 below.
 
 50. **The `DatabaseInstance` capability.** Delete `SupportsSchemaProvisioning`, `ApplySchemaAsync`,
     `ApplySchemaCoreAsync` and the constructor flag, and change `database-area.md` rule 4's sentence
@@ -1928,6 +1927,86 @@ Decisions raised while B2 and 49a were implemented, answered by the owner on 202
 77. **DROP TABLE.** 49a assumed every drop is catalog-only; DROP TABLE still reclaims its pages
     inline, which grows with the table. *Owner:* defer it as 49a defers other data-scaling steps:
     unpublish in Build, reclaim afterwards (#1443).
+
+    **Landed (#1443, 2026-10-15):** statement, typed migration and E4 script drops now commit
+    unpublication and a kind-14 retired-object intent together (`Sql.Catalog/src/SqlCatalog.cs:513`,
+    publication at `:586`; project names here omit `Assimalign.Cohesion.Database.`).
+    `Sql/src/Internal/SqlPlanExecutor.cs:906` performs no data-page release. The existing
+    `SqlVersionPurgeWorker` runs `SqlTableReclamation.RunBatch` (`Sql/src/Internal/SqlTableReclamation.cs:61`)
+    only after Build, taking at most 32 owned data/index pages through the native bounded
+    `Storage/src/Storage.cs:2126` operation. SQL's `SqlRowCodec.RecordSpaceFormatVersion`
+    (`Sql/src/Internal/SqlRowCodec.cs:74`) moved **10 -> 11**; storage-header and B-tree-node
+    versions did not change. No upgrade path, public interface, shipped friend grant or new
+    project reference was added. Existing storage allocation/release signatures gained native
+    owner/batch parameters; recommend this model-neutral capability over a public SQL bridge.
+
+    **Reader fence and ordering:** discovery allocates a logical transaction fence *after*
+    committed unpublication (`SqlTableReclamation.cs:119`). Both oldest active sequence and
+    open contexts must be newer, and all statement epochs admitted before discovery must finish
+    (`:147`). The statement lease persists through a concurrent transaction rollback. Previously
+    DROP excluded writers but a plain scan could skip pages freed inline; now an already bound
+    scan retains rows and tree pages until materialization ends. A later name lookup sees the
+    dropped table absent, including from an older transaction. The rule is conservative across
+    the database: an unrelated old transaction or 49a reservation can retain space, but cannot
+    be blocked by reclamation. Same-table DROP waits for 49a's existing reservation, then applies
+    the existing ownership rules; recommend keeping that behavior. Reclamation follows deferred
+    undo on the version-purge worker and runs independently of provisioning, without holding
+    the SQL apply gate or live-table/catalog locks over its page walk. Short storage allocator,
+    directory and journal critical sections remain necessary for every storage operation.
+
+    **Crash and health:** frees commit through WAL before the dedicated catalog intent page
+    is removed. Recovered owner/free headers are the progress record, so both a crash before
+    the first batch and one between batches converge without double-free. Names can be reused
+    immediately with new identities. Shutdown cancels/joins the current batch. Tests cover memory,
+    file, durable crash images through sessions and `Database.Sql.Client`, exact FSM accounting,
+    physical file reuse, old snapshots, mid-scan rollback, several drops and pending 49a work.
+    Build tests cover typed and script reconciliation and force a worker attempt inside typed
+    reconciliation. With the worker paused at handoff, they verify zero reclaimed pages and
+    unchanged owner-page and free-space counts at Build return.
+    Recommend **no Degraded** signal for pending space alone: catalog readiness is complete.
+    Events 23/24 expose started/completed cleanup; actual maintenance failures retain the
+    existing worker failure/offline policy.
+
+    **Review round 1:** catalog intent discovery no longer scans mutable slotted pages. Catalog
+    load caches identity/location pairs (`Sql.Catalog/src/SqlCatalog.cs:1278`), DROP adds them only
+    after commit, and retirement removes them only after commit. Its locked identity snapshot
+    (`:178`) and idempotent completion (`:200`) are the narrowly scoped public catalog additions
+    requested by the review direction; locations and the tuple codec remain private. The worker
+    releases the catalog lock before reader fencing and data reclamation. Format **11 stays 11**.
+    A three-session public CREATE/INSERT/DROP probe with 6,000-character defaults reproduced
+    cumulative maintenance failures in memory and on disk before the fix. The regression waits
+    for minimum DDL and worker counters, asserts zero failures, and checks every retired identity.
+
+    The crash corpus now records every durable change through a forced active-batch interruption,
+    rollback/retry, final data commit before intent retirement, and retirement I/O. Every image
+    reopens, preserves the replacement table and its index, reuses space, and agrees with full
+    data/catalog page walks. Both session and wire paths cover synchronous and grouped durability;
+    None checks only process-crash persistence of OS writes, not power-loss durability.
+    The background catalog-read audit found no other unlocked record scan: provisioning reads
+    locked catalog state, checkpoints operate on storage pages under kernel synchronization, and
+    the purge worker's other passes use transaction/data storage. The remaining catalog walks are
+    initial load (`SqlCatalog.cs:1283`) and failed-open format diagnosis (`SqlDatabaseEngine.cs:765`),
+    both before publication to workers or sessions.
+
+    **Q8D, Release NativeAOT:** Snapdragon X2 Elite @ 4.03 GHz, Windows ARM64 10.0.28000,
+    .NET 10.0.13 runtime / SDK 10.0.401, workstation GC, 12 logical processors. Publish
+    `Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks` for `win-arm64`, then run the
+    executable with `--cases Q8D --rows 100000 --iterations 5` five times. Each process warms
+    once and takes five samples from fresh copies of the same checkpointed file image.
+    EventSource support is enabled in the harness: event 14 supplies the provisioning-phase
+    duration; the outer stopwatch measures all of Build. Seed/copy/disposal are outside timing.
+    The populated table has 100,000 rows with 1,800-character payloads: **25,000 data pages**,
+    a 204,816,384-byte data file including two header slots (empty: 16,384 bytes).
+
+    | Work inside Build | Empty, best of 5 medians | 100,000 rows, best of 5 medians | Range of the 5 medians, empty / populated |
+    | --- | ---: | ---: | --- |
+    | Provisioning DROP phase | **1.9445 ms** | **1.8653 ms** | 1.9445–2.0999 / 1.8653–2.1411 ms |
+    | Whole Build, including open/recovery | 126.0200 ms | 898.4195 ms | 126.0200–485.5694 / 898.4195–2100.3385 ms |
+
+    These runs shared the machine with validation/pack builds, hence the broad whole-Build
+    variance. The DROP phase has no data-scaling work; opening/recovering the data file retains
+    its separate, data-dependent budget (decision 75). No test asserts elapsed time. The
+    deterministic Build counter proof covers both typed and script paths, empty and populated.
 78. **Scripts and typed objects.** A declared script may create its own objects, add an index to a
     typed table and run DML, but may not alter or drop an object the typed schema declares
     (`COHSQLS005`, refused before any file opens); a change to a typed object belongs in the typed

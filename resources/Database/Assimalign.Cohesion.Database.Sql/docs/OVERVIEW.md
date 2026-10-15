@@ -40,7 +40,9 @@ shared storage, with DDL flowing through the relational catalog
   planned rule-based and executed against table scans: `SELECT` with `WHERE`,
   projection, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, lone `COUNT(*)`;
   `INSERT` (multi-row, defaults, nullability); `UPDATE`/`DELETE` with accurate
-  affected counts; `CREATE/ALTER/DROP TABLE`. Unsupported dialect features fail
+  affected counts; `CREATE/ALTER/DROP TABLE`. DROP unpublishes immediately and the
+  version-purge worker reclaims its data/index pages after older readers finish.
+  Unsupported dialect features fail
   at plan time with precise messages. Statements nest at most the engine's
   `ExpressionNestingLimit` (256 levels by default, 32..4096; an `AND`/`OR` chain
   of any length is one level), and a statement within it that exhausts the
@@ -86,7 +88,7 @@ shared storage, with DDL flowing through the relational catalog
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership and script receipts persist in catalog format 10. A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in catalog format 11. A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.

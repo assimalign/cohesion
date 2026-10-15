@@ -208,6 +208,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         // The statement's own metrics are the ones set after this point; a statement that fails
         // before it runs leaves the previous statement's, which never classify this one.
         var previousMetrics = _lastStatementMetrics;
+        long readerEpoch = _database.TableReclamation.EnterStatement();
         try
         {
             if (_provisioningSchema is null && _database.SchemaProvisioner.Deferred is not null)
@@ -251,7 +252,15 @@ public sealed class SqlDatabaseSession : DatabaseSession
         }
         finally
         {
-            TraceStatementCompletion(request, previousMetrics);
+            try
+            {
+                if (request is SqlQueryRequest { Statement.SqlExpression: SqlDropTableExpression })
+                {
+                    _database.TableReclamation.Request();
+                }
+                TraceStatementCompletion(request, previousMetrics);
+            }
+            finally { _database.TableReclamation.ExitStatement(readerEpoch); }
         }
     }
 

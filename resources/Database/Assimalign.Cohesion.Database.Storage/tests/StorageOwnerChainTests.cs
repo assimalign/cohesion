@@ -16,6 +16,83 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </summary>
 public sealed class StorageOwnerChainTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Index owner pages survive allocation rollback and reclaim after reopen")]
+    public void FreeOwnerPages_IndexOwners_ShouldRecoverAndReclaimWithoutJoiningRowScans()
+    {
+        // Arrange
+        var data = new CrashSimulationStream();
+        var journal = new CrashSimulationStream();
+        using var storage = ChainStorage.Create(data, journal, poolCapacity: 64);
+        using (var transaction = storage.BeginTransaction())
+        {
+            using var page = storage.AllocatePageForWrite(transaction, PageType.Index, ownerId: 17);
+            page.MarkDirty();
+            transaction.Commit();
+        }
+        using (var rollback = storage.BeginTransaction())
+        {
+            using var page = storage.AllocatePageForWrite(rollback, PageType.Index, ownerId: 17);
+            page.MarkDirty();
+        }
+        storage.GetOwnerPages(17).ShouldBeEmpty();
+        storage.HasOwnerPages(17).ShouldBeFalse();
+        storage.Checkpoint();
+
+        // Act
+        using var recovered = ChainStorage.Open(data.CaptureDurable(), journal.CaptureDurable());
+        long free = recovered.FreeSpaceMap.FreePageCount;
+        using (var batch = recovered.BeginTransaction())
+        {
+            recovered.FreeOwnerPages(batch, 17, 1).ShouldBe(1);
+            batch.Commit();
+        }
+        using (var batch = recovered.BeginTransaction())
+        {
+            recovered.FreeOwnerPages(batch, 17, 1).ShouldBe(1);
+            batch.Commit();
+        }
+
+        // Assert
+        recovered.FreeSpaceMap.FreePageCount.ShouldBe(free + 2);
+        using var repeated = recovered.BeginTransaction();
+        recovered.FreeOwnerPages(repeated, 17, 1).ShouldBe(0);
+        repeated.Commit();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Bounded owner reclamation commits exact FSM deltas and rolls back safely")]
+    public void FreeOwnerPages_BoundedBatches_ShouldFreeEachPageExactlyOnce()
+    {
+        // Arrange
+        using var storage = ChainStorage.Create(new CrashSimulationStream(), new CrashSimulationStream(), poolCapacity: 64);
+        FillOwner(storage, ownerId: 7, "record", count: 250, recordSize: 400);
+        int pages = storage.GetOwnerPages(7).Count;
+        long free = storage.FreeSpaceMap.FreePageCount;
+
+        // Act: an interrupted batch restores its pages; completed batches are bounded.
+        using (var rollback = storage.BeginTransaction())
+        {
+            storage.FreeOwnerPages(rollback, 7, 3).ShouldBe(3);
+        }
+        storage.GetOwnerPages(7).Count.ShouldBe(pages);
+        int total = 0;
+        while (storage.HasOwnerPages(7))
+        {
+            using var batch = storage.BeginTransaction();
+            int count = storage.FreeOwnerPages(batch, 7, 3);
+            count.ShouldBeInRange(1, 3);
+            batch.Commit();
+            total += count;
+            storage.FreeSpaceMap.FreePageCount.ShouldBe(free + total);
+        }
+
+        // Assert
+        total.ShouldBe(pages);
+        using var repeat = storage.BeginTransaction();
+        storage.FreeOwnerPages(repeat, 7, 3).ShouldBe(0);
+        repeat.Commit();
+        storage.FreeSpaceMap.FreePageCount.ShouldBe(free + pages);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Owner presence queries do not allocate page-directory snapshots")]
     public void HasOwnerPages_RepeatedProbe_ShouldAvoidDirectoryAllocations()
     {

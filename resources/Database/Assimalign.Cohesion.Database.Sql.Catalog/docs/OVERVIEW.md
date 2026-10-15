@@ -12,6 +12,7 @@ physical index registrations exported by `Database.Indexing`.
   literals, and primary-key constraints.
 - **Transactional DDL** — create/drop table, add/drop column; each operation is a
   self-committing storage transaction (durable when the call returns).
+  DROP atomically records the retired identity for the SQL worker to reclaim afterwards.
 - **Physical column layout** — each table records which physical ordinals its
   dropped columns kept (`DroppedColumnOrdinals`, `PhysicalColumnCount`,
   `GetPhysicalOrdinal`): drop marks a column's ordinal dropped and never renumbers
@@ -27,7 +28,7 @@ physical index registrations exported by `Database.Indexing`.
   change advances `DdlGeneration` in its own transaction, so interrupted provisioning
   and later DDL trigger live-catalog reconciliation.
 
-- **SQL definitions and scripts** — format 10 persists function bodies, domains, dependencies,
+- **SQL definitions and scripts** — format 11 retains format 10's function bodies, domains, dependencies,
   ownership, statement-prefix script receipts and a script-set reconciliation marker. Catalog
   mutations can enlist a receipt in their existing transaction; the catalog remains language-free.
 

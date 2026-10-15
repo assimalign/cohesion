@@ -91,6 +91,7 @@ public sealed partial class SqlCatalog
     private readonly SqlStorage _storage;
     private readonly Dictionary<(string Schema, string Name), TableSlot> _tables = new(TableNameComparer.Instance);
     private readonly Dictionary<(ulong TableObjectId, string Name), IndexSlot> _indexes = new(IndexNameComparer.Instance);
+    private readonly Dictionary<ulong, (PageId PageId, int SlotIndex)> _pendingReclamations = new();
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
     private ulong _ddlGeneration;
@@ -166,6 +167,50 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value));
+        }
+    }
+
+    // Deviates from the implementation-only public bridge rule per review direction #1443:
+    // the catalog owns committed reclamation state and retirement; workers receive identities only.
+    /// <summary>Captures the retired table identities whose storage reclamation is pending.</summary>
+    /// <returns>A read-only snapshot unaffected by later drops or completed reclamations.</returns>
+    /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
+    public IReadOnlyList<ulong> GetPendingTableReclamations()
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            return Array.AsReadOnly(_pendingReclamations.Keys.ToArray());
+        }
+    }
+
+    /// <summary>Retires a table's reclamation intent after its data and index pages have been reclaimed.</summary>
+    /// <param name="objectId">The retired table identity, never a table name.</param>
+    /// <param name="cancellationToken">Cancels before the retirement transaction begins.</param>
+    /// <returns>A completed task after the retirement commit; an already retired or unknown identity is a no-op.</returns>
+    /// <remarks>
+    /// The caller must finish reclaiming the identity's data and index pages using their storage's
+    /// commit durability policy before calling this method. Catalog retirement does not walk data
+    /// pages or advance the DDL generation. Publication and removal of pending identities share the
+    /// catalog's metadata lock; the caller must release its data transaction before retiring an intent.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="objectId"/> is zero.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested before retirement began.</exception>
+    /// <exception cref="StorageOfflineException">The catalog is offline or the retirement commit is unconfirmed.</exception>
+    public ValueTask CompleteTableReclamationAsync(ulong objectId, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(objectId);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_pendingReclamations.TryGetValue(objectId, out var location)) { return default; }
+            using var transaction = _storage.BeginTransaction();
+            _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+            transaction.Commit();
+            _pendingReclamations.Remove(objectId);
+            return default;
         }
     }
 
@@ -520,6 +565,11 @@ public sealed partial class SqlCatalog
 
             using (var transaction = _storage.BeginTransaction())
             {
+                // The intent and unpublication share this commit. Each retired identity owns
+                // its intent page, so maintenance never edits a live metadata page. The worker
+                // retires this record only after the data-file frees are durable.
+                var reclamationLocation = _storage.InsertRow(transaction, slot.Table.ObjectId,
+                    SqlReclamationRecord.Encode(slot.Table.ObjectId, schema, name));
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
 
                 foreach (var indexSlot in droppedIndexes)
@@ -535,6 +585,7 @@ public sealed partial class SqlCatalog
 
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(schema, name));
                 _registrationsLocation = registrationsLocation;
+                _pendingReclamations.Add(slot.Table.ObjectId, reclamationLocation);
             }
 
             _tables.Remove((schema, name));
@@ -1239,6 +1290,11 @@ public sealed partial class SqlCatalog
 
             switch (kind)
             {
+                case SqlReclamationRecord.Kind:
+                    var intent = SqlReclamationRecord.Decode(ref reader);
+                    if (!_pendingReclamations.TryAdd(intent.ObjectId, (unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
+                    _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
+                    break;
                 case tableRecordKind:
                     var table = DecodeTable(ref reader);
                     _tables[(table.Schema, table.Name)] = new TableSlot(table, (unit.PageId, unit.SlotIndex));
@@ -1350,6 +1406,11 @@ public sealed partial class SqlCatalog
                 default:
                     throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
             }
+        }
+
+        if (_tables.Values.Any(slot => _pendingReclamations.ContainsKey(slot.Table.ObjectId)))
+        {
+            throw new System.IO.InvalidDataException();
         }
 
         if (schemaStateChunks.Count > 0)

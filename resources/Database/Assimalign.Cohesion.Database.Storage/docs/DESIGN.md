@@ -551,6 +551,18 @@ object ids, so a table scan stops decoding the whole database.
   **commits**. Freeing eagerly would let the allocator hand a page to a new owner
   while the release could still roll back — the rollback's pre-image would then
   resurrect old content over live data. Deferral makes that impossible.
+- **Bounded owner reclamation (#1443).** `FreeOwnerPages(transaction, ownerId, maximumPages)`
+  snapshots only the positive batch bound, from the record directory followed by a separate
+  index-page owner directory. It never copies the whole owner's page set for a bounded call.
+  `AllocatePageForWrite` can stamp an index owner before first touch; B-tree roots and every
+  split allocation pass their object id. Index pages do not enter row iteration or empty-table
+  probes. Open rebuilds this second directory from existing header owner fields. Allocation
+  rollback retains that tag on its empty safe-leak page, so retiring the owner also reclaims
+  abandoned trees. Each batch's free headers, directory removals and FSM updates use the existing
+  commit protocol; interrupted frees undo, durable frees are skipped on reopen. Neither the
+  storage format nor the B-tree node layout changes. SQL format 11 gates its required index tags
+  and catalog kind-14 intent. The SQL worker supplies the reader horizon and immutable retired
+  identity; storage supplies bounded physical reclamation, without a database apply gate.
 - **A page on the free list is never write-locked.** Commit releases the bracket's
   page write locks and then returns its freed pages to the free-space map, in one hold
   of the transaction lock that every page lock is taken under. Another transaction may
@@ -1502,7 +1514,7 @@ each crash.
 **The write-ahead rule for anchor pages (#1251 review).** The anchor's overflow pages are the
 only pages written outside the journal, and allocation can hand them a page whose free is
 still in a journal tail that is not durable: a bracket committed with
-`Commit(awaitDurability: false)` — a statement bracket, an undo batch, `DROP TABLE`'s release —
+`Commit(awaitDurability: false)` — a statement bracket or an undo batch —
 returns its pages to the allocator as soon as its commit record is appended. An anchor page
 written over such a page, and made durable, before that commit record is durable destroyed the
 page's committed content while the bracket that freed it could still vanish in a crash, with

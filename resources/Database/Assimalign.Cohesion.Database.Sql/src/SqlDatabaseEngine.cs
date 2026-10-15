@@ -228,7 +228,15 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
     internal void ScheduleProvisioning(SqlDeferredMigration migration) => _provisioningWorker.Enqueue(migration);
 
-    internal void CompleteProvisioningBuild() => _provisioningWorker.CompleteBuild();
+    private int _provisioningBuildComplete;
+    internal bool ProvisioningBuildComplete => Volatile.Read(ref _provisioningBuildComplete) != 0;
+
+    internal void CompleteProvisioningBuild()
+    {
+        Volatile.Write(ref _provisioningBuildComplete, 1);
+        _provisioningWorker.CompleteBuild();
+        _undoDeferredSignal.Set();
+    }
 
     /// <summary>
     /// Reports whether <paramref name="database"/> is still one of the engine's open databases:
@@ -1018,6 +1026,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
         Volatile.Write(ref _storageSnapshot, storages);
         Volatile.Write(ref _instanceSnapshot, instances);
+        // An open can publish durable DROP intents after the worker began its idle wait.
+        _undoDeferredSignal.Set();
     }
 
     // The databases as one typed sequence, which GetDatabasesAsync hands out without a per-item

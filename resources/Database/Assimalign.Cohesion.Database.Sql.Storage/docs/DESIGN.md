@@ -20,9 +20,21 @@ by — `Assimalign.Cohesion.Database.Storage`.
 - **Row placement is owner-chained.** `InsertRow(transaction, ownerId, row)` passes
   the owning table's object id through to the substrate's per-owner record chains,
   giving each table page locality: table scans (`GetUnitIterator(objectId)`) touch
-  only that table's pages, and `DROP TABLE` releases the chain. The ownerless
+  only that table's pages. `DROP TABLE` durably retires the identity in the catalog;
+  SQL's version-purge worker releases at most 32 owned data/index pages per batch after
+  Build and the old-reader horizon. The ownerless
   overloads write the shared (owner-zero) space — the catalog file set's layout,
   where kind-discriminated metadata records are few and scanned as a whole.
+  Reclamation intents (catalog kind 14, SQL format 11) instead use a private page owned
+  by the retired table id, so completing cleanup never edits live metadata. The existing
+  transactional `FreeOwnerPages` accepts a positive batch bound; recovered page headers
+  rebuild both directories and the FSM, making repeated batches crash-safe. Data frees
+  are durable before the intent is removed from the separate catalog file set. No SQL
+  storage layout/header version changes; the SQL engine's format gate moved from 10 to 11.
+  The catalog caches pending identities under its metadata lock and owns intent retirement;
+  the worker no longer walks mutable catalog records. Its identity snapshot releases that lock
+  before any data-page batch. Review crash tests cover active-batch interruption and final
+  retirement in synchronous/grouped modes, and process-crash persistence for None.
 - **The journal is a public composition seam.** `WriteAheadJournal` returns the
   storage's `StorageJournal`, matching Documents, Graph, and Blob storage.
   It replaces the shipped-to-shipped friend grant and hands the
