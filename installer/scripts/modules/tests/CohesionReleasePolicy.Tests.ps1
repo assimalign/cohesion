@@ -224,6 +224,16 @@ os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu
 
         $packCallCount | Should -BeGreaterThan 0
         $localPropertyCount | Should -Be $packCallCount
+
+        # Batched packs (Invoke-CohesionPackBatch, continued across lines with backticks) carry the
+        # same vector through -Property.
+        $batchCall = @([System.Text.RegularExpressions.Regex]::Matches(
+            $installLocal,
+            '(?m)^\s*Invoke-CohesionPackBatch(?:[^\r\n]*`\r?\n)*[^\r\n]*') | ForEach-Object Value)
+        $batchCall.Count | Should -BeGreaterThan 0
+        foreach ($call in $batchCall) {
+            $call | Should -Match '-Property (?:\$localPackProperties|@\(\$localPackProperties )'
+        }
         $installLocal | Should -Match 'Get-CohesionLocalPackageVersion'
         $installLocal | Should -Match 'Get-CohesionStaleLibraryPackage'
         $installLocal | Should -Match '(?ms)foreach \(\$packagePath in \$staleLibraryPackage\).*?Remove-Item -LiteralPath \$packagePath -Force'
@@ -244,7 +254,9 @@ os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu
         @($sdkPins.PSObject.Properties.Value | Where-Object { $_ -like '*.local' }).Count |
             Should -Be 0
 
-        $lastPack = $installLocal.LastIndexOf('& dotnet pack ', [StringComparison]::Ordinal)
+        $lastPack = [Math]::Max(
+            $installLocal.LastIndexOf('& dotnet pack ', [StringComparison]::Ordinal),
+            $installLocal.LastIndexOf('Invoke-CohesionPackBatch ', [StringComparison]::Ordinal))
         $generation = $installLocal.IndexOf('$consumerSourcePath =', [StringComparison]::Ordinal)
         $generation | Should -BeGreaterThan $lastPack
         $installLocal | Should -Match "Consumer SDK '.+?' was not produced"
