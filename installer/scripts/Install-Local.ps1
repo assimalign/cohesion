@@ -104,6 +104,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $feedDir  = Join-Path $repoRoot '_out\packages'
+# Transient solutions and traversal projects for Invoke-CohesionPackBatch. Each section packs its
+# projects as one batch rather than one `dotnet pack` per package; see that function for why.
+$batchDir = Join-Path $repoRoot '_out\obj\pack-batches'
 
 if ($UseCanonicalVersion -and -not $SkipLibraries) {
     throw '-UseCanonicalVersion is a package-boundary validation bootstrap and requires -SkipLibraries.'
@@ -273,14 +276,14 @@ if (-not $SkipSdks) {
     # Resource-domain SDKs are scaffolded by New-CohesionDomainScaffold.ps1; each
     # corresponds to a folder under resources/ and to the framework producers inside it.
     $sdkProjects = $cohesionSdks | ForEach-Object { Join-Path $repoRoot "sdks\$_\Tasks\src\$_.Tasks.csproj" }
-    foreach ($proj in $sdkProjects) {
-        if (-not (Test-Path -LiteralPath $proj)) {
-            Write-Host "  (skip, not found) $proj" -ForegroundColor DarkGray
-            continue
-        }
-        Write-Host "  pack $proj" -ForegroundColor DarkGray
-        & dotnet pack $proj -c $Configuration --nologo @localPackProperties
-        if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed for $proj" }
+    $sdkProjects = @($sdkProjects | Where-Object {
+        if (Test-Path -LiteralPath $_) { return $true }
+        Write-Host "  (skip, not found) $_" -ForegroundColor DarkGray
+        $false
+    })
+    if ($sdkProjects.Count -gt 0) {
+        Invoke-CohesionPackBatch -Name 'sdk-packs' -Project $sdkProjects -Configuration $Configuration `
+            -Property $localPackProperties -WorkingDirectory $batchDir
     }
 }
 else {
@@ -291,17 +294,16 @@ else {
 #region 3. Framework runtime packs (per framework x per RID) ---------------
 if (-not $SkipFramework) {
     Write-Host "[3/5] Packing framework runtime pack(s)..." -ForegroundColor Cyan
-    foreach ($framework in $cohesionFrameworks) {
-        $runtimeProj = Join-Path $repoRoot (Get-CohesionFrameworkProjectPath -Framework $framework -Kind Runtime)
-        if (-not (Test-Path -LiteralPath $runtimeProj)) {
-            Write-Host "  (skip, not found) $runtimeProj" -ForegroundColor DarkGray
-            continue
-        }
-        foreach ($rid in $Rids) {
-            Write-Host "  pack $framework runtime ($rid)" -ForegroundColor DarkGray
-            & dotnet pack $runtimeProj -c $Configuration -p:RuntimeIdentifier=$rid --nologo @localPackProperties
-            if ($LASTEXITCODE -ne 0) { throw "Runtime pack failed for $framework / $rid" }
-        }
+    $runtimeProjects = @($cohesionFrameworks | ForEach-Object {
+        $runtimeProj = Join-Path $repoRoot (Get-CohesionFrameworkProjectPath -Framework $_ -Kind Runtime)
+        if (Test-Path -LiteralPath $runtimeProj) { $runtimeProj }
+        else { Write-Host "  (skip, not found) $runtimeProj" -ForegroundColor DarkGray }
+    })
+    # One batch per RID: a batch holds each project once, under one set of global properties.
+    foreach ($rid in $Rids) {
+        if ($runtimeProjects.Count -eq 0) { break }
+        Invoke-CohesionPackBatch -Name "runtime-packs-$rid" -Project $runtimeProjects -Configuration $Configuration `
+            -Property @($localPackProperties + "-p:RuntimeIdentifier=$rid") -WorkingDirectory $batchDir
     }
 }
 else {
@@ -312,15 +314,14 @@ else {
 #region 4. Framework targeting packs (one per framework) -------------------
 if (-not $SkipFramework) {
     Write-Host "[4/5] Packing framework targeting pack(s)..." -ForegroundColor Cyan
-    foreach ($framework in $cohesionFrameworks) {
-        $refsProj = Join-Path $repoRoot (Get-CohesionFrameworkProjectPath -Framework $framework -Kind Refs)
-        if (-not (Test-Path -LiteralPath $refsProj)) {
-            Write-Host "  (skip, not found) $refsProj" -ForegroundColor DarkGray
-            continue
-        }
-        Write-Host "  pack $framework refs" -ForegroundColor DarkGray
-        & dotnet pack $refsProj -c $Configuration --nologo @localPackProperties
-        if ($LASTEXITCODE -ne 0) { throw "Targeting pack failed for $framework" }
+    $refsProjects = @($cohesionFrameworks | ForEach-Object {
+        $refsProj = Join-Path $repoRoot (Get-CohesionFrameworkProjectPath -Framework $_ -Kind Refs)
+        if (Test-Path -LiteralPath $refsProj) { $refsProj }
+        else { Write-Host "  (skip, not found) $refsProj" -ForegroundColor DarkGray }
+    })
+    if ($refsProjects.Count -gt 0) {
+        Invoke-CohesionPackBatch -Name 'targeting-packs' -Project $refsProjects -Configuration $Configuration `
+            -Property $localPackProperties -WorkingDirectory $batchDir
     }
 }
 else {
@@ -367,16 +368,18 @@ if (-not $SkipLibraries) {
     Write-Host ("  found {0} project(s)" -f $libraryProjects.Count) -ForegroundColor DarkGray
 
     $libraryFailures = @()
-    foreach ($p in $libraryProjects) {
-        Write-Host "  pack $($p.FullName)" -ForegroundColor DarkGray
-        & dotnet pack $p.FullName -c $Configuration --nologo @localPackProperties
-        if ($LASTEXITCODE -ne 0) {
-            if ($ContinueOnLibraryError) {
+    if (-not $ContinueOnLibraryError) {
+        Invoke-CohesionPackBatch -Name 'libraries' -Project @($libraryProjects | ForEach-Object FullName) `
+            -Configuration $Configuration -Property $localPackProperties -WorkingDirectory $batchDir
+    }
+    else {
+        # One pack per project, so a failure names its project and the rest of the feed still lands.
+        foreach ($p in $libraryProjects) {
+            Write-Host "  pack $($p.FullName)" -ForegroundColor DarkGray
+            & dotnet pack $p.FullName -c $Configuration --nologo @localPackProperties
+            if ($LASTEXITCODE -ne 0) {
                 $libraryFailures += $p.FullName
                 Write-Host "    !! pack failed (continuing because -ContinueOnLibraryError)" -ForegroundColor DarkYellow
-            }
-            else {
-                throw "dotnet pack failed for $($p.FullName)"
             }
         }
     }

@@ -1,6 +1,12 @@
 # The one build recipe every generic Cohesion pipeline runs: restore, build, test. The per-area
-# workflows under .github/workflows stay thin (a path filter, a matrix of project names, and a call
+# workflows under .github/workflows stay thin (a path filter, the area's project list, and a call
 # to this action), so the build logic exists once instead of once per area.
+#
+# A per-area workflow hands the action its whole project list, so one job per OS restores and
+# builds the area once. Building each project in its own job rebuilt the shared reference closure
+# once per project, and the organization's plan runs at most 20 jobs at once (5 macOS): Web's 112
+# single-project jobs waited 66 to 108 minutes on average to run for 1.5 to 2.5 minutes each.
+# The release pipeline still validates one project per leg through the `project` input.
 #
 # This action does NOT publish. Package publication happens only in .github/workflows/release.yml,
 # driven by a published GitHub Release, from the single authoritative inventory in
@@ -8,18 +14,24 @@
 # workflow racing to push a package built from whatever happened to be on main, at a version that
 # had passed no release gate.
 name: Cohesion Build
-description: Restores, builds, and tests one Cohesion project.
+description: Restores, builds, and tests a set of Cohesion projects.
 
 inputs:
   area:
     description: The top-level folder that contains the project set, such as libraries.
     required: true
   category:
-    description: The category folder under the top-level kind folder.
-    required: true
+    description: The category folder under the top-level kind folder. Empty when projects sit directly under the area folder (analyzers).
+    required: false
+    default: ''
   project:
-    description: The project folder and assembly name to build.
-    required: true
+    description: One project folder and assembly name to build. Give either this or projects.
+    required: false
+    default: ''
+  projects:
+    description: A JSON array of project folder and assembly names to build together. Give either this or project.
+    required: false
+    default: ''
   local-sdk-rids:
     description: Optional comma-separated runtime IDs for bootstrapping local Cohesion SDK and framework packages before restore.
     required: false
@@ -66,36 +78,200 @@ runs:
         }
         ./installer/scripts/Install-Local.ps1 @install
 
-    - name: Restore ${{ inputs.project }}
+    - name: Plan ${{ inputs.project || inputs.category || inputs.area }}
+      id: plan
       shell: pwsh
-      run: dotnet restore "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj"
+      env:
+        COHESION_AREA: ${{ inputs.area }}
+        COHESION_CATEGORY: ${{ inputs.category }}
+        COHESION_PROJECT: ${{ inputs.project }}
+        COHESION_PROJECTS: ${{ inputs.projects }}
+      # Every project and test project goes into one transient solution for restore and one
+      # transient traversal project for build, so each evaluates the shared reference graph once.
+      # Both also cover the test projects that do not reference their library (Amqp, EmailHub,
+      # Rezolvr, Templates). Build does not use the solution: a solution build unsets
+      # Configuration for references outside it (ShouldUnsetParentConfigurationAndPlatform), so
+      # they would build as Debug. The traversal hands every project exactly the global
+      # properties `dotnet build <project> --configuration Release` would.
+      #
+      # The solution lives in obj/ under the projects' deepest common folder, not in RUNNER_TEMP:
+      # a solution restore resolves msbuild-sdks pins (NuGetSdkResolver) from the global.json
+      # nearest the solution, not the project. Database.Testing's E2E fixture pins its Cohesion
+      # SDKs through resources/Database/global.json, which Install-Local.ps1 generates, and fails
+      # to resolve them from anywhere else. The step fails if a planned project's nearest
+      # global.json differs from the solution's.
+      run: |
+        $hasProject = -not [string]::IsNullOrWhiteSpace($env:COHESION_PROJECT)
+        $hasProjects = -not [string]::IsNullOrWhiteSpace($env:COHESION_PROJECTS)
+        if ($hasProject -eq $hasProjects) {
+          throw 'Give exactly one of the project and projects inputs.'
+        }
 
-    - name: Build ${{ inputs.project }}
+        $names = if ($hasProject) { @($env:COHESION_PROJECT) } else { @($env:COHESION_PROJECTS | ConvertFrom-Json) }
+        if ($names.Count -eq 0) {
+          throw 'The projects input is an empty list.'
+        }
+
+        $root = Join-Path (Get-Location).Path $env:COHESION_AREA
+        if (-not [string]::IsNullOrWhiteSpace($env:COHESION_CATEGORY)) {
+          $root = Join-Path $root $env:COHESION_CATEGORY
+        }
+
+        $plan = foreach ($name in $names) {
+          $source = Join-Path $root "$name/src/$name.csproj"
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "No project at $source."
+          }
+
+          $tests = Join-Path $root "$name/tests/$name.Tests.csproj"
+          [pscustomobject]@{
+            Name   = $name
+            Source = $source
+            Tests  = if (Test-Path -LiteralPath $tests -PathType Leaf) { $tests } else { $null }
+          }
+        }
+
+        $paths = @(@($plan.Source) + @($plan | Where-Object Tests | ForEach-Object Tests) |
+          ForEach-Object { [System.IO.Path]::GetFullPath($_) })
+
+        $folder = [System.IO.Path]::GetDirectoryName($paths[0])
+        foreach ($path in $paths) {
+          $directory = [System.IO.Path]::GetDirectoryName($path)
+          while (-not "$directory$([System.IO.Path]::DirectorySeparatorChar)".StartsWith(
+              "$folder$([System.IO.Path]::DirectorySeparatorChar)", [System.StringComparison]::Ordinal)) {
+            $folder = [System.IO.Path]::GetDirectoryName($folder)
+          }
+        }
+
+        $nearestGlobalJson = {
+          param([string] $Directory)
+          for ($current = $Directory; $current; $current = [System.IO.Path]::GetDirectoryName($current)) {
+            $candidate = [System.IO.Path]::Combine($current, 'global.json')
+            if ([System.IO.File]::Exists($candidate)) {
+              return $candidate
+            }
+          }
+        }
+        $solutionDirectory = [System.IO.Path]::Combine($folder, 'obj')
+        $solutionGlobalJson = & $nearestGlobalJson $solutionDirectory
+        foreach ($path in $paths) {
+          $projectGlobalJson = & $nearestGlobalJson ([System.IO.Path]::GetDirectoryName($path))
+          if ($projectGlobalJson -ne $solutionGlobalJson) {
+            throw "$path resolves global.json '$projectGlobalJson', but a solution in $solutionDirectory resolves '$solutionGlobalJson'. Restore these projects separately."
+          }
+        }
+
+        $entries = $paths | ForEach-Object { '  <Project Path="{0}" />' -f [System.Security.SecurityElement]::Escape($_) }
+        $null = New-Item -ItemType Directory -Path $solutionDirectory -Force
+        $solution = [System.IO.Path]::Combine($solutionDirectory, 'cohesion-build.slnx')
+        Set-Content -LiteralPath $solution -Value (@('<Solution>') + $entries + @('</Solution>')) -Encoding utf8
+
+        $items = $paths | ForEach-Object { '    <CohesionBuildProject Include="{0}" />' -f [System.Security.SecurityElement]::Escape($_) }
+        $traversal = Join-Path $env:RUNNER_TEMP 'cohesion-build.proj'
+        Set-Content -LiteralPath $traversal -Encoding utf8 -Value (@(
+          '<Project DefaultTargets="Build">'
+          '  <ItemGroup>'
+        ) + $items + @(
+          '  </ItemGroup>'
+          '  <Target Name="Build">'
+          '    <MSBuild Projects="@(CohesionBuildProject)" Targets="Build" BuildInParallel="true" />'
+          '  </Target>'
+          '</Project>'
+        ))
+        ConvertTo-Json -InputObject @($plan) | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'cohesion-build-plan.json') -Encoding utf8
+
+        Write-Host "Planned $($plan.Count) project(s), $(@($plan | Where-Object Tests).Count) with tests."
+        "solution=$solution" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        "traversal=$traversal" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+    - name: Restore
+      id: restore
       shell: pwsh
-      run: dotnet build "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj" --configuration Release --no-restore
+      run: dotnet restore "${{ steps.plan.outputs.solution }}"
 
-    - name: Restore tests for ${{ inputs.project }}
-      if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.area, inputs.category, inputs.project)) != '' }}
+    - name: Build
       shell: pwsh
-      run: dotnet restore "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj"
+      run: dotnet build "${{ steps.plan.outputs.traversal }}" --configuration Release --no-restore
 
-    - name: Test ${{ inputs.project }}
-      if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.area, inputs.category, inputs.project)) != '' }}
+    - name: Test
+      # Runs after a failed build too, so every test project that did build still reports. A test
+      # project whose build failed reports as failed here instead of hiding behind the build step.
+      if: ${{ !cancelled() && steps.restore.outcome == 'success' }}
       shell: pwsh
       # Recent healthy suites: Http.Connections <= 78 s (run 38563034652), Web.Hosting <= 41 s
-      # (38558592445), Templates <= 91 s (38567999644). Five minutes leaves ample scheduling
-      # margin; the per-area jobs allow 30 minutes for setup, builds, dump collection and upload.
-      run: dotnet test "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj" --configuration Release --no-restore --blame-hang-timeout 5m --blame-hang-dump-type mini --results-directory "./TestResults/${{ inputs.project }}"
+      # (38558592445), Templates <= 91 s (38567999644). The five-minute hang timeout applies to
+      # each test project; a stuck project is dumped and fails without stopping the others.
+      run: |
+        $plan = @(Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'cohesion-build-plan.json') -Raw | ConvertFrom-Json)
+        $result = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in @($plan | Where-Object Tests)) {
+          $resultsDirectory = Join-Path 'TestResults' $item.Name
+          $watch = [System.Diagnostics.Stopwatch]::StartNew()
+          Write-Host "::group::Test $($item.Name)"
+          dotnet test $item.Tests --configuration Release --no-build `
+            --blame-hang-timeout 5m --blame-hang-dump-type mini `
+            --results-directory $resultsDirectory `
+            --logger "trx;LogFileName=$($item.Name).trx"
+          $exitCode = $LASTEXITCODE
+          Write-Host '::endgroup::'
+          $watch.Stop()
 
-    - name: Upload test hang diagnostics for ${{ inputs.project }}
+          $counts = 'no results'
+          $trx = Join-Path $resultsDirectory "$($item.Name).trx"
+          if (Test-Path -LiteralPath $trx -PathType Leaf) {
+            $counters = ([xml](Get-Content -LiteralPath $trx -Raw)).TestRun.ResultSummary.Counters
+            $skipped = [int]$counters.total - [int]$counters.passed - [int]$counters.failed
+            $counts = "$($counters.passed) passed, $($counters.failed) failed, $skipped skipped"
+          }
+
+          if ($exitCode -ne 0) {
+            Write-Host "::error title=Tests failed::$($item.Name): $counts (exit code $exitCode)."
+          }
+          elseif ($counts -eq 'no results') {
+            # dotnet test exits 0 without running anything when the project is not a test project
+            # (an unimported Microsoft.NET.Test.Sdk). The per-project jobs passed that silently too.
+            $counts = 'no tests ran'
+            Write-Host "::warning title=No tests ran::$($item.Name) exited 0 without writing test results."
+          }
+
+          $result.Add([pscustomobject]@{
+            Name    = $item.Name
+            Passed  = $exitCode -eq 0
+            Counts  = $counts
+            Seconds = [math]::Round($watch.Elapsed.TotalSeconds)
+          })
+        }
+
+        $failed = @($result | Where-Object { -not $_.Passed })
+        $summary = @(
+          "### Tests: $($result.Count - $failed.Count) of $($result.Count) project(s) passed"
+          ''
+          '| Project | Result | Tests | Seconds |'
+          '| --- | --- | --- | ---: |'
+        )
+        foreach ($row in $result) {
+          $summary += "| $($row.Name) | $(if ($row.Passed) { 'passed' } else { '**failed**' }) | $($row.Counts) | $($row.Seconds) |"
+        }
+        $untested = @($plan | Where-Object { -not $_.Tests } | ForEach-Object Name)
+        if ($untested.Count -gt 0) {
+          $summary += ''
+          $summary += "Built without a test project: $($untested -join ', ')."
+        }
+        $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+        if ($failed.Count -gt 0) {
+          throw "$($failed.Count) test project(s) failed: $(@($failed.Name) -join ', ')."
+        }
+
+    - name: Upload test hang diagnostics
       if: ${{ failure() }}
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: test-blame-${{ inputs.project }}-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.run_attempt }}
+        name: test-blame-${{ inputs.project || inputs.category || inputs.area }}-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.run_attempt }}
         path: |
-          TestResults/${{ inputs.project }}/**/Sequence_*.xml
-          TestResults/${{ inputs.project }}/**/*.dmp
-          TestResults/${{ inputs.project }}/**/*.core
-          TestResults/${{ inputs.project }}/**/core.*
+          TestResults/**/Sequence_*.xml
+          TestResults/**/*.dmp
+          TestResults/**/*.core
+          TestResults/**/core.*
         if-no-files-found: ignore
         retention-days: 7

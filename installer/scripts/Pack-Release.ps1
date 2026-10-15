@@ -252,64 +252,66 @@ if ($LASTEXITCODE -ne 0) {
 # Pack
 # ---------------------------------------------------------------------------------------------
 
-function Invoke-PackageBuild {
-    param(
-        [Parameter(Mandatory)]
-        [string] $Project,
-
-        [string[]] $AdditionalArguments = @()
-    )
-
-    & dotnet pack $Project `
-        --configuration $Configuration `
-        --nologo `
-        @buildProperties `
-        @AdditionalArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Packing $Project failed with exit code $LASTEXITCODE."
-    }
-}
-
 $plan = @(
     Get-CohesionReleaseProject `
         -RepositoryDirectory $repositoryDirectory `
         -RuntimeIdentifier $RuntimeIdentifier |
         Where-Object { -not $SkipLibraries -or $_.Kind -ne 'Library' }
 )
-$planIndex = 0
 
 foreach ($item in $plan) {
-    $planIndex++
-    Write-Host ("[{0}/{1}] {2}" -f $planIndex, $plan.Count, $item.PackageId) -ForegroundColor Green
-
     if (-not (Test-Path -LiteralPath $item.ProjectPath -PathType Leaf)) {
         throw "The release inventory names a project that does not exist: $($item.ProjectPath)"
     }
+}
 
-    switch ($item.Kind) {
-        'FrameworkRuntime' {
-            Invoke-PackageBuild `
-                -Project $item.ProjectPath `
-                -AdditionalArguments @("-p:RuntimeIdentifier=$($item.RuntimeIdentifier)")
-        }
+# The plan packs in batches, in its kind order: one batch for libraries and targeting packs, one
+# per runtime identifier for the runtime packs (a batch holds each project once, under one set of
+# global properties), and one for the SDKs. See Invoke-CohesionPackBatch for why a batch replaces
+# one `dotnet pack` per package.
+$batch = @(
+    [pscustomobject]@{
+        Name     = 'libraries-and-targeting-packs'
+        Item     = @($plan | Where-Object { $_.Kind -eq 'Library' -or $_.Kind -eq 'FrameworkRef' })
+        Property = @()
+        Clean    = $false
+    }
 
-        'Sdk' {
-            # sdks/Directory.Build.targets packs the SDK task closure by globbing $(OutDir)**\*.
-            # Anything a previous build left in that folder - a renamed dependency, a dropped
-            # analyzer - is swept into the package silently. Cleaning first is what keeps an SDK
-            # pack a function of the current source tree.
-            & dotnet clean $item.ProjectPath --configuration $Configuration --nologo
-            if ($LASTEXITCODE -ne 0) {
-                throw "Cleaning $($item.ProjectPath) failed with exit code $LASTEXITCODE."
-            }
-
-            Invoke-PackageBuild -Project $item.ProjectPath
-        }
-
-        default {
-            Invoke-PackageBuild -Project $item.ProjectPath
+    foreach ($rid in $RuntimeIdentifier) {
+        [pscustomobject]@{
+            Name     = "runtime-packs-$rid"
+            Item     = @($plan | Where-Object { $_.Kind -eq 'FrameworkRuntime' -and $_.RuntimeIdentifier -eq $rid })
+            Property = @("-p:RuntimeIdentifier=$rid")
+            Clean    = $false
         }
     }
+
+    # sdks/Directory.Build.targets packs the SDK task closure by globbing $(OutDir)**\*.
+    # Anything a previous build left in that folder - a renamed dependency, a dropped analyzer - is
+    # swept into the package silently. Cleaning first is what keeps an SDK pack a function of the
+    # current source tree.
+    [pscustomobject]@{
+        Name     = 'sdk-packs'
+        Item     = @($plan | Where-Object { $_.Kind -eq 'Sdk' })
+        Property = @()
+        Clean    = $true
+    }
+)
+
+$batchDirectory = Join-Path $releaseOutputDirectory 'batches'
+foreach ($entry in $batch) {
+    if ($entry.Item.Count -eq 0) {
+        continue
+    }
+
+    Write-Host ("[{0}] {1}" -f $entry.Name, (@($entry.Item | ForEach-Object PackageId) -join ', ')) -ForegroundColor Green
+    Invoke-CohesionPackBatch `
+        -Name $entry.Name `
+        -Project @($entry.Item | ForEach-Object ProjectPath) `
+        -Configuration $Configuration `
+        -Property @($buildProperties + $entry.Property) `
+        -Clean:$entry.Clean `
+        -WorkingDirectory $batchDirectory
 }
 
 # ---------------------------------------------------------------------------------------------
