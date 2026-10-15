@@ -78,12 +78,29 @@ interceptor takes the receiver the intercepted method declares — generic over 
 when the call site's type cannot be named from generated code — so the application never fails to
 compile on generated code it did not write.
 
-Interceptors are emitted into `Assimalign.Cohesion.Web.Api.Generated`; consumers allow-list that
-namespace with `<InterceptorsNamespaces>`. The generator is delivered two ways: in-repo/test projects
-via `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`, and to Sdk.Web
-consumers via the `CohesionFrameworkAnalyzer` entry in the `App.Web` member list,
-`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props` (bundled under
-`analyzers/dotnet/cs/` in `App.Web.Ref`). See the generator's own `docs/DESIGN.md` for emission internals.
+Interceptors are emitted into `Assimalign.Cohesion.Web.Api.Generated`, which must be allowed through
+`InterceptorsNamespaces`. Delivery has three paths:
+
+- **Sdk.Web applications** receive the generator through the `CohesionFrameworkAnalyzer` entry in
+  `App.Web` (`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props`), bundled under
+  `analyzers/dotnet/cs/` in `App.Web.Ref`. Sdk.Web enables the namespace.
+- **NuGet consumers** reference this package directly. Web.Api bundles the generator DLL under
+  `analyzers/dotnet/cs/` and `buildTransitive/Assimalign.Cohesion.Web.Api.props` appends the namespace.
+  Analyzers do not flow transitively, so a reference to another package that depends on Web.Api
+  does not supply the generator. Repeating the namespace when Sdk.Web already enabled it is harmless.
+- **In-repo and test projects** use
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />` and append the
+  namespace to `InterceptorsNamespaces` themselves.
+
+Web.Api declares that analyzer reference to package the generator with the overloads that require it.
+Its own mapping calls use the raw middleware overloads, so its compilation emits no interceptors.
+Web.Routing declares no generator-dependent overload and does not bundle a second copy. The JSON
+property resolver for Web.Validation shares the generator assembly; NuGet validation-only consumers
+currently need a direct Web.Api reference, with independent delivery left as a follow-up.
+A duplicate-path probe with .NET SDK 10.0.401 passes both byte-identical generator DLLs to `csc`
+and fails with CS0433 for the generated interceptor attribute. Mixed App.Web/direct-package delivery
+needs an analyzer deduplication guard before compilation; that guard remains a follow-up.
+See the generator's own `docs/DESIGN.md` for emission internals and delivery constraints.
 
 ## Binding Sources and Inference
 

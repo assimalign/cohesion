@@ -355,18 +355,37 @@ members, further descendants, and recursive properties.
 
 ## Delivery
 
-The generator is consumed exactly like the base `SourceGeneration` generator:
+The generator reaches a consumer through one of three paths:
 
-- In-repo and test projects add `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`,
-  which activates the analyzer at compile time and bundles the DLL into the consuming library's own
-  `.nupkg`.
-- Sdk.Web consumers get it through the `<CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.Web" />`
-  entry in the `App.Web` member list (`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props`),
-  bundled at `analyzers/dotnet/cs/` inside `App.Web.Ref`.
+- **Sdk.Web applications** receive it through the
+  `<CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.Web" />` entry in the
+  `App.Web` member list (`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props`),
+  bundled at `analyzers/dotnet/cs/` inside `App.Web.Ref`. `Sdk.Web.props` enables its interceptor namespace.
+- **NuGet consumers** reference `Assimalign.Cohesion.Web.Api` directly. Its package bundles
+  `analyzers/dotnet/cs/Assimalign.Cohesion.SourceGeneration.Web.dll` and imports
+  `buildTransitive/Assimalign.Cohesion.Web.Api.props`, which appends
+  `Assimalign.Cohesion.Web.Api.Generated` to `InterceptorsNamespaces`. Analyzers do not flow
+  transitively: referencing only a package that depends on Web.Api does not deliver the generator.
+- **In-repo and test projects** add
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />` and allow-list
+  the generated namespace with
+  `<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>`.
+  The analyzer reference activates the generator in that project's compilation and, for a packable
+  library such as Web.Api, bundles its DLL in the library's `.nupkg`.
 
-Consumers must allow-list the generated namespace with
-`<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>`
-(the interceptor feature's opt-in), which the Web.Api test project demonstrates.
+Web.Api's own mapping calls use the `WebApplicationMiddleware` overloads, so running the generator
+while building that library emits no interceptors. The package's namespace append composes with the
+same append in Sdk.Web: repeating an allowed namespace is harmless.
+
+**Mixed framework/package delivery needs a guard.** With .NET SDK 10.0.401, a probe that supplies
+byte-identical generator DLLs through two distinct `Analyzer` paths passes both to `csc` and fails
+with CS0433 for the generated `InterceptsLocationAttribute`. Deduplicating the resolved analyzer
+items before compilation remains a follow-up for Sdk.Web applications that also reference Web.Api
+directly; the namespace opt-in alone does not cause this failure.
+
+`JsonValidationPropertyResolverGenerator` shares this assembly. A NuGet consumer that uses only
+Web.Validation currently needs a direct Web.Api package reference to receive it; independent delivery
+for validation-only consumers remains a follow-up. Web.Validation does not bundle another copy.
 
 ## Testing
 
