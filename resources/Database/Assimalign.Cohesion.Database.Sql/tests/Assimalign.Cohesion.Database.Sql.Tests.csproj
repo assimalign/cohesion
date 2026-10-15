@@ -13,6 +13,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+    <Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Sql.Language\tests\TestObjects\SqlTypeModifierCases.cs" Link="TestObjects\SqlTypeModifierCases.cs" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
