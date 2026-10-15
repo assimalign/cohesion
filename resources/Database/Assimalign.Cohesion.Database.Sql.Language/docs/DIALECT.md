@@ -1268,7 +1268,8 @@ minimum. Inside `CAST` an unrepresentable literal stays a CAST failure.
 | `INT`, `INTEGER`, `INT4` | `Int32` |
 | `BIGINT`, `INT8` | `Int64` |
 | `REAL`, `FLOAT4` | `Float32` |
-| `FLOAT`, `FLOAT8`, `DOUBLE` | `Float64` |
+| `FLOAT[(p)]` | `Float32` for p = 1..24; `Float64` for p = 25..53 or no argument |
+| `FLOAT8`, `DOUBLE` | `Float64` |
 | `DECIMAL[(p[,s])]`, `NUMERIC[(p[,s])]` | `Decimal` (single argument = precision) |
 | `CHAR[(n)]`, `CHARACTER[(n)]`, `VARCHAR[(n)]`, `TEXT[(n)]` | `String` |
 | `BINARY[(n)]`, `VARBINARY[(n)]`, `BLOB[(n)]`, `BYTEA[(n)]` | `Binary` |
@@ -1308,6 +1309,8 @@ CAST, declared scripts, and typed schemas (including SDK extraction).
 | NUMERIC, DECIMAL | Precision p = 1..28; optional scale s = 0..p; omitted scale is zero | No declared precision or scale; values must still fit System.Decimal |
 | VARCHAR, CHAR, CHARACTER, TEXT | One length n = 1..10485760 Unicode scalar values | No declared length limit |
 | BINARY, VARBINARY, BLOB, BYTEA | One length n = 1..10485760 bytes | No declared length limit |
+| FLOAT | One binary precision p = 1..53: 1..24 resolves to REAL (Float32), 25..53 to DOUBLE PRECISION (Float64) | Float64 |
+| TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL; DATETIME alias | One nonnegative precision is recognized but unsupported (COHDBL001) | The type's normal meaning |
 | Every other built-in type and every domain | None (INT(5), BOOLEAN(1) and domain(1) are invalid) | The type's normal meaning |
 
 Arguments are one or two unsigned integer literals within Int32; negative, fractional,
@@ -1320,6 +1323,23 @@ Unbounded VARCHAR and the other unbounded aliases remain unbounded. The numeric 
 is Cohesion's System.Decimal policy, rather than PostgreSQL's wider NUMERIC range
 (src/backend/utils/adt/numeric.c:1332-1397). Types without modifiers follow PostgreSQL's
 refusal in src/backend/parser/parse_type.c:358-365.
+
+FLOAT follows PostgreSQL's storage selection (src/backend/parser/gram.y:14991-15016).
+FLOAT(0) reports that precision must be at least 1 bit; FLOAT(54) and greater report that
+precision must be less than 54 bits. Both are SQL0005 and name the declaration or CAST target.
+The catalog reports the resolved type; binary precision is not retained as a decimal modifier.
+REAL/FLOAT4 and DOUBLE/FLOAT8 do not take arguments. Function overloads use the resolved storage
+type, so FLOAT(24) is a REAL signature and FLOAT(53) is a DOUBLE signature.
+
+**PostgreSQL difference: temporal precision is recognized, not supported.** TIME(p), TIMESTAMP(p),
+TIMESTAMPTZ(p), INTERVAL(p), and this dialect's DATETIME(p) alias report COHDBL001, naming both the
+object and precision modifier, including in CAST and declared scripts. The engine does not yet
+implement fractional-second rounding and never silently ignores a precision. PostgreSQL admits
+these modifiers (gram.y:15146-15181 and timestamp.c:1051-1110), and reduces precision above six
+with a warning (date.c:57-81; timestamp.c:110-132). A single unsigned Int32 precision above six
+is therefore also unsupported here. Malformed argument lists remain SQL0005. Typed declarations
+retain UnsupportedType and SDK diagnostics retain COHDBSDK106, with COHDBL001 in their detail.
+Fractional-second rounding is a separate follow-up.
 
 Invalid modifiers produce SQL0005 before execution, naming the column, domain, function
 parameter or return type, or CAST target. In process the text execution API throws
@@ -1338,7 +1358,7 @@ and reopen with the same metadata as an explicit zero scale; bare decimals remai
 The supported alteration is the full definition, for example
 ALTER TABLE t ALTER COLUMN c NUMERIC(28,2). PostgreSQL's ALTER COLUMN c TYPE ...
 form remains unsupported. Function overload identity and invocation semantics are
-unchanged; this rule validates their declared modifiers.
+unchanged apart from FLOAT(p)'s resolved storage selection.
 
 ## Declared bounds on writes (#1418)
 
@@ -1500,7 +1520,8 @@ bounds.
 - **Diagnostics and metadata:** a name that is not a built-in type and that the
   engine does not register as a domain fails while planning with `COHSQLE010`
   (`SQL0004` is retired: the parser no longer knows which names exist); invalid
-  target arguments produce `SQL0005`; malformed CAST syntax produces `SQL0003`.
+  target arguments produce `SQL0005`; recognized but unsupported temporal precision
+  produces `COHDBL001`; malformed CAST syntax produces `SQL0003`.
   A pair no registered cast converts is `COHSQLE011` (SQLSTATE 42846). A conversion
   that fails on the value (a `FormatException`, `OverflowException` or
   `InvalidCastException`, the only failures the built-in casts throw, an
@@ -1623,12 +1644,12 @@ function names are lexed but not supported (see the statement matrix).
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `COHDBL001` | Error | Recognized clause, keyword or operator is not supported by the SQL model surface, including prefix and infix `~` (#1101); the message names the construct |
+| `COHDBL001` | Error | Recognized clause, keyword, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101) and temporal precision in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
-| `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments, out-of-range length/precision/scale, or arguments a type does not take; names the declaration |
+| `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including VARCHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), or arguments a type does not take; names the declaration. Recognized but unsupported temporal precision uses COHDBL001 |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
 | `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
 | `SQL0100` | Information | Statement does not end with `;` |

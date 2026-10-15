@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -8,11 +9,95 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Language.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlTypeModifierTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Temporal precision: every declaration and script refuses unsupported semantics")]
+    [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
+    public async Task ExecuteAsync_TemporalPrecision_ShouldFailClosedAtEverySite(string type, string member)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("temporal", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE added (id INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"CREATE TABLE altered (value {type[..type.IndexOf('(')]})", cancellationToken: CancellationToken.None);
+
+        foreach (var (sql, subject) in SqlTypeModifierCases.Statements(type).Append(($"DROP FUNCTION parameter_function({type})", "parameter type")))
+        {
+            // Act / Assert
+            var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
+                await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+            error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+            error.Message.ShouldContain(subject, Case.Sensitive);
+            error.Message.ShouldContain(type, Case.Sensitive);
+            var builder = SqlDatabaseEngine.CreateBuilder("script");
+            builder.AddDatabase("app", declaration => declaration.Script("001", sql));
+            var scriptError = await Should.ThrowAsync<DatabaseParseException>(async () => await builder.BuildAsync(CancellationToken.None));
+            scriptError.Message.ShouldContain("COHDBL001", Case.Sensitive);
+            scriptError.Message.ShouldContain(subject, Case.Sensitive);
+            scriptError.Message.ShouldContain(type, Case.Sensitive);
+        }
+
+        // Assert: typed declaration is refused before Build, and failed DDL left no objects.
+        var typedError = Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Compile("app", schema =>
+            schema.Table<SqlTypeModifierCases.Row>("typed", table => table.Column(SqlTypeModifierCases.Selector(member), type))));
+        typedError.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        typedError.Message.ShouldContain($"typed.{member}", Case.Sensitive);
+        database.Catalog.TryGetTable("dbo", "created", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "added", out var added).ShouldBeTrue();
+        added.Columns.Count.ShouldBe(1);
+        database.Catalog.Domains.ShouldBeEmpty();
+        database.Catalog.Functions.ShouldBeEmpty();
+        await session.ExecuteAsync("INSERT INTO added VALUES (1)", cancellationToken: CancellationToken.None);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - FLOAT precision: all declaration sites persist and execute the resolved type")]
+    [MemberData(nameof(SqlTypeModifierCases.Floating), MemberType = typeof(SqlTypeModifierCases))]
+    public async Task ExecuteAsync_FloatPrecision_ShouldResolveCatalogAndValues(string type, DatabaseType expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("float", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE added (id INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"CREATE TABLE altered (value {type})", cancellationToken: CancellationToken.None);
+
+        // Act
+        foreach (var (sql, _) in SqlTypeModifierCases.Statements(type))
+        {
+            var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+            if (result is QueryResultSet rows) { await rows.DisposeAsync(); }
+        }
+
+        // Assert
+        foreach (string name in new[] { "created", "added", "altered" })
+        {
+            database.Catalog.TryGetTable("dbo", name, out var table).ShouldBeTrue();
+            var storage = table.FindColumn("value").ShouldNotBeNull().Type;
+            storage.Type.ShouldBe(expected);
+            storage.MaxLength.ShouldBeNull();
+            storage.Precision.ShouldBeNull();
+            storage.Scale.ShouldBeNull();
+        }
+        string resolved = expected == DatabaseType.Float32 ? "REAL" : "DOUBLE";
+        database.Catalog.Domains.ShouldHaveSingleItem().BaseType.ShouldBe(resolved);
+        database.Catalog.Functions.Single(function => function.Name == "parameter_function").ParameterTypes.ShouldBe([resolved]);
+        database.Catalog.Functions.Single(function => function.Name == "result_function").ReturnType.ShouldBe(resolved);
+        await session.ExecuteAsync("INSERT INTO added (id) VALUES (1)", cancellationToken: CancellationToken.None);
+        await using var casts = (await session.ExecuteAsync($"SELECT CAST(1.25 AS {type}) FROM added",
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await foreach (var row in casts.GetRowsAsync(CancellationToken.None))
+        {
+            if (expected == DatabaseType.Float32) { row.GetValue(0).ShouldBeOfType<float>().ShouldBe(1.25f); }
+            else { row.GetValue(0).ShouldBeOfType<double>().ShouldBe(1.25d); }
+        }
+        await session.ExecuteAsync($"DROP FUNCTION parameter_function({type})", cancellationToken: CancellationToken.None);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Type modifiers: native decimal descriptors use the SQL declaration rule")]
     [InlineData(0, 0, false)]
     [InlineData(1, 0, true)]

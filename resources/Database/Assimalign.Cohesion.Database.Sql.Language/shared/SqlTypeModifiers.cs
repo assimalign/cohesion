@@ -71,8 +71,33 @@ internal static class SqlTypeModifiers
     }
 
     internal static string? GetError(string name, int? first, int? second)
+        => GetError(name, first, second, out string code) is { } error ? $"{code}: {error}" : null;
+
+    internal static string? GetError(string name, int? first, int? second, out string code)
     {
+        code = DiagnosticCode;
         DatabaseType? type = StorageType(name);
+        if (string.Equals(name, "FLOAT", StringComparison.OrdinalIgnoreCase))
+        {
+            // PostgreSQL src/backend/parser/gram.y:14991-15016: precision selects storage.
+            if (second is not null) { return "FLOAT accepts one precision argument in bits."; }
+            if (first is < 1) { return "Precision for type float must be at least 1 bit."; }
+            if (first is > 53) { return "Precision for type float must be less than 54 bits."; }
+            return null;
+        }
+        if (type is DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan &&
+            first is not null)
+        {
+            if (first < 0 || second is not null)
+            {
+                return "Temporal types accept one nonnegative precision argument.";
+            }
+            // PostgreSQL accepts temporal precision and clamps values above six with a warning:
+            // date.c:57-81; timestamp.c:110-132,1096-1110. We do not implement that rounding yet.
+            code = "COHDBL001";
+            return string.Create(CultureInfo.InvariantCulture,
+                $"Temporal precision modifier '{name}({first})' is recognized but not supported by the SQL model surface.");
+        }
         return type == DatabaseType.Decimal
             ? GetError(type, null, first, second)
             : GetError(type, first, null, second);

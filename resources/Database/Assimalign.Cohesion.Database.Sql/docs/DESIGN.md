@@ -956,6 +956,15 @@ resolves it identically before comparing the catalog. Apply, the already-applied
 reopen therefore agree. Type-drift messages show every compared field (`MaxLength`, `Precision`,
 `Scale`) explicitly, including `null`, rather than formatting a null scale as zero.
 
+FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
+The shared resolver supplies that storage identity everywhere, including domain bases, function
+signatures, CAST and provisioning of typed SQL names. Catalog metadata records REAL or DOUBLE,
+with INFORMATION_SCHEMA reporting REAL or DOUBLE PRECISION; no decimal modifier remains.
+Precision 0 or greater than 53 is SQL0005 with PostgreSQL's bit-range reason. Temporal precision
+is recognized but lacks fractional-second rounding, so declarations, scripts and CAST fail closed
+with COHDBL001 naming the object and modifier. Malformed arguments still use SQL0005. The wire
+keeps its ParseFailure category and usable connection. See DIALECT.md for the PostgreSQL difference.
+
 ## Declared column bounds (#1418)
 
 `SqlCastConverter.ParseNumericText(text, target)` is the shared text-to-NUMERIC conversion:

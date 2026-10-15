@@ -36,9 +36,9 @@ public sealed partial class SqlQueryParser
             type += ParseTypeArguments(ref lexer, subject);
         }
         if (SqlTypeModifiers.TrySplit(type, out string name, out int? first, out int? second) &&
-            SqlTypeModifiers.GetError(name, first, second) is { } error)
+            SqlTypeModifiers.GetError(name, first, second, out string code) is { } error)
         {
-            AddTypeModifierDiagnostic(subject, error, start, _lastTokenEnd);
+            AddTypeModifierDiagnostic(subject, error, start, _lastTokenEnd, code);
         }
         return type;
     }

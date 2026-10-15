@@ -68,7 +68,7 @@ public sealed class SqlTableBuilder<TRow>
     /// refuses a name it does not know, or a type not stored as the member's CLR type is (a domain
     /// over <c>VARCHAR(320)</c> for a <see cref="string"/> member), before it touches any file.
     /// </remarks>
-    /// <exception cref="SqlSchemaValidationException">The SQL type name is malformed or declares invalid length, precision or scale modifiers.</exception>
+    /// <exception cref="SqlSchemaValidationException">The SQL type name is malformed or declares invalid or unsupported length, precision or scale modifiers.</exception>
     public void Column(Expression<Func<TRow, object?>> selector, string sqlType)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sqlType);

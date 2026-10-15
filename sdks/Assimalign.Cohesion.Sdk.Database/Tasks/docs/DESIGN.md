@@ -262,8 +262,9 @@ body, applied through a receipt-aware runner rather than plain SQL files) is
 The extractor links the stateless internal Sql.Language/shared/SqlTypeModifiers through
 CohesionSharedSource, alongside the schema package and engine. Column SQL text and Decimal(p,s)
 use one mapping and rule (named Decimal arguments bind by parameter name in either order):
-p 1..28, s 0..p, string/binary length 1..10485760, no modifiers on other
-types or domain references. Omitted bounds stay unbounded. Invalid declarations emit COHDBSDK106
+p 1..28, s 0..p, string/binary length 1..10485760, and FLOAT binary precision 1..53.
+Temporal precision is recognized but unsupported; other types and domain references take no
+modifiers. Omitted bounds stay unbounded. Invalid declarations emit COHDBSDK106
 with their table/column or domain name and source location, and write no schema artifact. The
 compiled-schema validator also covers raw metadata. No new diagnostic id or public API is added;
 valid artifacts and hashes retain runtime parity. Declared scripts remain COHDBSDK110 because
@@ -272,3 +273,9 @@ only runtime provisioning owns their receipts.
 Decimal scale normalization is shared too: precision with an omitted scale means zero. The
 compiled-schema snapshots normalize raw records before validation and hashing, so SDK artifacts,
 runtime declarations and raw compiled metadata cannot disagree about that default.
+
+The same SQL text rule admits FLOAT(p) for 1..53 bits (1..24 selects Float32, 25..53 Float64 at
+engine resolution). Temporal precision is recognized but unsupported and reports COHDBSDK106
+with COHDBL001 in its detail, naming the column and modifier; malformed or invalid modifiers
+retain SQL0005 in that detail. No artifact is written on either refusal. The existing diagnostic
+ids and runtime/SDK canonical-document parity remain unchanged.

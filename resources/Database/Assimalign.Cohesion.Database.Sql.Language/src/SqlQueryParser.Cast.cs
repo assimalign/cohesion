@@ -126,12 +126,13 @@ public sealed partial class SqlQueryParser
     {
         // The lexer retains delimiters; resolution uses the identifier's value.
         SqlTypeModifiers.TrySplit(name, out string identifier, out _, out _);
+        string code = SqlTypeModifiers.DiagnosticCode;
         string? error = validArguments
-            ? SqlTypeModifiers.GetError(identifier, firstArgument, secondArgument)
+            ? SqlTypeModifiers.GetError(identifier, firstArgument, secondArgument, out code)
             : SqlTypeModifiers.ArgumentShape;
         if (error is not null)
         {
-            AddTypeModifierDiagnostic($"CAST target '{name}'", error, start, end);
+            AddTypeModifierDiagnostic($"CAST target '{name}'", error, start, end, code);
             return null;
         }
 
@@ -139,11 +140,12 @@ public sealed partial class SqlQueryParser
             ? typeInfo : null;
     }
 
-    private void AddTypeModifierDiagnostic(string subject, string message, int start, int end)
+    private void AddTypeModifierDiagnostic(string subject, string message, int start, int end,
+        string code = SqlTypeModifiers.DiagnosticCode)
     {
         _parseDiagnostics.Add(new Diagnostic
         {
-            Code = SqlTypeModifiers.DiagnosticCode,
+            Code = code,
             Message = $"{subject}: {message}",
             Start = start,
             End = end,

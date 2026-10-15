@@ -286,3 +286,9 @@ but no scale to scale zero, including records made with `with` and deserialized 
 The shared `NormalizeScale` rule also serves typed builders, the validator, SQL resolution,
 provisioning and SDK extraction. An omitted scale and explicit zero therefore have the same
 canonical document and hash; a bare decimal keeps both fields null. The v4 shape is unchanged.
+
+SQL type text accepts FLOAT(p) for 1..53 bits. The engine resolves 1..24 as Float32 and 25..53 as
+Float64 and verifies that it matches the member's CLR storage; the compiled declaration retains
+its SQL text. Temporal precision is recognized but unsupported: the existing UnsupportedType
+exception carries COHDBL001 and names the table/column and modifier, for builders and raw compiled
+CustomType metadata alike. Invalid FLOAT precision retains SQL0005 in the validation detail.

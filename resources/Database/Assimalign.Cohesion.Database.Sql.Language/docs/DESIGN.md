@@ -378,3 +378,12 @@ identifier-only spelling. DIALECT.md records the exact ranges and unbounded defa
 `NormalizeScale` is the shared decimal default: an explicit precision with no scale means zero;
 a bare decimal stays unconstrained. Compiled-schema snapshots, their validation, the typed
 builders, SDK extraction and engine provisioning use this same rule as SQL and CAST resolution.
+
+FLOAT(p) admission and resolution follow PostgreSQL's `gram.y:14991-15016`: 1..24 bits selects
+Float32, 25..53 selects Float64, and bare FLOAT is Float64. The resolved type carries no length,
+decimal precision or scale. Out-of-range FLOAT precision remains SQL0005. Temporal precision
+(TIME, TIMESTAMP/DATETIME, TIMESTAMPTZ and INTERVAL) is valid PostgreSQL syntax whose rounding
+is not implemented here: the shared rule returns COHDBL001 with the modifier, and parser callers
+attach the declaration or CAST target. The rule distinguishes these unsupported modifiers from
+malformed argument lists, which remain SQL0005. A single unsigned precision above six is also
+recognized, because PostgreSQL clamps it with a warning; DIALECT.md records the difference.

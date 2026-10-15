@@ -214,3 +214,8 @@ catalog mutation. SQL0005 and the column/domain/function parameter or return-typ
 the existing ParseFailure message; SqlClientException reports ParseFailure with ConnectionUsable
 true. No client ABI or wire format changes. Typed schema and declared-script validation happen at
 host declaration/Build, before a server starts; these host APIs have no remote declaration verb.
+
+Recognized but unsupported temporal precision uses COHDBL001 in the same ParseFailure exchange,
+including CAST, naming the declaration and modifier. FLOAT(p) returns the resolved Float32
+(1..24 bits) or Float64 (25..53 bits) in catalog queries and result headers; bare FLOAT stays
+Float64. Invalid FLOAT precision remains SQL0005. Neither path changes the wire format.

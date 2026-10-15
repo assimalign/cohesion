@@ -11,6 +11,64 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlTypeModifierTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - FLOAT precision: invalid boundaries name the object and PostgreSQL bit limit")]
+    [InlineData("FLOAT(0)", "at least 1 bit")]
+    [InlineData("FLOAT(54)", "less than 54 bits")]
+    [InlineData("FLOAT(2147483647)", "less than 54 bits")]
+    public void Parse_InvalidFloatPrecision_ShouldReportBitRange(string type, string reason)
+    {
+        // Arrange
+        var parser = new SqlQueryParser();
+        foreach (var (sql, subject) in SqlTypeModifierCases.Statements(type).Append(($"DROP FUNCTION parameter_function({type})", "parameter type")))
+        {
+            // Act
+            var errors = parser.Parse(sql).Diagnostics.Where(error => error.Severity == DiagnosticSeverity.Error).ToArray();
+
+            // Assert
+            var error = errors.ShouldHaveSingleItem();
+            error.Code.ShouldBe("SQL0005");
+            error.Message.ShouldNotBeNull().ShouldContain(subject, Case.Sensitive);
+            error.Message.ShouldContain(reason, Case.Sensitive);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Temporal precision: PostgreSQL modifiers are recognized but unsupported")]
+    [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporalSql), MemberType = typeof(SqlTypeModifierCases))]
+    public void Parse_TemporalPrecision_ShouldNameUnsupportedModifier(string type)
+    {
+        // Arrange
+        var parser = new SqlQueryParser();
+        foreach (var (sql, subject) in SqlTypeModifierCases.Statements(type).Append(($"DROP FUNCTION parameter_function({type})", "parameter type")))
+        {
+            // Act
+            var errors = parser.Parse(sql).Diagnostics.Where(error => error.Severity == DiagnosticSeverity.Error).ToArray();
+
+            // Assert
+            var error = errors.ShouldHaveSingleItem(sql);
+            error.Code.ShouldBe("COHDBL001", sql);
+            error.Message.ShouldNotBeNull().ShouldContain(subject, Case.Sensitive);
+            error.Message.ShouldContain(type, Case.Sensitive);
+            error.Message.ShouldContain("precision", Case.Sensitive);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - FLOAT precision: resolution selects PostgreSQL storage without retained modifiers")]
+    [MemberData(nameof(SqlTypeModifierCases.Floating), MemberType = typeof(SqlTypeModifierCases))]
+    public void Parse_FloatPrecision_ShouldResolveStorage(string type, DatabaseType expected)
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse($"SELECT CAST(1 AS {type}) FROM items");
+
+        // Assert
+        statement.Diagnostics.Where(error => error.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        var select = statement.Expression.ShouldBeOfType<SqlSelectExpression>();
+        var cast = select.Columns[0].Expression.ShouldBeOfType<SqlCastExpression>();
+        cast.TargetTypeInfo.ShouldNotBeNull().Type.ShouldBe(expected);
+        cast.TargetTypeInfo.MaxLength.ShouldBeNull();
+        cast.TargetTypeInfo.Precision.ShouldBeNull();
+        cast.TargetTypeInfo.Scale.ShouldBeNull();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Type modifiers: all declaration sites agree with CAST")]
     [MemberData(nameof(SqlTypeModifierCases.Types), MemberType = typeof(SqlTypeModifierCases))]
     public void Parse_ModifierBoundary_ShouldAgreeAtEverySite(string type, bool valid)
@@ -44,6 +102,10 @@ public sealed class SqlTypeModifierTests
     [InlineData("VARCHAR", -1, null, null)]
     [InlineData("VARCHAR", null, 1, null)]
     [InlineData("INT", null, null, 0)]
+    [InlineData("FLOAT", null, 0, null)]
+    [InlineData("FLOAT", null, 54, null)]
+    [InlineData("FLOAT", 24, 24, null)]
+    [InlineData("FLOAT", null, 24, 0)]
     public void TryResolve_InvalidFields_ShouldRefuse(string name, int? length, int? precision, int? scale)
     {
         // Arrange / Act
@@ -65,5 +127,23 @@ public sealed class SqlTypeModifierTests
         info.Precision.ShouldBe(28);
         info.Scale.ShouldBe(0);
         info.MaxLength.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - FLOAT raw resolution: length and precision entry points agree")]
+    [InlineData(1, DatabaseType.Float32)]
+    [InlineData(24, DatabaseType.Float32)]
+    [InlineData(25, DatabaseType.Float64)]
+    [InlineData(53, DatabaseType.Float64)]
+    public void TryResolve_FloatPrecision_ShouldAgreeForBothArgumentSlots(int precision, DatabaseType expected)
+    {
+        // Arrange / Act
+        SqlTypeNames.TryResolve("float", precision, null, null, out var firstArgument).ShouldBeTrue();
+        SqlTypeNames.TryResolve("FLOAT", null, precision, null, out var precisionArgument).ShouldBeTrue();
+
+        // Assert
+        firstArgument.Type.ShouldBe(expected);
+        precisionArgument.Type.ShouldBe(expected);
+        firstArgument.Precision.ShouldBeNull();
+        precisionArgument.Precision.ShouldBeNull();
     }
 }

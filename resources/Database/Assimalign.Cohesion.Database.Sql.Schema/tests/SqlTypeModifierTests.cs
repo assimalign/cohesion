@@ -10,6 +10,28 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public sealed class SqlTypeModifierTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Schema] - Temporal precision: typed and raw declarations report unsupported modifiers")]
+    [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
+    public void Compile_TemporalPrecision_ShouldNameUnsupportedModifier(string type, string member)
+    {
+        // Arrange / Act
+        var typed = Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Create("app", schema =>
+            schema.Table<SqlTypeModifierCases.Row>("items", table => table.Column(SqlTypeModifierCases.Selector(member), type))));
+        var raw = Should.Throw<SqlSchemaValidationException>(() => new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", false, [],
+            [new CompiledSchemaTable("items", "Row", [new CompiledSchemaColumn(member, DatabaseType.DateTime, true, CustomType: type)], null, [], [])], []));
+
+        // Assert
+        foreach (var (error, declaration) in new[] { (typed, $"items.{member}"), (raw, $"tables.items.columns.{member}.type") })
+        {
+            var diagnostic = error.Errors.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe(SqlSchemaValidationErrorCode.UnsupportedType);
+            diagnostic.Declaration.ShouldBe(declaration);
+            error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+            error.Message.ShouldContain(declaration, Case.Sensitive);
+            error.Message.ShouldContain(type, Case.Sensitive);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Schema] - Raw decimal metadata: omitted scale has the explicit zero identity")]
     public void Compile_OmittedDecimalScale_ShouldNormalizeColumnsAndDomains()
     {

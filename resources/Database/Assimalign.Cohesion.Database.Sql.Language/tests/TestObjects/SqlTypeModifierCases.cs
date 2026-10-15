@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 
+using Assimalign.Cohesion.Database.Types;
+
 // Test-only linked source: one boundary corpus exercises independent declaration entry points.
 namespace Assimalign.Cohesion.Database.Sql.Language.Tests.TestObjects;
 
@@ -11,6 +13,34 @@ public static class SqlTypeModifierCases
     public static IEnumerable<object[]> Types => All.Select(row => new[] { row[0], row[1] });
     public static IEnumerable<object[]> Sql => All.Select(row => new[] { row[0], row[1], row[2] });
     public static IEnumerable<object[]> Columns => All.Select(row => new[] { row[0], row[1], row[3] });
+    public static IEnumerable<object[]> UnsupportedTemporalSql => UnsupportedTemporal.Select(row => new[] { row[0] });
+
+    public static IEnumerable<object[]> Floating
+    {
+        get
+        {
+            yield return ["FLOAT", DatabaseType.Float64];
+            yield return ["FLOAT(1)", DatabaseType.Float32];
+            yield return ["FLOAT(24)", DatabaseType.Float32];
+            yield return ["FLOAT(25)", DatabaseType.Float64];
+            yield return ["FLOAT(53)", DatabaseType.Float64];
+        }
+    }
+
+    public static IEnumerable<object[]> UnsupportedTemporal
+    {
+        get
+        {
+            foreach (var (name, member) in new[] { ("TIME", "Time"), ("TIMESTAMP", "Timestamp"),
+                ("TIMESTAMPTZ", "TimestampTz"), ("INTERVAL", "Duration"), ("DATETIME", "Timestamp") })
+            {
+                foreach (int precision in new[] { 0, 2, 3, 6, 7, int.MaxValue })
+                {
+                    yield return [$"{name}({precision})", member];
+                }
+            }
+        }
+    }
 
     public static IEnumerable<object[]> All
     {
@@ -46,6 +76,25 @@ public static class SqlTypeModifierCases
             yield return ["INT(5)", false, "INT", "Number"];
             yield return ["BOOLEAN", true, "BOOLEAN", "Flag"];
             yield return ["BOOLEAN(1)", false, "BOOLEAN", "Flag"];
+            foreach (object[] floating in Floating)
+            {
+                bool single = (DatabaseType)floating[1] == DatabaseType.Float32;
+                yield return [floating[0], true, single ? "REAL" : "DOUBLE", single ? "Single" : "Double"];
+            }
+            foreach (string type in new[] { "FLOAT(0)", "FLOAT(54)", "FLOAT(2147483647)", "FLOAT(2147483648)",
+                "FLOAT(-1)", "FLOAT()", "FLOAT(24,1)", "REAL(24)", "DOUBLE(53)", "FLOAT4(24)", "FLOAT8(53)" })
+            {
+                yield return [type, false, "DOUBLE", "Double"];
+            }
+            foreach (var (name, member) in new[] { ("TIME", "Time"), ("TIMESTAMP", "Timestamp"),
+                ("TIMESTAMPTZ", "TimestampTz"), ("INTERVAL", "Duration"), ("DATETIME", "Timestamp") })
+            {
+                yield return [name, true, name, member];
+                foreach (string suffix in new[] { "(-1)", "()", "(1,2)", "(2147483648)" })
+                {
+                    yield return [name + suffix, false, name, member];
+                }
+            }
         }
     }
 
@@ -67,6 +116,12 @@ public static class SqlTypeModifierCases
         "Bytes" => row => row.Bytes,
         "Number" => row => row.Number,
         "Flag" => row => row.Flag,
+        "Single" => row => row.Single,
+        "Double" => row => row.Double,
+        "Time" => row => row.Time,
+        "Timestamp" => row => row.Timestamp,
+        "TimestampTz" => row => row.TimestampTz,
+        "Duration" => row => row.Duration,
         _ => throw new ArgumentOutOfRangeException(nameof(member)),
     };
 
@@ -77,5 +132,11 @@ public static class SqlTypeModifierCases
         public byte[] Bytes { get; set; } = [];
         public int Number { get; set; }
         public bool Flag { get; set; }
+        public float Single { get; set; }
+        public double Double { get; set; }
+        public TimeOnly Time { get; set; }
+        public DateTime Timestamp { get; set; }
+        public DateTimeOffset TimestampTz { get; set; }
+        public TimeSpan Duration { get; set; }
     }
 }

@@ -11,6 +11,35 @@ namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
 public partial class CompileDatabaseSchemaTaskTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Temporal precision: extraction names the unsupported modifier and column")]
+    [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
+    public void Execute_TemporalPrecision_ShouldRefuseUnsupportedModifier(string type, string member)
+    {
+        // Arrange
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Schema.cs");
+        File.WriteAllText(sourcePath, $$"""
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            using Assimalign.Cohesion.Database.Sql.Language.Tests.TestObjects;
+            var schema = SqlSchema.Create("app", schema => schema.Table<SqlTypeModifierCases.Row>("items", table => table.Column(row => row.{{member}}, "{{type}}")));
+            """);
+        var engine = new RecordingBuildEngine();
+        var task = CreateTask(directory, sourcePath, "Sql", engine);
+        task.ReferencePaths = [.. task.ReferencePaths, new Microsoft.Build.Utilities.TaskItem(
+            Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Sdk.Database.Tests.dll"))];
+
+        // Act
+        bool success = task.Execute();
+
+        // Assert
+        success.ShouldBeFalse();
+        engine.Errors.ShouldContain(error => error.Code == "COHDBSDK106");
+        Errors(engine).ShouldContain("COHDBL001", Case.Sensitive);
+        Errors(engine).ShouldContain($"items.{member}", Case.Sensitive);
+        Errors(engine).ShouldContain(type, Case.Sensitive);
+        task.Schemas.ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Type modifiers: named decimal arguments retain runtime precision and scale")]
     [InlineData(1, 28, false)]
     [InlineData(28, 1, true)]
