@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 
 using Shouldly;
@@ -59,7 +60,8 @@ public partial class CompileDatabaseSchemaTaskTests
         var engine = new RecordingBuildEngine();
         var task = CreateTask(directory, sourcePath, "Sql", engine);
         // The shared test row has the same CLR identity in the Roslyn compilation and runtime.
-        task.ReferencePaths = [.. task.ReferencePaths, new Microsoft.Build.Utilities.TaskItem(typeof(SqlTypeModifierCases.Row).Assembly.Location)];
+        task.ReferencePaths = [.. task.ReferencePaths, new Microsoft.Build.Utilities.TaskItem(
+            Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Sdk.Database.Tests.dll"))];
 
         // Act
         bool success = task.Execute();
