@@ -8,9 +8,9 @@ namespace Assimalign.Cohesion.Web.Serialization.Internal;
 /// </summary>
 internal static class ContentSerializationFeatureResolver
 {
-    internal static IHttpContentSerializationFeature GetRequired(IHttpContext context)
+    internal static IContentSerializationFeature GetRequired(IHttpContext context)
     {
-        return context.Features.Get<IHttpContentSerializationFeature>()
+        return context.Features.Get<IContentSerializationFeature>()
             ?? throw new HttpContentSerializationException(
                 ErrorMessages.ContentSerializationNotRegistered);
     }

@@ -68,7 +68,7 @@ public class EndpointBindingGeneratorTests
         string source = Preamble + "\n" + types + "\n\npublic static class Endpoints\n{\n" + members + "\n    public static void Configure(WebApplication app)\n    {\n" + body + "\n    }\n}\n";
 
         string antiforgeryAssembly = typeof(Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata).Assembly.Location;
-        string serializationAssembly = typeof(Assimalign.Cohesion.Web.Serialization.IHttpContentSerializationFeature).Assembly.Location;
+        string serializationAssembly = typeof(Assimalign.Cohesion.Web.Serialization.IContentSerializationFeature).Assembly.Location;
         string validationAssembly = typeof(Assimalign.Cohesion.Web.Validation.ValidationMetadata).Assembly.Location;
 
         // The test host's trusted platform assemblies include every assembly this project references,

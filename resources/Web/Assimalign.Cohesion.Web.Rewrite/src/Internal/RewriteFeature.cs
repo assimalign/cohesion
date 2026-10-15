@@ -3,10 +3,10 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 
 /// <summary>
-/// Default <see cref="IWebRewriteFeature"/>, published by the first rewrite of a request for as long as the
+/// Default <see cref="IRewriteFeature"/>, published by the first rewrite of a request for as long as the
 /// rest of the pipeline runs.
 /// </summary>
-internal sealed class RewriteFeature : IWebRewriteFeature
+internal sealed class RewriteFeature : IRewriteFeature
 {
     public RewriteFeature(HttpPath originalPath, IHttpQueryCollection originalQuery)
     {
@@ -15,7 +15,7 @@ internal sealed class RewriteFeature : IWebRewriteFeature
     }
 
     /// <inheritdoc />
-    public string Name => nameof(IWebRewriteFeature);
+    public string Name => nameof(IRewriteFeature);
 
     /// <inheritdoc />
     public HttpPath OriginalPath { get; }

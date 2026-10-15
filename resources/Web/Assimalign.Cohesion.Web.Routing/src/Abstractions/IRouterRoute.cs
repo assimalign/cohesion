@@ -37,7 +37,7 @@ public interface IRouterRoute
     /// <remarks>
     /// May be <see langword="null"/> for fully custom implementations that match without a
     /// <see cref="RoutePattern"/>. Pattern-less routes are skipped by outbound URL generation
-    /// (<see cref="ILinkGenerator"/>) and cannot carry a route name.
+    /// (<see cref="IRouterLinkGenerator"/>) and cannot carry a route name.
     /// </remarks>
     RoutePattern? Pattern { get; }
 

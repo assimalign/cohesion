@@ -18,7 +18,7 @@ public static class RouterConventionBuilderExtensions
     extension(IRouterRouteBuilder builder)
     {
         /// <summary>
-        /// Names the route for URL generation (<see cref="ILinkGenerator"/>) by attaching a
+        /// Names the route for URL generation (<see cref="IRouterLinkGenerator"/>) by attaching a
         /// <see cref="RouteNameMetadata"/>.
         /// </summary>
         /// <param name="routeName">The route name. Unique per router, compared case-insensitively.</param>

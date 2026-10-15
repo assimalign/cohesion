@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Http;
 /// <see cref="IHttpContext.Features"/> once it has evaluated the checks for a health endpoint.
 /// Lets other middleware observe the produced <see cref="Report"/> without re-running the checks.
 /// </summary>
-public interface IHttpHealthFeature : IHttpFeature
+public interface IHealthFeature : IHttpFeature
 {
     /// <summary>
     /// Gets the health report produced for the current request.

@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// </remarks>
 public static class JsonContentSerializationFeatureExtensions
 {
-    extension(IHttpContentSerializationFeature feature)
+    extension(IContentSerializationFeature feature)
     {
         /// <summary>
         /// Resolves the System.Text.Json contract the built-in JSON format serializes
@@ -33,7 +33,7 @@ public static class JsonContentSerializationFeatureExtensions
         /// </summary>
         /// <remarks>
         /// <para>
-        /// The writer is the one <see cref="IHttpContentSerializationFeature.GetWriter"/> returns for
+        /// The writer is the one <see cref="IContentSerializationFeature.GetWriter"/> returns for
         /// <c>application/json</c>. The built-in reader and writer that one <c>AddJson</c> call registers
         /// share their options, so the same contract describes request bodies of the type as well.
         /// </para>
@@ -41,7 +41,7 @@ public static class JsonContentSerializationFeatureExtensions
         /// Returns <see langword="false"/> when <c>application/json</c> resolves to no writer, to a writer
         /// other than the built-in JSON writer, or when the registered resolver has no contract for the
         /// type. The lookup is reflection-free: it asks the registered resolver, exactly as
-        /// <see cref="IHttpContentWriter.CanWrite"/> does.
+        /// <see cref="IContentWriter.CanWrite"/> does.
         /// </para>
         /// </remarks>
         /// <param name="type">The declared CLR type to resolve.</param>
@@ -53,7 +53,7 @@ public static class JsonContentSerializationFeatureExtensions
             ArgumentNullException.ThrowIfNull(feature);
             ArgumentNullException.ThrowIfNull(type);
 
-            if (feature.GetWriter(HttpMediaType.ApplicationJson) is JsonHttpContentWriter writer)
+            if (feature.GetWriter(HttpMediaType.ApplicationJson) is JsonContentWriter writer)
             {
                 return writer.TryGetTypeInfo(type, out typeInfo);
             }

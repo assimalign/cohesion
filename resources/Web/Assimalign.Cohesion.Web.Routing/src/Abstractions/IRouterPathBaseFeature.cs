@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// full <see cref="IHttpRequest.Path"/>. The feature is absent outside any path branch.
 /// </para>
 /// </remarks>
-public interface IWebPathBaseFeature : IHttpFeature
+public interface IRouterPathBaseFeature : IHttpFeature
 {
     /// <summary>
     /// Gets the prefixes the entered branches matched, outermost first (for example <c>/api/v1</c>).

@@ -66,7 +66,7 @@ public readonly struct HealthReportEntry
     /// </summary>
     /// <remarks>
     /// The exception is for in-process readers, such as a custom <see cref="IHealthResponseWriter"/>
-    /// or a reader of <see cref="IHttpHealthFeature.Report"/>. The default JSON writer does not
+    /// or a reader of <see cref="IHealthFeature.Report"/>. The default JSON writer does not
     /// publish it unless <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/> is set.
     /// </remarks>
     public Exception? Exception { get; }

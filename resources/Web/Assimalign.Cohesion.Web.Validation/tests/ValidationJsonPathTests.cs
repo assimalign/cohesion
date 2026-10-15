@@ -34,7 +34,7 @@ public sealed class ValidationJsonPathTests
     public void Create_RegisteredContract_ShouldUseJsonNamesAndIndexes(string source, string expected)
     {
         // Arrange
-        IHttpContentSerializationFeature serialization = new ContentSerializationBuilder()
+        IContentSerializationFeature serialization = new ContentSerializationBuilder()
             .AddJson(ValidationOrderJsonContext.Default, options => options.PropertyNamingPolicy = JsonNamingPolicy.CamelCase)
             .Build();
         IValidationError[] errors = [new ValidationError { Source = source, Message = "invalid" }];
@@ -76,9 +76,9 @@ public sealed class ValidationJsonPathTests
     public void Create_DifferentApplicationContracts_ShouldUseEachRegisteredPolicy()
     {
         // Arrange
-        IHttpContentSerializationFeature camel = new ContentSerializationBuilder()
+        IContentSerializationFeature camel = new ContentSerializationBuilder()
             .AddJson(ValidationOrderJsonContext.Default).Build();
-        IHttpContentSerializationFeature unchanged = new ContentSerializationBuilder()
+        IContentSerializationFeature unchanged = new ContentSerializationBuilder()
             .AddJson(ValidationOrderJsonContext.Default, options => options.PropertyNamingPolicy = null).Build();
         IValidationError[] errors = [new ValidationError { Source = "order => order.Items[2].Quantity", Message = "invalid" }];
 
@@ -99,7 +99,7 @@ public sealed class ValidationJsonPathTests
     public void Create_CustomContractResolver_ShouldUseFinalPropertyName(bool omitGeneratedResolver, string source, string expected)
     {
         // Arrange
-        IHttpContentSerializationFeature serialization = new ContentSerializationBuilder()
+        IContentSerializationFeature serialization = new ContentSerializationBuilder()
             .AddJson(new RenamedContractResolver(omitGeneratedResolver)).Build();
         IValidationError[] errors = [new ValidationError { Source = source, Message = "invalid" }];
 

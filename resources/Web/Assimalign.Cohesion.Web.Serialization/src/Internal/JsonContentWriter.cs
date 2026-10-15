@@ -17,11 +17,11 @@ namespace Assimalign.Cohesion.Web.Serialization.Internal;
 /// points only, so the path is reflection-free under NativeAOT. The body is streamed, so no
 /// <c>Content-Length</c> is set; transports frame the response per protocol.
 /// </summary>
-internal sealed class JsonHttpContentWriter : IHttpContentWriter
+internal sealed class JsonContentWriter : IContentWriter
 {
     private readonly JsonSerializerOptions _options;
 
-    public JsonHttpContentWriter(JsonSerializerOptions options)
+    public JsonContentWriter(JsonSerializerOptions options)
     {
         _options = options;
     }

@@ -42,7 +42,7 @@ internal sealed class AntiforgeryEventSource : EventSource
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
             RequestRejected(reason, (int)status, tokenLocation,
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
         }
     }
@@ -53,7 +53,7 @@ internal sealed class AntiforgeryEventSource : EventSource
         if (IsEnabled(EventLevel.Warning, EventKeywords.None) && TryReportAbort(out int suppressedCount))
         {
             RejectionAborted(reason,
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 suppressedCount,
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
         }

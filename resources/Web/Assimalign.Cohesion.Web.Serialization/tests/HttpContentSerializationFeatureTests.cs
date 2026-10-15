@@ -15,11 +15,11 @@ namespace Assimalign.Cohesion.Web.Serialization.Tests;
 /// </summary>
 public class HttpContentSerializationFeatureTests
 {
-    private static IHttpContentSerializationFeature Compose(params IHttpContentReader[] readers)
+    private static IContentSerializationFeature Compose(params IContentReader[] readers)
     {
         ContentSerializationBuilder composition = new();
 
-        foreach (IHttpContentReader reader in readers)
+        foreach (IContentReader reader in readers)
         {
             composition.AddReader(reader);
         }
@@ -32,10 +32,10 @@ public class HttpContentSerializationFeatureTests
     {
         // Arrange
         FakeContentReader json = new(HttpMediaType.ApplicationJson);
-        IHttpContentSerializationFeature feature = Compose(json);
+        IContentSerializationFeature feature = Compose(json);
 
         // Act
-        IHttpContentReader? resolved = feature.GetReader(HttpMediaType.ApplicationJson);
+        IContentReader? resolved = feature.GetReader(HttpMediaType.ApplicationJson);
 
         // Assert
         resolved.ShouldBeSameAs(json);
@@ -46,10 +46,10 @@ public class HttpContentSerializationFeatureTests
     {
         // Arrange
         FakeContentReader json = new(HttpMediaType.ApplicationJson);
-        IHttpContentSerializationFeature feature = Compose(json);
+        IContentSerializationFeature feature = Compose(json);
 
         // Act
-        IHttpContentReader? resolved = feature.GetReader(HttpMediaType.Parse("application/json; charset=utf-8"));
+        IContentReader? resolved = feature.GetReader(HttpMediaType.Parse("application/json; charset=utf-8"));
 
         // Assert
         resolved.ShouldBeSameAs(json);
@@ -61,10 +61,10 @@ public class HttpContentSerializationFeatureTests
         // Arrange
         FakeContentReader wildcard = new(HttpMediaType.Parse("application/*"));
         FakeContentReader json = new(HttpMediaType.ApplicationJson);
-        IHttpContentSerializationFeature feature = Compose(wildcard, json);
+        IContentSerializationFeature feature = Compose(wildcard, json);
 
         // Act
-        IHttpContentReader? resolved = feature.GetReader(HttpMediaType.ApplicationJson);
+        IContentReader? resolved = feature.GetReader(HttpMediaType.ApplicationJson);
 
         // Assert
         resolved.ShouldBeSameAs(json);
@@ -76,10 +76,10 @@ public class HttpContentSerializationFeatureTests
         // Arrange
         FakeContentReader first = new(HttpMediaType.ApplicationJson);
         FakeContentReader second = new(HttpMediaType.ApplicationJson);
-        IHttpContentSerializationFeature feature = Compose(first, second);
+        IContentSerializationFeature feature = Compose(first, second);
 
         // Act
-        IHttpContentReader? resolved = feature.GetReader(HttpMediaType.ApplicationJson);
+        IContentReader? resolved = feature.GetReader(HttpMediaType.ApplicationJson);
 
         // Assert
         resolved.ShouldBeSameAs(first);
@@ -89,10 +89,10 @@ public class HttpContentSerializationFeatureTests
     public void GetReader_NoMatch_ShouldReturnNull()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = Compose(new FakeContentReader(HttpMediaType.ApplicationJson));
+        IContentSerializationFeature feature = Compose(new FakeContentReader(HttpMediaType.ApplicationJson));
 
         // Act
-        IHttpContentReader? resolved = feature.GetReader(HttpMediaType.Parse("text/csv"));
+        IContentReader? resolved = feature.GetReader(HttpMediaType.Parse("text/csv"));
 
         // Assert
         resolved.ShouldBeNull();
@@ -103,10 +103,10 @@ public class HttpContentSerializationFeatureTests
     {
         // Arrange
         FakeContentWriter writer = new(HttpMediaType.ApplicationJson, HttpMediaType.Parse("application/*"));
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddWriter(writer).Build();
+        IContentSerializationFeature feature = new ContentSerializationBuilder().AddWriter(writer).Build();
 
         // Act
-        IHttpContentWriter? resolved = feature.GetWriter(HttpMediaType.Parse("application/vnd.example"));
+        IContentWriter? resolved = feature.GetWriter(HttpMediaType.Parse("application/vnd.example"));
 
         // Assert
         resolved.ShouldBeSameAs(writer);

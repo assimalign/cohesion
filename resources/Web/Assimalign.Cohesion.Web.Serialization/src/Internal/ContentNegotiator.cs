@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Serialization.Internal;
 
 /// <summary>
-/// The negotiation algorithm behind the <see cref="IHttpContentSerializationFeature"/> negotiation
+/// The negotiation algorithm behind the <see cref="IContentSerializationFeature"/> negotiation
 /// seam (#149): given a request's <c>Accept</c> header and the writers a registry can offer, it
 /// picks the concrete media type the response should carry. The q-value / precedence core is the
 /// shared <see cref="HttpContentNegotiation"/> primitive (#771) — this type only collects the
@@ -28,7 +28,7 @@ internal static class ContentNegotiator
     /// registered.
     /// </returns>
     internal static bool TryNegotiate(
-        IReadOnlyList<IHttpContentWriter> writers,
+        IReadOnlyList<IContentWriter> writers,
         string? acceptHeader,
         out HttpMediaType mediaType)
     {
@@ -61,7 +61,7 @@ internal static class ContentNegotiator
     /// and de-duplicated. Wildcard entries are a writer's match targets, not representations it can
     /// serialize <em>as</em>, so they are excluded.
     /// </summary>
-    private static List<HttpMediaType> CollectServerOptions(IReadOnlyList<IHttpContentWriter> writers)
+    private static List<HttpMediaType> CollectServerOptions(IReadOnlyList<IContentWriter> writers)
     {
         var options = new List<HttpMediaType>();
         if (writers is null)
@@ -69,7 +69,7 @@ internal static class ContentNegotiator
             return options;
         }
 
-        foreach (IHttpContentWriter writer in writers)
+        foreach (IContentWriter writer in writers)
         {
             foreach (HttpMediaType candidate in writer.MediaTypes)
             {

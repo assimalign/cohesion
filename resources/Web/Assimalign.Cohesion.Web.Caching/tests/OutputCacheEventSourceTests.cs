@@ -189,7 +189,7 @@ public sealed class OutputCacheEventSourceTests
         context.Request.QueryCollection["secret-query"] = new HttpQuery("secret-query=secret-value").Parse()["secret-query"];
         RequestIdFeature request = new();
         context.Features.Set<IWebRequestIdFeature>(request);
-        context.Features.Set<IWebEndpointFeature>(new EndpointFeature());
+        context.Features.Set<IRouterEndpointFeature>(new EndpointFeature());
         requestId = request.RequestId.ToHexString();
         return context;
     }
@@ -200,9 +200,9 @@ public sealed class OutputCacheEventSourceTests
         public ActivityTraceId RequestId { get; } = ActivityTraceId.CreateRandom();
     }
 
-    private sealed class EndpointFeature : IWebEndpointFeature
+    private sealed class EndpointFeature : IRouterEndpointFeature
     {
-        public string Name => nameof(IWebEndpointFeature);
+        public string Name => nameof(IRouterEndpointFeature);
         public WebApplicationMiddleware Endpoint => _ => Task.CompletedTask;
         public string? RouteTemplate => "/content/{id}";
     }

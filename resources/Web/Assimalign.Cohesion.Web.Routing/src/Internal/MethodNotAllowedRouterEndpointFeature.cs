@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// (RFC 9110 §15.5.6). It is not an <see cref="IRouteMatchFeature"/>, because no route was selected,
 /// so endpoint-metadata consumers see no metadata for the exchange.
 /// </summary>
-internal sealed class MethodNotAllowedEndpointFeature : IWebEndpointFeature
+internal sealed class MethodNotAllowedRouterEndpointFeature : IRouterEndpointFeature
 {
     private readonly RouteMatch _match;
 
@@ -18,14 +18,14 @@ internal sealed class MethodNotAllowedEndpointFeature : IWebEndpointFeature
     /// Initializes a new 405 endpoint for a <see cref="RouteMatchStatus.MethodNotAllowed"/> match.
     /// </summary>
     /// <param name="match">The match whose acceptable methods form the <c>Allow</c> header.</param>
-    public MethodNotAllowedEndpointFeature(RouteMatch match)
+    public MethodNotAllowedRouterEndpointFeature(RouteMatch match)
     {
         _match = match;
         Endpoint = WriteAsync;
     }
 
     /// <inheritdoc />
-    public string Name => nameof(IWebEndpointFeature);
+    public string Name => nameof(IRouterEndpointFeature);
 
     /// <inheritdoc />
     public WebApplicationMiddleware Endpoint { get; }

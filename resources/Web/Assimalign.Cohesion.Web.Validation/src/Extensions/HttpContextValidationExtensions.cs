@@ -90,11 +90,11 @@ public static class HttpContextValidationExtensions
                     return true;
                 }
 
-                errors = ValidationErrorMap.Create(result.Errors, typeof(T), context.Features.Get<IHttpContentSerializationFeature>());
+                errors = ValidationErrorMap.Create(result.Errors, typeof(T), context.Features.Get<IContentSerializationFeature>());
             }
             catch (ValidationFailureException exception)
             {
-                errors = ValidationErrorMap.Create(exception.Errors, typeof(T), context.Features.Get<IHttpContentSerializationFeature>());
+                errors = ValidationErrorMap.Create(exception.Errors, typeof(T), context.Features.Get<IContentSerializationFeature>());
             }
 
             ProblemDetails problem = ProblemDetails.FromStatus(HttpStatusCode.BadRequest, problemDetail);

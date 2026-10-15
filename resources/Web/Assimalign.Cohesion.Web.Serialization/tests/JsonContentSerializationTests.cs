@@ -22,8 +22,8 @@ public class JsonContentSerializationTests
 {
     private static TestHttpContext ComposeContext()
     {
-        IHttpContentSerializationFeature feature = SerializationComponents.CreateJsonFeature(TestJsonContext.Default)
-            .ShouldBeAssignableTo<IHttpContentSerializationFeature>()!;
+        IContentSerializationFeature feature = SerializationComponents.CreateJsonFeature(TestJsonContext.Default)
+            .ShouldBeAssignableTo<IContentSerializationFeature>()!;
 
         TestHttpContext context = new();
         context.Features.Set(feature);
@@ -112,7 +112,7 @@ public class JsonContentSerializationTests
     public void CanReadCanWrite_ResolverCoverage_ShouldReflectContracts()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
+        IContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
 
         // Act / Assert
         feature.Readers.Single().CanRead(typeof(TestOrder)).ShouldBeTrue();

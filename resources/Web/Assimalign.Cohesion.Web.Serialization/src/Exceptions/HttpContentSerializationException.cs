@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// or an unnegotiated call, and flows to the application's <c>OnError</c> hook like any other
 /// exception. Layers that want to produce protocol <em>outcomes</em> instead (a <c>415</c> for an
 /// unsupported <c>Content-Type</c>, a <c>406</c> for a failed negotiation) consult the
-/// non-throwing <see cref="IHttpContentSerializationFeature"/> lookup surface first and never see
+/// non-throwing <see cref="IContentSerializationFeature"/> lookup surface first and never see
 /// this exception.
 /// </para>
 /// <para>

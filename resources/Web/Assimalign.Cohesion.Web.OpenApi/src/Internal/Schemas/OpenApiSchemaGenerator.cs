@@ -47,7 +47,7 @@ internal sealed class OpenApiSchemaGenerator
 {
     private const string componentPrefix = "#/components/schemas/";
 
-    private readonly IHttpContentSerializationFeature? _serialization;
+    private readonly IContentSerializationFeature? _serialization;
     private readonly OpenApiSpecVersion _version;
     private readonly JsonSchemaExporterOptions _exporterOptions;
     private readonly Dictionary<Type, string> _componentNames = new();
@@ -59,7 +59,7 @@ internal sealed class OpenApiSchemaGenerator
     private string? _problemDetailsName;
     private Type? _componentRoot;
 
-    public OpenApiSchemaGenerator(IHttpContentSerializationFeature? serialization, OpenApiSpecVersion version)
+    public OpenApiSchemaGenerator(IContentSerializationFeature? serialization, OpenApiSpecVersion version)
     {
         _serialization = serialization;
         _version = version;

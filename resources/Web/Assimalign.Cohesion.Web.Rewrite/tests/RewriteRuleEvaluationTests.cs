@@ -98,7 +98,7 @@ public class RewriteRuleEvaluationTests
 
         // Assert
         apiDownstream.ShouldBeSameAs(api);
-        api.Features.Get<IWebRewriteFeature>().ShouldBeNull();
+        api.Features.Get<IRewriteFeature>().ShouldBeNull();
         probe.Path!.Value.Value.ShouldBe("/spa/index.html");
     }
 

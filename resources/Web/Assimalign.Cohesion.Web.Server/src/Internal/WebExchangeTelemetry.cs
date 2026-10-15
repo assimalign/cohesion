@@ -204,7 +204,7 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature, IWebRequestAc
 
             if (_startTimestamp != 0 || _activity is not null)
             {
-                route = _exchange.Features.Get<IWebEndpointFeature>()?.RouteTemplate;
+                route = _exchange.Features.Get<IRouterEndpointFeature>()?.RouteTemplate;
             }
 
             RecordMetrics(statusCode, error, route, elapsed);

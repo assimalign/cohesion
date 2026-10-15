@@ -42,7 +42,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
     private const string multipartFormMediaType = "multipart/form-data";
     private const string problemMediaType = "application/problem+json";
 
-    private readonly IHttpContentSerializationFeature? _serialization;
+    private readonly IContentSerializationFeature? _serialization;
     private readonly OpenApiSchemaGenerator _schemas;
     private readonly List<string> _declaredSchemes = [];
     private readonly AuthorizationOptions _authorization;
@@ -68,7 +68,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
     public WebOpenApiEndpointSource(
         IRouter router,
         OpenApiOptions options,
-        IHttpContentSerializationFeature? serialization,
+        IContentSerializationFeature? serialization,
         AuthorizationOptions authorization,
         string? defaultAuthenticationScheme,
         OpenApiSpecVersion version)
@@ -506,7 +506,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
             return null;
         }
 
-        foreach (IHttpContentReader reader in _serialization.Readers)
+        foreach (IContentReader reader in _serialization.Readers)
         {
             if (reader.CanRead(type) && GetConcreteMediaType(reader.MediaTypes) is { } mediaType)
             {
@@ -526,7 +526,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
             return null;
         }
 
-        foreach (IHttpContentWriter writer in _serialization.Writers)
+        foreach (IContentWriter writer in _serialization.Writers)
         {
             if (writer.CanWrite(type) && GetConcreteMediaType(writer.MediaTypes) is { } mediaType)
             {

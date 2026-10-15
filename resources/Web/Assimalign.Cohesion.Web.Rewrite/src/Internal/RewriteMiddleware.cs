@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// </para>
 /// <para>
 /// <b>Inside a <c>Map(path)</c> branch</b> the rules see the path below the branch's prefix. A rewrite of it
-/// publishes an <see cref="IWebPathBaseFeature"/> with the same path base over the rewritten path, and the
+/// publishes an <see cref="IRouterPathBaseFeature"/> with the same path base over the rewritten path, and the
 /// view's request path is the path base followed by the rewritten path. The branch's own feature is put back
 /// when the rest of the pipeline returns.
 /// </para>
@@ -57,7 +57,7 @@ internal sealed class RewriteMiddleware : IWebApplicationMiddleware
             return next.Invoke(context);
         }
 
-        IWebPathBaseFeature? branch = context.Features.Get<IWebPathBaseFeature>();
+        IRouterPathBaseFeature? branch = context.Features.Get<IRouterPathBaseFeature>();
         RewriteContext rewrite = new(context, branch?.PathBase ?? HttpPath.Root, branch?.Path ?? request.Path, request.Query);
 
         if (!Evaluate(rewrite))
@@ -137,7 +137,7 @@ internal sealed class RewriteMiddleware : IWebApplicationMiddleware
         }
     }
 
-    private static async Task InvokeRewrittenAsync(IHttpContext context, IWebPathBaseFeature? branch, RewriteContext rewrite, WebApplicationMiddleware next)
+    private static async Task InvokeRewrittenAsync(IHttpContext context, IRouterPathBaseFeature? branch, RewriteContext rewrite, WebApplicationMiddleware next)
     {
         HttpPath path = rewrite.Path;
         RewriteHttpContext view = new(context, branch is null ? path : Join(branch.PathBase, path), rewrite.Query);
@@ -146,15 +146,15 @@ internal sealed class RewriteMiddleware : IWebApplicationMiddleware
 
         // A later rewrite (inside a branch, after one at the application level) keeps the first rewrite's
         // originals: they are the values the client sent.
-        bool firstRewrite = features.Get<IWebRewriteFeature>() is null;
+        bool firstRewrite = features.Get<IRewriteFeature>() is null;
         if (firstRewrite)
         {
-            features.Set<IWebRewriteFeature>(new RewriteFeature(context.Request.Path, context.Request.Query));
+            features.Set<IRewriteFeature>(new RewriteFeature(context.Request.Path, context.Request.Query));
         }
 
         if (branch is not null)
         {
-            features.Set<IWebPathBaseFeature>(new RewritePathBaseFeature(branch.PathBase, path));
+            features.Set<IRouterPathBaseFeature>(new RewritePathBaseFeature(branch.PathBase, path));
         }
 
         try
@@ -167,12 +167,12 @@ internal sealed class RewriteMiddleware : IWebApplicationMiddleware
             // request as they handed it on.
             if (branch is not null)
             {
-                features.Set<IWebPathBaseFeature>(branch);
+                features.Set<IRouterPathBaseFeature>(branch);
             }
 
             if (firstRewrite)
             {
-                features.Set<IWebRewriteFeature>(null);
+                features.Set<IRewriteFeature>(null);
             }
         }
     }

@@ -139,7 +139,7 @@ internal sealed class WebServerEventSource : EventSource
             _headThrottle.TryEmit(out int suppressed))
         {
             ResponseHeadRefused(serverId, GetRequestId(exchange), FormatVersion(exchange.Version),
-                exchange.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                exchange.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 "The HTTP transport refused an invalid response field.", suppressed);
         }
     }
@@ -150,7 +150,7 @@ internal sealed class WebServerEventSource : EventSource
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
             CompletionCallbackFailed(serverId, GetRequestId(exchange),
-                exchange.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                exchange.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
         }
     }

@@ -27,7 +27,7 @@ internal sealed class OutputCacheEventSource : EventSource
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
             ResponseNotStored(reason.ToString(),
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
         }
     }

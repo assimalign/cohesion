@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Web.Rewrite.Tests;
 
 /// <summary>
 /// Rewriting inside a <c>Map(path)</c> branch (Web ADR 1, decision 3): the rules see the branch's effective
-/// path, a rewrite publishes a matching <see cref="IWebPathBaseFeature"/> under the unchanged path base while
+/// path, a rewrite publishes a matching <see cref="IRouterPathBaseFeature"/> under the unchanged path base while
 /// <c>Request.Path</c> is the path base and the rewritten path, redirects are relative to the path base, and
 /// the branch's own view comes back when the rest of the branch returns.
 /// </summary>
@@ -38,8 +38,8 @@ public class RewriteBranchTests
         probe.PathBase!.Value.Value.ShouldBe("/docs");
         probe.Path!.Value.Value.ShouldBe("/docs/new/intro");
         probe.Rewrite!.OriginalPath.Value.ShouldBe("/docs/old/intro");
-        context.Features.Get<IWebPathBaseFeature>().ShouldBeNull();
-        context.Features.Get<IWebRewriteFeature>().ShouldBeNull();
+        context.Features.Get<IRouterPathBaseFeature>().ShouldBeNull();
+        context.Features.Get<IRewriteFeature>().ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - Branch: Rules in a branch should match the path below the prefix, not the full path")]

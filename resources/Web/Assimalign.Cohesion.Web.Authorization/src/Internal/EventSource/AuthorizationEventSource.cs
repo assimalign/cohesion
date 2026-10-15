@@ -45,7 +45,7 @@ internal sealed class AuthorizationEventSource : EventSource
         {
             RequestDenied(
                 forbid ? "Forbid" : "Challenge",
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 endpoint?.Metadata.GetMetadata<AuthorizationMetadata>() is null ? "Fallback" : "Endpoint",
                 policy.Requirements[failedRequirement].GetType().Name,
                 string.Join(", ", policy.AuthenticationSchemes),

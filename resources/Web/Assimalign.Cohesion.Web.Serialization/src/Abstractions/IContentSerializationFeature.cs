@@ -7,8 +7,8 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// <summary>
 /// The content-serialization registry, exposed to middleware and handlers as a typed feature on
 /// <see cref="IHttpContext.Features"/>: media-type-keyed lookup over the registered
-/// request-deserialization (<see cref="IHttpContentReader"/>) and response-serialization
-/// (<see cref="IHttpContentWriter"/>) halves.
+/// request-deserialization (<see cref="IContentReader"/>) and response-serialization
+/// (<see cref="IContentWriter"/>) halves.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -20,18 +20,18 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// throwing convenience path is the <c>ReadContentAsync</c>/<c>WriteContentAsync</c> extensions.
 /// </para>
 /// </remarks>
-public interface IHttpContentSerializationFeature : IHttpFeature
+public interface IContentSerializationFeature : IHttpFeature
 {
     /// <summary>
     /// Gets the registered readers, in registration order.
     /// </summary>
-    IReadOnlyList<IHttpContentReader> Readers { get; }
+    IReadOnlyList<IContentReader> Readers { get; }
 
     /// <summary>
     /// Gets the registered writers, in registration order. The first writer is the default used
     /// when a call site names no content type.
     /// </summary>
-    IReadOnlyList<IHttpContentWriter> Writers { get; }
+    IReadOnlyList<IContentWriter> Writers { get; }
 
     /// <summary>
     /// Resolves the reader for a request <c>Content-Type</c>. Among readers whose declared ranges
@@ -40,7 +40,7 @@ public interface IHttpContentSerializationFeature : IHttpFeature
     /// </summary>
     /// <param name="mediaType">The concrete media type of the request body.</param>
     /// <returns>The matching reader, or <see langword="null"/> when none is registered.</returns>
-    IHttpContentReader? GetReader(HttpMediaType mediaType);
+    IContentReader? GetReader(HttpMediaType mediaType);
 
     /// <summary>
     /// Resolves the writer for a response content type. Among writers whose declared ranges
@@ -49,5 +49,5 @@ public interface IHttpContentSerializationFeature : IHttpFeature
     /// </summary>
     /// <param name="mediaType">The concrete media type to emit.</param>
     /// <returns>The matching writer, or <see langword="null"/> when none is registered.</returns>
-    IHttpContentWriter? GetWriter(HttpMediaType mediaType);
+    IContentWriter? GetWriter(HttpMediaType mediaType);
 }

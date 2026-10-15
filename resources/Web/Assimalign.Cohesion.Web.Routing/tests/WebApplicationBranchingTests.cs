@@ -47,7 +47,7 @@ public class WebApplicationBranchingTests
         seenPath!.Value.Value.ShouldBe(expectedPath);
         seenBase!.Value.Value.ShouldBe("/static");
         seenRequestPath!.Value.Value.ShouldBe(requestPath);
-        context.Features.Get<IWebPathBaseFeature>().ShouldBeNull(); // restored after the branch
+        context.Features.Get<IRouterPathBaseFeature>().ShouldBeNull(); // restored after the branch
         context.GetEffectivePath().Value.ShouldBe(requestPath);
     }
 
@@ -118,7 +118,7 @@ public class WebApplicationBranchingTests
         bool endpointRan = false;
         builder.Use(next => context =>
         {
-            context.Features.Set<IWebEndpointFeature>(new TestEndpointFeature(_ => { endpointRan = true; return Task.CompletedTask; }));
+            context.Features.Set<IRouterEndpointFeature>(new TestEndpointFeature(_ => { endpointRan = true; return Task.CompletedTask; }));
             return next(context);
         });
         builder.Map("/api", branch => branch.Use(next => next));
@@ -182,7 +182,7 @@ public class WebApplicationBranchingTests
 
         // Assert
         baseAfterInnerFault!.Value.Value.ShouldBe("/api");
-        context.Features.Get<IWebPathBaseFeature>().ShouldBeNull();
+        context.Features.Get<IRouterPathBaseFeature>().ShouldBeNull();
     }
 
     // ------------------------------------------------------------------ MapWhen
@@ -219,7 +219,7 @@ public class WebApplicationBranchingTests
         {
             if (context.Request.Path.Value == "/selected")
             {
-                context.Features.Set<IWebEndpointFeature>(new TestEndpointFeature(_ => { endpointRan = true; return Task.CompletedTask; }));
+                context.Features.Set<IRouterEndpointFeature>(new TestEndpointFeature(_ => { endpointRan = true; return Task.CompletedTask; }));
             }
 
             return next(context);

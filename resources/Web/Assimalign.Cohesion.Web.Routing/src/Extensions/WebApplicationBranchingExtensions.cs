@@ -34,7 +34,7 @@ public static class WebApplicationBranchingExtensions
         /// case-insensitively) into <paramref name="configure"/>'s pipeline. The branch does not rejoin.
         /// </summary>
         /// <remarks>
-        /// Inside the branch, <see cref="IWebPathBaseFeature"/> records the matched prefix as the path base
+        /// Inside the branch, <see cref="IRouterPathBaseFeature"/> records the matched prefix as the path base
         /// and the remaining path; <c>context.GetEffectivePath()</c> returns the remaining path. The request
         /// is not rewritten: <see cref="IHttpRequest.Path"/> keeps the full path.
         /// </remarks>
@@ -96,7 +96,7 @@ public static class WebApplicationBranchingExtensions
     {
         /// <summary>
         /// Gets the prefixes the path branches this request entered matched
-        /// (<see cref="IWebPathBaseFeature.PathBase"/>), or <see cref="HttpPath.Root"/> outside any path branch.
+        /// (<see cref="IRouterPathBaseFeature.PathBase"/>), or <see cref="HttpPath.Root"/> outside any path branch.
         /// </summary>
         /// <returns>The request's path base.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
@@ -104,12 +104,12 @@ public static class WebApplicationBranchingExtensions
         {
             ArgumentNullException.ThrowIfNull(context);
 
-            return context.Features.Get<IWebPathBaseFeature>()?.PathBase ?? HttpPath.Root;
+            return context.Features.Get<IRouterPathBaseFeature>()?.PathBase ?? HttpPath.Root;
         }
 
         /// <summary>
         /// Gets the request path as the current pipeline segment sees it: the path below the path base
-        /// inside a path branch (<see cref="IWebPathBaseFeature.Path"/>), and <see cref="IHttpRequest.Path"/>
+        /// inside a path branch (<see cref="IRouterPathBaseFeature.Path"/>), and <see cref="IHttpRequest.Path"/>
         /// outside one.
         /// </summary>
         /// <returns>The effective request path.</returns>
@@ -118,7 +118,7 @@ public static class WebApplicationBranchingExtensions
         {
             ArgumentNullException.ThrowIfNull(context);
 
-            return context.Features.Get<IWebPathBaseFeature>()?.Path ?? context.Request.Path;
+            return context.Features.Get<IRouterPathBaseFeature>()?.Path ?? context.Request.Path;
         }
     }
 
@@ -142,11 +142,11 @@ public static class WebApplicationBranchingExtensions
 
     private static async Task InvokePathBranchAsync(IHttpContext context, string prefix, HttpPath prefixPath, WebApplicationMiddleware branch)
     {
-        IWebPathBaseFeature? outer = context.Features.Get<IWebPathBaseFeature>();
+        IRouterPathBaseFeature? outer = context.Features.Get<IRouterPathBaseFeature>();
         HttpPath remainder = RemovePrefix(outer?.Path ?? context.Request.Path, prefix);
         HttpPath pathBase = (outer?.PathBase ?? HttpPath.Root).Concat(prefixPath);
 
-        context.Features.Set<IWebPathBaseFeature>(new WebPathBaseFeature(pathBase, remainder));
+        context.Features.Set<IRouterPathBaseFeature>(new RouterPathBaseFeature(pathBase, remainder));
 
         try
         {
@@ -156,7 +156,7 @@ public static class WebApplicationBranchingExtensions
         {
             // Restore the enclosing view for the middleware outside the branch that observe the request
             // after it returns.
-            context.Features.Set<IWebPathBaseFeature>(outer);
+            context.Features.Set<IRouterPathBaseFeature>(outer);
         }
     }
 }

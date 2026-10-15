@@ -10,14 +10,14 @@ namespace Assimalign.Cohesion.Web.Serialization;
 
 /// <summary>
 /// Typed request-body reads over the content-serialization registry: the request's
-/// <c>Content-Type</c> selects the registered <see cref="IHttpContentReader"/>, which
+/// <c>Content-Type</c> selects the registered <see cref="IContentReader"/>, which
 /// deserializes the body without per-call-site serializer ceremony.
 /// </summary>
 /// <remarks>
 /// These are the throwing convenience path — an unresolvable read is surfaced as an
 /// <see cref="HttpContentSerializationException"/> fault for the application's <c>OnError</c>
 /// hook. Layers that turn unsupported media types into protocol outcomes (<c>415</c>) consult
-/// <see cref="IHttpContentSerializationFeature.GetReader"/> first instead.
+/// <see cref="IContentSerializationFeature.GetReader"/> first instead.
 /// </remarks>
 public static class HttpRequestSerializationExtensions
 {
@@ -57,7 +57,7 @@ public static class HttpRequestSerializationExtensions
             ArgumentNullException.ThrowIfNull(request);
             ArgumentNullException.ThrowIfNull(type);
 
-            IHttpContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(request.HttpContext);
+            IContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(request.HttpContext);
 
             if (!request.Headers.TryGetValue(HttpHeaderKey.ContentType, out HttpHeaderValue header)
                 || !HttpMediaType.TryParse(header.Value, out HttpMediaType contentType))
@@ -66,7 +66,7 @@ public static class HttpRequestSerializationExtensions
                     ErrorMessages.RequestContentTypeMissingOrInvalid);
             }
 
-            IHttpContentReader reader = feature.GetReader(contentType)
+            IContentReader reader = feature.GetReader(contentType)
                 ?? throw new HttpContentSerializationException(
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestContentReaderNotRegistered, contentType));
 

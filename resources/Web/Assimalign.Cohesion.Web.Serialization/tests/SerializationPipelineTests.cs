@@ -73,7 +73,7 @@ public class SerializationPipelineTests
 
         factory.Application.Use(async (context, next) =>
         {
-            IHttpContentSerializationFeature registry = context.Features.Get<IHttpContentSerializationFeature>()!;
+            IContentSerializationFeature registry = context.Features.Get<IContentSerializationFeature>()!;
 
             if (!context.Request.Headers.TryGetValue(HttpHeaderKey.ContentType, out HttpHeaderValue header)
                 || !HttpMediaType.TryParse(header.Value, out HttpMediaType contentType)

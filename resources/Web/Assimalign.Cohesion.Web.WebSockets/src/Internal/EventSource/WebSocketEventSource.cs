@@ -104,7 +104,7 @@ internal sealed class WebSocketEventSource : EventSource
 
     [NonEvent]
     private static string GetRouteTemplate(IHttpContext context)
-        => context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty;
+        => context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty;
 
     protected override void OnEventCommand(EventCommandEventArgs command)
     {

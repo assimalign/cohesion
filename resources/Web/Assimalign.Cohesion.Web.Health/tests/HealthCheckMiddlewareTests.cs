@@ -146,7 +146,7 @@ public class HealthCheckMiddlewareTests
         TestHttpContext context = new("/healthz", HttpMethod.Get);
         await builder.Build().ExecuteAsync(context);
 
-        IHttpHealthFeature? feature = context.Features.Get<IHttpHealthFeature>();
+        IHealthFeature? feature = context.Features.Get<IHealthFeature>();
         feature.ShouldNotBeNull();
         feature!.Report.Status.ShouldBe(HealthStatus.Degraded);
     }
@@ -362,7 +362,7 @@ public class HealthCheckMiddlewareTests
         await builder.Build().ExecuteAsync(context);
 
         // Assert
-        IHttpHealthFeature? feature = context.Features.Get<IHttpHealthFeature>();
+        IHealthFeature? feature = context.Features.Get<IHealthFeature>();
         feature.ShouldNotBeNull();
         feature!.Report.Entries["db"].Exception.ShouldBeSameAs(exception);
     }

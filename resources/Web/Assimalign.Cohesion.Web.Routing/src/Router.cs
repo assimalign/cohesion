@@ -112,7 +112,7 @@ public sealed class Router : IRouter
     IEnumerable<IRouterRoute> IRouter.Routes => Routes;
 
     /// <inheritdoc />
-    public ILinkGenerator LinkGenerator { get; }
+    public IRouterLinkGenerator LinkGenerator { get; }
 
     /// <inheritdoc />
     public RouteMatch Match(IHttpContext context)

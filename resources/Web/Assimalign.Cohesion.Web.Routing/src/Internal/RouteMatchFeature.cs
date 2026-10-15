@@ -11,15 +11,15 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// <summary>
 /// Default <see cref="IRouteMatchFeature"/> implementation installed on the HTTP context feature
 /// collection when a request matches a route. It is also the exchange's
-/// <see cref="IWebEndpointFeature"/>: the pipeline's terminal runs the matched route's handler through
+/// <see cref="IRouterEndpointFeature"/>: the pipeline's terminal runs the matched route's handler through
 /// <see cref="Endpoint"/>.
 /// </summary>
 /// <remarks>
-/// Every endpoint publication shares the <see cref="IWebEndpointFeature"/> slot name, so a later
+/// Every endpoint publication shares the <see cref="IRouterEndpointFeature"/> slot name, so a later
 /// publication (a re-route, or the 405 endpoint) replaces an earlier one instead of leaving two
 /// endpoints on the exchange.
 /// </remarks>
-internal sealed class RouteMatchFeature : IRouteMatchFeature, IWebEndpointFeature
+internal sealed class RouteMatchFeature : IRouteMatchFeature, IRouterEndpointFeature
 {
     private readonly WebApplicationMiddleware _endpoint;
     private HashSet<string>? _acknowledged;
@@ -54,7 +54,7 @@ internal sealed class RouteMatchFeature : IRouteMatchFeature, IWebEndpointFeatur
     }
 
     /// <inheritdoc />
-    public string Name => nameof(IWebEndpointFeature);
+    public string Name => nameof(IRouterEndpointFeature);
 
     /// <inheritdoc />
     public IRouterRoute? Route { get; }

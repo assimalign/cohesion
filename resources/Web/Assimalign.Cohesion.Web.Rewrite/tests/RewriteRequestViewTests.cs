@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web.Rewrite.Tests;
 
 /// <summary>
 /// The request view a rewrite hands the rest of the pipeline (Web ADR 1): the rewritten path and query, every
-/// other member the original's, the original values kept in <see cref="IWebRewriteFeature"/> while the rest
+/// other member the original's, the original values kept in <see cref="IRewriteFeature"/> while the rest
 /// of the pipeline runs, and the original context left as it was for the middleware ahead of the rewrite.
 /// </summary>
 public class RewriteRequestViewTests
@@ -104,7 +104,7 @@ public class RewriteRequestViewTests
         probe.Rewrite.OriginalQuery.ShouldBeSameAs(originalQuery);
         probe.Path!.Value.Value.ShouldBe("/new/page");
         probe.Query!["v"].Value.ShouldBe("2");
-        context.Features.Get<IWebRewriteFeature>().ShouldBeNull();
+        context.Features.Get<IRewriteFeature>().ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - Feature: A second rewrite should keep the values the client sent")]
@@ -126,7 +126,7 @@ public class RewriteRequestViewTests
         probe.Query!["step"].Value.ShouldBe("2");
         probe.Rewrite!.OriginalPath.Value.ShouldBe("/a");
         probe.Rewrite.OriginalQuery["client"].Value.ShouldBe("1");
-        context.Features.Get<IWebRewriteFeature>().ShouldBeNull();
+        context.Features.Get<IRewriteFeature>().ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - Feature: A fault downstream should still remove the feature")]
@@ -142,7 +142,7 @@ public class RewriteRequestViewTests
         await Should.ThrowAsync<InvalidOperationException>(() => builder.SendAsync(context));
 
         // Assert
-        context.Features.Get<IWebRewriteFeature>().ShouldBeNull();
+        context.Features.Get<IRewriteFeature>().ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - Pitfall: Middleware ahead of the rewrite should keep seeing the original values after next returns")]

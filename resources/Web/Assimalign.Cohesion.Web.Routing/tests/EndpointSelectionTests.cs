@@ -346,7 +346,7 @@ public class EndpointSelectionTests
         await app.ExecuteAsync(context);
 
         // Assert
-        context.Features.Get<IWebEndpointFeature>()!.RouteTemplate.ShouldBe("/api/orders/{id:int}");
+        context.Features.Get<IRouterEndpointFeature>()!.RouteTemplate.ShouldBe("/api/orders/{id:int}");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - Endpoint: The 405 endpoint publishes no route template")]
@@ -363,7 +363,7 @@ public class EndpointSelectionTests
 
         // Assert
         context.Response.StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
-        IWebEndpointFeature endpoint = context.Features.Get<IWebEndpointFeature>().ShouldNotBeNull();
+        IRouterEndpointFeature endpoint = context.Features.Get<IRouterEndpointFeature>().ShouldNotBeNull();
         endpoint.RouteTemplate.ShouldBeNull();
     }
 
@@ -381,7 +381,7 @@ public class EndpointSelectionTests
 
         // Assert
         context.GetRouteMatch()!.IsPreflight.ShouldBeTrue();
-        context.Features.Get<IWebEndpointFeature>()!.RouteTemplate.ShouldBe("/items/{id:int}");
+        context.Features.Get<IRouterEndpointFeature>()!.RouteTemplate.ShouldBe("/items/{id:int}");
     }
 
     private static TestHttpContext CreatePreflight(string path, string requestedMethod)

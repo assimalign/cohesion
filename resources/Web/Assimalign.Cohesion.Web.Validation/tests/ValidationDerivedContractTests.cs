@@ -25,7 +25,7 @@ public sealed class ValidationDerivedContractTests
     public void Create_AttributedDerivedContract_ShouldUseRegisteredJsonNames(Type modelType, string source, string expected)
     {
         // Arrange — only the base type is explicitly registered; System.Text.Json discovers both descendants.
-        IHttpContentSerializationFeature serialization = new ContentSerializationBuilder()
+        IContentSerializationFeature serialization = new ContentSerializationBuilder()
             .AddJson(ValidationDerivedJsonContext.Default).Build();
         serialization.TryGetJsonTypeInfo(modelType, out JsonTypeInfo? contract).ShouldBeTrue();
         contract.ShouldNotBeNull();

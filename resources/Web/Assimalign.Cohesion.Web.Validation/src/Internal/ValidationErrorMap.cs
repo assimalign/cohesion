@@ -29,7 +29,7 @@ internal static class ValidationErrorMap
     public static Dictionary<string, object?> Create(
         IEnumerable<IValidationError> errors,
         Type? modelType = null,
-        IHttpContentSerializationFeature? serialization = null)
+        IContentSerializationFeature? serialization = null)
     {
         Dictionary<string, List<string>> messages = new(StringComparer.Ordinal);
         List<string> keys = new();
@@ -101,7 +101,7 @@ internal static class ValidationErrorMap
         return true;
     }
 
-    private static string GetJsonPath(string path, Type modelType, IHttpContentSerializationFeature serialization)
+    private static string GetJsonPath(string path, Type modelType, IContentSerializationFeature serialization)
     {
         Type? owner = modelType;
         StringBuilder mapped = new();
