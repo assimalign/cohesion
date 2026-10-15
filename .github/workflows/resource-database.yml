@@ -10,26 +10,57 @@ on:
       - '!resources/Database/**/*.md'
       # The E2E job packs the SDK chain the SampleHost builds on (base, ApplicationModel and
       # Database SDKs) through Install-Local.ps1 and the packaging module beside it, and derives
-      # the SampleHost's SDK pins from the root global.json; a change to any of them must re-run it.
+      # the SampleHost's SDK pins from the root global.json (listed below); a change to any of
+      # them must re-run it.
       - 'sdks/Assimalign.Cohesion.Sdk/**'
       - 'sdks/Assimalign.Cohesion.Sdk.ApplicationModel/**'
       - 'sdks/Assimalign.Cohesion.Sdk.Database/**'
       - 'installer/scripts/**'
-      - 'global.json'
       # The framework-closure job reads App.Database's member list against the project graph.
       - 'libraries/App/Assimalign.Cohesion.App.Runtime/tests/**'
-      - '.github/actions/build/**'
       - '.github/workflows/resource-database.yml'        # When Pipeline File Changes
+      # Shared build infrastructure that every project in this workflow compiles with.
+      - '.github/actions/build/**'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'resources/Directory.Build.props'
+      - 'resources/Directory.Build.targets'
+      - 'build/Build.props'
+      - 'build/Build.targets'
+      - 'build/Targets/**'
+      - 'build/Tasks/**'
+  workflow_dispatch:
+    inputs:
+      all-os:
+        description: Also run the Windows and macOS legs, which otherwise run only on main.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# A newer push to the same branch (or pull request) supersedes this run, so the older run is
+# cancelled instead of holding runner slots: the organization's plan runs at most 20 jobs at once,
+# 5 of them macOS. Every main commit keeps its own run, because the run id makes its group unique.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    # Above the per-area 30 until the first main runs measure this job: run 38740702835's
+    # single-project legs bound it at 29 minutes on Linux and 42 on Windows (.claude/rules/build-system.md).
+    timeout-minutes: 60
     strategy:
+      # Every leg reports its own result. With fail-fast, one failing leg cancels the others (#1093).
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes run
+        # Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         # Every delivered Database project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
@@ -37,7 +68,9 @@ jobs:
         # Documents.Client/.Security, Graph.Security, Blob.Security and
         # KeyValuePair.Security) and the post-MVP shells (Sql.Security, Memory) are
         # excluded until they ship.
-        projects: [
+        # One leg per OS builds and tests the whole area: the inner list is a single matrix value
+        # that .github/actions/build receives whole. The release inventory guard reads this list.
+        projects: [[
             'Assimalign.Cohesion.Database',
             'Assimalign.Cohesion.Database.ApplicationModel',
             'Assimalign.Cohesion.Database.Blob',
@@ -76,27 +109,30 @@ jobs:
             'Assimalign.Cohesion.Database.Testing',
             'Assimalign.Cohesion.Database.Transactions',
             'Assimalign.Cohesion.Database.Types'
-        ]
-        # Database.Testing evaluates the real Sdk.Database SampleHost project. Its
-        # package-backed SDK/framework closure is prepared once below and reused on
-        # all three runners, so exclude it from the source-only build leg.
-        exclude:
-          - os: ubuntu-latest
-            projects: 'Assimalign.Cohesion.Database.Testing'
-          - os: windows-latest
-            projects: 'Assimalign.Cohesion.Database.Testing'
-          - os: macos-latest
-            projects: 'Assimalign.Cohesion.Database.Testing'
+        ]]
     steps:
       - uses: actions/checkout@v7
-        name: "Checkout: ${{ matrix.projects }}"
+        name: Checkout
+
+      # Database.Testing evaluates the real Sdk.Database SampleHost project, so it builds in the
+      # database-testing job against the packages prepared below. It stays in the list above
+      # because the release inventory guard reads only that list, and a single matrix value
+      # cannot be excluded entry by entry.
+      - name: Select the source-only projects
+        id: select
+        shell: pwsh
+        env:
+          COHESION_PROJECTS: ${{ toJSON(matrix.projects) }}
+        run: |
+          $projects = @($env:COHESION_PROJECTS | ConvertFrom-Json | Where-Object { $_ -ne 'Assimalign.Cohesion.Database.Testing' })
+          "projects=$(ConvertTo-Json -InputObject $projects -Compress)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - uses: ./.github/actions/build
-        name: "Running Build & Tests: ${{ matrix.projects }}"
+        name: Build and test
         with:
           area: 'resources'
           category: 'Database'
-          project: ${{ matrix.projects }}
+          projects: ${{ steps.select.outputs.projects }}
 
   # The SQL engine's two NativeAOT harnesses, published for linux-x64 and run (this machine leg
   # does not exist locally; win-arm64 is published by hand, see each csproj):
@@ -183,12 +219,15 @@ jobs:
         with:
           global-json-file: global.json
 
+      # One runtime pack per E2E leg's RID: only the Linux leg runs off main without all-os.
       - name: Pack local SDK and framework closure
         shell: pwsh
+        env:
+          COHESION_RIDS: ${{ (github.ref == 'refs/heads/main' || inputs.all-os) && 'linux-x64,win-x64,osx-arm64' || 'linux-x64' }}
         run: |
           ./installer/scripts/Install-Local.ps1 `
               -Configuration Release `
-              -Rids linux-x64,win-x64,osx-arm64 `
+              -Rids ($env:COHESION_RIDS -split ',') `
               -SkipLibraries
 
       - name: Upload local SDK and framework closure
@@ -208,7 +247,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Same OS selection as the build job; the pack job packs a runtime pack for each leg here.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v7
 
