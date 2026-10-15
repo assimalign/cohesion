@@ -170,8 +170,8 @@ public sealed partial class SqlCatalog
         }
     }
 
-    // Deviates from the implementation-only public bridge rule per review direction #1443:
-    // the catalog owns committed reclamation state and retirement; workers receive identities only.
+    // The catalog owns committed reclamation state and its retirement, as it owns pending
+    // migrations and script receipts; the reclamation worker receives identities only.
     /// <summary>Captures the retired table identities whose storage reclamation is pending.</summary>
     /// <returns>A read-only snapshot unaffected by later drops or completed reclamations.</returns>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
