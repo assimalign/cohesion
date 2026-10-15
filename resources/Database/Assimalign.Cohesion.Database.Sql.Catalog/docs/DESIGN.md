@@ -14,8 +14,15 @@ transaction as applied-schema records (kind 6). The SQL engine gates this additi
 format 9; no legacy reader or upgrade path is added. Persisting intent does not advance DDL
 generation or replace the old applied marker. Saving the completed applied marker deletes every
 pending chunk in the same transaction. Open validates the envelope and ordering, and the engine
-checks the target document's hash before resuming. Catalog persistence knows no SQL executor,
+gates the target document's format before checking its hash or resuming. Catalog persistence knows no SQL executor,
 worker, or hosting lifecycle.
+
+The compiled document is now `cohesion/database-schema/v5` (#1438), matching Sdk.Database.
+Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
+document, so catalog format 10 need not change. SQL checks those document formats before opening
+the data file set and before Apply/Verify compares persisted hashes. A v4 NUMERIC(p) document
+with scale:null is refused through the schema format gate, with the rebuild/recreate remedy;
+its old hash is never validated or reconciled. No compatibility reader or upgrade is added.
 
 ## Collation metadata (#1025)
 

@@ -27,6 +27,8 @@ internal sealed partial class SqlSchemaProvisioner
     private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
     private string? _validatedHash;
+    private string? _formatCheckedStateDocument;
+    private string? _formatCheckedPendingDocument;
 
     // Instance-local test hooks, reached only by this assembly's tests. A skip must not
     // enter any catalog traversal; crash tests capture durable storage after each step.
@@ -38,6 +40,47 @@ internal sealed partial class SqlSchemaProvisioner
     {
         _database = database;
         _catalog = catalog;
+        // Existing databases passed the document gate before their data file set opened.
+        _formatCheckedStateDocument = catalog.SchemaState?.CanonicalDocument;
+        _formatCheckedPendingDocument = catalog.PendingMigration?.CanonicalDocument;
+    }
+
+    internal static void ValidateRecordedFormats(SqlCatalog catalog)
+    {
+        ValidateRecordedFormat(catalog.SchemaState?.CanonicalDocument);
+        ValidateRecordedFormat(catalog.PendingMigration?.CanonicalDocument);
+    }
+
+    private void ValidateRecordedFormats()
+    {
+        string? state = _catalog.SchemaState?.CanonicalDocument;
+        string? pending = _catalog.PendingMigration?.CanonicalDocument;
+        if (!ReferenceEquals(state, _formatCheckedStateDocument)) { ValidateRecordedFormat(state); }
+        if (!ReferenceEquals(pending, _formatCheckedPendingDocument)) { ValidateRecordedFormat(pending); }
+        _formatCheckedStateDocument = state;
+        _formatCheckedPendingDocument = pending;
+    }
+
+    private static void ValidateRecordedFormat(string? document)
+    {
+        if (document is null) { return; }
+        try
+        {
+            using JsonDocument json = JsonDocument.Parse(document);
+            if (json.RootElement.ValueKind == JsonValueKind.Object &&
+                json.RootElement.TryGetProperty("format", out JsonElement format) &&
+                format.ValueKind == JsonValueKind.String && format.GetString() == SqlCompiledSchema.CurrentFormat)
+            {
+                return;
+            }
+        }
+        catch (JsonException)
+        {
+            // A damaged marker still follows the existing live-catalog reconstruction path.
+            // A valid document of any other format must reach the schema package's gate.
+            return;
+        }
+        _ = SqlCompiledSchemaSerializer.Deserialize(document);
     }
 
     internal async ValueTask<SqlSchemaMigrationResult> ApplyAsync(
@@ -47,6 +90,7 @@ internal sealed partial class SqlSchemaProvisioner
     {
         ArgumentNullException.ThrowIfNull(schema);
         cancellationToken.ThrowIfCancellationRequested();
+        ValidateRecordedFormats();
         if (deferDataScalingSteps && TryGetDeferredResult(schema) is { } deferredResult)
         {
             return deferredResult;
@@ -152,6 +196,7 @@ internal sealed partial class SqlSchemaProvisioner
                 await _catalog.SaveSchemaStateAsync(
                     new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, generation),
                     cancellationToken).ConfigureAwait(false);
+                _formatCheckedStateDocument = schema.CanonicalDocument;
             }
             catch (Exception failure)
             {
@@ -262,6 +307,7 @@ internal sealed partial class SqlSchemaProvisioner
         try
         {
             TraceStage("Validate", SqlProvisioningCodes.PolicyRefused);
+            ValidateRecordedFormats();
             ValidateSupportedSchema(schema);
             TraceStage("Verify", SqlProvisioningCodes.Drift, stepCount: 0);
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;

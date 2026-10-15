@@ -1725,7 +1725,11 @@ text converted to the column type. Enums use their numeric storage values.
 `table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
 for example `DefaultSql(row => row.Placed, "'2026-01-01'")`; the SQL typed prefix
 `DATE '2026-01-01'` remains unsupported. Both declarations store the rendered literal text in the
-unchanged `cohesion/database-schema/v4` document, so equal text gives the same hash.
+`cohesion/database-schema/v5` document, so equal text gives the same hash. This format normalizes
+an omitted decimal scale to zero when precision is present. Earlier artifacts, applied markers
+and pending targets are refused before hash comparison (SqlSchemaValidationException,
+InvalidDocument at schema.format; COHDBSDK206 for SDK migration input). Rebuild artifacts and
+recreate databases recording an earlier schema format; there is no upgrade or old-hash reconciliation.
 
 `DEFAULT -7` and `DEFAULT -1.2500` accept a single numeric minus. Arithmetic, nested unary expressions,
 functions and other computed expressions remain unsupported in typed defaults and ADD COLUMN; see E4 below for CREATE TABLE function-call defaults. `DEFAULT NULL` has the same
@@ -1822,4 +1826,4 @@ TABLE against a typed table, and DROP INDEX against a typed index (including its
 are refused before Build opens or changes the database. Scripts may create and later alter their
 own tables, create their own indexes on typed tables, and run DML against typed tables.
 Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
-SDK v4 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
+SDK v5 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.

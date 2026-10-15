@@ -44,6 +44,14 @@ public static class SqlCompiledSchemaSerializer
 
         try
         {
+            // Refuse the format before constructing (and normalizing) any schema object.
+            using (JsonDocument json = JsonDocument.Parse(document))
+            {
+                string? format = json.RootElement.ValueKind == JsonValueKind.Object &&
+                    json.RootElement.TryGetProperty("format", out JsonElement value) && value.ValueKind == JsonValueKind.String
+                        ? value.GetString() : null;
+                SqlCompiledSchemaValidator.ValidateFormat(format);
+            }
             SqlCompiledSchema schema = JsonSerializer.Deserialize(
                 document,
                 SqlCompiledSchemaJsonContext.Default.SqlCompiledSchema)

@@ -148,7 +148,7 @@ Either verb selects a column on its own, before or after `Column`, including an 
 type or inferred domain. Repeating the same rendered literal is idempotent; a different literal
 for that column is `COHDBSDK105`. Only `DefaultLiteral` reaches the document: a typed default and
 `DefaultSql` containing its exact rendered literal produce identical documents and hashes. The
-shape remains v4. The SDK/runtime parity tests cover every constant kind, all enum backing widths,
+shape retains the B2 members; #1438 advances the format to v5 for decimal normalization. The SDK/runtime parity tests cover every constant kind, all enum backing widths,
 nullable values, implicit numeric conversions, constant concatenation, named arguments, domains,
 and exact document/hash equality. Foreign-key compatibility compares the compiled storage and
 SQL type metadata, so an enum and its integer storage, or char and string, match when their
@@ -177,9 +177,14 @@ The outputs are:
 | `CohesionDatabaseSchema` items | Set by `CohesionDatabaseCompileSchema` | One per database the manifest lists (its schema document, full path), with `DatabaseName` and `HashPath` metadata, for downstream targets. |
 | `Schemas` task output | `CompileDatabaseSchemaTask` | One item per database, named for it, with `Hash`, `SchemaPath` and `HashPath` metadata. |
 
-The document format is `cohesion/database-schema/v4`, shared with the runtime compiler and the
-migration baseline writer. B2's `defaultLiteral` member changes the strict document contract;
-earlier formats are refused, including v3. The document contains semantic data only, never source paths or timestamps. The task writes with
+The document format is `cohesion/database-schema/v5`, shared with the runtime compiler and the
+migration baseline writer. B2 introduced `defaultLiteral` in v4; #1438 advances the format again
+because normalizing an omitted decimal scale changes a raw v4 NUMERIC(p) document's identity.
+Earlier formats are refused before normalization, including v4. Rebuild artifacts and recreate
+databases recording an earlier schema format; no old hash or identity is reconciled. Reading an
+old artifact or migration baseline reports COHDBSDK206 with the schema.format refusal and remedy,
+without writing a migration. Runtime deserialization uses SqlSchemaValidationException with
+InvalidDocument. The document contains semantic data only, never source paths or timestamps. The task writes with
 LF line endings and avoids replacing unchanged outputs. The manifest is the only record of which
 files in the directory are the SDK's: the task deletes the `.schema.json` and `.schema.sha256`
 files of a database its previous manifest listed and that is no longer declared, and leaves every
@@ -238,7 +243,7 @@ dependency closure.
 
 ## E4 script artifact decision
 
-Iteration 1 keeps declared scripts outside the v4 typed schema. They require runtime statement
+Iteration 1 keeps declared scripts outside the v5 typed schema. They require runtime statement
 receipts and checksummed history that generated SQL alone cannot establish. The extractor emits
 COHDBSDK110 for SqlDatabaseBuilder.Script, preventing incomplete artifacts: migration files that
 carried a script without its receipt would leave a Verify-mode application unable to start, and a

@@ -15,12 +15,8 @@ internal static class SqlCompiledSchemaValidator
     {
         ArgumentNullException.ThrowIfNull(schema);
 
+        ValidateFormat(schema.Format);
         var errors = new List<SqlSchemaValidationError>();
-        if (!string.Equals(schema.Format, SqlCompiledSchema.CurrentFormat, StringComparison.Ordinal))
-        {
-            Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, "schema.format",
-                $"Compiled schema format '{schema.Format}' is not supported.");
-        }
 
         RequireName(schema.Name, "schema.name", errors);
 
@@ -34,6 +30,16 @@ internal static class SqlCompiledSchemaValidator
         if (errors.Count > 0)
         {
             throw new SqlSchemaValidationException(errors);
+        }
+    }
+
+    internal static void ValidateFormat(string? format)
+    {
+        if (!string.Equals(format, SqlCompiledSchema.CurrentFormat, StringComparison.Ordinal))
+        {
+            throw InvalidDocument("schema.format",
+                $"Compiled schema format '{format}' is not supported; expected '{SqlCompiledSchema.CurrentFormat}'. " +
+                "Rebuild schema artifacts and recreate databases that record an older schema format.");
         }
     }
 

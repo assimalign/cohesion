@@ -13,6 +13,48 @@ namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
 public class CreateDatabaseMigrationTaskTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: v4 numeric artifacts and baselines reach the format gate")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Execute_V4NumericDocument_ShouldRefuseFormat(bool baseline)
+    {
+        // Arrange: preserve the pre-normalization v4 document and hash its actual bytes.
+        using var directory = new TemporaryDirectory();
+        var current = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders", false, [],
+            [new CompiledSchemaTable("items", "Tests.Row",
+                [new CompiledSchemaColumn("value", DatabaseType.Decimal, true, Precision: 3, CustomType: "NUMERIC(3)")],
+                null, [], [])], []);
+        string artifact = WriteSchema(directory.File("schemas"), current);
+        string document = current.CanonicalDocument
+            .Replace(SqlCompiledSchema.CurrentFormat, "cohesion/database-schema/v4", StringComparison.Ordinal)
+            .Replace("\"scale\":0", "\"scale\":null", StringComparison.Ordinal);
+        string hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(document)));
+        if (baseline)
+        {
+            Directory.CreateDirectory(directory.File("Migrations/orders"));
+            artifact = directory.File("Migrations/orders/0001_initial.schema.json");
+        }
+        File.WriteAllText(artifact, document);
+        File.WriteAllText(Path.ChangeExtension(artifact, ".sha256"), hash);
+        var engine = new RecordingBuildEngine();
+        var task = CreateTask(directory, engine, "next");
+
+        // Act
+        bool result = task.Execute();
+
+        // Assert
+        result.ShouldBeFalse();
+        var error = engine.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBSDK206");
+        error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v5", Case.Sensitive);
+        error.Message.ShouldContain("Rebuild", Case.Sensitive);
+        task.MigrationPath.ShouldBeEmpty();
+        task.BaselinePath.ShouldBeEmpty();
+        File.ReadAllText(artifact).ShouldBe(document);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: SQL writes ordinal script and baseline")]
     public void Execute_WithSqlSchema_ShouldWriteOrdinalScriptAndBaseline()
     {

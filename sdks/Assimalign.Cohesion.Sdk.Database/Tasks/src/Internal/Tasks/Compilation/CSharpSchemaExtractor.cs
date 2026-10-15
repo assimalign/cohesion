@@ -149,7 +149,7 @@ internal sealed class CSharpSchemaExtractor
 
                 if (method.Name == "Script" && DisplayTypeName(method.ContainingType) == databaseBuilderType)
                 {
-                    Error("COHDBSDK110", "Declared scripts are runtime journaled migrations and are not extracted into the v4 typed-schema artifact. Provision them with an Apply-mode deployment before Verify-mode startup; keep this declaration outside the SDK schema compilation.", invocation.GetLocation());
+                    Error("COHDBSDK110", "Declared scripts are runtime journaled migrations and are not extracted into the v5 typed-schema artifact. Provision them with an Apply-mode deployment before Verify-mode startup; keep this declaration outside the SDK schema compilation.", invocation.GetLocation());
                 }
                 if (IsSchemaFactory(method))
                 {

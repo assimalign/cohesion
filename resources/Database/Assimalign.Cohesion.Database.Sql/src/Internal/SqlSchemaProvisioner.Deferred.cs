@@ -197,6 +197,7 @@ internal sealed partial class SqlSchemaProvisioner
                 {
                     await _catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(migration.Schema.Hash,
                         migration.Schema.CanonicalDocument, generation), cancellationToken).ConfigureAwait(false);
+                    _formatCheckedStateDocument = migration.Schema.CanonicalDocument;
                     break;
                 }
                 catch (SqlCatalogException) when (!_database.IsOffline && _catalog.DdlGeneration != generation)

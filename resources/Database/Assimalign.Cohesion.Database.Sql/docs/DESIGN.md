@@ -956,6 +956,15 @@ resolves it identically before comparing the catalog. Apply, the already-applied
 reopen therefore agree. Type-drift messages show every compared field (`MaxLength`, `Precision`,
 `Scale`) explicitly, including `null`, rather than formatting a null scale as zero.
 
+This normalization advances the runtime/SDK document to `cohesion/database-schema/v5`: a v4
+NUMERIC(3) declaration could record scale:null while applying scale zero, so rereading it must
+not silently change its hash. The schema format gate refuses every earlier document with
+SqlSchemaValidationException (InvalidDocument, schema.format), naming both formats and the
+rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
+file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
+The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
+identity. Both catalog records retain a versioned document, so catalog format 10 is unchanged.
+
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
 The shared resolver supplies that storage identity everywhere, including domain bases, function
 signatures, CAST and provisioning of typed SQL names. Catalog metadata records REAL or DOUBLE,
@@ -1087,13 +1096,16 @@ wire refusal. A marker-free catalog containing one genuine old counter tuple is 
 duplicate counters, unknown record kinds, and malformed or ambiguous markers remain corruption.
 
 The marker retains the canonical document for migration history, alongside `{hash, generation}`.
-Equal declared hash and current generation return immediately: no ownership scan, snapshot,
+After the open-time document format gate, equal declared hash and current generation return immediately: no ownership scan, snapshot,
 document deserialization, serialization or SHA-256 in the provisioning phase. Declaration identity
 is computed before I/O in Build phase 3; immutable retained `SqlSchema` declarations cache their
 compiled schema, and compiled schemas cache their document and hash. A fresh declaration still has
 to be compiled and hashed once. The instance-local `CatalogWalkCount` hook covers every provisioner
 catalog traversal; its own assembly's tests assert zero on the second Build. Schema's own tests
 assert its identity computation counters stay at one on repeated reads and compilation.
+The provisioner caches the checked immutable document references; replacing a marker or pending
+target through the catalog requires another format check. Current-format damaged markers still
+follow the existing live-catalog reconstruction path; another document format never does.
 The required open-time binding pass also retains its first unresolved CHECK and domain at that
 generation. Post-provisioning declaration validation reuses those results until DDL changes the
 generation, avoiding two further table walks on an unchanged Build. Its internal
@@ -1123,8 +1135,8 @@ emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain expl
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
 on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
 Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
-has the same canonical document and hash. The document remains `cohesion/database-schema/v4`:
-this changes declaration syntax and literal admission, not the document shape.
+has the same canonical document and hash. The document now uses `cohesion/database-schema/v5`
+for normalized decimal identities; typed defaults keep the shape introduced in B2.
 The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
 `SqlPlanExecutor.ResolveDefault` conversion as CREATE TABLE and ADD COLUMN, which uses
@@ -1134,7 +1146,7 @@ Build with `COHSQLP001` before either file set exists; finite and underflow chec
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
-`cohesion/database-schema/v4`, because strict v3 readers cannot read `defaultLiteral`. Null defaults
+`cohesion/database-schema/v5`; B2 introduced `defaultLiteral` in v4. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
@@ -4355,7 +4367,7 @@ records only typed objects, whose structure scripts cannot change; it is safe to
 generation after script execution or receipt-chain recovery.
 
 Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
-data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v4 typed
+data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v5 typed
 artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
 Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
 SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views
