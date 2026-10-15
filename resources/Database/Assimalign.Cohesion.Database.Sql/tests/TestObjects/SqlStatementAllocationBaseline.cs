@@ -46,6 +46,7 @@ internal sealed class SqlStatementAllocationBaseline
     {
         _session.Database.ThrowIfOffline();
         var previousMetrics = _session.LastStatementMetrics;
+        long readerEpoch = _session.Database.TableReclamation.EnterStatement();
         try
         {
             if (ProvisioningSchema(_session) is null && _session.Database.SchemaProvisioner.Deferred is not null)
@@ -72,6 +73,7 @@ internal sealed class SqlStatementAllocationBaseline
             }
             throw;
         }
+        finally { _session.Database.TableReclamation.ExitStatement(readerEpoch); }
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_parserOptions")]

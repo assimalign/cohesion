@@ -378,16 +378,11 @@ public sealed class SqlStorageOperationsTests
     }
 
     /// <summary>
-    /// A DDL statement that committed a durable bracket of its own and then meets an offline
-    /// storage is unconfirmed, even when the operation that met it wrote no commit record (#1272):
-    /// here <c>DROP TABLE</c> has committed the catalog's removal of its table and waits for the
-    /// statement apply gate to release the table's pages when the database goes offline; the
-    /// release is refused, but the drop survives the reopen, so the caller must not be told it was
-    /// refused. The storage's offline error carries no written commit record, so the record of the
-    /// committed bracket is what makes the statement unconfirmed.
+    /// Decision 77 removes DROP's post-publication data bracket. A later storage failure belongs
+    /// to maintenance; an already confirmed DROP stays successful and its durable intent survives.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: a DDL statement that committed a durable bracket before the offline storage is unconfirmed")]
-    public async Task Ddl_OfflineAfterItCommittedADurableBracket_ShouldBeUnconfirmed()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: a confirmed DROP survives a later maintenance failure and reclaims on reopen")]
+    public async Task DropTable_OfflineAfterCatalogCommit_ShouldRemainConfirmedAndResumeCleanup()
     {
         // Arrange: a table to drop, and a second database whose failed fsync supplies the offline error.
         const string name = "ddl";
@@ -410,8 +405,8 @@ public sealed class SqlStorageOperationsTests
 
         var offlineError = failed.DataStorage.OfflineError.ShouldNotBeNull();
 
-        // Another statement holds the database's apply gate, so the drop commits its catalog bracket
-        // and then waits to release the table's pages.
+        // Another statement holds the apply gate and an old snapshot. DROP must finish while
+        // reclamation waits for that snapshot, without acquiring the apply gate.
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var released = new Release(() => release.TrySetResult());
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -426,25 +421,22 @@ public sealed class SqlStorageOperationsTests
         await using var ddl = await database.CreateSessionAsync();
         var drop = ddl.ExecuteAsync("DROP TABLE t").AsTask();
         bool catalogCommitted = await Eventually(() => !database.Catalog.TryGetTable("dbo", "t", out _));
-        bool dropWaited = !drop.IsCompleted;
+        await drop.WaitAsync(Timeout);
+        database.TableReclamation.ReclaimedPages.ShouldBe(0);
 
-        // Act: the database goes offline while the drop waits; then the gate is released.
+        // Act: storage goes offline after DROP returned; then release the old statement.
         database.DataStorage.TakeOffline(offlineError);
         release.SetResult();
         await Record.ExceptionAsync(async () => await holding.WaitAsync(Timeout));
-        var unconfirmed = await Should.ThrowAsync<DatabaseException>(async () => await drop.WaitAsync(Timeout));
         await Record.ExceptionAsync(async () => await database.Coordinator.RollbackAsync(holder));
         var reopened = await engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
 
-        // Assert: unconfirmed with the offline code, no commit record of its own written, and the
-        // drop survived.
+        // Assert: the confirmed unpublication survived, with all outstanding space reclaimed.
         catalogCommitted.ShouldBeTrue();
-        dropWaited.ShouldBeTrue();
-        var error = unconfirmed.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
-        error.Message.ShouldStartWith("COHSQLT004: Database 'ddl' went offline while the operation was committing", Case.Sensitive);
-        StorageOfflineException.Find(error).ShouldNotBeNull().CommitRecordWritten.ShouldBeFalse();
         (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 't'")).ShouldBe(0L);
+        (await Eventually(() => !reopened.TableReclamation.HasWork)).ShouldBeTrue();
+        reopened.DataStorage.FreeSpaceMap.FreePageCount.ShouldBe(reopened.DataStorage.PageManager.PageCount - 2);
     }
 
     /// <summary>

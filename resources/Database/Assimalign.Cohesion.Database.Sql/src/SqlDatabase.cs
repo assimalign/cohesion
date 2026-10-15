@@ -60,6 +60,7 @@ public sealed class SqlDatabase : DatabaseInstance
     // Internal diagnostics/fault-injection seam for this project's own tests.
     internal SqlSchemaProvisioner SchemaProvisioner => _schemaProvisioner;
     internal SqlDdlInterlock DdlInterlock { get; } = new();
+    internal SqlTableReclamation TableReclamation { get; }
     internal void ReportProvisioning(DatabaseProvisioningProgress? progress) => SetProvisioningProgress(progress);
 
     internal async ValueTask ResumeProvisioningAsync(CancellationToken cancellationToken)
@@ -204,6 +205,7 @@ public sealed class SqlDatabase : DatabaseInstance
                 $"Database '{name}' uses data-storage format {_catalog.RecordSpaceFormatVersion}, but one of its index trees " +
                 $"does not: {exception.Message}", exception);
         }
+        TableReclamation = new SqlTableReclamation(this);
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
         engine.BeforeProvisioning?.Invoke(this);
 
@@ -583,6 +585,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <inheritdoc />
     protected override void DisposeCore()
     {
+        TableReclamation.Stop();
         _schemaProvisioner.StopDeferredAsync().AsTask().GetAwaiter().GetResult();
         // An offline database closes without writing anything (#1243): both file sets are
         // taken offline, so the coordinator's aborts undo nothing and neither storage
@@ -616,6 +619,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <inheritdoc />
     protected override async ValueTask DisposeAsyncCore()
     {
+        TableReclamation.Stop();
         await _schemaProvisioner.StopDeferredAsync().ConfigureAwait(false);
         // See DisposeCore: an offline database closes without writing anything (#1243).
         try

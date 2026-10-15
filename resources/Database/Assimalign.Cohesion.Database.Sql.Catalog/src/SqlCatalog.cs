@@ -520,6 +520,11 @@ public sealed partial class SqlCatalog
 
             using (var transaction = _storage.BeginTransaction())
             {
+                // The intent and unpublication share this commit. Each retired identity owns
+                // its intent page, so maintenance never edits a live metadata page. The worker
+                // retires this record only after the data-file frees are durable.
+                _storage.InsertRow(transaction, slot.Table.ObjectId,
+                    SqlReclamationRecord.Encode(slot.Table.ObjectId, schema, name));
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
 
                 foreach (var indexSlot in droppedIndexes)
@@ -1229,6 +1234,7 @@ public sealed partial class SqlCatalog
         ThrowIfOffline();
         var schemaStateChunks = new List<SchemaStateChunk>();
         var pendingChunks = new List<SchemaStateChunk>();
+        var retired = new HashSet<ulong>();
         using var iterator = _storage.GetUnitIterator();
 
         while (iterator.MoveNext())
@@ -1239,6 +1245,11 @@ public sealed partial class SqlCatalog
 
             switch (kind)
             {
+                case SqlReclamationRecord.Kind:
+                    var intent = SqlReclamationRecord.Decode(ref reader);
+                    if (!retired.Add(intent.ObjectId)) { throw new System.IO.InvalidDataException(); }
+                    _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
+                    break;
                 case tableRecordKind:
                     var table = DecodeTable(ref reader);
                     _tables[(table.Schema, table.Name)] = new TableSlot(table, (unit.PageId, unit.SlotIndex));
@@ -1350,6 +1361,11 @@ public sealed partial class SqlCatalog
                 default:
                     throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
             }
+        }
+
+        if (_tables.Values.Any(slot => retired.Contains(slot.Table.ObjectId)))
+        {
+            throw new System.IO.InvalidDataException();
         }
 
         if (schemaStateChunks.Count > 0)

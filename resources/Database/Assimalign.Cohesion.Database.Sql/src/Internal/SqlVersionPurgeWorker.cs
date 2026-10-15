@@ -111,6 +111,11 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
 
         foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
         {
+            if (_engine.ProvisioningBuildComplete && !database.IsClosed && !database.IsOffline
+                && database.TableReclamation.HasWork && wait > TimeSpan.FromMilliseconds(25))
+            {
+                wait = TimeSpan.FromMilliseconds(25);
+            }
             if (!database.IsClosed && !database.IsOffline && database.Coordinator.NextDeferredUndoRetry is { } retry && retry < wait)
             {
                 wait = retry;
@@ -190,12 +195,18 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
                     if (full)
                     {
                         BeforeFullPass?.Invoke(database);
+                        database.TableReclamation.Request();
                         database.Coordinator.RunVersionPurgePass(cancellationToken);
                         _fullPassFailed.Remove(database);
                     }
                     else
                     {
                         database.Coordinator.RetryDeferredUndo(cancellationToken);
+                    }
+
+                    if (database.TableReclamation.HasWork && (full || !_fullPassFailed.ContainsKey(database)))
+                    {
+                        database.TableReclamation.RunBatch(cancellationToken);
                     }
 
                     // A deferred undo still waiting, or a failed full pass this retry did not redo,
@@ -225,6 +236,11 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
                 {
                     break;
                 }
+                catch (OperationCanceledException) when (!_engine.IsOpen(database))
+                {
+                    // Closing joins this database's reclamation batch with its own token.
+                    _fullPassFailed.Remove(database);
+                }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
                 {
                     // Recorded, not fatal: the writer whose undo failed again keeps its place in the
@@ -235,7 +251,7 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
                     if (!database.IsOffline)
                     {
                         ReportFailure(database.Name, exception, TimeSpan.Zero);
-                        if (full)
+                        if (full || database.TableReclamation.HasWork)
                         {
                             ScheduleRetry(database);
                         }

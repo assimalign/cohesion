@@ -936,8 +936,8 @@ internal sealed partial class SqlPlanExecutor
 
         // The table's indexes fall with it. The catalog removes their metadata
         // and registrations atomically with the table record; the live trees
-        // then leave the manager's directory (their pages await vacuum — see the
-        // Indexing DESIGN). Order matters: catalog first (durable), directory
+        // then leave the manager's directory (their owner-tagged pages await the
+        // reclamation worker). Order matters: catalog first (durable), directory
         // second, all under the exclusive lock so no writer maintains a ghost.
         var droppedIndexes = _catalog.GetIndexes(table.ObjectId);
 
@@ -951,18 +951,9 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        // Release the table's record chain: per-object pages make the drop a
-        // page-directory walk instead of a garbage legacy. Rides the statement
-        // bracket like every DDL row effect — the catalog entry itself is
-        // already self-committed, so the release is
-        // not undone by rolling back the enclosing transaction; a crash before
-        // the bracket proves out restores the pages as an unreachable, safely
-        // leaked chain (the catalog no longer references the object).
-        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
-        {
-            _storage.FreeOwnerPages(bracket, table.ObjectId);
-            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
-        }, cancellationToken).ConfigureAwait(false);
+        // The catalog committed the retired identity with the unpublication. The
+        // version-purge worker reclaims its rows and trees after existing readers finish.
+        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 
     /// <summary>

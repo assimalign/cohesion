@@ -15,6 +15,38 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDatabaseEventSourceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Dropped table reclamation emits one start and completion with bounded identity payloads")]
+    public async Task DropTable_Reclamation_ShouldReportLifecycleOnce()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var recorder = new Assimalign.Cohesion.Testing.EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Informational);
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new());
+        var database = await engine.CreateDatabaseAsync("traced", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE retired (id INT PRIMARY KEY)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO retired VALUES (1)", cancellationToken: timeout.Token);
+        database.Catalog.TryGetTable("dbo", "retired", out var table).ShouldBeTrue();
+
+        // Act
+        await session.ExecuteAsync("DROP TABLE retired", cancellationToken: timeout.Token);
+        while (database.TableReclamation.HasWork) { await Task.Delay(5, timeout.Token); }
+
+        // Assert
+        var started = recorder.Events.Single(entry => entry.EventId == 23);
+        var completed = recorder.Events.Single(entry => entry.EventId == 24);
+        started.EventName.ShouldBe("TableReclamationStarted");
+        completed.EventName.ShouldBe("TableReclamationCompleted");
+        started.PayloadNames.ShouldBe(["engineName", "database", "objectId"]);
+        completed.PayloadNames.ShouldBe(["engineName", "database", "objectId", "pages"]);
+        started.Payload!.ShouldBe([engine.Name, "traced", table.ObjectId]);
+        completed.Payload!.Take(3).ShouldBe(started.Payload);
+        ((long)completed.Payload![3]!).ShouldBe(2);
+        recorder.Events.Count(entry => entry.EventId == 23).ShouldBe(1);
+        recorder.Events.Count(entry => entry.EventId == 24).ShouldBe(1);
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - A declared script reports its checksum once and never its SQL body")]
     public async Task Provisioning_Script_ShouldReportAppliedOnce()
     {

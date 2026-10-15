@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -129,6 +130,11 @@ public sealed class SqlPerObjectChainTests : IDisposable
 
         // Act
         await session.ExecuteAsync("DROP TABLE victim");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (instance.DataStorage.HasOwnerPages(victimId))
+        {
+            await Task.Delay(5, timeout.Token);
+        }
 
         // Assert: the chain is released...
         instance.DataStorage.GetOwnerPages(victimId).ShouldBeEmpty();

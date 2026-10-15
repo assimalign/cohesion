@@ -1144,12 +1144,67 @@ value once; existing rows continue to resolve that value from the catalog withou
 Column additions on the same table retain declaration order: once an addition is deferred,
 every later addition to that table follows it on the worker, including nullable additions.
 
-An existing implementation contradicts 49a's catalog-only premise for every drop: `DROP TABLE`
-calls `Storage.FreeOwnerPages`, which clears and WAL-logs each owned data page
-(`Database.Storage/src/Storage.cs:2111`). Drops remain inline as the accepted classification
-requires. Moving that physical reclamation out of Build needs a separate decision: deferring the
-drop would contradict that classification, while silently removing reclamation would change its
-existing storage contract.
+Decision 77 (#1443) makes every `DROP TABLE` unpublish inline and reclaim afterwards. The
+statement, typed migration, compensation and declared-script paths all use the catalog's single
+publication transaction. It deletes the table/index metadata and writes kind 14, a reclamation
+intent naming the retired object identity. A script's statement receipt shares that commit.
+None walks data or index pages during Build, including `RunMigrationsInline` and imperative
+schema application. Cost depends on schema metadata, not the dropped table's row/page count.
+
+### Deferred table reclamation (decision 77)
+
+`SqlVersionPurgeWorker` owns cleanup because it already manages unreachable storage and retries
+maintenance failures. It runs one batch of at most 32 data/index pages per pending table per pass,
+after deferred undo, and wakes on a drop, database open, or at most 25 ms while pending. The
+engine's Build-complete gate prevents a batch during schema/script reconciliation. The provisioning
+worker remains independent: its old snapshot can postpone reclamation, but reclamation never
+takes its apply gate or table reservations. DROP against a pending table waits through the existing
+admission/lock-manager path; ordinary ownership and dependency refusals still apply afterwards.
+
+Before this change, DROP's Exclusive object lock excluded writers (IntentExclusive) but plain
+SELECT did not take a table lock. An in-flight scan could skip pages the statement freed; the
+iterator's type/owner checks avoided decoding a reused page as the old table. Cleanup now waits
+for every potentially older reader. After observing committed catalog unpublication, discovery
+allocates and ends a fresh logical transaction as a fence. Both `Manager.OldestActive` and the
+coordinator's open contexts must be newer than that fence. Using DROP's begin sequence would be
+unsafe for a snapshot begun during DROP. In addition, a per-statement epoch lease spans planning
+through result materialization; every lease at or before discovery must end, even if another flow
+rolls its transaction back mid-scan. No newly bound statement can resolve the retired identity.
+The catalog is not historical MVCC: an old transaction issuing a later lookup sees the absence;
+an already bound scan retains all its rows and tree pages until it finishes. This conservative
+database-wide horizon may retain space for an unrelated old snapshot; it never blocks that
+snapshot's work. It complements the version-purge prune bound without exposing a new Transactions
+API. PostgreSQL uses a different fence: `RelationDropStorage` schedules deletion
+(`src/backend/catalog/storage.c:203-231`), `smgrDoPendingDeletes` executes it at transaction end
+(`:662-736`), and DROP holds AccessExclusiveLock (`src/backend/commands/tablecmds.c:1575`).
+
+Only the reclaimer's private run lock and retired page write locks cover its page walk. Short
+allocator/directory/journal critical sections retain the storage kernel's normal synchronization;
+no shared SQL apply gate, live table lock or catalog lock covers batch I/O. Every free is WAL-covered,
+removes its owner tag and enters the FSM only after commit. Recovery rebuilds owner directories
+and the FSM from recovered headers, so an interrupted batch is either undone or absent from the
+next batch. The worker deletes its dedicated catalog intent page only after all data commits are
+durable; a crash before this deletion merely discovers zero remaining pages. There is no separate
+progress cursor to commit incorrectly. Object identities are never reused, so CREATE with the same
+name is independent, including after a reopen. Closing cancels and joins a batch before closing
+storage; the durable intent resumes on the next open. Memory and file strategies use the same path.
+
+SQL data/catalog format **11** (formerly 10) requires kind 14 and table owner tags on all newly
+allocated index pages, including split siblings/roots and abandoned allocations. The engine refuses
+older formats; the storage header and B-tree node formats are unchanged. A stateless shared tuple
+codec lets catalog and worker agree on the record without a public maintenance bridge or friend
+assembly grant. Pending space alone does **not** report Degraded: the requested catalog is complete
+and the database is usable. Existing worker failure health still applies to actual cleanup failures.
+EventSource IDs 23/24 report reclamation started/completed with engine, database and retired id;
+completion includes pages reclaimed by that process (after a crash it counts remaining work).
+
+`SqlTableReclamationTests` forces batches during Build and verifies zero reclamation for typed and
+scripted empty/populated drops. Its real worker tests cover name reuse, multiple drops, old snapshots,
+mid-scan rollback, shutdown and 49a reservations. Durable images before the first batch and after
+one batch converge through both session and `Database.Sql.Client` paths. Client tests additionally
+check exact FSM accounting and physical file-length stability when the freed pages are reused.
+The Release/NativeAOT `Q8D` benchmark records both full Build (including open/recovery) and its
+provisioning DROP phase; decision 77 in the program design records the measurements.
 
 The catalog's format-9 pending intent contains the complete target document/hash, operation kind,
 table, object name, original one-based execution position and total. Its transaction commits
@@ -1377,7 +1432,7 @@ Every synchronization wait reached by these paths has the following owner and te
 | Provisioner semaphore | Apply and Verify use `WaitAsync(0, token)` and refuse contention. The worker inherits ownership and never reacquires it. Compensation stays inside its owner's reservation. |
 | DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately; nobody waits for a DDL lease. Inline apply keeps the lease through compensation and cleanup; the worker never requests it. |
 | Table, referenced-parent, row and index-key locks | Real waits use `LockManager.AcquireAsync` with a live transaction sequence, so the wait-for graph and cycle detector see them. Apply keeps a read-only owner across its self-committing DDL. Handoff reserves pending tables and FK parents in object-id order before publication; the worker reuses that owner. Caller/worker cancellation and database-offline abandonment also end waits. |
-| Coordinator statement gate | Acquired after transaction-lock pre-acquisition, with cancellation. Its holder performs one physical bracket; the lock manager rejects a request that would wait while that gate is held. Worker index population releases it after each batch of at most 64 versions. Inline work, including the existing DROP TABLE reclamation, can scale with table size; the gate is not a wall-clock deadline. |
+| Coordinator statement gate | Acquired after transaction-lock pre-acquisition, with cancellation. Its holder performs one physical bracket; the lock manager rejects a request that would wait while that gate is held. Worker index population releases it after each batch of at most 64 versions. Table reclamation runs outside this gate in batches of at most 32 retired pages. Other inline data work can scale with table size; the gate is not a wall-clock deadline. |
 | Catalog, index and storage metadata/page monitors; journal durability | Internal critical sections perform finite local work and do not await SQL transaction locks. Physical page ownership conflicts fail immediately. Group commit waits at most its configured batching window before flushing itself; journal durability failures take the database offline. Synchronous filesystem I/O has no hard completion deadline, so cancellation does not promise an OS-I/O timeout. |
 | Final worker marker retry | An unrelated DDL generation change retries the optimistic comparison/save, checking worker cancellation each iteration. It never waits for the DDL interlock while holding table reservations. Sustained unrelated DDL can delay convergence until cancellation. |
 | Compensation and reservation rollback | Compensation traverses the finite completed-step list in reverse, with `CancellationToken.None` so caller cancellation cannot interrupt cleanup. It retains the live lock owner, or creates a fresh one if handoff already ended that owner. Any reacquisition is still a lock-manager wait, detectable and offline-abandonable, with no extra semaphore/DDL lease wait. The read-only reservation has no row versions to undo; statement cleanup drains its admitted physical work before rollback. |
@@ -1694,9 +1749,9 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   tables of a database still share one record *space* but not one page
   stream: rows land on pages tagged with their table's object id (the storage
   layer's per-owner chains), so **a table scan touches only its own table's
-  pages** — O(table), not O(database) — and `DROP TABLE` releases the
-  table's whole chain back to the allocator (transactionally, inside the
-  statement bracket; the record-byte layout is unchanged from version 2). The
+  pages** — O(table), not O(database) — and `DROP TABLE` unpublishes the identity
+  and durably schedules its data/index pages for asynchronous reclamation after the
+  reader horizon (decision 77; the record-byte layout is unchanged from version 2). The
   object-id prefix is now an integrity check, not a filter: every read meets
   only its own table's records, so a prefix naming another object is a damaged
   record and fails the statement (#1362).
@@ -1718,12 +1773,13 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 6 only: stamped rows in per-object page chains whose index keys use the
+  format 11 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
-  layout, which the catalog's table record carries (extension version 3: the
-  dropped columns' physical ordinals, #1241). The earlier versions are history —
+  layout, which the catalog's table record carries (including extension version 3's
+  dropped physical ordinals, later domain/ownership/resolved-call fields, and the
+  current format's durable reclamation intents and index owner tags). Earlier versions are history —
   1 = the pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream,
   3 = per-object chains with the `DateTimeKind` and offset inside temporal keys
   (written through 10.0.0-preview.1), 4 = format 5's rows over index trees of
@@ -2698,9 +2754,9 @@ fails each fsync of `CREATE TABLE`, `CREATE INDEX`, `DROP TABLE` and `ALTER TABL
 turn, reopens, and checks the caller was told unconfirmed every time, including the cases whose
 effect survived. Three more pin the DDL classification (#1272): a `DROP TABLE` waiting for its
 table's lock when another statement's fsync takes the database offline is refused with
-`COHSQLT004` and the table survives the reopen; a `DROP TABLE` that committed its catalog bracket
-and then waits for the apply gate when the database goes offline is unconfirmed, though its own
-failing operation wrote no commit record, and the drop survives the reopen; and a `CREATE TABLE`
+`COHSQLT004` and the table survives the reopen; a `DROP TABLE` confirms its catalog commit while
+an unrelated statement holds the apply gate, and a later offline failure leaves its durable
+reclamation intent to resume on reopen (decision 77); and a `CREATE TABLE`
 that committed its identity reservation and then waits for the apply gate to build its
 primary-key tree when the database goes offline is refused with `COHSQLT004`, the table is absent
 after the reopen, and the next table created skips the reserved identity, which proves the
@@ -4072,6 +4128,9 @@ bounded peer-sent names) are in the area's
 | 19 | `DeferredStepProgress` | Verbose | — | same as 18 |
 | 20 | `DeferredStepCompleted` | Informational | — | same as 18, `outcome` (`Applied`, `Error`, `Cancelled`), `durationMilliseconds` |
 | 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (`COHSQLP004`), `exceptionType` (no message) |
+| 22 | `ScriptApplied` | Informational | — | `engineName`, `database`, `script`, `hash`; never the script body |
+| 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
+| 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
 
 `Sessions = 0x1`; `Statements = 0x2`. Provisioning has no keyword. Id 17 stays retired.
 

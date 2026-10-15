@@ -5,6 +5,25 @@ The SQL model's schema authority (area architecture:
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 
+## Durable table reclamation (decision 77, #1443)
+
+SQL format 11 (formerly 10) adds catalog kind **14**: a typed tuple containing kind Int32,
+retired table object id Int64, schema and table name as Binary-collated strings. DROP writes
+one intent atomically with deleting the table/index descriptions, registrations, advancing the
+DDL generation and (for declared scripts) recording the statement receipt. Its work is constant
+in data-page count. The intent occupies a page owned by the retired id in the catalog file set;
+normal metadata uses owner zero. Maintenance can therefore remove it without modifying a live
+catalog page. Load rejects duplicate retired identities and an identity both live and retired,
+and advances the identity allocator past every pending id. Reusing a name never reuses its id.
+
+The stateless `shared/SqlReclamationRecord.cs` tuple codec is compiled into catalog and engine;
+no public maintenance API or shipped friend grant is needed. The SQL version-purge worker discovers
+intents after Build, confirms committed unpublication through a locked catalog lookup, waits for
+older transactions/statements, and frees owner-tagged data/index pages in bounded durable batches.
+Only after data durability does it delete the intent. Recovery restores free headers and the FSM
+before resumption: no cursor or cross-file atomic commit is required. An intent with no remaining
+pages is harmless and completes on retry. Catalog itself never walks or frees the data file.
+
 ## Durable pending migrations (49a)
 
 Catalog kind 9 is a chunked UTF-8, source-generated JSON `SqlCatalogPendingMigration` envelope.
@@ -36,7 +55,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 10 requires the complete table record,
+after the existing constraints. Current format 11 requires the complete table record,
 including the resolved-call vectors described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -116,7 +135,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 10 also requires the call vectors;
+  which this catalog always writes. Current format 11 also requires the call vectors;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -186,10 +205,10 @@ codec, the key encoding and every comparison read, so they do not consult the do
   the table records' physical layout, #1241) is a property of these records
   themselves — so the database-grain marker is catalog
   metadata. (`Database.Indexing` also stamps and checks its own page format on
-  each tree, behind this marker.) The engine writes its version (10) when it
+  each tree, behind this marker.) The engine writes its version (11) when it
   creates a database and refuses to open one whose marker reads anything else; it
   has no upgrade path (owner decisions of 2026-10-01 and 2026-10-02; upgrades are
-  #1152). Versions 5 through 10 are stored as a kind-8 record like version 4. Absent marker
+  #1152). Versions 5 through 11 are stored as a kind-8 record like version 4. Absent marker
   reads as version 1 (pre-marker databases, or a creation interrupted before the
   engine stamped the marker).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**
@@ -479,7 +498,8 @@ Value/data classes, the shared codec and source-generated System.Text.Json metad
 
 ## E4 definitions and script receipts
 
-The engine stamps format 10, previously 9. Kinds 10/11 store immutable SqlCatalogFunction and
+Phase E4 introduced format 10, previously 9 (superseded by format 11 for reclamation above).
+Kinds 10/11 store immutable SqlCatalogFunction and
 SqlCatalogDomain records: signatures/types, canonical SQL with resolved-call vectors,
 volatility/null behavior, domain dependencies and Adhoc/Schema ownership. Publication/removal advances DDL generation. Snapshots
 include both kinds. The engine owns semantic binding and dependency/ownership admission.
