@@ -1642,6 +1642,23 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
     - **Issue bookkeeping:**
       - #1463 stays open as the parent of #1476–#1478 and closes with the new PR.
       - The merge closed #829 through a stray link. It was reopened, because the IdentityModel program still owns it.
+61. **The Web refactoring branch (owner, 2026-10-15; `users/dotnetcadet/web-refactoring`).**
+    - **Feature contracts take their package's vocabulary.** The owner renamed them and dropped the `Http`/`Web` prefixes:
+      - Web.Health: `IHttpHealthFeature` → `IHealthFeature`.
+      - Web.Rewrite: `IWebRewriteFeature` → `IRewriteFeature`.
+      - Web.Routing: `IWebEndpointFeature` → `IRouterEndpointFeature`, `IWebPathBaseFeature` → `IRouterPathBaseFeature`, `ILinkGenerator` → `IRouterLinkGenerator`.
+      - Web.Serialization: `IHttpContentSerializationFeature` → `IContentSerializationFeature`, `IHttpContentReader` → `IContentReader`, `IHttpContentWriter` → `IContentWriter`.
+      - The source break is accepted on decision 15's terms. Entries above this one keep the names of their day.
+    - **`WebApplicationServerHostService` is internal.** It only adapts an `IWebApplicationServer` to `IHostService`, and servers join the host through `UseServer` and `AddServer`. #1458 had made it public.
+    - **Web.Hosting's default HTTP interceptors are container registrations.**
+      - Request limits, protocol upgrade and extended CONNECT are `IHttpExchangeInterceptor` singleton instances, registered ahead of the application's registrations.
+      - The default server resolves the aggregate once, when it is created. An application adds an interceptor through `builder.Services` and replaces or drops a default by removing its registration first.
+      - `Build` rejects a non-singleton interceptor registration and one under a narrower interceptor type, as it does for `IHttpFeature`.
+    - **Parameterless creation is a public constructor (amends decision 59).** A `Create()` that takes no arguments adds nothing over `new`, so seven Http interceptors expose public parameterless constructors instead. Creation methods that take and validate arguments keep decision 59's shape. `general-rules.md` and `checklist.md` record the amendment.
+    - **The endpoint-binding generator ships with the Web.Api package.**
+      - A NuGet-only consumer's typed `Map*` calls are now intercepted instead of throwing. The package carries the generator and a `buildTransitive` interceptor opt-in.
+      - When App.Web already supplies the generator, the package drops its own copy, so an Sdk.Web project that also references the package compiles once.
+      - Web.Routing does not carry the generator. Its one generated verb, `AddRouting`, comes from the root generator, and analyzers do not flow through package dependencies.
 
 ### 7.5 Lineup
 
