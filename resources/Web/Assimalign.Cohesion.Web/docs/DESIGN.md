@@ -169,7 +169,8 @@ omit any of them, so their readers handle an absent feature.
 
 `IWebApplicationBuilder.AddServer` accepts any `IWebApplicationServer`, including the public
 `WebApplicationServer` engine, directly or through a factory over the final `IWebApplicationContext`.
-Web.Hosting wraps every server that is not an `IHostService` in the public, non-owning
+Servers join the host lifecycle through `UseServer` or `AddServer`. Web.Hosting wraps every
+server, including one that implements `IHostService`, in the internal, non-owning
 `WebApplicationServerHostService`. The wrapper forwards start and stop and owns its own service id;
 it does not dispose the server. A server need not reference or implement Hosting's `IHostService`.
 Multiple servers start in registration order and stop in reverse order;

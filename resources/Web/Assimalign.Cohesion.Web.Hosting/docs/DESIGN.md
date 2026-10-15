@@ -132,7 +132,9 @@ and multiplexed exchanges, isolates application faults, and drains on stop. Its 
 lives beside that implementation. Web.Server references Http.Connections, Connections and
 Web.Routing, and no connection driver, HTTP policy feature or Hosting library.
 
-`WebApplicationServerHostService` is the public, non-owning `IHostService` wrapper. Its
+Servers join the host lifecycle through `UseServer` or `AddServer`;
+`WebApplicationServerHostService` is the internal, non-owning `IHostService` wrapper in
+`Assimalign.Cohesion.Web.Hosting.Internal`. Its
 constructor takes any `IWebApplicationServer`; `Server` exposes the original object and
 `Id` is the wrapper's own `ServiceId`. Start and stop forward the caller's token. The wrapper
 retains the default server's `HostStartupException` envelope for a bind failure, with the
@@ -153,8 +155,10 @@ and extended CONNECT), TCP/TLS/QUIC helper composition, pipelines, control-plane
 integration. The builder supplies the composed pipeline and listener options to the public engine.
 Application services still start before servers and stop after their drain.
 
-**Compatibility with 10.0.0-preview.1 (decision 15).** Making the engine/options and wrapper public
-is additive; relaxing `UseServer` accepts more implementations. No shipped public type is moved.
+**Compatibility with 10.0.0-preview.1 (decision 15).** Making the engine/options public
+is additive; relaxing `UseServer` accepts more implementations. #1458 also made the wrapper
+public. Making it internal is a source and binary break for intervening code that wrapped a
+server by hand; register the server through `UseServer` or `AddServer` instead.
 
 **Breaking lifecycle behavior:** preview.1 bypassed the adapter for a server implementing
 `IHostService`, invoking that interface's start and stop methods. Every server registration now
