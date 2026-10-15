@@ -233,7 +233,7 @@ Its motivating source is the **pipeline's bodyless 404 terminal**. The silent `T
 terminal in `WebApplication.Build` (which returned an empty `200` for any unhandled request) now sets a
 bodyless `404 Not Found` when the response reaches it untouched (still `200`, no body, no `Content-Type`,
 no `Location`). That terminal is **`Web.Routing`'s `WebApplicationTerminal`** (it lived in
-`Web.Hosting`, then in the Web root (#1056), until #1379 moved it beside `IWebEndpointFeature`, the
+`Web.Hosting`, then in the Web root (#1056), until #1379 moved it beside `IRouterEndpointFeature`, the
 endpoint it runs). `Web.Hosting`'s application pipeline and every `Map`/`MapWhen` branch end in it,
 and it stays payload-free: neither `Web.Hosting` nor `Web.Routing` references `Web.ProblemDetails` (or
 this package). The resource hosting-isolation rule (COHRES002) forbade the runtime that reference when

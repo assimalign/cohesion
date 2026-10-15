@@ -5,9 +5,21 @@ This build-time Roslyn generator supplies typed endpoint binding for
 parameters, invoke the handler, write its response, and attach endpoint metadata without runtime
 reflection. Unsupported handlers produce `COHWEB` compile-time diagnostics.
 
-Sdk.Web applications receive the generator through App.Web. In-repository consumers activate it
-with `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />` and add
-`Assimalign.Cohesion.Web.Api.Generated` to `InterceptorsNamespaces`.
+Sdk.Web applications receive the generator through App.Web, with the interceptor namespace enabled
+by Sdk.Web. NuGet consumers reference `Assimalign.Cohesion.Web.Api` directly: its package carries the
+generator DLL and a `buildTransitive` props file that appends `Assimalign.Cohesion.Web.Api.Generated`
+to `InterceptorsNamespaces`. Analyzers do not flow through a transitive Web.Api dependency.
+In-repository consumers activate it with
+`<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />` and add that
+namespace to `InterceptorsNamespaces` themselves. Web.Api's `buildTransitive` targets file removes its
+package copy before compilation, including design-time builds, when another source also supplies
+the generator. In Sdk.Web applications App.Web's copy wins because it matches the framework
+reference assemblies; a lone package copy stays active. See [Delivery](DESIGN.md#delivery) for
+the guard's selection rules.
+
+The same assembly supplies `JsonValidationPropertyResolverGenerator` for Web.Validation. NuGet
+consumers receive it only through a direct Web.Api package reference; separate delivery for
+validation-only consumers remains a follow-up.
 
 Query parameters support scalar values and sequences of scalars: arrays, `List<T>`, `IEnumerable<T>`,
 `IReadOnlyList<T>`, `IReadOnlyCollection<T>`, `IList<T>` and `ICollection<T>`. For example,

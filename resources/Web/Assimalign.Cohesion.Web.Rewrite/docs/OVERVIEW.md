@@ -9,7 +9,7 @@ registers code-first rules that run, in order, ahead of static files and routing
 
 - **Internal rewrites.** A rewrite changes the path and query the rest of the pipeline sees, without telling
   the client. The request itself is never mutated: the rest of the pipeline receives a request view whose
-  `Path` and `Query` are the rewritten values, and `IWebRewriteFeature` keeps the originals readable (Web
+  `Path` and `Query` are the rewritten values, and `IRewriteFeature` keeps the originals readable (Web
   ADR 1). Routing, static files and the generated endpoint binders follow the rewrite with no change.
 - **Redirects.** A redirect answers `301`, `302`, `307` or `308` with a `Location` and ends the pipeline.
 - **Rule kinds.** Regular-expression rules over the path, or the path and query, with `$1`/`${name}`
@@ -27,7 +27,7 @@ registers code-first rules that run, in order, ahead of static files and routing
 ## Dependencies
 
 - `Assimalign.Cohesion.Web`: the pipeline builder and the middleware abstraction.
-- `Assimalign.Cohesion.Web.Routing`: the path-branch view (`IWebPathBaseFeature`,
+- `Assimalign.Cohesion.Web.Routing`: the path-branch view (`IRouterPathBaseFeature`,
   `context.GetEffectivePath()`), which moved there with `Map(path)` (#1379). The rewrite still runs ahead of
   routing and uses none of the router's types.
 - `Assimalign.Cohesion.Http`: the HTTP context, the `HttpPath`, `HttpHost` and query value objects, and the
@@ -65,7 +65,7 @@ app.MapGet("/product", (int id) => ...);   // binds the rewritten query
 ```
 
 Inside an endpoint, `context.Request.Path` is the rewritten path, and the URL the client sent is
-`context.Features.Get<IWebRewriteFeature>()?.OriginalPath`.
+`context.Features.Get<IRewriteFeature>()?.OriginalPath`.
 
 See [`DESIGN.md`](DESIGN.md) for the request view and the pitfall it carries, path branches, rule evaluation
 and loop protection, the target syntax and its encoding model, redirects, the canonicalization helpers,

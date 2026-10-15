@@ -39,7 +39,7 @@ public static class HttpContextRoutingExtensions
 
             // Replace-on-set: the feature collection is name-keyed, and every endpoint publication
             // (a RouteMatchFeature, or routing's 405 endpoint) reports the same stable Name
-            // (nameof(IWebEndpointFeature)), so re-routing overwrites the prior endpoint in the same
+            // (nameof(IRouterEndpointFeature)), so re-routing overwrites the prior endpoint in the same
             // slot rather than accumulating stale entries.
             context.Features.Set<IRouteMatchFeature>(new RouteMatchFeature(route, values));
         }

@@ -40,8 +40,8 @@ runtime could see. Decision 32 relaxed COHRES002, and the five moved to their pu
 
 | Contract | Publisher | New home | Why there |
 |---|---|---|---|
-| `IWebEndpointFeature` | `UseRouting` | `Web.Routing` | routing selects the endpoint; the standard terminal that runs it (`WebApplicationTerminal`) moved with it |
-| `IWebPathBaseFeature` | `Map(path)` | `Web.Routing` | the non-rejoining branches end in that terminal, so they and their path-base view moved too |
+| `IRouterEndpointFeature` | `UseRouting` | `Web.Routing` | routing selects the endpoint; the standard terminal that runs it (`WebApplicationTerminal`) moved with it |
+| `IRouterPathBaseFeature` | `Map(path)` | `Web.Routing` | the non-rejoining branches end in that terminal, so they and their path-base view moved too |
 | `IWebRequestIdFeature` | `Web.Server`'s telemetry | `Web.Server` | the server publishes it; COHRES001 rules out `Web.Hosting` itself as the home, because its readers are feature libraries |
 | `IWebResponseCompletionFeature` | `Web.Server` | `Web.Server` | as above |
 | `IWebServerDrainFeature` | `Web.Server` | `Web.Server` | as above |
@@ -73,7 +73,7 @@ reader compiles unchanged. The `Web.Routing` types take `Assimalign.Cohesion.Web
 `Web.Routing` already declares that namespace across its code and the rules require its
 `Abstractions/` and `Extensions/` types to declare its `RootNamespace` (`general-rules.md`, "Every
 project pins its `RootNamespace`"). A call site of `Map(path)`, `MapWhen`, `GetPathBase`,
-`GetEffectivePath`, `WebApplicationTerminal`, `IWebEndpointFeature` or `IWebPathBaseFeature` adds
+`GetEffectivePath`, `WebApplicationTerminal`, `IRouterEndpointFeature` or `IRouterPathBaseFeature` adds
 `using Assimalign.Cohesion.Web.Routing;`, which most applications already have for `UseRouting`.
 `UseWhen` and `Run` stay in this assembly and namespace, but moved from
 `WebApplicationBranchingExtensions` into `WebApplicationExtensions` (that class name now belongs to
@@ -134,7 +134,7 @@ segment-boundary prefix match, and why branches hold middleware rather than rout
 
 ## Endpoints and the pipeline terminal
 
-The endpoint contract (`IWebEndpointFeature`) and the standard terminal (`WebApplicationTerminal`)
+The endpoint contract (`IRouterEndpointFeature`) and the standard terminal (`WebApplicationTerminal`)
 are `Web.Routing`'s since #1379. The contract the root still states is the pipeline builder's: an
 `IWebApplicationPipelineBuilder` composes its middleware around a terminal, and a builder whose
 pipeline should run selected endpoints ends in `WebApplicationTerminal.InvokeAsync`. `WebApplication`

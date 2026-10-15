@@ -39,7 +39,7 @@ internal sealed class JsonContentWriter : IContentWriter
     /// <summary>
     /// Resolves the contract this writer serializes <paramref name="type"/> with, from the frozen
     /// options the JSON pair was registered with. Backs the public
-    /// <c>IHttpContentSerializationFeature.TryGetJsonTypeInfo</c> seam.
+    /// <c>IContentSerializationFeature.TryGetJsonTypeInfo</c> seam.
     /// </summary>
     /// <param name="type">The declared CLR type.</param>
     /// <param name="typeInfo">The contract, when the registered resolver covers the type.</param>

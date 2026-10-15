@@ -133,7 +133,7 @@ public class HealthCheckMiddlewareTests
         context.Response.Headers[HttpHeaderKey.CacheControl].Value.ShouldContain("no-store");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: attaches the health report as an IHttpHealthFeature")]
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: attaches the health report as an IHealthFeature")]
     public async Task MapHealthChecks_WhenEvaluated_ShouldAttachHealthFeature()
     {
         IHealthCheckService service = HealthChecks.CreateBuilder()

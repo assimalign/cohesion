@@ -275,7 +275,7 @@ Drain-close failures retain the exception type and `Message`, following the stan
 exceptions outside the type-only carve-outs; they do not write a stack trace.
 
 `requestId` comes from `IWebRequestIdFeature`, and `routeTemplate` comes from
-`IWebEndpointFeature`. Missing features yield empty strings. Their reads, exception formatting,
+`IRouterEndpointFeature`. Missing features yield empty strings. Their reads, exception formatting,
 status formatting, and payload truncation happen only while the event is enabled. Ambient
 activities never supply correlation.
 

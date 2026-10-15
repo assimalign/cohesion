@@ -412,7 +412,7 @@ when no listener is enabled. Pass-through requests are not counted. There is no 
 or counter, and neither Verbose event is throttled.
 
 Every event reads the request id from `IWebRequestIdFeature` and the route template from
-`IWebEndpointFeature` inside `IsEnabled`. It never reads `Activity.Current` or a request path. The
+`IRouterEndpointFeature` inside `IsEnabled`. It never reads `Activity.Current` or a request path. The
 origin is a single serialized Origin value, empty when missing, repeated or malformed, truncated to
 256 characters inside `IsEnabled`; the first rejected header name is truncated there to 64 characters.
 The requested method has already passed the preflight token check and its 32-character limit. Other
