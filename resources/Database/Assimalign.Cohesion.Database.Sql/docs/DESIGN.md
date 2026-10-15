@@ -409,7 +409,7 @@ flowchart LR
   `SqlNullBehavior.CalledOnNullInput` every parameter must be a reference or nullable type
   (refused at `Create` otherwise, `declare it 'Int64?'`), and receives `null` for NULL. A
   typed aggregate called on NULL input folds its NULL rows too.
-- **Exceptions.** Whatever a core throws other than `OperationCanceledException`,
+- **Exceptions.** Whatever a core throws other than cancellation of the statement itself,
   `InsufficientExecutionStackException`, `OutOfMemoryException` or a `DatabaseException`
   becomes `COHSQLE007` (`Function 'clamp' failed: ...`, SQLSTATE 38000), the original as
   its inner exception; a `DatabaseException` passes unchanged, so a built-in's own
@@ -417,7 +417,19 @@ flowchart LR
   application function raises an error of its own code the same way (a message that leads
   with `APP001:` reaches the client unchanged). The statement
   fails like any coded failure: it writes nothing and an explicit transaction stays
-  usable, the session's statement-atomic rule.
+  usable, the session's statement-atomic rule. `OperationCanceledException` passes through only
+  when the statement's own token is canceled, regardless of the token the exception carries.
+  Scalars use the existing `SqlArguments.Context.CancellationToken`; aggregates retain the
+  creation context's token once per accumulator, for creation, every Add path and Finish,
+  including an empty group. No public signature changes or per-row allocations are needed.
+  Direct public calls with the default context have no statement to cancel, so application
+  cancellation is `COHSQLE007`; callers can already supply a token through `SqlFunctionContext`.
+  No token-taking Invoke overload is added. Domain checks, SQL function bodies and SQL domain
+  CHECKs retain the same token through nested calls; a native failure keeps the native function's
+  name. A failed attempt to fold an immutable call remains a call and is retried during execution,
+  with the statement context. PostgreSQL likewise distinguishes cancellation using backend state
+  (`src/backend/tcop/postgres.c:3575-3631`, `QueryCancelPending` and timeout indicators); E3's
+  `IsCastFailure` is the local precedent and now shares the function predicate.
 - **Folding.** An `Immutable` call whose arguments are all constants or parameters is
   computed while binding and replaced by its value (`evaluate_function`,
   `src/backend/optimizer/util/clauses.c`); one that throws is kept and fails when a row
@@ -892,8 +904,7 @@ flowchart LR
   throws, so the session and an explicit transaction stay usable. That includes an
   `OperationCanceledException` the statement did not ask for: a conversion never receives the
   statement's token, and a raw cancellation would end a wire session. The rule is the same for
-  the built-ins and an application's casts. (E2's functions and a domain's check, which run
-  through E2's `SqlScalarFunction`, still let any cancellation through: a follow-up.)
+  the built-ins and an application's casts, scalar functions, aggregates and domain checks.
 - **A cast from a domain depends on the expression's shape.** The plan knows an operand's domain
   only for a column of the domain or a `CAST` to it, under any `COLLATE`: `CAST(amount AS TEXT)`
   runs the domain's cast, but `CAST(COALESCE(amount, 0) AS TEXT)` and `CAST(CASE ... THEN amount
@@ -3617,8 +3628,14 @@ is not a number, and a statement whose walk runs out of stack throws it with
 with `COHSQLE005` (#1165), a function call whose arguments no overload of its
 function accepts with `COHSQLE006` (#1189), and one that several overloads accept
 equally well with `COHSQLE008`, all while planning. Whatever a function throws, other
-than a `DatabaseException`, a cancellation or an exhausted stack or memory, throws it
-with `COHSQLE007`, the function's exception inner (E2). A write that would evaluate a
+than a `DatabaseException`, cancellation of the statement itself or an exhausted stack or memory,
+throws it with `COHSQLE007`, naming the function with its original exception inner (E2, #1419).
+An `OperationCanceledException` is cancellation only when the statement's own token is canceled;
+a default or unrelated token on the exception does not change that rule. It covers scalar calls,
+aggregate creation/addition/finishing, engine domain checks and application calls inside SQL
+functions and SQL domain CHECKs. An uncanceled statement's application cancellation is a coded
+wire execution error, so the client's connection stays usable. A genuinely canceled wire statement
+retains the existing session-cancellation behavior. A write that would evaluate a
 stored CHECK whose function the engine does not resolve throws it with `COHSQLE009`
 (E2 part 2). Character assignment overflow throws it with `COHSQLE012` (SQLSTATE 22001);
 numeric modifier overflow, after scale rounding, reuses `COHSQLE002` (SQLSTATE 22003),

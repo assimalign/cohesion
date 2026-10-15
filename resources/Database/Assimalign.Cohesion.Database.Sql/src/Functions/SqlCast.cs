@@ -43,8 +43,10 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// other than a <see cref="DatabaseException"/> (which passes unchanged), an exhausted stack or
 /// memory, is a fault of the conversion's code: <c>COHSQLE007</c> (<c>Cast TEXT AS cents failed:
 /// ...</c>), which leaves the session and an explicit transaction usable, as for a function. That
-/// includes an <see cref="OperationCanceledException"/>: the conversion never sees the statement's
-/// cancellation token, so only the statement's own cancellation cancels it. One instance serves every
+/// includes an <see cref="OperationCanceledException"/> unless the statement's own token is
+/// canceled, regardless of the token carried by the exception. The conversion never receives the
+/// statement's token; domain checks follow the same rule through <see cref="SqlScalarFunction"/>.
+/// One instance serves every
 /// session, so the conversion must be thread-safe.
 /// </para>
 /// </remarks>
