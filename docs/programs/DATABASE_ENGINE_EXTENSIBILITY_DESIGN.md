@@ -1960,8 +1960,9 @@ Decisions raised while B2 and 49a were implemented, answered by the owner on 202
     immediately with new identities. Shutdown cancels/joins the current batch. Tests cover memory,
     file, durable crash images through sessions and `Database.Sql.Client`, exact FSM accounting,
     physical file reuse, old snapshots, mid-scan rollback, several drops and pending 49a work.
-    Build tests force a worker attempt inside both typed and script reconciliation and assert
-    zero reclaimed pages; the worker is paused at handoff to verify zero at Build return.
+    Build tests cover typed and script reconciliation and force a worker attempt inside typed
+    reconciliation. With the worker paused at handoff, they verify zero reclaimed pages and
+    unchanged owner-page and free-space counts at Build return.
     Recommend **no Degraded** signal for pending space alone: catalog readiness is complete.
     Events 23/24 expose started/completed cleanup; actual maintenance failures retain the
     existing worker failure/offline policy.
