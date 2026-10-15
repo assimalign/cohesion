@@ -85,6 +85,12 @@ internal static class Program
         Console.WriteLine($"label={label} rows={rows} iterations={iterations} aot={!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported} " +
             $"gc={(System.Runtime.GCSettings.IsServerGC ? "server" : "workstation")} os={Environment.OSVersion.VersionString} cpus={Environment.ProcessorCount}");
 
+        if (cases.Contains("Q8D"))
+        {
+            await Q8Drop.RunAsync(rows, iterations);
+            if (cases.Count == 1) { return 0; }
+        }
+
         var builder = SqlDatabaseEngine.CreateBuilder("sql-benchmark");
 #if !SQL_BENCHMARK_BASELINE
         RegisterFunctions(builder.Functions);
