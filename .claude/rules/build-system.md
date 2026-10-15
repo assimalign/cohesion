@@ -491,8 +491,7 @@ limit cut off a healthy macOS job.
 Database's build job starts at `timeout-minutes: 60` until its first `main` runs measure it.
 Run `38740702835`'s single-project legs bound it at 29 minutes on Linux and 42 on Windows
 (the shortest leg plus every other leg's time beyond it, which counts the shared closure build
-more than once). Locally, the area's 37 source projects restored, built, and tested in 10.8
-minutes on a 12-core machine.
+more than once). The first consolidated Linux job took 10.2 minutes (run `38797738233`).
 On failure, the action uploads `TestResults/<project>/**/Sequence_*.xml` and dumps as one
 artifact per job, named for the project (release legs) or the area category, OS, architecture,
 job, and attempt, and retained for seven days. Ordinary failures
