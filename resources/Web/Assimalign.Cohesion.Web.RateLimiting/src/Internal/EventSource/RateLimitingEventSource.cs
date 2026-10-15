@@ -37,7 +37,7 @@ internal sealed class RateLimitingEventSource : EventSource
                 gate,
                 policyName ?? string.Empty,
                 retryAfter?.TotalSeconds ?? -1,
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
         }
     }

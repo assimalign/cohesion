@@ -100,6 +100,11 @@ on:
       - "Directory.Build.targets"
       - "global.json"
   workflow_dispatch:
+    inputs:
+      all-os:
+        description: Also run the Windows and macOS legs, which otherwise run only on main.
+        type: boolean
+        default: false
 
 concurrency:
   group: sdk-smoke-${{ github.workflow }}-${{ github.ref }}
@@ -116,7 +121,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes and
+        # pull requests run Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -212,22 +219,25 @@ jobs:
               -RuntimeIdentifier $env:COHESION_HOST_RID
 
   sdk-tasks:
-    name: "${{ matrix.projects }} [${{ matrix.os }}]"
+    name: "SDK tasks [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes and
+        # pull requests run Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         # These are the source-bearing SDK task projects. Keeping the static
         # project matrix also makes them visible to the release inventory guard.
-        projects: [
+        # One leg per OS builds all of them: the inner list is a single matrix value.
+        projects: [[
             "Assimalign.Cohesion.Sdk.Tasks",
             "Assimalign.Cohesion.Sdk.ApplicationModel.Tasks",
             "Assimalign.Cohesion.Sdk.Database.Tasks",
             "Assimalign.Cohesion.Sdk.Gateway.Tasks"
-          ]
+          ]]
     steps:
-      - name: "Checkout: ${{ matrix.projects }}"
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install .NET
@@ -245,14 +255,25 @@ jobs:
             throw "build/Tasks build failed with exit code $LASTEXITCODE."
           }
 
-      - name: "Build: ${{ matrix.projects }}"
+      - name: Build SDK task projects
         shell: pwsh
+        env:
+          COHESION_PROJECTS: ${{ toJSON(matrix.projects) }}
         run: |
-          $project = "${{ matrix.projects }}"
-          $sdk = $project.Substring(0, $project.Length - ".Tasks".Length)
-          dotnet build "./sdks/$sdk/Tasks/src/$project.csproj" --configuration Release --nologo
-          if ($LASTEXITCODE -ne 0) {
-            throw "$project build failed with exit code $LASTEXITCODE."
+          # Every project builds even when an earlier one fails, so each reports its own result.
+          $failed = foreach ($project in @($env:COHESION_PROJECTS | ConvertFrom-Json)) {
+            $sdk = $project.Substring(0, $project.Length - ".Tasks".Length)
+            Write-Host "::group::Build $project"
+            dotnet build "./sdks/$sdk/Tasks/src/$project.csproj" --configuration Release --nologo | Out-Host
+            $exitCode = $LASTEXITCODE
+            Write-Host '::endgroup::'
+            if ($exitCode -ne 0) {
+              Write-Host "::error title=Build failed::$project build failed with exit code $exitCode."
+              $project
+            }
+          }
+          if (@($failed).Count -gt 0) {
+            throw "$(@($failed).Count) SDK task project(s) failed: $(@($failed) -join ', ')."
           }
 
   gateway-packages:
@@ -452,13 +473,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            rid: linux-x64
-          - os: windows-latest
-            rid: win-x64
-          - os: macos-latest
-            rid: osx-arm64
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes and
+        # pull requests run Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        include: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '[{"os":"ubuntu-latest","rid":"linux-x64"},{"os":"windows-latest","rid":"win-x64"},{"os":"macos-latest","rid":"osx-arm64"}]' || '[{"os":"ubuntu-latest","rid":"linux-x64"}]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

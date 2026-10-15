@@ -255,4 +255,10 @@
   <data name="ServiceProviderNotCreated" xml:space="preserve">
     <value>The service provider is created when the web application is built.</value>
   </data>
+  <data name="HttpInterceptorLifetimeInvalid" xml:space="preserve">
+    <value>The HTTP exchange interceptor registration {0} is {1}. An HTTP exchange interceptor must be a singleton: the default listener shares the same stateless instance across every connection and request. Register it with AddSingleton&lt;IHttpExchangeInterceptor&gt;.</value>
+  </data>
+  <data name="HttpInterceptorServiceTypeInvalid" xml:space="preserve">
+    <value>The registration {0} uses the service type {1}, which is assignable to IHttpExchangeInterceptor but is not IHttpExchangeInterceptor. The default server consumes only IHttpExchangeInterceptor registrations, so this interceptor would never reach its listener. Register it with AddSingleton&lt;IHttpExchangeInterceptor&gt;.</value>
+  </data>
 </root>

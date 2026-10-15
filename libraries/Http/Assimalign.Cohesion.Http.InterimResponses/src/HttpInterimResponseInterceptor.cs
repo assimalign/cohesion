@@ -12,16 +12,13 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 public sealed class HttpInterimResponseInterceptor : HttpExchangeInterceptor
 {
-    private HttpInterimResponseInterceptor()
-    {
-    }
-
     /// <summary>
     /// Creates the response interceptor that makes <see cref="IHttpInterimResponseFeature"/>
     /// available on every exchange served by the transport it is registered on.
     /// </summary>
-    /// <returns>The response interceptor to add to the transport's response-interceptor list.</returns>
-    public static HttpInterimResponseInterceptor Create() => new HttpInterimResponseInterceptor();
+    public HttpInterimResponseInterceptor()
+    {
+    }
 
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;

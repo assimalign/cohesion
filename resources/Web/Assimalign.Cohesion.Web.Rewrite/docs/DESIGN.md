@@ -9,7 +9,7 @@ URL onto the resource that serves it. This package is that work as one pipeline 
 `UseRewrite(rules => ...)`, over code-first rules registered at composition time (issue #782).
 
 The package owns the `UseRewrite` verb, the `RewriteOptions` rule list, the `IRewriteRule` and
-`IRewriteContext` contracts for custom rules, the `IWebRewriteFeature` that keeps the original URL readable,
+`IRewriteContext` contracts for custom rules, the `IRewriteFeature` that keeps the original URL readable,
 the `RewriteFlow` and `RewriteMatchTarget` enums, and the internal engine: the middleware, the request view,
 the target parser and the built-in rules.
 
@@ -33,8 +33,8 @@ The dotted edge is the reference the build rejects: a feature library never refe
 module.
 
 **Why `Web.Routing`.** The rewrite runs ahead of routing and uses none of the router's types. It references
-the package for the path-branch view: inside `Map(path)` the rules read `IWebPathBaseFeature` and
-`context.GetEffectivePath()`, and a rewrite publishes its own `IWebPathBaseFeature` (see "Path branches").
+the package for the path-branch view: inside `Map(path)` the rules read `IRouterPathBaseFeature` and
+`context.GetEffectivePath()`, and a rewrite publishes its own `IRouterPathBaseFeature` (see "Path branches").
 Both lived in the Web root until #1379 moved them, with `Map(path)` itself, to `Web.Routing` (owner decision
 33: the root holds no feature contracts). The reference adds nothing to an application's closure, since
 `App.Web` carries `Web.Routing` already.
@@ -45,7 +45,7 @@ Both lived in the Web root until #1379 moved them, with `Map(path)` itself, to `
 ([`docs/resources/Web/DECISIONS.md`](../../../../docs/resources/Web/DECISIONS.md), plan §7.4 decision 17)
 settled how a rewrite still reaches the rest of the pipeline. **A rewrite hands the rest of the pipeline a
 request view**: an `IHttpContext` whose `Request.Path` and `Request.Query` are the rewritten values and whose
-every other member is the original's. The original values stay readable through `IWebRewriteFeature`.
+every other member is the original's. The original values stay readable through `IRewriteFeature`.
 
 Two alternatives were rejected. An *effective-path feature* would have needed every reader of
 `Request.Path` and `Request.Query` (20 call sites in 10 packages, plus the endpoint generator's emitted
@@ -68,7 +68,7 @@ stays on the rewritten URL. Every other context member (`Response`, `Features`, 
 The middleware creates a view only when the rules changed the URL. A request no rule rewrote continues with
 the context the middleware received, and so does a rewrite back to the same path with the same query.
 
-### `IWebRewriteFeature`
+### `IRewriteFeature`
 
 The first rewrite of a request publishes the feature with the request's path and query as the middleware
 received them, which are the values the client sent. A later rewrite (a second `UseRewrite`, or one inside a
@@ -84,7 +84,7 @@ request telemetry describe the URL the client sent. It is a trap for a middlewar
 before the rewrite and expects to see the rewrite after `next` returns. Two further consequences:
 
 - A URL built after the rewrite from `Request.Path` carries the rewritten path. The cookie authentication
-  handler's sign-in return URL is one such URL. Read `IWebRewriteFeature.OriginalPath` for the client's URL.
+  handler's sign-in return URL is one such URL. Read `IRewriteFeature.OriginalPath` for the client's URL.
 - `context.Response.HttpContext` is the original context, because the response is shared rather than
   wrapped. Reach the request through the context you were handed, not through the response.
 
@@ -92,13 +92,13 @@ The same holds for every view in the area, so it is documented here rather than 
 
 ## Path branches
 
-A path branch publishes `IWebPathBaseFeature`: the prefix it matched (`PathBase`) and the path below it
+A path branch publishes `IRouterPathBaseFeature`: the prefix it matched (`PathBase`) and the path below it
 (`Path`), with `Request.Path` left whole. Inside a branch the rewrite works on the branch's terms (ADR 1,
 decision 3):
 
 - **The rules see the effective path**, the path below the prefix, and `IRewriteContext.PathBase` reports the
   prefix. A rule written inside `Map("/docs")` matches `/old/intro`, not `/docs/old/intro`.
-- **A rewrite publishes a matching `IWebPathBaseFeature`**: the same `PathBase` over the rewritten path, in the
+- **A rewrite publishes a matching `IRouterPathBaseFeature`**: the same `PathBase` over the rewritten path, in the
   slot the branch's own feature uses (the feature collection is keyed by the contract's name, so a reader
   resolves exactly one). `Request.Path` on the view is the path base followed by the rewritten path:
   `/docs/old/intro` rewritten to `/new/intro` reads `/docs/new/intro`. The branch's own feature comes back
@@ -138,7 +138,7 @@ flowchart TD
     Rule -->|"redirect or EndResponse"| Answer["Answer the exchange; next does not run"]
     Rule -->|"SkipRemainingRules, or the last rule ran"| Changed{"Did the URL change?"}
     Changed -->|"no"| PassThrough
-    Changed -->|"yes"| View["Continue with the request view and IWebRewriteFeature"]
+    Changed -->|"yes"| View["Continue with the request view and IRewriteFeature"]
 ```
 
 ### Stopping and restarting
@@ -318,7 +318,7 @@ the pipeline returns, and the features are shared with the view, so the route is
 matched: a request to `/legacy/orders/9` rewritten to `/orders/9` reports `url.path=/legacy/orders/9` and
 `http.route=/orders/{id:int}`. `UseHttpLogging`, registered ahead of `UseRewrite`, logs the client's path too.
 Middleware registered after `UseRewrite` that logs the path logs the rewritten one, and reads
-`IWebRewriteFeature` for the original. The package itself emits no log entries or spans: it has no logger seam
+`IRewriteFeature` for the original. The package itself emits no log entries or spans: it has no logger seam
 of its own, and the rewrite is visible in the route the request reports.
 
 `UseHttpLogging` captures the request body through its own `IHttpContext`/`IHttpRequest` view, wrapping the

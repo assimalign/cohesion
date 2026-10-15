@@ -1020,7 +1020,7 @@ in #1367, so the core now holds no transport-produced feature contract.
 Two consequences follow:
 
 - **The feature depends on a registration.** It exists only on a listener that registers
-  `HttpExtendedConnectInterceptor.Create()`; the Web host does by default. The HTTP/2 and HTTP/3
+  `new HttpExtendedConnectInterceptor()`; the Web host does by default. The HTTP/2 and HTTP/3
   transports advertise extended CONNECT regardless, so a listener without the interceptor surfaces a
   client's extended CONNECT as an ordinary `CONNECT`.
 - **An extended CONNECT pays for the response phase.** The interceptor reaches the control through

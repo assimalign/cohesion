@@ -8,7 +8,8 @@ per-exchange contracts it publishes:
 `IWebServerDrainFeature`, `IWebClientFaultFeature`, `IWebResponseClientFaultFeature` and
 `IWebResponseStartingFeature`. Applications can construct the engine without Web.Hosting;
 its own interceptors install the same features on both direct and hosted paths. Web.Hosting
-composes options, pipelines and a non-owning host-service wrapper.
+composes options, pipelines and an internal, non-owning host-service wrapper. Servers join
+the host lifecycle through `UseServer` or `AddServer`.
 
 The package exists because of two rules that point in opposite directions:
 
@@ -57,7 +58,7 @@ The dotted edge is the reference COHRES001 rejects: a feature library may never 
 runtime module, which is why the contracts could not move into `Web.Hosting`. `Web.Diagnostics` correlates its logs with the server's request id
 and the activity published on this exchange (#1297).
 
-Web.Server references Web.Routing to read `IWebEndpointFeature.RouteTemplate` for `http.route`
+Web.Server references Web.Routing to read `IRouterEndpointFeature.RouteTemplate` for `http.route`
 and bounded diagnostic route payloads. **Web.Routing must never reference Web.Server:** that edge
 would form a dependency cycle. The engine depends on Connections and Http.Connections, but no
 connection driver, Http.RequestLimits, Http.ProtocolUpgrade, Http.ExtendedConnect or Hosting
@@ -307,7 +308,7 @@ connection task releases its slot only after its drain completes.
 **Bind before Started.** `StartAsync` first awaits the aggregate HTTP listener's
 `BindAsync`. Only after every transport endpoint is bound does it schedule the
 stored accept-loop task and return. A direct server reports and propagates the original
-transport exception. In the hosted path, `WebApplicationServerHostService` wraps a default
+transport exception. In the hosted path, the internal `WebApplicationServerHostService` wraps a default
 server's bind failure in `HostStartupException`, retaining the original inner exception for
 host startup classification. The wrapper has its own service id and does not own or dispose
 the server. `WebApplicationContext` wraps every server, including one that also implements
@@ -872,7 +873,7 @@ server's published request id and activity instead of parsing the header again.
 | `url.query` | when the request has a query | no | no | the query's parameters, each value replaced by `REDACTED` unless the application declared the parameter safe (#1298) |
 | `server.address`, `server.port` | yes | no | no | the `Host` or `:authority` host, and its port when the value carries one |
 | `network.protocol.version` | yes | yes | no | `1.1`, `2` or `3` |
-| `http.route` | when routed | when routed | no | `IWebEndpointFeature.RouteTemplate` |
+| `http.route` | when routed | when routed | no | `IRouterEndpointFeature.RouteTemplate` |
 | `http.response.status_code` | when sent | when sent | no | the status sent |
 | `error.type` | on failure | on failure | no | see the outcome table |
 
@@ -972,7 +973,7 @@ semantic convention sets `Error` on a `1xx`–`3xx` span that ended in another e
 rule covers a `4xx` that was sent, which is the case where the transport's status replaced the staged
 response (the table's second row).
 
-**How `http.route` reaches the span.** The template travels through `IWebEndpointFeature`, which
+**How `http.route` reaches the span.** The template travels through `IRouterEndpointFeature`, which
 already carries the selected endpoint to the pipeline terminal. When this was designed COHRES002
 forbade a `Web.Routing` reference, so the contract sat in the Web root; since #1379 it is
 `Web.Routing`'s, and the server references `Web.Routing` to read it (owner decisions 33 and 57).

@@ -14,18 +14,15 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpMaxRequestBodySizeInterceptor : HttpExchangeInterceptor
 {
-    private HttpMaxRequestBodySizeInterceptor()
-    {
-    }
-
     /// <summary>
     /// Creates the interceptor that surfaces the transport's effective per-request body-size cap
     /// as a typed <see cref="IHttpMaxRequestBodySizeFeature"/> on every exchange, allowing the
     /// cap to be observed — and, while the request body has not started to be read, adjusted —
     /// per request.
     /// </summary>
-    /// <returns>A stateless interceptor to register on the server's listener options.</returns>
-    public static HttpMaxRequestBodySizeInterceptor Create() => new HttpMaxRequestBodySizeInterceptor();
+    public HttpMaxRequestBodySizeInterceptor()
+    {
+    }
 
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;

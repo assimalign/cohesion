@@ -26,7 +26,8 @@ reports lifecycle and failures, with `serverId` identifying each server in the p
 request content in its payloads. See [Diagnostics](DESIGN.md#diagnostics). Disposing the application
 disposes the service provider and every factory-created service.
 
-Every server registration uses a non-owning `WebApplicationServerHostService` wrapper, including
+Servers join the host lifecycle through `UseServer` or `AddServer`. Every registration uses an
+internal, non-owning `WebApplicationServerHostService` wrapper, including
 servers that also implement `IHostService`. Custom servers must implement their server startup
 and shutdown on `IWebApplicationServer`; a separate `IHostService` implementation is no longer
 used for the server phase. This is a behavioral break from 10.0.0-preview.1. Instance registrations
@@ -40,24 +41,36 @@ a stop followed by restart keeps them alive.
 Register middleware with `Use` before starting the application or explicitly building its
 pipeline. A later `Use` throws `InvalidOperationException` because the pipeline is already built.
 
-Every listener the default server composes gets five interceptors before any of the application's
-own: the request limits, the HTTP/1.1 protocol upgrade, the HTTP/2 and HTTP/3 extended
-CONNECT, the client fault, and response starting. The first surfaces the body-size cap and the minimum request-body and
+The default server composes interceptors in three stages: its own client-fault and response-starting
+hooks first, every `IHttpExchangeInterceptor` singleton from `Services` in registration order,
+then interceptors added by `UseServer` callbacks. The builder registers request limits,
+HTTP/1.1 protocol upgrade, and HTTP/2 and HTTP/3 extended CONNECT as singleton instances before
+application code runs. The default server resolves the aggregate once when it is created;
+custom servers own their listeners and do not consume it. Request limits surfaces the body-size cap and the minimum request-body and
 response data rates per request (`context.MaxRequestBodySize`, `context.MinRequestBodyDataRate`,
 `context.MinResponseDataRate`), so an endpoint whose body legitimately idles can disable the request
 rate before it reads (#1383), and one whose reader pauses can disable the slow-read check before its
 response starts (#1384). A client that grants no flow-control credit or stops reading is otherwise
 reclaimed on every protocol, and its exchange is recorded as cancelled. The
-next two make `context.Upgrade`, `context.ExtendedConnect` and a
+two transition interceptors make `context.Upgrade`, `context.ExtendedConnect` and a
 WebSocket handshake (`context.WebSockets`) work on every protocol without listener configuration. A
-request no handler accepts is served as before. The fourth publishes `IWebClientFaultFeature` on a
+request no handler accepts is served as before. The server's client-fault hook publishes `IWebClientFaultFeature` on a
 request that can have a body, on every version: when the body breaks its framing or a limit while it is
 read, the transport answers `400`, `413`, `408` or `431` itself (on HTTP/2 and HTTP/3 it resets the
 stream for a malformed body instead, reported as `400`), and the HTTP logging middleware and the
 exception boundary treat the read's exception as the client's fault, not an application defect
-(#1340, #1378). A `UseServer` callback that clears `options.Interceptors` removes them, and with them
-WebSockets on every protocol (the HTTP/2 and HTTP/3 transports keep advertising extended CONNECT, but
-nothing surfaces it) and the client-fault classification.
+(#1340, #1378). A `UseServer` callback that clears `options.Interceptors` removes the registered
+HTTP policies, including WebSockets support (the HTTP/2 and HTTP/3 transports keep advertising
+extended CONNECT, but nothing surfaces it). The server still prepends its own two hooks afterward.
+
+Register an application interceptor with
+`builder.Services.AddSingleton<IHttpExchangeInterceptor>(interceptor)`. To drop or replace a
+default, find its descriptor by `ImplementationInstance` type and call
+`builder.Services.Container.Unregister(descriptor)` before registering the replacement; to
+replace all, use `builder.Services.RemoveAll<IHttpExchangeInterceptor>()`. The replacement
+follows any retained defaults. `Build()` rejects non-singleton registrations and service types
+narrower than `IHttpExchangeInterceptor`, naming the offending registration. See the
+[composition and override recipe](DESIGN.md#default-interceptors).
 
 A handler that throws before its response starts is answered with a bare `500`. So is a response
 the transport refuses to send because a header or trailer name is not a token or a value holds CR,

@@ -112,22 +112,27 @@ jobs:
             [string] $RepositoryDirectory,
 
             [Parameter(Mandatory)]
-            [string] $Project
+            [string[]] $Project
         )
 
+        # The per-area shape: one matrix value holding the whole area's list, handed to the action.
+        $quotedProject = @($Project | ForEach-Object { "            `"$_`"" }) -join ",`n"
         $workflow = @"
 name: Test area matrix
 jobs:
   build:
     strategy:
       matrix:
-        projects: ["$Project"]
+        os: [ubuntu-latest]
+        projects: [[
+$quotedProject
+          ]]
     steps:
       - uses: ./.github/actions/build
         with:
           area: "libraries"
           category: "Test"
-          project: "`${{ matrix.projects }}"
+          projects: `${{ toJSON(matrix.projects) }}
 "@
         Set-Content `
             -LiteralPath (Join-Path $RepositoryDirectory '.github/workflows/library-test.yml') `
@@ -579,6 +584,36 @@ Describe 'CohesionPackaging inventory and area-matrix equality' {
 
         { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
             Should -Throw -ExpectedMessage '*release inventory does not ship it*'
+    }
+
+    It 'reads every project in a multi-line whole-area list' {
+        $secondName = 'Test.Equality.Second'
+        $null = Add-CohesionTestProject `
+            -RepositoryDirectory $repository `
+            -Root 'libraries' `
+            -Name $secondName
+        InModuleScope CohesionPackaging -Parameters @{ Entry = @("libraries/Test/$projectName", "libraries/Test/$secondName") } {
+            param($Entry)
+            $script:CohesionReleaseLibrary = @($Entry)
+        }
+        Write-CohesionTestAreaMatrix -RepositoryDirectory $repository -Project @($projectName, $secondName)
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } | Should -Not -Throw
+        @((Get-CohesionCiMatrixEntry -RepositoryDirectory $repository).Entry.Project) |
+            Should -Be @($projectName, $secondName)
+    }
+
+    It 'rejects a project in a whole-area list that the inventory does not ship' {
+        $secondName = 'Test.Equality.Unshipped'
+        $null = Add-CohesionTestProject `
+            -RepositoryDirectory $repository `
+            -Root 'libraries' `
+            -Name $secondName
+        Write-CohesionTestReleaseLibrary -Entry "libraries/Test/$projectName"
+        Write-CohesionTestAreaMatrix -RepositoryDirectory $repository -Project @($projectName, $secondName)
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
+            Should -Throw -ExpectedMessage "*$secondName*release inventory does not ship it*"
     }
 }
 

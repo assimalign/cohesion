@@ -20,7 +20,7 @@ the request seam, acceptance rides the response seam):
 using Assimalign.Cohesion.Http;
 
 HttpConnectionListenerOptions options = new();
-options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
+options.Interceptors.Add(new HttpProtocolUpgradeInterceptor());
 ```
 
 Then, in a handler:

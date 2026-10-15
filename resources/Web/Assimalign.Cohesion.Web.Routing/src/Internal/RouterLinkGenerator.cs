@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Web.Routing.Policies;
 namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
-/// Default <see cref="ILinkGenerator"/> built over a router's route table.
+/// Default <see cref="IRouterLinkGenerator"/> built over a router's route table.
 /// </summary>
 /// <remarks>
 /// Construction indexes the pattern-based routes by name (unique, case-insensitive — a duplicate
@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// culture and parameter policies are re-validated through the same policy objects the matcher
 /// uses (with no HTTP context, which the policy contract permits).
 /// </remarks>
-internal sealed class RouterLinkGenerator : ILinkGenerator
+internal sealed class RouterLinkGenerator : IRouterLinkGenerator
 {
     private readonly OutboundCandidate[] _candidates;
     private readonly Dictionary<string, OutboundCandidate> _candidatesByName;

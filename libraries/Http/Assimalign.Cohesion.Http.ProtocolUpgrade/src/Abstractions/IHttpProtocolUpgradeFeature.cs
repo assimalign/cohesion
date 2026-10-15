@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Http;
 /// Exchange feature that exposes the protocol-upgrade capability
 /// (<see cref="IHttpProtocolUpgrade"/>) for the current request. Installed at parse time by the
 /// interceptor this package registers on the server transport
-/// (<see cref="HttpProtocolUpgradeInterceptor.Create"/>) — only for exchanges whose
+/// (<see cref="HttpProtocolUpgradeInterceptor()"/>) — only for exchanges whose
 /// request head matched a transition signal. Ordinary exchanges carry no such feature, which is
 /// how <c>context.Upgrade</c> reads <see langword="null"/> for them.
 /// </summary>

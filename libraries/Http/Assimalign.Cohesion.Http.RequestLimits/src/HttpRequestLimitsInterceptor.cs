@@ -13,10 +13,6 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpRequestLimitsInterceptor : HttpExchangeInterceptor
 {
-    private HttpRequestLimitsInterceptor()
-    {
-    }
-
     /// <summary>
     /// Creates the interceptor that surfaces every per-request limit this package provides on every
     /// exchange: the body-size cap as a typed <see cref="IHttpMaxRequestBodySizeFeature"/>, the minimum
@@ -31,10 +27,11 @@ public sealed class HttpRequestLimitsInterceptor : HttpExchangeInterceptor
     /// One feature object carries every contract, so an exchange pays one allocation and one
     /// feature-collection slot for all of them, as it did for the body-size feature alone. It registers
     /// under the body-size feature's name, so it replaces the feature
-    /// <see cref="HttpMaxRequestBodySizeInterceptor.Create"/> attaches: register one or the other.
+    /// <see cref="HttpMaxRequestBodySizeInterceptor()"/> attaches: register one or the other.
     /// </remarks>
-    /// <returns>A stateless interceptor to register on the server's listener options.</returns>
-    public static HttpRequestLimitsInterceptor Create() => new HttpRequestLimitsInterceptor();
+    public HttpRequestLimitsInterceptor()
+    {
+    }
 
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;

@@ -173,7 +173,12 @@ Describe 'Cohesion release policy wiring' {
         $releasePacker | Should -Match '(?m)^\$supportedRuntimeIdentifier = Get-CohesionReleaseRuntimeIdentifier\r?$'
         $releasePacker | Should -Match 'Unsupported release runtime identifier\(s\)'
         $sdkSmokeWorkflow | Should -Match '(?m)^  pull_request:\r?$'
-        $sdkSmokeWorkflow | Should -Match '(?m)^        os: \[ubuntu-latest, windows-latest, macos-latest\]\r?$'
+        # main, and a manual run with all-os, cover all three OSes; other pushes and pull requests
+        # run Linux only. The release's validate-consumer job below stays three-OS unconditionally.
+        $allOsOnMain = @'
+os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+'@
+        $sdkSmokeWorkflow | Should -Match ('(?m)^        ' + [regex]::Escape($allOsOnMain) + '\r?$')
         $sdkSmokeWorkflow | Should -Match '\./installer/scripts/Pack-Release\.ps1'
         $sdkSmokeWorkflow | Should -Match '(?m)^\s*-SkipLibraries\r?$'
         $sdkSmokeWorkflow | Should -Match 'Invoke-SdkConsumerSmoke\.ps1'
@@ -219,6 +224,16 @@ Describe 'Cohesion release policy wiring' {
 
         $packCallCount | Should -BeGreaterThan 0
         $localPropertyCount | Should -Be $packCallCount
+
+        # Batched packs (Invoke-CohesionPackBatch, continued across lines with backticks) carry the
+        # same vector through -Property.
+        $batchCall = @([System.Text.RegularExpressions.Regex]::Matches(
+            $installLocal,
+            '(?m)^\s*Invoke-CohesionPackBatch(?:[^\r\n]*`\r?\n)*[^\r\n]*') | ForEach-Object Value)
+        $batchCall.Count | Should -BeGreaterThan 0
+        foreach ($call in $batchCall) {
+            $call | Should -Match '-Property (?:\$localPackProperties|@\(\$localPackProperties )'
+        }
         $installLocal | Should -Match 'Get-CohesionLocalPackageVersion'
         $installLocal | Should -Match 'Get-CohesionStaleLibraryPackage'
         $installLocal | Should -Match '(?ms)foreach \(\$packagePath in \$staleLibraryPackage\).*?Remove-Item -LiteralPath \$packagePath -Force'
@@ -239,7 +254,9 @@ Describe 'Cohesion release policy wiring' {
         @($sdkPins.PSObject.Properties.Value | Where-Object { $_ -like '*.local' }).Count |
             Should -Be 0
 
-        $lastPack = $installLocal.LastIndexOf('& dotnet pack ', [StringComparison]::Ordinal)
+        $lastPack = [Math]::Max(
+            $installLocal.LastIndexOf('& dotnet pack ', [StringComparison]::Ordinal),
+            $installLocal.LastIndexOf('Invoke-CohesionPackBatch ', [StringComparison]::Ordinal))
         $generation = $installLocal.IndexOf('$consumerSourcePath =', [StringComparison]::Ordinal)
         $generation | Should -BeGreaterThan $lastPack
         $installLocal | Should -Match "Consumer SDK '.+?' was not produced"

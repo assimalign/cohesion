@@ -52,9 +52,9 @@ public class Http3InputCompletionRoundTripTests
             configure: null,
             configureListener: options =>
             {
-                options.Interceptors.Add(HttpRequestLimitsInterceptor.Create());
-                options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
-                options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+                options.Interceptors.Add(new HttpRequestLimitsInterceptor());
+                options.Interceptors.Add(new HttpProtocolUpgradeInterceptor());
+                options.Interceptors.Add(new HttpExtendedConnectInterceptor());
                 options.Interceptors.Add(interceptor);
             },
             cancellationToken);

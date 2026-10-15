@@ -45,8 +45,8 @@ public static class JsonContentSerializationBuilderExtensions
             options.MakeReadOnly();
 
             return builder
-                .AddReader(new JsonHttpContentReader(options))
-                .AddWriter(new JsonHttpContentWriter(options));
+                .AddReader(new JsonContentReader(options))
+                .AddWriter(new JsonContentWriter(options));
         }
     }
 }

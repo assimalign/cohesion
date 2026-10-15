@@ -59,7 +59,7 @@ internal sealed class WebOpenApiDescriptionProvider : IOpenApiDescriptionProvide
         WebOpenApiEndpointSource routes = new(
             routing.Router,
             _options,
-            _application.Features.OfType<IHttpContentSerializationFeature>().LastOrDefault(),
+            _application.Features.OfType<IContentSerializationFeature>().LastOrDefault(),
             authorization,
             _application.Features.OfType<IAuthenticationService>().LastOrDefault()?.DefaultAuthenticateScheme,
             version);

@@ -45,7 +45,7 @@ models were set aside on 2026-07-10.
   local endpoint (DESIGN, "Not an access control").
 - Keeps routing state **per application** (no process-wide shared builder), so multiple web
   applications hosted in one process have fully isolated route tables.
-- Generates **outbound URLs** (`ILinkGenerator`): routes register a unique, case-insensitive
+- Generates **outbound URLs** (`IRouterLinkGenerator`): routes register a unique, case-insensitive
   **name** via metadata (duplicates fail at build time), and paths or absolute URIs are generated
   from a name — or from route values alone, resolved by outbound precedence — honoring defaults,
   collapsing omitted optionals/catch-alls, re-validating constraints, escaping per path segment,
@@ -68,15 +68,15 @@ models were set aside on 2026-07-10.
 | `RouterConventionBuilderExtensions` | Routing's convention verbs: `WithName` (routes) and `RequireHost` (routes and groups). |
 | `RouteHostConstraint` | Parsed host constraint (`host[:port]`, `*.wildcard`, `*`, bracketed IPv6) with `Parse`/`TryParse`/`IsMatch`. |
 | `RouteHostMetadata` | Sealed endpoint-metadata carrier declaring the hosts a route accepts; consulted by `Router` during candidate selection. |
-| `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata (and `IsPreflight` for a CORS preflight's candidate). It is also the exchange's `IWebEndpointFeature`, which the pipeline terminal runs. |
+| `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata (and `IsPreflight` for a CORS preflight's candidate). It is also the exchange's `IRouterEndpointFeature`, which the pipeline terminal runs. |
 | `IRouteMiddlewareMetadata` | Endpoint metadata that names the middleware which must honor it; dispatch fails the request when that middleware never acknowledged the endpoint (`AcknowledgeEndpointMiddleware`). |
 | `RouteNameMetadata` | Sealed endpoint-metadata carrier naming a route for URL generation; unique per router, checked at build time. |
-| `ILinkGenerator` | Outbound URL generation (`GetPathByName`, `GetUriByName`, `TryGetPathByValues`, …); exposed as `IRouter.LinkGenerator` and via `context.GetLinkGenerator()`. |
+| `IRouterLinkGenerator` | Outbound URL generation (`GetPathByName`, `GetUriByName`, `TryGetPathByValues`, …); exposed as `IRouter.LinkGenerator` and via `context.GetLinkGenerator()`. |
 | `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) / `AcknowledgeEndpointMiddleware` / `GetLinkGenerator` over the routing features. |
 | `RoutingExtensions.UseRouting` | Pipeline integration: selects the endpoint (match / 405 / preflight candidate / none) and calls `next`; the terminal runs it. |
-| `IWebEndpointFeature` | The endpoint selected for the exchange: the delegate the terminal runs and the `RouteTemplate` the server reports as `http.route`. Moved here from the Web root (#1379). |
+| `IRouterEndpointFeature` | The endpoint selected for the exchange: the delegate the terminal runs and the `RouteTemplate` the server reports as `http.route`. Moved here from the Web root (#1379). |
 | `WebApplicationTerminal` | The standard pipeline terminal: runs the published endpoint, or answers an untouched response with a bodyless 404. `WebApplication` and every non-rejoining branch end in it (#1379). |
-| `WebApplicationBranchingExtensions` / `IWebPathBaseFeature` | `Map(path, branch)` and `MapWhen` (branches that end in the terminal), and the path-base view a path branch publishes (`GetPathBase()`, `GetEffectivePath()`). Moved here from the Web root (#1379); the rejoining `UseWhen` and `Run` stay in the root. |
+| `WebApplicationBranchingExtensions` / `IRouterPathBaseFeature` | `Map(path, branch)` and `MapWhen` (branches that end in the terminal), and the path-base view a path branch publishes (`GetPathBase()`, `GetEffectivePath()`). Moved here from the Web root (#1379); the rejoining `UseWhen` and `Run` stay in the root. |
 
 ## Usage
 

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Web.Hosting.Internal;
 
 using Shouldly;
 using Xunit;

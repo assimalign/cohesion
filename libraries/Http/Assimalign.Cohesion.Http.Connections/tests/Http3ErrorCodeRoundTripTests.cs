@@ -101,7 +101,7 @@ public class Http3ErrorCodeRoundTripTests
                 await exchange.Response.Streaming.WriteAsync(Encoding.ASCII.GetBytes("without the upload"), cancellationToken);
             },
             configure: null,
-            configureListener: static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()),
+            configureListener: static options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()),
             cancellationToken);
 
         // Act

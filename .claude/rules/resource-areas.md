@@ -264,7 +264,10 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   the context. Health checks register `IHealthContributor`, control-plane command handlers
   register `IResourceCommandHandler` (both handed to the control plane once, at `Build`), the
   module's own endpoints and data-plane services register `IHostService`, and collaborators they
-  share (repositories, stores, key providers) are singletons their factories resolve. DI holds the
+  share (repositories, stores, key providers) are singletons their factories resolve. Web registers
+  its default HTTP policies as `IHttpExchangeInterceptor` singleton instances before application
+  registrations and resolves that aggregate once in the default server factory, before listener
+  callbacks; custom servers own their listeners. DI holds the
   dependency graph, not option values: single-valued configuration of one component (listener
   options, a concurrency cap, Web's `AddPipeline` replacement) stays builder state.
 - **Root verbs are explicit-interface shims.** Each `I<Area>ApplicationBuilder` member is
@@ -287,7 +290,9 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   rejects a scoped or transient `IHttpFeature` registration, a registration under a contract
   derived from `IHttpFeature`, and a disposable `IHttpFeature` instance or implementation type;
   the pipeline build, which resolves the aggregate, rejects a disposable feature a factory
-  registration produced.
+  registration produced. Web also rejects a non-singleton `IHttpExchangeInterceptor` registration
+  or one under a narrower interceptor service type: the listener shares each instance across all
+  connections and consumes only the exact aggregate contract.
 - **The service type is the lifecycle phase; registration order is the order within a phase.**
   A single-phase area registers everything as `IHostService` and places its own services by
   *when* they register: telemetry in the builder constructor (first), hard-wired endpoints in

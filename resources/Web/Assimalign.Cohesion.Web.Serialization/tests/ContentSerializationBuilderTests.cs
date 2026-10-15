@@ -49,7 +49,7 @@ public class ContentSerializationBuilderTests
         ServiceDescriptor descriptor = services.Container.ShouldHaveSingleItem();
         descriptor.ServiceType.ShouldBe(typeof(IHttpFeature));
         descriptor.Lifetime.ShouldBe(ServiceLifetime.Singleton);
-        IHttpContentSerializationFeature feature = Resolve(services);
+        IContentSerializationFeature feature = Resolve(services);
         feature.Readers.ShouldHaveSingleItem().CanRead(typeof(TestOrder)).ShouldBeTrue();
         feature.Writers.ShouldHaveSingleItem().CanWrite(typeof(TestReceipt)).ShouldBeTrue();
     }
@@ -59,7 +59,7 @@ public class ContentSerializationBuilderTests
     {
         // Arrange
         ContentSerializationBuilder builder = new ContentSerializationBuilder().AddReader(new FakeContentReader(HttpMediaType.ApplicationJson));
-        IHttpContentSerializationFeature built = builder.Build();
+        IContentSerializationFeature built = builder.Build();
 
         // Act
         builder.AddReader(new FakeContentReader(HttpMediaType.TextPlain));
@@ -77,7 +77,7 @@ public class ContentSerializationBuilderTests
         FakeContentReader second = new(HttpMediaType.TextPlain);
 
         // Act
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddReader(first).AddReader(second).Build();
+        IContentSerializationFeature feature = new ContentSerializationBuilder().AddReader(first).AddReader(second).Build();
 
         // Assert
         feature.Readers.Count.ShouldBe(2);
@@ -127,11 +127,11 @@ public class ContentSerializationBuilderTests
     }
 
     // Resolves the registry the way the host does when it composes the pipeline.
-    private static IHttpContentSerializationFeature Resolve(IServiceProviderBuilder services)
+    private static IContentSerializationFeature Resolve(IServiceProviderBuilder services)
     {
         IServiceProvider provider = services.Build();
         return provider.GetRequiredService<IEnumerable<IHttpFeature>>()
             .ShouldHaveSingleItem()
-            .ShouldBeAssignableTo<IHttpContentSerializationFeature>()!;
+            .ShouldBeAssignableTo<IContentSerializationFeature>()!;
     }
 }

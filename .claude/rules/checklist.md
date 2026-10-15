@@ -35,7 +35,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] Every private field — instance or static — is `_camelCase`
 - [ ] Assembly attributes, `InternalsVisibleTo` included, live in `Properties/AssemblyInfo.cs`, not the csproj
 - [ ] One public type per file (with grouped root-first naming for variant families, e.g., `Http2Frame.Header.cs`)
-- [ ] New public APIs are interfaces. Implementations are internal unless consumers construct them directly; then they are `public sealed` with a private constructor and static `Create` methods (`general-rules.md`, "Creation-only facades become public implementations"). Any other departure follows the exception protocol in `deviations.md`; `resources/Database/**` is concrete-first and follows `database-area.md` instead
+- [ ] New public APIs are interfaces. Implementations are internal unless consumers construct them directly; then they are `public sealed` with a private constructor and static `Create` methods for creation with arguments, or a public parameterless constructor and no `Create()` for parameterless creation (owner decision 61, 2026-10-15; `general-rules.md`, "Creation-only facades become public implementations"). Any other departure follows the exception protocol in `deviations.md`; `resources/Database/**` is concrete-first and follows `database-area.md` instead
 - [ ] No static class exists only to create an object: its creation methods live on the public implementation type
 - [ ] Public APIs have complete XML documentation (`<summary>`, `<param>`, `<returns>`, `<exception>`)
 - [ ] Internal types are `internal`, not `public`

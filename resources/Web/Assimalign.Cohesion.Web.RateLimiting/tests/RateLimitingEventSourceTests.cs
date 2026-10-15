@@ -232,7 +232,7 @@ public sealed class RateLimitingEventSourceTests
         RateLimitTestContext context = new(path: "/" + sensitiveValue);
         context.Request.Headers[HttpHeaderKey.Authorization] = sensitiveValue;
         context.Features.Set<IWebRequestIdFeature>(new DiagnosticRequestIdFeature(forbidDiagnosticRead));
-        context.Features.Set<IWebEndpointFeature>(new DiagnosticEndpointFeature(forbidDiagnosticRead));
+        context.Features.Set<IRouterEndpointFeature>(new DiagnosticEndpointFeature(forbidDiagnosticRead));
         if (gate == "endpoint")
         {
             context.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(
@@ -262,13 +262,13 @@ public sealed class RateLimitingEventSourceTests
         public ActivityTraceId RequestId => _forbidRead ? throw new InvalidOperationException("Disabled diagnostics read request id.") : _requestId;
     }
 
-    private sealed class DiagnosticEndpointFeature : IWebEndpointFeature
+    private sealed class DiagnosticEndpointFeature : IRouterEndpointFeature
     {
         private readonly bool _forbidRead;
 
         public DiagnosticEndpointFeature(bool forbidRead) => _forbidRead = forbidRead;
 
-        public string Name => nameof(IWebEndpointFeature);
+        public string Name => nameof(IRouterEndpointFeature);
         public WebApplicationMiddleware Endpoint => _ => Task.CompletedTask;
         public string? RouteTemplate => _forbidRead ? throw new InvalidOperationException("Disabled diagnostics read route template.") : "/orders/{id}";
     }

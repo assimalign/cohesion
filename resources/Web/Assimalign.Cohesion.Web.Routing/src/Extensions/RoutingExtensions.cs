@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// <c>UseRouting</c> selects the endpoint; it does not run it (#1054). It publishes the match and calls
 /// <c>next</c>, so every middleware registered after it runs with the endpoint and its metadata known,
 /// and the pipeline's terminal (<see cref="WebApplicationTerminal"/>) runs the endpoint through
-/// <see cref="IWebEndpointFeature"/>.
+/// <see cref="IRouterEndpointFeature"/>.
 /// Dispatch is implicit: there is no separate <c>UseEndpoints</c> step to register.
 /// </para>
 /// </remarks>
@@ -130,18 +130,18 @@ public static class RoutingExtensions
                 if (TryGetPreflightMethod(context.Request, out HttpMethod requestedMethod)
                     && router.Match(context, requestedMethod) is { Status: RouteMatchStatus.Matched } candidate)
                 {
-                    WebApplicationMiddleware unhandledPreflight = new MethodNotAllowedEndpointFeature(match).Endpoint;
+                    WebApplicationMiddleware unhandledPreflight = new MethodNotAllowedRouterEndpointFeature(match).Endpoint;
                     context.Features.Set<IRouteMatchFeature>(new RouteMatchFeature(candidate.Route!, candidate.Values, unhandledPreflight));
                     break;
                 }
 
-                context.Features.Set<IWebEndpointFeature>(new MethodNotAllowedEndpointFeature(match));
+                context.Features.Set<IRouterEndpointFeature>(new MethodNotAllowedRouterEndpointFeature(match));
                 break;
 
             default:
                 // Nothing matched: clear any endpoint an earlier selection published, so the request
                 // reaches the terminal's 404 instead of a stale endpoint.
-                context.Features.Set<IWebEndpointFeature>(null);
+                context.Features.Set<IRouterEndpointFeature>(null);
                 break;
         }
     }

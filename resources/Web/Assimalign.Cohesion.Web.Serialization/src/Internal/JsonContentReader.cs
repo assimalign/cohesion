@@ -15,11 +15,11 @@ namespace Assimalign.Cohesion.Web.Serialization.Internal;
 /// <see cref="JsonTypeInfo"/>-based System.Text.Json entry points only, so the path is
 /// reflection-free under NativeAOT.
 /// </summary>
-internal sealed class JsonHttpContentReader : IHttpContentReader
+internal sealed class JsonContentReader : IContentReader
 {
     private readonly JsonSerializerOptions _options;
 
-    public JsonHttpContentReader(JsonSerializerOptions options)
+    public JsonContentReader(JsonSerializerOptions options)
     {
         _options = options;
     }

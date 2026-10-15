@@ -3,23 +3,23 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
-/// Default <see cref="IWebPathBaseFeature"/>, installed by a path branch for the duration of the branch.
+/// Default <see cref="IRouterPathBaseFeature"/>, installed by a path branch for the duration of the branch.
 /// </summary>
-internal sealed class WebPathBaseFeature : IWebPathBaseFeature
+internal sealed class RouterPathBaseFeature : IRouterPathBaseFeature
 {
     /// <summary>
     /// Initializes the feature with the accumulated path base and the path below it.
     /// </summary>
     /// <param name="pathBase">The prefixes the entered branches matched, outermost first.</param>
     /// <param name="path">The request path below <paramref name="pathBase"/>.</param>
-    public WebPathBaseFeature(HttpPath pathBase, HttpPath path)
+    public RouterPathBaseFeature(HttpPath pathBase, HttpPath path)
     {
         PathBase = pathBase;
         Path = path;
     }
 
     /// <inheritdoc />
-    public string Name => nameof(IWebPathBaseFeature);
+    public string Name => nameof(IRouterPathBaseFeature);
 
     /// <inheritdoc />
     public HttpPath PathBase { get; }

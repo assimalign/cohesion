@@ -133,7 +133,7 @@ public class HealthCheckMiddlewareTests
         context.Response.Headers[HttpHeaderKey.CacheControl].Value.ShouldContain("no-store");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: attaches the health report as an IHttpHealthFeature")]
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: attaches the health report as an IHealthFeature")]
     public async Task MapHealthChecks_WhenEvaluated_ShouldAttachHealthFeature()
     {
         IHealthCheckService service = HealthChecks.CreateBuilder()
@@ -146,7 +146,7 @@ public class HealthCheckMiddlewareTests
         TestHttpContext context = new("/healthz", HttpMethod.Get);
         await builder.Build().ExecuteAsync(context);
 
-        IHttpHealthFeature? feature = context.Features.Get<IHttpHealthFeature>();
+        IHealthFeature? feature = context.Features.Get<IHealthFeature>();
         feature.ShouldNotBeNull();
         feature!.Report.Status.ShouldBe(HealthStatus.Degraded);
     }
@@ -362,7 +362,7 @@ public class HealthCheckMiddlewareTests
         await builder.Build().ExecuteAsync(context);
 
         // Assert
-        IHttpHealthFeature? feature = context.Features.Get<IHttpHealthFeature>();
+        IHealthFeature? feature = context.Features.Get<IHealthFeature>();
         feature.ShouldNotBeNull();
         feature!.Report.Entries["db"].Exception.ShouldBeSameAs(exception);
     }

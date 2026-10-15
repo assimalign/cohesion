@@ -37,7 +37,7 @@ public class Http2FrameAtomicityTests
         using CancellationTokenSource cancellation = new();
         Http2OutputTapConnection? tap = null;
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options, decorate: transport => tap = new Http2OutputTapConnection(transport));
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/stream"));
         IHttpContext streamed = await peer.ReceiveContextAsync();
@@ -70,7 +70,7 @@ public class Http2FrameAtomicityTests
         using CancellationTokenSource cancellation = new();
         Http2OutputTapConnection? tap = null;
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options, decorate: transport => tap = new Http2OutputTapConnection(transport));
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/stream"));
         IHttpContext streamed = await peer.ReceiveContextAsync();

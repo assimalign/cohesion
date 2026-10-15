@@ -29,7 +29,7 @@ public static class RewriteExtensions
         /// <para>
         /// A rewrite does not change the request the middleware received. The rest of the pipeline receives a
         /// view of the exchange whose <c>Request.Path</c> and <c>Request.Query</c> are the rewritten values and
-        /// whose every other member is the original's, and <see cref="IWebRewriteFeature"/> keeps the original
+        /// whose every other member is the original's, and <see cref="IRewriteFeature"/> keeps the original
         /// values readable while that pipeline runs. Middleware registered ahead of <c>UseRewrite</c>, and the
         /// server's request telemetry, keep the original values: a component that holds the context it handed
         /// to <c>next</c> still sees the original path after <c>next</c> returns. The <c>http.route</c> the
@@ -37,7 +37,7 @@ public static class RewriteExtensions
         /// </para>
         /// <para>
         /// Inside a <c>Map(path)</c> branch the rules see, and rewrite, the path below the branch's prefix; the
-        /// branch's <see cref="IWebPathBaseFeature"/> then reports the rewritten path under the same path base.
+        /// branch's <see cref="IRouterPathBaseFeature"/> then reports the rewritten path under the same path base.
         /// Requests that the runtime's control plane and health endpoints answer ahead of the application
         /// pipeline never reach the rules.
         /// </para>

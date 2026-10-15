@@ -1,0 +1,6 @@
+<Project>
+	<!-- Enable the interceptors that implement the typed Map* overloads. -->
+	<PropertyGroup>
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
+	</PropertyGroup>
+</Project>

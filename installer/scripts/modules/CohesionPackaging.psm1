@@ -1876,6 +1876,114 @@ function Assert-CohesionPackageMetadata {
         $withReadme)
 }
 
+function Invoke-CohesionPackBatch {
+    <#
+    .SYNOPSIS
+        Packs a set of projects with one restore and one MSBuild invocation.
+
+    .DESCRIPTION
+        One `dotnet pack` per project re-evaluated and re-checked the shared reference closure for
+        every package: the SDK smoke's strict pack ran 59 of them, a median 10.5 s each, and took
+        11 to 27 minutes. A batch restores its projects through one transient solution and packs
+        them through one transient traversal project, which MSBuild builds in parallel and in which
+        every shared reference builds once.
+
+        `dotnet pack` runs on the traversal project itself, so each project receives the global
+        properties `dotnet pack <project>` passes (Configuration, _IsPacking, NuGetInteractive)
+        plus -Property. Packing does not go through the solution: a solution build unsets
+        Configuration for references outside it (ShouldUnsetParentConfigurationAndPlatform), which
+        would build them as Debug.
+
+        Every project in a batch shares one set of global properties. A project that packs under
+        several values of a property, such as a framework runtime pack per runtime identifier,
+        needs one batch per value; two values in one batch would race on its obj folder.
+
+    .PARAMETER Name
+        Names the batch in the log and its transient files.
+
+    .PARAMETER Project
+        Full paths of the projects to pack.
+
+    .PARAMETER Configuration
+        Build configuration.
+
+    .PARAMETER Property
+        MSBuild property arguments (-p:Name=Value) for restore and pack.
+
+    .PARAMETER Clean
+        Cleans every project, with only -Configuration, before restoring and packing.
+
+    .PARAMETER WorkingDirectory
+        Where the transient solution and traversal project are written.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Name,
+
+        [Parameter(Mandatory)]
+        [string[]] $Project,
+
+        [Parameter(Mandatory)]
+        [string] $Configuration,
+
+        [string[]] $Property = @(),
+
+        [switch] $Clean,
+
+        [Parameter(Mandatory)]
+        [string] $WorkingDirectory
+    )
+
+    $escapedProject = @($Project | ForEach-Object { [System.Security.SecurityElement]::Escape($_) })
+    $null = New-Item -ItemType Directory -Path $WorkingDirectory -Force
+    $solution = Join-Path $WorkingDirectory "$Name.slnx"
+    $traversal = Join-Path $WorkingDirectory "$Name.proj"
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllLines(
+        $solution,
+        [string[]] (@('<Solution>') + @($escapedProject | ForEach-Object { "  <Project Path=`"$_`" />" }) + @('</Solution>')),
+        $utf8)
+    [System.IO.File]::WriteAllLines(
+        $traversal,
+        [string[]] (@(
+            '<Project DefaultTargets="Pack">'
+            '  <ItemGroup>'
+        ) + @($escapedProject | ForEach-Object { "    <CohesionPackProject Include=`"$_`" />" }) + @(
+            '  </ItemGroup>'
+            '  <Target Name="Clean">'
+            '    <MSBuild Projects="@(CohesionPackProject)" Targets="Clean" BuildInParallel="true" />'
+            '  </Target>'
+            '  <Target Name="Pack">'
+            '    <MSBuild Projects="@(CohesionPackProject)" Targets="Pack" BuildInParallel="true" />'
+            '  </Target>'
+            '</Project>'
+        )),
+        $utf8)
+
+    Write-Host "Packing batch $Name ($($Project.Count) project(s))" -ForegroundColor Green
+    foreach ($path in $Project) {
+        Write-Host "  $path" -ForegroundColor DarkGray
+    }
+
+    if ($Clean) {
+        & dotnet clean $traversal --configuration $Configuration --nologo
+        if ($LASTEXITCODE -ne 0) {
+            throw "Cleaning batch $Name failed with exit code $LASTEXITCODE."
+        }
+    }
+
+    & dotnet restore $solution --nologo "-p:Configuration=$Configuration" @Property
+    if ($LASTEXITCODE -ne 0) {
+        throw "Restoring batch $Name failed with exit code $LASTEXITCODE."
+    }
+
+    & dotnet pack $traversal --configuration $Configuration --no-restore --nologo @Property
+    if ($LASTEXITCODE -ne 0) {
+        throw "Packing batch $Name failed with exit code $LASTEXITCODE."
+    }
+}
+
 Export-ModuleMember -Function @(
     'Get-CohesionReleaseRuntimeIdentifier'
     'Get-CohesionReleaseSdk'
@@ -1888,4 +1996,5 @@ Export-ModuleMember -Function @(
     'Assert-CohesionReleaseInventory'
     'Assert-CohesionReleasePackageSet'
     'Assert-CohesionPackageMetadata'
+    'Invoke-CohesionPackBatch'
 )

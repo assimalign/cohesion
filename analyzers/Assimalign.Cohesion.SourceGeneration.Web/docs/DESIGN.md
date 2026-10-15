@@ -97,7 +97,7 @@ Each interceptor:
 - Emits inline binding per parameter: route (`TryGetRouteValues` + boxed fast-path/`TryParse`
   fallback), query/form (`TryGetValue` + `TryParse`), header (`GetValue` + `TryParse`), body, and
   direct injections. The body is probed through the registry's non-throwing lookup first: a missing or
-  unparseable `Content-Type`, or one `IHttpContentSerializationFeature.GetReader` has no reader for,
+  unparseable `Content-Type`, or one `IContentSerializationFeature.GetReader` has no reader for,
   is a 415. `ReadContentAsync<T>` then reads it, and a `JsonException` is a 400. An
   `InvalidDataException` is a 400 too, with `errors` keyed `$body` (#1340): the transport's body
   stream throws it for a malformed message framing (a broken chunk size or trailer section) and
@@ -355,18 +355,43 @@ members, further descendants, and recursive properties.
 
 ## Delivery
 
-The generator is consumed exactly like the base `SourceGeneration` generator:
+The generator reaches a consumer through one of three paths:
 
-- In-repo and test projects add `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`,
-  which activates the analyzer at compile time and bundles the DLL into the consuming library's own
-  `.nupkg`.
-- Sdk.Web consumers get it through the `<CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.Web" />`
-  entry in the `App.Web` member list (`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props`),
-  bundled at `analyzers/dotnet/cs/` inside `App.Web.Ref`.
+- **Sdk.Web applications** receive it through the
+  `<CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.Web" />` entry in the
+  `App.Web` member list (`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props`),
+  bundled at `analyzers/dotnet/cs/` inside `App.Web.Ref`. `Sdk.Web.props` enables its interceptor namespace.
+- **NuGet consumers** reference `Assimalign.Cohesion.Web.Api` directly. Its package bundles
+  `analyzers/dotnet/cs/Assimalign.Cohesion.SourceGeneration.Web.dll` and imports
+  `buildTransitive/Assimalign.Cohesion.Web.Api.props`, which appends
+  `Assimalign.Cohesion.Web.Api.Generated` to `InterceptorsNamespaces`. Analyzers do not flow
+  transitively: referencing only a package that depends on Web.Api does not deliver the generator.
+- **In-repo and test projects** add
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />` and allow-list
+  the generated namespace with
+  `<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>`.
+  The analyzer reference activates the generator in that project's compilation and, for a packable
+  library such as Web.Api, bundles its DLL in the library's `.nupkg`.
 
-Consumers must allow-list the generated namespace with
-`<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>`
-(the interceptor feature's opt-in), which the Web.Api test project demonstrates.
+Web.Api's own mapping calls use the `WebApplicationMiddleware` overloads, so running the generator
+while building that library emits no interceptors. The package's namespace append composes with the
+same append in Sdk.Web: repeating an allowed namespace is harmless.
+
+**Duplicate delivery.** Web.Api also ships
+`buildTransitive/Assimalign.Cohesion.Web.Api.targets`. Its
+`_CohesionWebApiRemoveDuplicateGenerator` target runs before `CoreCompile`, after package and
+targeting-pack analyzers resolve, in real and design-time builds. When more than one `Analyzer`
+has the file name `Assimalign.Cohesion.SourceGeneration.Web.dll`, the target removes only items
+whose `NuGetPackageId` is `Assimalign.Cohesion.Web.Api`. The other source's copy wins: in Sdk.Web
+applications, keeping App.Web's generator deliberately matches the framework reference assemblies
+the application compiles against. A lone Web.Api package copy is unchanged. Without the guard,
+.NET SDK 10.0.401 passes two distinct paths to byte-identical generators through to `csc`, causing
+CS0433 for the generated `InterceptsLocationAttribute`. Repeating the namespace opt-in does not
+cause this failure.
+
+`JsonValidationPropertyResolverGenerator` shares this assembly. A NuGet consumer that uses only
+Web.Validation currently needs a direct Web.Api package reference to receive it; independent delivery
+for validation-only consumers remains a follow-up. Web.Validation does not bundle another copy.
 
 ## Testing
 

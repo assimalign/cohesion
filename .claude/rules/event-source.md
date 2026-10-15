@@ -139,7 +139,7 @@ internal sealed class TcpConnectionEventSource : EventSource
       - rate-limit partition keys, cache keys or tag names;
       - control-plane command payloads, keys or caller identities.
     - **Web routes and peers.** Routes appear as `routeTemplate`
-      (`IWebEndpointFeature.RouteTemplate`), only in packages already referencing Web.Routing.
+      (`IRouterEndpointFeature.RouteTemplate`), only in packages already referencing Web.Routing.
       A peer address appears only in
       `ConnectionFaulted`/`ConnectionEndedByPeer`, `CredentialRejected` and
       `ForwardingStopped(UntrustedPeer)`; it is personal data in the sink.

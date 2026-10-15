@@ -159,9 +159,19 @@ app.MapGet("/internal/cache", () => "cleared").ExcludeFromDescription();
 
 ## Wiring
 
-- Reference the generator: `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`
-  (automatic for Sdk.Web consumers).
-- Allow-list the generated namespace:
+- **Sdk.Web applications** receive the generator through App.Web and the interceptor namespace
+  opt-in through Sdk.Web. When Web.Api is also referenced directly, its `buildTransitive` targets file
+  removes the package's duplicate generator before compilation, including design-time builds.
+  App.Web's copy wins because it matches the application's framework reference assemblies.
+  See [The Source Generator](DESIGN.md#the-source-generator) for the guard's selection rules.
+- **NuGet consumers** reference `Assimalign.Cohesion.Web.Api` directly. The package carries the
+  generator under `analyzers/dotnet/cs/` and its `buildTransitive` props appends
+  `Assimalign.Cohesion.Web.Api.Generated` to `InterceptorsNamespaces`. Analyzers do not flow
+  transitively, so depending on another package that references Web.Api is insufficient. The guard
+  leaves the package's generator in place when it is the only copy.
+- **In-repo and test projects** add
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />` and allow-list
+  the namespace with
   `<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>`.
 - Body binding and serialized return values need `Web.Serialization` (`AddJsonSerialization(...)` with
   the application's source-generated `JsonSerializerContext`); form binding needs `Http.Forms`. Both

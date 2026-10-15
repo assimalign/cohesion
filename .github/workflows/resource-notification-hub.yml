@@ -6,25 +6,55 @@ on:
       - "!resources/NotificationHub/**/*.slnx"
       - "!resources/NotificationHub/**/*.md"
       - ".github/workflows/resource-notification-hub.yml" # When Pipeline File Changes
+      # Shared build infrastructure that every project in this workflow compiles with.
+      - ".github/actions/build/**"
+      - "global.json"
+      - "Directory.Build.props"
+      - "Directory.Build.targets"
+      - "build/Build.props"
+      - "build/Build.targets"
+      - "build/Targets/**"
+      - "build/Tasks/**"
+  workflow_dispatch:
+    inputs:
+      all-os:
+        description: Also run the Windows and macOS legs, which otherwise run only on main.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# A newer push to the same branch (or pull request) supersedes this run, so the older run is
+# cancelled instead of holding runner slots: the organization's plan runs at most 20 jobs at once,
+# 5 of them macOS. Every main commit keeps its own run, because the run id makes its group unique.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
+      # Every leg reports its own result: with fail-fast, one failing leg cancels the rest of the
+      # matrix and leaves the other projects without a signal (#1093).
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        projects: ["Assimalign.Cohesion.NotificationHub", "Assimalign.Cohesion.NotificationHub.ApplicationModel", "Assimalign.Cohesion.NotificationHub.Hosting"]
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes run
+        # Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        # One leg per OS builds and tests the whole area: the inner list is a single matrix value
+        # that .github/actions/build receives whole. The release inventory guard reads this list.
+        projects: [["Assimalign.Cohesion.NotificationHub", "Assimalign.Cohesion.NotificationHub.ApplicationModel", "Assimalign.Cohesion.NotificationHub.Hosting"]]
     steps:
       - uses: actions/checkout@v7
-        name: "Checkout: ${{ matrix.projects }}"
+        name: Checkout
 
       - uses: ./.github/actions/build
-        name: "Running Build & Tests: ${{ matrix.projects }}"
+        name: Build and test
         with:
           area: "resources"
           category: "NotificationHub"
-          project: ${{ matrix.projects }}
+          projects: ${{ toJSON(matrix.projects) }}

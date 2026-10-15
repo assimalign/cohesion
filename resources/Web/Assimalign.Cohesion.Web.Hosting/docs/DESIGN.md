@@ -19,7 +19,7 @@ library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web` producers, a
 takes such a reference only for runtime machinery it composes itself, because each one ships in all
 18 area frameworks. Routing and Server supply the terminal and server engine, whose contracts left the Web root
 under owner decision 33: `Web.Routing` for the pipeline terminal (`WebApplicationTerminal`) and the
-`IWebEndpointFeature` it dispatches, and `Web.Server` for the engine and the per-exchange features
+`IRouterEndpointFeature` it dispatches, and `Web.Server` for the engine and the per-exchange features
 it publishes. Web.Health supplies the independent
 health model that this module's Hosting.Health adapter uses. Applications still see the whole Web family because the
 `App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
@@ -85,6 +85,7 @@ dependency the host runs with is a registration in it, and the root
 | `IWebApplicationBuilder.AddServer(...)`, `Server.UseServer<TServer>(...)` | `IWebApplicationServer` |
 | `IWebApplicationBuilder.AddFeature(...)`, the feature packages' `builder.Services.Add<Feature>(...)` verbs | `IHttpFeature` (singleton only) |
 | `AddHealthCheck(name, check)` | `IHealthContributor` |
+| HTTP policy defaults, `Services.AddSingleton<IHttpExchangeInterceptor>(...)` | `IHttpExchangeInterceptor` (singleton only; default server) |
 
 A value becomes an instance registration, which stays owned by its caller; a
 `Func<IWebApplicationContext, T>` becomes a factory registration invoked once with the
@@ -111,7 +112,9 @@ slot to get the same guarantee.
 provider once, and resolves the application services, running each factory exactly once
 against the final context. Servers resolve once at host start, because the default
 server captures the composed pipeline and middleware is added to the built application.
-Features resolve once at pipeline build (below). Nothing resolves per request.
+Features resolve once at pipeline build (below). HTTP exchange interceptors resolve once
+inside the default server factory, before its listener configurations run. Custom servers own
+their listeners and do not consume that aggregate. Nothing resolves per request.
 
 **The application owns the provider.** Disposing a `WebApplication` stops the host, then
 disposes the provider, which disposes every factory-created service in reverse creation
@@ -132,7 +135,9 @@ and multiplexed exchanges, isolates application faults, and drains on stop. Its 
 lives beside that implementation. Web.Server references Http.Connections, Connections and
 Web.Routing, and no connection driver, HTTP policy feature or Hosting library.
 
-`WebApplicationServerHostService` is the public, non-owning `IHostService` wrapper. Its
+Servers join the host lifecycle through `UseServer` or `AddServer`;
+`WebApplicationServerHostService` is the internal, non-owning `IHostService` wrapper in
+`Assimalign.Cohesion.Web.Hosting.Internal`. Its
 constructor takes any `IWebApplicationServer`; `Server` exposes the original object and
 `Id` is the wrapper's own `ServiceId`. Start and stop forward the caller's token. The wrapper
 retains the default server's `HostStartupException` envelope for a bind failure, with the
@@ -153,8 +158,10 @@ and extended CONNECT), TCP/TLS/QUIC helper composition, pipelines, control-plane
 integration. The builder supplies the composed pipeline and listener options to the public engine.
 Application services still start before servers and stop after their drain.
 
-**Compatibility with 10.0.0-preview.1 (decision 15).** Making the engine/options and wrapper public
-is additive; relaxing `UseServer` accepts more implementations. No shipped public type is moved.
+**Compatibility with 10.0.0-preview.1 (decision 15).** Making the engine/options public
+is additive; relaxing `UseServer` accepts more implementations. #1458 also made the wrapper
+public. Making it internal is a source and binary break for intervening code that wrapped a
+server by hand; register the server through `UseServer` or `AddServer` instead.
 
 **Breaking lifecycle behavior:** preview.1 bypassed the adapter for a server implementing
 `IHostService`, invoking that interface's start and stop methods. Every server registration now
@@ -360,9 +367,9 @@ The count covers only what the host knows every exchange carries. Middleware ins
 exchange passes through them, and in an ordinary application those sit on most exchanges:
 
 - **Routing** installs one feature on every matched request. `RouteMatchFeature` implements both
-  `IRouteMatchFeature` and `IWebEndpointFeature` under the one name `IWebEndpointFeature`, so it takes
-  one slot; a 405 takes the same slot with `MethodNotAllowedEndpointFeature`. In a routed application
-  a matched request is the ordinary exchange. A `Map` branch also installs `IWebPathBaseFeature` on
+  `IRouteMatchFeature` and `IRouterEndpointFeature` under the one name `IRouterEndpointFeature`, so it takes
+  one slot; a 405 takes the same slot with `MethodNotAllowedRouterEndpointFeature`. In a routed application
+  a matched request is the ordinary exchange. A `Map` branch also installs `IRouterPathBaseFeature` on
   each request that enters it.
 - **One feature on every exchange that passes through:** `UseForwardedHeaders`,
   `UseResponseCompression` (not on a `HEAD`, nor over HTTPS unless `EnableForHttps` is set),
@@ -441,7 +448,7 @@ no longer grow the collection past three slots.
 terminal reached only when every registered middleware chained to `next`.
 
 **Endpoint dispatch (#1054).** When an endpoint-selecting middleware (`UseRouting`)
-published an `IWebEndpointFeature`, the terminal runs that endpoint. That is
+published an `IRouterEndpointFeature`, the terminal runs that endpoint. That is
 where a matched route's handler runs, after every middleware registered behind
 `UseRouting`, and where routing's 405 is written. The terminal is
 `WebApplicationTerminal.InvokeAsync` (#1056), shared with every non-rejoining pipeline
@@ -944,19 +951,23 @@ HTTP policy defaults does not remove response starting or client-fault reporting
 
 ## Default interceptors
 
-### Public HTTP interceptor factories (#1465)
+### Public HTTP interceptor construction (#1465)
 
-`ApplyDefaultInterceptors` constructs the same three HTTP policy interceptors with
-`HttpRequestLimitsInterceptor.Create()`, `HttpProtocolUpgradeInterceptor.Create()`, and
-`HttpExtendedConnectInterceptor.Create()`, in that order. These are the public sealed
-implementations with private constructors approved by owner decision 59. The server's own
+`WebApplicationServerBuilder` registers the three HTTP policy defaults as
+`IHttpExchangeInterceptor` singleton instances in its constructor, before application code runs:
+
+`new HttpRequestLimitsInterceptor()`, `new HttpProtocolUpgradeInterceptor()`, and
+`new HttpExtendedConnectInterceptor()`, in that order. These are the public sealed
+implementations introduced with private constructors by owner decision 59.
+Owner decision 61, 2026-10-15 replaces their parameterless factories with public constructors. The server's own
 client-fault and response-starting interceptors keep their existing descriptive names and behavior.
-No default, ordering, or listener option changes in this cleanup.
+The defaults retain their relative order. Their registrations can now be removed or replaced
+before the application is built.
 
 The removed Http factory calls are source- and binary-breaking API changes on decision 15's preview
 terms; their package DESIGN files record exactly which calls shipped in `10.0.0-preview.1` and the
 replacement spellings. Hosted applications using only `WebApplicationServerBuilder` keep the same
-source calls. Applications registering those Http factories themselves must rename the calls and
+source calls. Applications constructing those Http interceptors themselves must update the calls and
 rebuild against the updated packages.
 
 The bootstrap credential verifier also uses `EcdsaJsonWebTokenSignatureVerifier.Create` and
@@ -968,15 +979,53 @@ that package's preview.1 compatibility section.
 
 ### What it is
 
-Hosting installs request limits, protocol upgrade and extended CONNECT before user configurations
-run. The server then prepends its own client-fault and response-starting hooks. The effective order is:
+The default server factory resolves `IEnumerable<IHttpExchangeInterceptor>` once and adds every
+registration to `HttpConnectionListenerOptions.Interceptors` in registration order, before any
+`UseServer` listener callback runs. The server then prepends its own client-fault and
+response-starting hooks. With the default registrations retained, the effective order is:
 
 1. Web.Server client fault.
 2. Web.Server response starting.
 3. Http.RequestLimits.
 4. Http.ProtocolUpgrade.
 5. Http.ExtendedConnect.
-6. User configurations' interceptors, in registration order.
+6. Application `IHttpExchangeInterceptor` registrations, in registration order.
+7. Interceptors added by `UseServer` callbacks, in callback order.
+
+Only the default server consumes the interceptor aggregate. Custom servers own their listeners;
+a custom-only composition with no listener configured does not resolve the aggregate at all.
+Direct construction in Web.Server remains DI-free and adds only that engine's own interceptors.
+
+**Override through Services.** Add an interceptor with
+`builder.Services.AddSingleton<IHttpExchangeInterceptor>(interceptor)` (a factory is supported
+too). To replace a default, remove its descriptor first; the defaults use instances so their
+concrete types identify them without resolving a service. With `System.Linq` and
+`Assimalign.Cohesion.DependencyInjection` imported:
+
+```csharp
+var defaultUpgrade = builder.Services.Container.Single(descriptor =>
+    descriptor.ServiceType == typeof(IHttpExchangeInterceptor) &&
+    descriptor.ImplementationInstance is HttpProtocolUpgradeInterceptor);
+builder.Services.Container.Unregister(defaultUpgrade);
+builder.Services.AddSingleton<IHttpExchangeInterceptor>(replacement);
+```
+
+Here `replacement` is the application's `IHttpExchangeInterceptor` instance. It follows the
+remaining defaults because it was registered later. Unregister without adding a replacement to
+drop just that default. To replace the entire list, call
+`builder.Services.RemoveAll<IHttpExchangeInterceptor>()` before registering replacements.
+Both APIs are available on `WebApplicationBuilder.Services`; no hosting-specific override API
+is needed. A callback may still edit the listener's list after these registrations are added.
+
+**Validate the aggregate's contract.** Beside feature validation, `WebApplicationBuilder.Build`
+checks descriptors before adding build-owned registrations or calling `MakeReadOnly`. Every
+`IHttpExchangeInterceptor` registration must be a singleton: the listener shares the stateless
+instance across all connections and requests. A service type assignable to
+`IHttpExchangeInterceptor` but narrower than that exact contract (including
+`HttpExchangeInterceptor` or a concrete implementation) is rejected because it would never
+join the aggregate. Each resource-backed error names the descriptor's position, lifetime,
+service type and known implementation, using the same description as feature errors. Validation
+also applies to custom-only compositions, while only the default server resolves the aggregate.
 
 The first two hooks only publish their own features and attach response callbacks; they neither
 read nor change the HTTP policy features. The HTTP defaults retain their relative order and still

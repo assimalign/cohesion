@@ -22,6 +22,13 @@ on:
       - "build/**"
       - "installer/scripts/**"
       - ".github/workflows/tooling-templates.yml"
+      # Shared build infrastructure that every project in this workflow compiles with.
+      - ".github/actions/build/**"
+      - "global.json"
+      - "Directory.Build.props"
+      - "Directory.Build.targets"
+      - "tooling/Directory.Build.props"
+      - "tooling/Directory.Build.targets"
   pull_request:
     paths:
       - "tooling/templates/**"
@@ -39,8 +46,29 @@ on:
       - "build/**"
       - "installer/scripts/**"
       - ".github/workflows/tooling-templates.yml"
+      # Shared build infrastructure that every project in this workflow compiles with.
+      - ".github/actions/build/**"
+      - "global.json"
+      - "Directory.Build.props"
+      - "Directory.Build.targets"
+      - "tooling/Directory.Build.props"
+      - "tooling/Directory.Build.targets"
+  workflow_dispatch:
+    inputs:
+      all-os:
+        description: Also run the Windows and macOS legs, which otherwise run only on main.
+        type: boolean
+        default: false
+
 permissions:
   contents: read
+
+# A newer push to the same branch (or pull request) supersedes this run, so the older run is
+# cancelled instead of holding runner slots: the organization's plan runs at most 20 jobs at once,
+# 5 of them macOS. Every main commit keeps its own run, because the run id makes its group unique.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     name: "Templates [${{ matrix.os }}]"
@@ -52,8 +80,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        projects: [ "Assimalign.Cohesion.Templates" ]
+        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes run
+        # Linux only, because the organization's plan runs at most 5 macOS jobs at once.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        # One leg per OS builds and tests the whole area: the inner list is a single matrix value
+        # that .github/actions/build receives whole. The release inventory guard reads this list.
+        projects: [[ "Assimalign.Cohesion.Templates" ]]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -129,6 +161,6 @@ jobs:
         with:
           area: 'tooling'
           category: 'templates'
-          project: ${{ matrix.projects }}
+          projects: ${{ toJSON(matrix.projects) }}
           local-sdk-rids: ${{ steps.host.outputs.rid }}
           local-sdk-use-canonical-version: 'true'

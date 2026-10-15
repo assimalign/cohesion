@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Surfaces the extended CONNECT capability (RFC 8441 / RFC 9220) of the current exchange on
 /// <see cref="IHttpContext"/>, backed by the <see cref="IHttpExtendedConnectFeature"/> the
-/// interceptor from <see cref="HttpExtendedConnectInterceptor.Create"/> installs on the exchange's
+/// interceptor from <see cref="HttpExtendedConnectInterceptor()"/> installs on the exchange's
 /// feature collection.
 /// </summary>
 /// <remarks>
@@ -35,7 +35,7 @@ public static class HttpExtendedConnectExtensions
         /// </summary>
         /// <remarks>
         /// The feature is present for an HTTP/2 or HTTP/3 extended CONNECT on a listener that
-        /// registered <see cref="HttpExtendedConnectInterceptor.Create"/>, provided the transport's
+        /// registered <see cref="HttpExtendedConnectInterceptor()"/>, provided the transport's
         /// exchange control could still accept the tunnel when the exchange's response phase began;
         /// the interceptor's <see cref="IHttpExchangeInterceptor.BeforeResponse"/> hook removes it
         /// otherwise. Any other exchange reads <see langword="null"/>, and so does an extended CONNECT
@@ -55,7 +55,7 @@ public static class HttpExtendedConnectExtensions
         /// <summary>
         /// Gets whether the current exchange carries the extended CONNECT feature: an HTTP/2 or
         /// HTTP/3 extended CONNECT (a <c>CONNECT</c> carrying a <c>:protocol</c> pseudo-header) on a
-        /// listener that registered <see cref="HttpExtendedConnectInterceptor.Create"/>, whose tunnel
+        /// listener that registered <see cref="HttpExtendedConnectInterceptor()"/>, whose tunnel
         /// the transport's exchange control could still accept when the exchange's response phase
         /// began.
         /// </summary>

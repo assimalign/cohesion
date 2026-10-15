@@ -23,7 +23,7 @@ internal sealed class DownstreamProbe
 
     public HttpPath? PathBase { get; private set; }
 
-    public IWebRewriteFeature? Rewrite { get; private set; }
+    public IRewriteFeature? Rewrite { get; private set; }
 
     public Task InvokeAsync(IHttpContext context)
     {
@@ -33,7 +33,7 @@ internal sealed class DownstreamProbe
         Query = context.Request.Query;
         EffectivePath = context.GetEffectivePath();
         PathBase = context.GetPathBase();
-        Rewrite = context.Features.Get<IWebRewriteFeature>();
+        Rewrite = context.Features.Get<IRewriteFeature>();
         return Task.CompletedTask;
     }
 }

@@ -38,7 +38,7 @@ internal sealed class CorsEventSource : EventSource
             PreflightRejected(reason.ToString(), origin,
                 requestedMethod.Length > 32 ? requestedMethod[..32] : requestedMethod,
                 rejectedHeader[..Math.Min(rejectedHeader.Length, 64)].ToString(),
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
         }
     }
@@ -53,7 +53,7 @@ internal sealed class CorsEventSource : EventSource
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
             PreflightPassedThrough(cause, requestedMethod,
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
         }
     }

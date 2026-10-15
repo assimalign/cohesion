@@ -74,11 +74,11 @@ internal sealed class TestApplicationContext : IWebApplicationContext
 }
 
 /// <summary>A published endpoint that records its invocation.</summary>
-internal sealed class TestEndpointFeature : IWebEndpointFeature
+internal sealed class TestEndpointFeature : IRouterEndpointFeature
 {
     public TestEndpointFeature(Func<IHttpContext, Task> endpoint) => Endpoint = context => endpoint(context);
 
-    public string Name => nameof(IWebEndpointFeature);
+    public string Name => nameof(IRouterEndpointFeature);
 
     public WebApplicationMiddleware Endpoint { get; }
 }

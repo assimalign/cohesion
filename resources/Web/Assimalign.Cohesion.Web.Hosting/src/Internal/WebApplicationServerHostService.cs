@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 
-namespace Assimalign.Cohesion.Web.Hosting;
+namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 /// <summary>
 /// Runs a Web server as a host service without taking ownership of the server.
@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Web.Hosting;
 /// <remarks>
 /// The caller or service provider retains disposal ownership. Each wrapper has its own service identity.
 /// </remarks>
-public sealed class WebApplicationServerHostService : IHostService
+internal sealed class WebApplicationServerHostService : IHostService
 {
     /// <summary>Creates a non-owning host service for a server.</summary>
     /// <param name="server">The server whose lifecycle is forwarded.</param>

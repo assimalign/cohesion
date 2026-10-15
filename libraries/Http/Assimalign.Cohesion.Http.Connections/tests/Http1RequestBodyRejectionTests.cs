@@ -157,7 +157,7 @@ public class Http1RequestBodyRejectionTests
 
         if (streaming)
         {
-            options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+            options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         }
 
         Served served = new();

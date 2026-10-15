@@ -25,7 +25,7 @@ public static class HttpRequestLimitsExtensions
 
         /// <summary>
         /// Gets the minimum request-body data-rate feature for this exchange, or <see langword="null"/>
-        /// when the request-limits interceptor (<see cref="HttpRequestLimitsInterceptor.Create"/>) is not
+        /// when the request-limits interceptor (<see cref="HttpRequestLimitsInterceptor()"/>) is not
         /// registered on the server.
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
@@ -40,7 +40,7 @@ public static class HttpRequestLimitsExtensions
 
         /// <summary>
         /// Gets the minimum response data-rate feature for this exchange, or <see langword="null"/> when
-        /// the request-limits interceptor (<see cref="HttpRequestLimitsInterceptor.Create"/>) is not
+        /// the request-limits interceptor (<see cref="HttpRequestLimitsInterceptor()"/>) is not
         /// registered on the server.
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>

@@ -53,7 +53,7 @@ internal sealed class RequestTimeoutEventSource : EventSource
                 int suppressedCount = _suppressedWarnings;
                 _suppressedWarnings = 0;
                 RequestTimedOut(timeout.TotalMilliseconds, responseStarted, statusCode,
-                    context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                    context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                     suppressedCount, context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
                 _lastWarning = Stopwatch.GetTimestamp();
             }
@@ -67,7 +67,7 @@ internal sealed class RequestTimeoutEventSource : EventSource
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
             TimeoutIgnored(timeout.TotalMilliseconds,
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);
         }
     }

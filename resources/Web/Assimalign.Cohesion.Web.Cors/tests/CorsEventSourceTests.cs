@@ -222,7 +222,7 @@ public sealed class CorsEventSourceTests
         await using CorsTestContext context = CreatePreflight("https://" + new string('a', 300));
         UnreadIdentifiers identifiers = new();
         context.Features.Set<IWebRequestIdFeature>(identifiers);
-        context.Features.Set<IWebEndpointFeature>(identifiers);
+        context.Features.Set<IRouterEndpointFeature>(identifiers);
         string rejectedHeader = new('b', 100);
         source.PreflightRejected(context, CorsPreflightRejection.HeaderNotAllowed, "PUT", rejectedHeader);
         long before = source.RejectedPreflights;
@@ -372,7 +372,7 @@ public sealed class CorsEventSourceTests
     {
         CorsTestContext context = CorsTestContext.Preflight(requestOrigin, method, headers, "/sensitive-path");
         context.Features.Set<IWebRequestIdFeature>(new RequestIdFeature());
-        context.Features.Set<IWebEndpointFeature>(new EndpointFeature());
+        context.Features.Set<IRouterEndpointFeature>(new EndpointFeature());
         return context;
     }
 
@@ -392,14 +392,14 @@ public sealed class CorsEventSourceTests
         public ActivityTraceId RequestId { get; } = ActivityTraceId.CreateRandom();
     }
 
-    private sealed class EndpointFeature : IWebEndpointFeature
+    private sealed class EndpointFeature : IRouterEndpointFeature
     {
-        public string Name => nameof(IWebEndpointFeature);
+        public string Name => nameof(IRouterEndpointFeature);
         public WebApplicationMiddleware Endpoint => static _ => Task.CompletedTask;
         public string RouteTemplate => "/items/{id}";
     }
 
-    private sealed class UnreadIdentifiers : IWebRequestIdFeature, IWebEndpointFeature
+    private sealed class UnreadIdentifiers : IWebRequestIdFeature, IRouterEndpointFeature
     {
         public string Name => nameof(UnreadIdentifiers);
         public ActivityTraceId RequestId => throw new InvalidOperationException("Request id read while Verbose is disabled.");

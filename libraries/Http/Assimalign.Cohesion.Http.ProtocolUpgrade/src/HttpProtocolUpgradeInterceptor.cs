@@ -46,17 +46,14 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
 {
-    private HttpProtocolUpgradeInterceptor()
-    {
-    }
-
     /// <summary>
     /// Creates the exchange interceptor that detects HTTP/1.1 upgrade / <c>CONNECT</c> transition
     /// signals and surfaces them as an <see cref="IHttpProtocolUpgradeFeature"/> over the
     /// transport's exchange control (takeover). Add it to the transport's interceptor list.
     /// </summary>
-    /// <returns>The interceptor to add to the transport's interceptor list.</returns>
-    public static HttpProtocolUpgradeInterceptor Create() => new HttpProtocolUpgradeInterceptor();
+    public HttpProtocolUpgradeInterceptor()
+    {
+    }
 
     // RFC 9110 §5.6.1 / §5.6.3 — a list element loses its optional whitespace, SP and HTAB, and
     // nothing else. HTTP/1.1 decodes field values as Latin-1, so a no-break space (0xA0) or a

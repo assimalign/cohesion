@@ -106,7 +106,7 @@ internal sealed class TestHttpResponse : IHttpResponse
 /// A registry entry double whose media types are supplied per test, for exercising the
 /// specificity/registration-order matching rules without a real serializer.
 /// </summary>
-internal sealed class FakeContentReader : IHttpContentReader
+internal sealed class FakeContentReader : IContentReader
 {
     public FakeContentReader(params HttpMediaType[] mediaTypes) => MediaTypes = mediaTypes;
 
@@ -122,7 +122,7 @@ internal sealed class FakeContentReader : IHttpContentReader
 /// A writer double mirroring <see cref="FakeContentReader"/>; records the content type it was
 /// asked to emit.
 /// </summary>
-internal sealed class FakeContentWriter : IHttpContentWriter
+internal sealed class FakeContentWriter : IContentWriter
 {
     public FakeContentWriter(params HttpMediaType[] mediaTypes) => MediaTypes = mediaTypes;
 
