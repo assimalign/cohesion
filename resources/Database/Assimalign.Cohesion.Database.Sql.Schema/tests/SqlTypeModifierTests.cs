@@ -10,6 +10,28 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public sealed class SqlTypeModifierTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Schema] - Raw decimal metadata: omitted scale has the explicit zero identity")]
+    public void Compile_OmittedDecimalScale_ShouldNormalizeColumnsAndDomains()
+    {
+        // Arrange: a with expression also enters through the compiled-schema boundary.
+        var column = new CompiledSchemaColumn("value", DatabaseType.Decimal, true) with { Precision = 3 };
+        SqlCompiledSchema Compile(int? scale) => new(SqlCompiledSchema.CurrentFormat, "app", false,
+            [new CompiledSchemaType("Money", DatabaseType.Decimal, 3, scale)],
+            [new CompiledSchemaTable("items", "Row", [column with { Scale = scale }], null, [], [])], []);
+
+        // Act
+        var omitted = Compile(null);
+        var explicitZero = Compile(0);
+
+        // Assert
+        omitted.Tables[0].Columns[0].Scale.ShouldBe(0);
+        omitted.Types[0].Scale.ShouldBe(0);
+        omitted.CanonicalDocument.ShouldBe(explicitZero.CanonicalDocument);
+        omitted.Hash.ShouldBe(explicitZero.Hash);
+        SqlCompiledSchemaSerializer.Deserialize(omitted.CanonicalDocument.Replace("\"scale\":0", "\"scale\":null"))
+            .Hash.ShouldBe(explicitZero.Hash);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Schema] - Type modifiers: typed declarations enforce every SQL boundary")]
     [MemberData(nameof(SqlTypeModifierCases.Columns), MemberType = typeof(SqlTypeModifierCases))]
     public void Create_ModifierBoundary_ShouldValidateAtDeclaration(string type, bool valid, string member)

@@ -51,7 +51,7 @@ public static class SqlTypeNames
 
         // An explicit precision implies scale zero; a bare DECIMAL remains unconstrained.
         typeInfo = new DatabaseTypeInfo(type.Value, length, precision,
-            type == DatabaseType.Decimal && precision is not null ? scale ?? 0 : scale);
+            SqlTypeModifiers.NormalizeScale(type, precision, scale));
         return true;
     }
 

@@ -268,3 +268,7 @@ with their table/column or domain name and source location, and write no schema 
 compiled-schema validator also covers raw metadata. No new diagnostic id or public API is added;
 valid artifacts and hashes retain runtime parity. Declared scripts remain COHDBSDK110 because
 only runtime provisioning owns their receipts.
+
+Decimal scale normalization is shared too: precision with an omitted scale means zero. The
+compiled-schema snapshots normalize raw records before validation and hashing, so SDK artifacts,
+runtime declarations and raw compiled metadata cannot disagree about that default.

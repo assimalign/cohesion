@@ -1331,6 +1331,10 @@ validation use SqlSchemaValidationException with UnsupportedType and the table/c
 or domain name; Sdk.Database uses COHDBSDK106 at the source location. COHSQLS001-005 are
 script receipt/ownership codes, not the typed-schema validation enum.
 
+Raw compiled decimal columns and domains with precision but no scale normalize to scale zero
+before validation and hashing, just like SQL and CAST resolution. They apply, re-apply, verify
+and reopen with the same metadata as an explicit zero scale; bare decimals remain unconstrained.
+
 The supported alteration is the full definition, for example
 ALTER TABLE t ALTER COLUMN c NUMERIC(28,2). PostgreSQL's ALTER COLUMN c TYPE ...
 form remains unsupported. Function overload identity and invocation semantics are

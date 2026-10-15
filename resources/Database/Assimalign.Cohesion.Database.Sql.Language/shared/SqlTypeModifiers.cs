@@ -15,6 +15,10 @@ internal static class SqlTypeModifiers
     internal const int MaximumPrecision = 28;
     internal const string ArgumentShape = "Type arguments must be one or two unsigned integer literals within the Int32 range.";
 
+    // A bare decimal is unconstrained; an explicit precision implies scale zero everywhere.
+    internal static int? NormalizeScale(DatabaseType? type, int? precision, int? scale)
+        => type == DatabaseType.Decimal && precision is not null ? scale ?? 0 : scale;
+
     // PostgreSQL validates declaration lengths in src/backend/utils/adt/varchar.c:33-57;
     // MaxAttrSize is 10 Mi characters (src/include/access/htup_details.h:620-626). Binary uses
     // the same explicit ceiling here. Omitted bounds stay unbounded; a bound allocates nothing.
@@ -76,6 +80,7 @@ internal static class SqlTypeModifiers
 
     internal static string? GetError(DatabaseType? type, int? length, int? precision, int? scale)
     {
+        scale = NormalizeScale(type, precision, scale);
         if (type == DatabaseType.Decimal)
         {
             if (length is not null)

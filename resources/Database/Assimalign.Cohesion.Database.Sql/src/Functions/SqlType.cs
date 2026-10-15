@@ -308,6 +308,11 @@ public sealed class SqlType : IEquatable<SqlType>
     /// <returns>The built-in type.</returns>
     internal static SqlType ForStorage(DatabaseTypeInfo storage)
     {
+        int? scale = SqlTypeModifiers.NormalizeScale(storage.Type, storage.Precision, storage.Scale);
+        if (scale != storage.Scale)
+        {
+            storage = new DatabaseTypeInfo(storage.Type, storage.MaxLength, storage.Precision, scale);
+        }
         foreach (var builtIn in BuiltIn)
         {
             if (builtIn.Storage.Type == storage.Type)
@@ -318,7 +323,7 @@ public sealed class SqlType : IEquatable<SqlType>
                 }
 
                 string name = storage.Type == DatabaseType.Decimal && storage.Precision is { } precision
-                    ? string.Create(CultureInfo.InvariantCulture, $"NUMERIC({precision}, {storage.Scale ?? 0})")
+                    ? string.Create(CultureInfo.InvariantCulture, $"NUMERIC({precision}, {storage.Scale})")
                     : storage.MaxLength is { } length
                         ? string.Create(CultureInfo.InvariantCulture, $"{(storage.Type == DatabaseType.String ? "VARCHAR" : builtIn.Name)}({length})")
                         : builtIn.Name;

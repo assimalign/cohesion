@@ -374,3 +374,7 @@ surrounding syntax errors. SqlTypeNames.TryResolve returns false for an unknown 
 modifiers; name-only resolution still distinguishes known built-ins. The shared splitter preserves
 quoted identifiers and reads at most two unsigned Int32 arguments; typed schemas retain their
 identifier-only spelling. DIALECT.md records the exact ranges and unbounded defaults.
+
+`NormalizeScale` is the shared decimal default: an explicit precision with no scale means zero;
+a bare decimal stays unconstrained. Compiled-schema snapshots, their validation, the typed
+builders, SDK extraction and engine provisioning use this same rule as SQL and CAST resolution.

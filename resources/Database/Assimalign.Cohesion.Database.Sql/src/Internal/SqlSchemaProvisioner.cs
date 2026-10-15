@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -9,6 +10,7 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -339,7 +341,8 @@ internal sealed partial class SqlSchemaProvisioner
         domain = null;
         if (column.CustomType is not { } declared)
         {
-            return new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision, column.Scale);
+            return new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision,
+                SqlTypeModifiers.NormalizeScale(column.Type, column.Precision, column.Scale));
         }
 
         if (types.Resolve(declared, out string? error) is not { } type)
@@ -796,11 +799,9 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     private static string DescribeType(DatabaseType type, int? maxLength, int? precision, int? scale)
-        => maxLength is { } length
-            ? $"{type}({length})"
-            : precision is { } digits
-                ? $"{type}({digits},{scale ?? 0})"
-                : type.ToString();
+        => $"{type}(MaxLength={maxLength?.ToString(CultureInfo.InvariantCulture) ?? "null"}, " +
+            $"Precision={precision?.ToString(CultureInfo.InvariantCulture) ?? "null"}, " +
+            $"Scale={scale?.ToString(CultureInfo.InvariantCulture) ?? "null"})";
 
     /// <summary>
     /// The catalog stores a CHECK as the canonical text of its parsed predicate, while a compiled

@@ -42,7 +42,7 @@ public sealed class SqlTypeBuilder
         }
 
         _precision = precision;
-        _scale = scale;
+        _scale = SqlTypeModifiers.NormalizeScale(DatabaseType.Decimal, precision, scale);
     }
 
     /// <summary>

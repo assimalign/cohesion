@@ -950,6 +950,12 @@ COHSQLS codes remain reserved for script receipts/ownership. There is no persist
 or compatibility reader: nothing has shipped. The full-definition ALTER COLUMN form is covered;
 PostgreSQL's TYPE/USING syntax remains unsupported.
 
+Raw compiled decimal metadata follows the same shared scale normalization: precision with no
+scale resolves to scale zero. Compiled snapshots canonicalize it before hashing, and provisioning
+resolves it identically before comparing the catalog. Apply, the already-applied skip, Verify and
+reopen therefore agree. Type-drift messages show every compared field (`MaxLength`, `Precision`,
+`Scale`) explicitly, including `null`, rather than formatting a null scale as zero.
+
 ## Declared column bounds (#1418)
 
 `SqlCastConverter.ParseNumericText(text, target)` is the shared text-to-NUMERIC conversion:

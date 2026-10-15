@@ -452,7 +452,8 @@ internal sealed class CSharpSchemaExtractor
             Error("COHDBSDK106", $"Custom type '{TypeName(type)}' must declare its storage representation with Decimal(precision, scale).", configure.GetLocation());
         }
 
-        return new SchemaTypeSource(TypeName(type), sqlName, precision, scale);
+        return new SchemaTypeSource(TypeName(type), sqlName, precision,
+            SqlTypeModifiers.NormalizeScale(DatabaseType.Decimal, precision, scale));
     }
 
     // The runtime's rule for a domain's or a type name's identifier (Sql.Schema's CompiledSchemaTypeNames).

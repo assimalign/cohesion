@@ -280,3 +280,9 @@ range contract. The v4 document shape is unchanged. C# int/string parameters and
 records cannot express these ranges at compile time; runtime declaration validation and the SDK's
 COHDBSDK106 provide parity without new public signatures. COHSQLS is the engine's script-history
 family, not this package's validation codes.
+
+Compiled table and schema snapshots normalize raw decimal columns and domains with a precision
+but no scale to scale zero, including records made with `with` and deserialized documents.
+The shared `NormalizeScale` rule also serves typed builders, the validator, SQL resolution,
+provisioning and SDK extraction. An omitted scale and explicit zero therefore have the same
+canonical document and hash; a bare decimal keeps both fields null. The v4 shape is unchanged.
