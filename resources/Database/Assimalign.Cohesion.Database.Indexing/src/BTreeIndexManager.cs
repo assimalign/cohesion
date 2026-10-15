@@ -147,7 +147,7 @@ public sealed class BTreeIndexManager
                 throw new IndexException($"An index named '{definition.Name}' already exists on object {objectId}.");
             }
 
-            long rootPageId = BTreeIndex.CreateRoot(_options.Storage, storageTransaction);
+            long rootPageId = BTreeIndex.CreateRoot(_options.Storage, storageTransaction, objectId);
             index = new BTreeIndex(
                 _options.Storage, _options.TransactionSource, _options.LockManager, objectId, definition, rootPageId);
             _indexes[key] = index;

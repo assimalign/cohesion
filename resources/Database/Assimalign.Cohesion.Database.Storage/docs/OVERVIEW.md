@@ -16,6 +16,8 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
   resizable through `Storage.BufferPoolCapacity`; engines expose it as an option (#1254).
 - **Page management** — the sealed `StoragePageManager` (allocation/free/retrieval/flush);
   the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
+  Owner-tagged data/index pages can be reclaimed in bounded transactional batches; reuse
+  begins only after commit, and recovery rebuilds the owner directories alongside the FSM.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages, storage transactions (`StorageTransaction`), and `StorageUnitIterator` full scans.
   A rollback restores each page in one copy that record reads confirm against, so a committed

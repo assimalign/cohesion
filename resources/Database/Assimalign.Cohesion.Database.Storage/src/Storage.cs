@@ -74,6 +74,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     // Commit-time frees take _ownerLock inside _transactionLock; nothing takes
     // _transactionLock while it holds _ownerLock.
     private readonly Dictionary<ulong, SortedSet<long>> _ownerPages = new();
+    private readonly Dictionary<ulong, SortedSet<long>> _indexOwnerPages = new();
     private readonly Dictionary<ulong, PageId> _currentWritePages = new();
     private readonly object _ownerLock = new();
 
@@ -1207,6 +1208,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                         // owner's current write page.
                         RegisterOwnerPage(pageOwner, (PageId)i);
                     }
+                    else if (type == PageType.Index && pageOwner != 0)
+                    {
+                        RegisterIndexOwnerPage(pageOwner, (PageId)i);
+                    }
 
                     // A page recovery did not rebuild has no image in the journal, so invariant P
                     // needs its LSN at or below the redo point. One above it outlived the journal
@@ -1429,31 +1434,33 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="type">The type of page to allocate.</param>
+    /// <param name="ownerId">The object's stable identity for an index page; zero for an unowned page.</param>
     /// <returns>A handle to the new pinned page.</returns>
     /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
-    public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type)
+    public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type, ulong ownerId = 0)
     {
         var owner = ValidateTransaction(transaction);
-        return AllocateTouchedPage(owner, type);
+        return AllocateTouchedPage(owner, type, ownerId);
     }
 
     /// <summary>
     /// Allocates a fresh page for a latched structure inside a transaction (see
-    /// <see cref="AllocatePageForWrite(StorageTransaction, PageType)"/>), and enlists the
+    /// <see cref="AllocatePageForWrite(StorageTransaction, PageType, ulong)"/>), and enlists the
     /// structure's latch with the transaction, as
     /// <see cref="OpenPageForWrite(StorageTransaction, PageId, StoragePageLatch)"/> does.
     /// </summary>
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="type">The type of page to allocate.</param>
     /// <param name="latch">The latch the structure's readers hold while they read its pages; the caller holds it exclusively.</param>
+    /// <param name="ownerId">The object's stable identity for an index page; zero for an unowned page.</param>
     /// <returns>A handle to the new pinned page.</returns>
     /// <exception cref="InvalidOperationException">The current thread does not hold <paramref name="latch"/> exclusively.</exception>
     /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
-    public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type, StoragePageLatch latch)
+    public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type, StoragePageLatch latch, ulong ownerId = 0)
     {
         var owner = ValidateTransaction(transaction);
         EnlistLatch(owner, latch);
-        var handle = AllocateTouchedPage(owner, type);
+        var handle = AllocateTouchedPage(owner, type, ownerId);
         owner.MarkLatchedPage((long)handle.Id);
         return handle;
     }
@@ -1476,12 +1483,18 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         transaction.EnlistLatch(latch);
     }
 
-    private StoragePageHandle AllocateTouchedPage(StorageTransaction owner, PageType type)
+    private StoragePageHandle AllocateTouchedPage(StorageTransaction owner, PageType type, ulong ownerId)
     {
         var handle = _pageManager!.AllocatePage(type);
 
         try
         {
+            var page = handle.Page;
+            page.OwnerId = ownerId;
+            if (type == PageType.Index && ownerId != 0)
+            {
+                RegisterIndexOwnerPage(ownerId, handle.Id);
+            }
             RegisterTouch(owner, handle);
             return handle;
         }
@@ -2098,7 +2111,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Releases every data page of the specified owner's record chain inside a
+    /// Releases a bounded batch of the specified owner's data and index pages inside a
     /// transaction: each page is retyped <see cref="PageType.Free"/> under the
     /// write-ahead log (a rollback restores the chain from the pre-image), and
     /// the pages return to the free-space map when the transaction commits, never
@@ -2106,12 +2119,38 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="ownerId">The owner whose chain to release.</param>
+    /// <param name="maximumPages">The positive maximum number of pages to release; defaults to the whole owner.</param>
     /// <returns>The number of pages released.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumPages"/> is not positive.</exception>
     /// <exception cref="StorageTransactionException">The transaction is not active, or a chain page is owned by another transaction.</exception>
-    public unsafe int FreeOwnerPages(StorageTransaction transaction, ulong ownerId)
+    public unsafe int FreeOwnerPages(StorageTransaction transaction, ulong ownerId, int maximumPages = int.MaxValue)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPages);
         var owner = ValidateTransaction(transaction);
-        long[] pages = SnapshotOwnerPages(ownerId);
+        long[] pages;
+        lock (_ownerLock)
+        {
+            // Copy only the batch, never the whole chain. Index pages are kept out of
+            // the record directory so row scans and empty-table probes remain unchanged.
+            var batch = new List<long>(Math.Min(maximumPages, 64));
+            if (_ownerPages.TryGetValue(ownerId, out var records))
+            {
+                foreach (long page in records)
+                {
+                    batch.Add(page);
+                    if (batch.Count == maximumPages) { break; }
+                }
+            }
+            if (batch.Count < maximumPages && _indexOwnerPages.TryGetValue(ownerId, out var indexes))
+            {
+                foreach (long page in indexes)
+                {
+                    batch.Add(page);
+                    if (batch.Count == maximumPages) { break; }
+                }
+            }
+            pages = batch.ToArray();
+        }
 
         foreach (long pageId in pages)
         {
@@ -2152,6 +2191,19 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             pages.Add((long)pageId);
             _currentWritePages[ownerId] = pageId;
+        }
+    }
+
+    private void RegisterIndexOwnerPage(ulong ownerId, PageId pageId)
+    {
+        lock (_ownerLock)
+        {
+            if (!_indexOwnerPages.TryGetValue(ownerId, out var pages))
+            {
+                pages = new SortedSet<long>();
+                _indexOwnerPages.Add(ownerId, pages);
+            }
+            pages.Add((long)pageId);
         }
     }
 
@@ -2210,6 +2262,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 if (_currentWritePages.TryGetValue(ownerId, out var current) && (long)current == pageId)
                 {
                     _currentWritePages.Remove(ownerId);
+                }
+
+                if (_indexOwnerPages.TryGetValue(ownerId, out var indexes))
+                {
+                    indexes.Remove(pageId);
+                    if (indexes.Count == 0) { _indexOwnerPages.Remove(ownerId); }
                 }
 
                 _freeSpaceMap.Free((PageId)pageId);

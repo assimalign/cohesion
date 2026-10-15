@@ -20,6 +20,15 @@ continues to compare raw bytes.
 
 ## The B+Tree implementation
 
+All newly allocated root and split pages carry their object's identity in the storage header
+(#1443). The tag is set before the WAL pre-image, including an allocation later rolled back.
+The storage owner directory for index pages is separate from its row directory. SQL's deferred
+table reclamation uses these tags to free complete retired trees, including abandoned allocations,
+after its reader horizon; no B-tree traversal or tree-wide latch is needed once that identity is
+unreachable. SQL format 11 requires this tagging, with no upgrade reader. The B-tree node format
+is unchanged. Standalone DROP INDEX still removes the directory registration; its tagged pages
+are reclaimable when the containing table is retired (index-only vacuum remains separate work).
+
 `BTreeIndexManager.Create(options)` composes B+Trees over `PageType.Index` pages —
 one node per page, a sorted offset directory with entry data growing from the body
 end, key capacity capped (`MaxKeyLength` = 1 KiB) so a node always holds several
