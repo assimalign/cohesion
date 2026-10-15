@@ -344,11 +344,12 @@ public sealed class SqlCastTests
     /// name that is not a built-in type to the engine's type catalog (phase E3), which does not know it.
     /// </summary>
     /// <param name="target">The unknown target name.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: unknown target fails before row evaluation with COHSQLE010")]
-    [InlineData("NOTATYPE")]
-    [InlineData("unknown_type")]
-    [InlineData("unknown_type(4)")]
-    public async Task Cast_UnknownTarget_ShouldRejectWhilePlanning(string target)
+    /// <param name="invalidModifier">Whether parsing rejects modifiers before catalog lookup.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: unknown target fails before row evaluation")]
+    [InlineData("NOTATYPE", false)]
+    [InlineData("unknown_type", false)]
+    [InlineData("unknown_type(4)", true)]
+    public async Task Cast_UnknownTarget_ShouldRejectBeforeExecution(string target, bool invalidModifier)
     {
         await using var engine = SqlDatabaseEngine.Create("cast-target", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
@@ -358,9 +359,18 @@ public sealed class SqlCastTests
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
             $"SELECT CAST(id AS {target}) FROM t WHERE id < 0;"));
 
-        error.ShouldNotBeOfType<DatabaseParseException>();
-        error.Message.ShouldStartWith("COHSQLE010: CAST target: type '" + target + "' does not exist", Case.Sensitive);
-        error.Message.ShouldContain("SqlDatabaseEngineBuilder.Types", Case.Sensitive);
+        if (invalidModifier)
+        {
+            error.ShouldBeOfType<DatabaseParseException>();
+            error.Message.ShouldContain("SQL0005", Case.Sensitive);
+            error.Message.ShouldContain("CAST target", Case.Sensitive);
+        }
+        else
+        {
+            error.ShouldNotBeOfType<DatabaseParseException>();
+            error.Message.ShouldStartWith("COHSQLE010: CAST target: type '" + target + "' does not exist", Case.Sensitive);
+            error.Message.ShouldContain("SqlDatabaseEngineBuilder.Types", Case.Sensitive);
+        }
     }
 
     /// <summary>Rejects CAST in schema expressions that cannot yet execute it honestly.</summary>

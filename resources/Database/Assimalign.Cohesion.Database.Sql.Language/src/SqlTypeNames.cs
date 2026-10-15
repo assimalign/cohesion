@@ -1,5 +1,6 @@
 using System;
 
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
@@ -21,33 +22,13 @@ public static class SqlTypeNames
     /// <param name="precision">The declared precision argument, when one was written.</param>
     /// <param name="scale">The declared scale argument, when one was written.</param>
     /// <param name="typeInfo">The resolved type identity and constraints.</param>
-    /// <returns>True when the name is part of the declared dialect; otherwise false.</returns>
+    /// <returns>True when the name and modifiers are valid in the declared dialect; otherwise false.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
     public static bool TryResolve(string name, int? length, int? precision, int? scale, out DatabaseTypeInfo typeInfo)
     {
         ArgumentNullException.ThrowIfNull(name);
 
-        DatabaseType? type = name.ToUpperInvariant() switch
-        {
-            "BOOLEAN" or "BOOL" => DatabaseType.Boolean,
-            "TINYINT" => DatabaseType.Int8,
-            "SMALLINT" or "INT2" => DatabaseType.Int16,
-            "INT" or "INTEGER" or "INT4" => DatabaseType.Int32,
-            "BIGINT" or "INT8" => DatabaseType.Int64,
-            "REAL" or "FLOAT4" => DatabaseType.Float32,
-            "FLOAT" or "FLOAT8" or "DOUBLE" => DatabaseType.Float64,
-            "DECIMAL" or "NUMERIC" => DatabaseType.Decimal,
-            "CHAR" or "CHARACTER" or "VARCHAR" or "TEXT" => DatabaseType.String,
-            "BINARY" or "VARBINARY" or "BLOB" or "BYTEA" => DatabaseType.Binary,
-            "DATE" => DatabaseType.Date,
-            "TIME" => DatabaseType.Time,
-            "TIMESTAMP" or "DATETIME" => DatabaseType.DateTime,
-            "TIMESTAMPTZ" => DatabaseType.DateTimeOffset,
-            "INTERVAL" => DatabaseType.TimeSpan,
-            "UUID" or "GUID" => DatabaseType.Guid,
-            "JSON" => DatabaseType.Json,
-            "JSONB" => DatabaseType.JsonBinary,
-            _ => null,
-        };
+        DatabaseType? type = SqlTypeModifiers.StorageType(name);
 
         if (type is null)
         {
@@ -62,7 +43,15 @@ public static class SqlTypeNames
             length = null;
         }
 
-        typeInfo = new DatabaseTypeInfo(type.Value, length, precision, scale);
+        if (SqlTypeModifiers.GetError(type, length, precision, scale) is not null)
+        {
+            typeInfo = null!;
+            return false;
+        }
+
+        // An explicit precision implies scale zero; a bare DECIMAL remains unconstrained.
+        typeInfo = new DatabaseTypeInfo(type.Value, length, precision,
+            type == DatabaseType.Decimal && precision is not null ? scale ?? 0 : scale);
         return true;
     }
 

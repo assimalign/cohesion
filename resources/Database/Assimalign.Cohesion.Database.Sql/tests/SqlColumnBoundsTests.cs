@@ -389,12 +389,12 @@ public sealed class SqlColumnBoundsTests
         (await RowsAsync(session, "SELECT * FROM existing_values")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1 });
     }
 
-    /// <summary>A scale wider than Decimal can store leaves representable fractions intact while still limiting integer digits.</summary>
-    /// <param name="type">The valid declaration with a scale beyond Decimal's range.</param>
+    /// <summary>A scale at Decimal's limit retains fractions while still limiting integer digits.</summary>
+    /// <param name="type">The valid declaration near Decimal's scale limit.</param>
     /// <param name="overflow">The first integer outside the declaration's precision.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Column bounds: wide numeric scale defaults retain fractions and enforce integer bounds")]
-    [InlineData("NUMERIC(30, 29)", "10")]
-    [InlineData("NUMERIC(29, 29)", "1")]
+    [InlineData("NUMERIC(28, 27)", "10")]
+    [InlineData("NUMERIC(28, 28)", "1")]
     public async Task Default_WideNumericScale_ShouldRetainFractionAndEnforcePrecision(string type, string overflow)
     {
         // Arrange
@@ -490,7 +490,7 @@ public sealed class SqlColumnBoundsTests
             }
             yield return [path, "NUMERIC", "1.23499999999999999999999999995"];
             yield return [path, "unscaled_amount", "1.23499999999999999999999999995"];
-            yield return [path, "wide_amount", "0.00000000000000000000000000001"];
+            yield return [path, "exact_amount", "0.00000000000000000000000000001"];
         }
     }
 
@@ -507,7 +507,7 @@ public sealed class SqlColumnBoundsTests
         var builder = SqlDatabaseEngine.CreateBuilder("numeric-text-overflow");
         builder.Types.Add(SqlType.CreateDomain("rounded_amount", SqlType.Decimal(3, 2)));
         builder.Types.Add(SqlType.CreateDomain("unscaled_amount", SqlType.Numeric));
-        builder.Types.Add(SqlType.CreateDomain("wide_amount", SqlType.Decimal(29, 29)));
+        builder.Types.Add(SqlType.CreateDomain("exact_amount", SqlType.Numeric));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("bounds");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -589,20 +589,21 @@ public sealed class SqlColumnBoundsTests
             .ShouldBe(new object?[] { 150m, 150m });
     }
 
-    /// <summary>The Decimal coefficient limit applies after scale-zero rounding, including symmetric negative values.</summary>
+    /// <summary>The maximum declared precision applies after scale-zero rounding, including symmetric negative values.</summary>
     /// <returns>The asynchronous test operation.</returns>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Column bounds: numeric text rounds at Decimal's coefficient limit")]
-    public async Task Cast_DecimalBoundaryText_ShouldRoundBeforeCheckingRepresentation()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Column bounds: numeric text rounds at the maximum declared precision")]
+    public async Task Cast_MaximumPrecisionText_ShouldRoundBeforeCheckingBounds()
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("decimal-boundary-text");
-        builder.Types.Add(SqlType.CreateDomain("whole_amount", SqlType.Decimal(29, 0)));
+        builder.Types.Add(SqlType.CreateDomain("whole_amount", SqlType.Decimal(28, 0)));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("bounds");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE bounded_values (id INT, v whole_amount)");
-        const string fits = "79228162514264337593543950335.49999999999999999999999999999";
-        const string overflows = "79228162514264337593543950335.5";
+        const decimal maximum = 9999999999999999999999999999m;
+        const string fits = "9999999999999999999999999999.49999999999999999999999999999";
+        const string overflows = "9999999999999999999999999999.5";
 
         // Act
         await ExecuteAsync(session, $"INSERT INTO bounded_values VALUES (1, '{fits}'), (2, '-{fits}')");
@@ -613,36 +614,61 @@ public sealed class SqlColumnBoundsTests
             $"UPDATE bounded_values SET v = '-{overflows}' WHERE id = 2"));
 
         // Assert
-        cast.ShouldHaveSingleItem().ShouldBe(new object?[] { decimal.MaxValue, decimal.MinValue });
+        cast.ShouldHaveSingleItem().ShouldBe(new object?[] { maximum, -maximum });
         (await RowsAsync(session, "SELECT v FROM bounded_values ORDER BY id")).Select(row => row[0])
-            .ShouldBe(new object?[] { decimal.MaxValue, decimal.MinValue });
+            .ShouldBe(new object?[] { maximum, -maximum });
         castError.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(numericOverflow);
         assignmentError.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(numericOverflow);
     }
 
-    /// <summary>A scale beyond Decimal's range is honored exactly when rounding carries into a representable value.</summary>
+    /// <summary>
+    /// Preserves converter regression coverage at Decimal's coefficient and scale limits. These
+    /// primitive rounding cases no longer require admitting invalid precision-29 declarations.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Column bounds: decimal text conversion retains exact coefficient and scale limits")]
+    public void ParseExactDecimal_BoundaryRounding_ShouldRequireExactRepresentation()
+    {
+        // Arrange
+        const string fits = "79228162514264337593543950335.49999999999999999999999999999";
+        const string overflows = "79228162514264337593543950335.5";
+        const string carry = "0.000000000000000000000000000095";
+        const string inexact = "0.000000000000000000000000000094";
+        const decimal tiny = 0.0000000000000000000000000001m;
+
+        // Act / Assert
+        SqlCastConverter.ParseExactDecimal(fits, targetScale: 0).ShouldBe(decimal.MaxValue);
+        SqlCastConverter.ParseExactDecimal("-" + fits, targetScale: 0).ShouldBe(decimal.MinValue);
+        Should.Throw<OverflowException>(() => SqlCastConverter.ParseExactDecimal(overflows, targetScale: 0));
+        Should.Throw<OverflowException>(() => SqlCastConverter.ParseExactDecimal("-" + overflows, targetScale: 0));
+        SqlCastConverter.ParseExactDecimal(carry, targetScale: 29).ShouldBe(tiny);
+        SqlCastConverter.ParseExactDecimal("-" + carry, targetScale: 29).ShouldBe(-tiny);
+        Should.Throw<OverflowException>(() => SqlCastConverter.ParseExactDecimal(inexact, targetScale: 29));
+        Should.Throw<OverflowException>(() => SqlCastConverter.ParseExactDecimal("-" + inexact, targetScale: 29));
+    }
+
+    /// <summary>The maximum declared scale rounds fractional carry and rejects carry beyond precision.</summary>
     /// <returns>The asynchronous test operation.</returns>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Column bounds: scale 29 text accepts exact carry and refuses approximate storage")]
-    public async Task Cast_WideScaleNumericText_ShouldStoreOnlyExactRoundedResult()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Column bounds: scale 28 text rounds carry and rejects precision overflow")]
+    public async Task Cast_MaximumScaleNumericText_ShouldRoundCarryAndRejectOverflow()
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("wide-scale-numeric-text");
-        builder.Types.Add(SqlType.CreateDomain("tiny_amount", SqlType.Decimal(29, 29)));
+        builder.Types.Add(SqlType.CreateDomain("tiny_amount", SqlType.Decimal(28, 28)));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("bounds");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE bounded_values (id INT, v tiny_amount)");
         const string carry = "0.000000000000000000000000000095";
-        const string inexact = "0.000000000000000000000000000094";
+        const string overflow = "0.99999999999999999999999999995";
         const decimal expected = 0.0000000000000000000000000001m;
 
         // Act
         await ExecuteAsync(session, $"INSERT INTO bounded_values VALUES (1, '{carry}'), (2, '-{carry}')");
         var cast = await RowsAsync(session, $"SELECT CAST('{carry}' AS tiny_amount), CAST('-{carry}' AS tiny_amount) FROM bounded_values WHERE id = 1");
         var castError = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session,
-            $"SELECT CAST('{inexact}' AS tiny_amount) FROM bounded_values WHERE id = 1"));
+            $"SELECT CAST('{overflow}' AS tiny_amount) FROM bounded_values WHERE id = 1"));
         var assignmentError = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
-            $"UPDATE bounded_values SET v = '-{inexact}' WHERE id = 2"));
+            $"UPDATE bounded_values SET v = '-{overflow}' WHERE id = 2"));
 
         // Assert
         cast.ShouldHaveSingleItem().ShouldBe(new object?[] { expected, -expected });

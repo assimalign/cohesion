@@ -81,7 +81,7 @@ scale). `table.Column(selector, sqlType)` declares a column of a named SQL type,
 engine registers (`"email"`) or a built-in type name with its arguments (`"VARCHAR(320)"`): the
 column keeps its member's storage type and the name as written, without length, precision or
 scale, and a member declared with two names is refused at the second. This package does not know
-the engine's types, so it checks only the name's shape (an identifier, optionally one or two
+the engine's domain registrations; it checks the built-in modifier ranges as well as the name's shape (an identifier, optionally one or two
 unsigned integer arguments; `CompiledSchemaTypeNames`), which also keeps the name safe to write
 into DDL; the SQL engine's build resolves it, built-in names first, and refuses an unknown name or
 a type not stored as the member is, before it touches any file. Because a declared type's name and
@@ -259,3 +259,24 @@ stays v4 and typed defaults remain literal-only. Script history has its own orde
 and catalog-generation marker, so unchanged reconciliation hashes nothing. Script-created tables
 and indexes are excluded from typed snapshot reconstruction; deleting script code undoes nothing.
 See Database.Sql's E4 section for recovery and the inline-execution/SDK owner-review decisions.
+
+## Modifier validation (#1438)
+
+The builders and compiled-schema validator link Sql.Language/shared/SqlTypeModifiers through
+CohesionSharedSource, as does Sdk.Database. The helper owns the built-in mapping, modifier ranges
+and argument splitter; it is stateless, internal and reflection-free. No Language assembly
+reference or public bridge is needed. Column(selector, sqlType) refuses an invalid modifier
+immediately with SqlSchemaValidationException, UnsupportedType, naming table.column.
+SqlTypeBuilder.Decimal uses the same exception and names the domain (the CLR type's simple name).
+Its previous ArgumentOutOfRangeException becomes the schema's existing coded error category.
+CompiledSchemaColumn fields and CustomType text, and CompiledSchemaType precision/scale, are
+validated when a SqlCompiledSchema is constructed or deserialized, closing the raw-record path.
+
+Precision is 1..28, scale 0..precision (an omitted scale means zero with an explicit precision),
+and explicit string/binary lengths are 1..10485760; omitted bounds remain unbounded. Domains take
+no modifiers at use sites. The identifier-only typed syntax stays unchanged; integer arguments
+now use the parser's Int32 rule rather than the previous nine-digit shape check. DIALECT.md is the
+range contract. The v4 document shape is unchanged. C# int/string parameters and the raw compiled
+records cannot express these ranges at compile time; runtime declaration validation and the SDK's
+COHDBSDK106 provide parity without new public signatures. COHSQLS is the engine's script-history
+family, not this package's validation codes.

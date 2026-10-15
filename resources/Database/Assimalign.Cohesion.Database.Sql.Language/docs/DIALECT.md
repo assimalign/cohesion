@@ -1270,11 +1270,8 @@ minimum. Inside `CAST` an unrepresentable literal stays a CAST failure.
 | `REAL`, `FLOAT4` | `Float32` |
 | `FLOAT`, `FLOAT8`, `DOUBLE` | `Float64` |
 | `DECIMAL[(p[,s])]`, `NUMERIC[(p[,s])]` | `Decimal` (single argument = precision) |
-| `CHAR[(n)]`, `CHARACTER[(n)]`, `VARCHAR[(n)]`, `TEXT` | `String` |
-
-In DDL, `n`, `p` and `s` are unsigned integer literals within the Int32 range;
-any other argument, or a third one, reports `SQL0003` at parse time (#1068).
-| `BINARY`, `VARBINARY`, `BLOB`, `BYTEA` | `Binary` |
+| `CHAR[(n)]`, `CHARACTER[(n)]`, `VARCHAR[(n)]`, `TEXT[(n)]` | `String` |
+| `BINARY[(n)]`, `VARBINARY[(n)]`, `BLOB[(n)]`, `BYTEA[(n)]` | `Binary` |
 | `DATE` / `TIME` / `TIMESTAMP`, `DATETIME` / `TIMESTAMPTZ` / `INTERVAL` | `Date` / `Time` / `DateTime` / `DateTimeOffset` / `TimeSpan` |
 | `UUID`, `GUID` | `Guid` |
 | `JSON` / `JSONB` | `Json` / `JsonBinary` |
@@ -1299,6 +1296,45 @@ which a `CAST` raises too, with an empty table). Plain columns and domain base t
 use the same bounds, described next. A native domain's name is an ASCII identifier. SQL-defined
 domains and functions may use delimited names containing punctuation, such as `"positive.type:amount"`.
 Function parameters, results, columns and CAST targets resolve the same domain name ignoring case.
+
+## Type modifiers at declaration (#1438)
+
+Every type spelling uses these ranges: CREATE TABLE, ALTER TABLE ADD COLUMN,
+ALTER TABLE ALTER COLUMN, CREATE DOMAIN, CREATE FUNCTION parameters and RETURNS,
+CAST, declared scripts, and typed schemas (including SDK extraction).
+
+| Type names | Accepted arguments | No arguments |
+| --- | --- | --- |
+| NUMERIC, DECIMAL | Precision p = 1..28; optional scale s = 0..p; omitted scale is zero | No declared precision or scale; values must still fit System.Decimal |
+| VARCHAR, CHAR, CHARACTER, TEXT | One length n = 1..10485760 Unicode scalar values | No declared length limit |
+| BINARY, VARBINARY, BLOB, BYTEA | One length n = 1..10485760 bytes | No declared length limit |
+| Every other built-in type and every domain | None (INT(5), BOOLEAN(1) and domain(1) are invalid) | The type's normal meaning |
+
+Arguments are one or two unsigned integer literals within Int32; negative, fractional,
+overflowing, empty or extra arguments are invalid. CHAR and CHARACTER remain VARCHAR
+aliases with the same length rule; no blank padding is introduced. The explicit string
+ceiling follows PostgreSQL's anychar_typmodin (src/backend/utils/adt/varchar.c:33-57)
+and MaxAttrSize (src/include/access/htup_details.h:620-626). The same ceiling for binary
+makes explicit bounded declarations consistent; a bound does not allocate a buffer.
+Unbounded VARCHAR and the other unbounded aliases remain unbounded. The numeric ceiling
+is Cohesion's System.Decimal policy, rather than PostgreSQL's wider NUMERIC range
+(src/backend/utils/adt/numeric.c:1332-1397). Types without modifiers follow PostgreSQL's
+refusal in src/backend/parser/parse_type.c:358-365.
+
+Invalid modifiers produce SQL0005 before execution, naming the column, domain, function
+parameter or return type, or CAST target. In process the text execution API throws
+DatabaseParseException; Database.Sql.Client receives ParseFailure with SQL0005 and the
+same object name in its message, and ConnectionUsable stays true. Malformed surrounding
+statement syntax remains SQL0003. Declared scripts are parsed during engine Build before
+any database is opened, and preserve SQL0005. Typed schema builders and compiled schema
+validation use SqlSchemaValidationException with UnsupportedType and the table/column
+or domain name; Sdk.Database uses COHDBSDK106 at the source location. COHSQLS001-005 are
+script receipt/ownership codes, not the typed-schema validation enum.
+
+The supported alteration is the full definition, for example
+ALTER TABLE t ALTER COLUMN c NUMERIC(28,2). PostgreSQL's ALTER COLUMN c TYPE ...
+form remains unsupported. Function overload identity and invocation semantics are
+unchanged; this rule validates their declared modifiers.
 
 ## Declared bounds on writes (#1418)
 
@@ -1349,9 +1385,8 @@ lengths can compare equal under the index's collation.
   grouping, and a decimal point without digits on both sides are rejected.
   Unquoted SQL numeric literals retain their separate lexical rules.
   Declared scale does not promise display padding or arbitrary precision.
-  A scale of 28 or more needs no rounding of a value
-  Decimal can hold; wider declarations do not extend its storage range. Modifier
-  application rejects precision below 1 or scale outside 0..precision.
+  Scale 28 needs no rounding of a value Decimal can hold. Declaration validation
+  rejects precision outside 1..28 or scale outside 0..precision.
 
 Bounds are checked before DML writes or DDL publication, so a failing statement
 stores no partial rows or added column. Its code leads the `DatabaseException`
@@ -1364,7 +1399,7 @@ now truncates character values, and all four paths round NUMERIC to its scale.
 ## Explicit conversion (`CAST`, #1022, E3)
 
 A target that is a built-in type name resolves through `SqlTypeNames` into
-`DatabaseTypeInfo`, which the parser checks for argument shape only: every built-in
+`DatabaseTypeInfo`, with the shared declaration modifier checks: every built-in
 type is a valid target. Any other name is left to the engine's type catalog (a
 domain, or `COHSQLE010` while planning). Which conversions exist is the engine's
 **cast registry** (phase E3), PostgreSQL's `pg_cast` (`castfunc`, `castcontext`): the
@@ -1453,10 +1488,10 @@ bounds.
   text still cannot fit Decimal exactly, or unscaled text cannot fit it exactly,
   conversion fails with the same `COHSQLE002` code.
   The output does not promise padding to the declared scale.
-- **Strings:** all four string aliases permit an optional positive Int32 length
-  n; bare aliases have no CAST length limit. Length counts Unicode scalar values.
+- **Strings:** all four string aliases permit an optional length
+  n from 1 through 10485760; bare aliases have no CAST length limit. Length counts Unicode scalar values.
   Longer results truncate at a character boundary; CHAR/CHARACTER do not pad. The
-  binary aliases permit an optional positive length too. Every other built-in
+  binary aliases permit the same optional length in bytes. Every other built-in
   target, and a domain, takes no parameters.
 - **Diagnostics and metadata:** a name that is not a built-in type and that the
   engine does not register as a domain fails while planning with `COHSQLE010`
@@ -1589,7 +1624,7 @@ function names are lexed but not supported (see the statement matrix).
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
 | `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
-| `SQL0005` | Error | Invalid CAST target parameters: malformed arguments, or arguments a built-in target does not take |
+| `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments, out-of-range length/precision/scale, or arguments a type does not take; names the declaration |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
 | `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
 | `SQL0100` | Information | Statement does not end with `;` |

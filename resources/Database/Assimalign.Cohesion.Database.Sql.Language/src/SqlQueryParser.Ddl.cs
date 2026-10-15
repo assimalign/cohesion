@@ -5,6 +5,7 @@ using System.Globalization;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 public sealed partial class SqlQueryParser
 {
@@ -202,22 +203,7 @@ public sealed partial class SqlQueryParser
             AddExpectedDiagnostic(ref lexer, "a column name");
         }
 
-        string dataType = string.Empty;
-        if (IsIdentifierOrKeyword(ref lexer))
-        {
-            dataType = CurrentText(ref lexer);
-            Advance(ref lexer);
-
-            // Handle parameterized types: VARCHAR(100), DECIMAL(18, 4)
-            if (lexer.Current.Type == TokenType.LeftParen)
-            {
-                dataType += ParseTypeArguments(ref lexer);
-            }
-        }
-        else
-        {
-            AddExpectedDiagnostic(ref lexer, $"a data type for column '{columnName}'");
-        }
+        string dataType = ParseDefinitionType(ref lexer, $"Column '{columnName}'");
 
         // Parse optional constraints
         bool isNullable = true;
@@ -295,7 +281,7 @@ public sealed partial class SqlQueryParser
     /// <c>VARCHAR(25 5)</c> became VARCHAR(255), <c>DECIMAL(10, 2, 5)</c> lost its third
     /// argument and <c>VARCHAR(MAX)</c> failed in the planner with a raw format error.
     /// </summary>
-    private string ParseTypeArguments(ref TokenLexer lexer)
+    private string ParseTypeArguments(ref TokenLexer lexer, string subject)
     {
         Advance(ref lexer); // consume (
         if (TryReadCastArgument(ref lexer, out int? first))
@@ -323,8 +309,8 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        AddSyntaxDiagnostic(ref lexer,
-            "Type arguments must be one or two unsigned integer literals within the Int32 range, as in VARCHAR(100) or DECIMAL(18, 4).");
+        AddTypeModifierDiagnostic(subject, SqlTypeModifiers.ArgumentShape, lexer.Current.Position,
+            lexer.Current.Position + lexer.Current.Value.Length);
         SkipToClosingParenthesis(ref lexer);
         return string.Empty;
     }

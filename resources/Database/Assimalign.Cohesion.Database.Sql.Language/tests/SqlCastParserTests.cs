@@ -69,7 +69,7 @@ public class SqlCastParserTests
     [InlineData("CHAR(1)", 1)]
     [InlineData("CHARACTER(5)", 5)]
     [InlineData("VARCHAR(100)", 100)]
-    [InlineData("TEXT(2147483647)", int.MaxValue)]
+    [InlineData("TEXT(10485760)", 10485760)]
     public void Parse_StringTarget_RetainsLength(string target, int length)
     {
         var statement = Parse($"SELECT CAST(42 AS {target});");
@@ -87,7 +87,6 @@ public class SqlCastParserTests
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - CAST: Leaves a name that is not a built-in type to the engine's type catalog (E3)")]
     [InlineData("NOTATYPE")]
     [InlineData("email")]
-    [InlineData("NOTATYPE(4)")]
     public void Parse_NameThatIsNotBuiltIn_LeavesItToTheEngine(string target)
     {
         string sql = $"SELECT CAST(x AS {target});";
@@ -148,6 +147,8 @@ public class SqlCastParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - CAST: Rejects invalid type arguments")]
+    [InlineData("NOTATYPE(4)", "does not accept type arguments")]
+    [InlineData("TEXT(2147483647)", "one positive length argument")]
     [InlineData("INT(4)", "does not accept type arguments")]
     [InlineData("BOOLEAN(1)", "does not accept type arguments")]
     [InlineData("DECIMAL(0)", "precision must be between 1 and 28")]

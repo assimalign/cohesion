@@ -190,7 +190,7 @@ public class SqlSchemaTests
         Should.Throw<ArgumentNullException>(() => SqlSchema.Create(null!, _ => { }));
         Should.Throw<ArgumentException>(() => SqlSchema.Create(" ", _ => { }));
         Should.Throw<ArgumentNullException>(() => SqlSchema.Create("orders", null!));
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlSchema.Create(
+        Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Create(
             "orders",
             database => database.Type<Money>(type => type.Decimal(2, 3))));
         Should.Throw<ArgumentException>(() => SqlSchema.Create(

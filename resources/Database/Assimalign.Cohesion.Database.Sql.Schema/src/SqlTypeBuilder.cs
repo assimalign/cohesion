@@ -1,6 +1,8 @@
 using System;
 
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema;
 
@@ -28,17 +30,15 @@ public sealed class SqlTypeBuilder
     }
 
     /// <summary>Represents the type as a fixed-precision decimal.</summary>
-    /// <param name="precision">The total number of digits.</param>
+    /// <param name="precision">The total number of digits, from 1 through 28.</param>
     /// <param name="scale">The number of fractional digits.</param>
-    /// <exception cref="ArgumentOutOfRangeException">The precision is less than one, the scale is negative, or the scale exceeds the precision.</exception>
+    /// <exception cref="SqlSchemaValidationException">The domain precision or scale is outside the SQL modifier ranges.</exception>
     public void Decimal(int precision, int scale)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(precision, 1);
-        ArgumentOutOfRangeException.ThrowIfNegative(scale);
-
-        if (scale > precision)
+        if (SqlTypeModifiers.GetError(DatabaseType.Decimal, null, precision, scale) is { } error)
         {
-            throw new ArgumentOutOfRangeException(nameof(scale), scale, "Decimal scale cannot exceed precision.");
+            throw new SqlSchemaValidationException([
+                new SqlSchemaValidationError(SqlSchemaValidationErrorCode.UnsupportedType, _clrType.Name, error)]);
         }
 
         _precision = precision;

@@ -8,6 +8,7 @@ using System.Linq;
 using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -127,7 +128,13 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
         error = null;
         if (!SqlTypeRules.TrySplit(text, out string name, out int? first, out int? second))
         {
-            error = $"the type arguments in '{text}' must be one or two unsigned integers";
+            error = SqlTypeModifiers.ArgumentShape;
+            return null;
+        }
+
+        error = SqlTypeModifiers.GetError(name, first, second);
+        if (error is not null)
+        {
             return null;
         }
 
@@ -138,12 +145,6 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
 
         if (!_domains.TryGetValue(name, out var domain))
         {
-            return null;
-        }
-
-        if (first is not null)
-        {
-            error = $"domain '{domain.Name}' takes no type arguments; its base type {domain.BaseType!.Name} fixes its length, precision and scale";
             return null;
         }
 

@@ -930,6 +930,26 @@ in a CHECK, an index or a generated expression, or applies `Implicit` contexts, 
 PostgreSQL's text forms of INTERVAL (the engine reads .NET's `[d.]hh:mm:ss`, so `'12'` is twelve
 days, not seconds); and a `COHESION_SCHEMA` view of casts.
 
+## Modifier admission (#1438)
+
+The parser validates modifiers for columns, domain bases and function signatures before planning,
+using the same internal SqlTypeModifiers source as CAST, SqlTypeNames, SqlTypeCatalog,
+SqlType.Decimal/VarChar, Sql.Schema and Sdk.Database. This source is linked with
+CohesionSharedSource; no public helper, interface, visibility grant or engine dependency is added
+to the schema package. TryResolveBuiltIn passes decimal's first argument once, as precision,
+so NUMERIC(p,s) no longer also carries a spurious MaxLength. Explicit precision defaults scale
+to zero consistently. Invalid catalog resolution reports the shared reason as defense in depth.
+
+DIALECT.md records precision 1..28, scale 0..precision, and explicit string/binary length
+1..10485760. Bare types retain their unbounded meaning, and CHAR stays a VARCHAR alias.
+Invalid SQL modifiers are SQL0005 naming the column, domain, function parameter/result or CAST
+target. Text execution throws DatabaseParseException; the server sends ParseFailure and keeps the
+connection usable. Declared scripts parse in Build before database I/O, so the same failure precedes
+any script effects. Typed schema declarations use their existing UnsupportedType validation enum;
+COHSQLS codes remain reserved for script receipts/ownership. There is no persisted-catalog upgrade
+or compatibility reader: nothing has shipped. The full-definition ALTER COLUMN form is covered;
+PostgreSQL's TYPE/USING syntax remains unsupported.
+
 ## Declared column bounds (#1418)
 
 `SqlCastConverter.ParseNumericText(text, target)` is the shared text-to-NUMERIC conversion:
@@ -986,13 +1006,12 @@ character probes whole: a longer string can compare equal under the index's coll
   leading/trailing decimal points are rejected in every text conversion path. An unquoted
   numeric DEFAULT keeps SQL literal syntax, including exponent notation; its original numeric
   text reaches the same exact rounding routine. This does not add arbitrary-precision storage.
-  A declared scale of 28 or more requires
-  no rounding of a value Decimal can represent, and an integer-digit allowance of 29 or more
-  adds no limit within that representation. Target-scale padding is not promised. The parser's
-  explicit built-in CAST precision range remains 1..28; domains and column metadata can carry
-  wider bounds without expanding Decimal's storage range. The shared routine rejects precision
-  below 1 or scale outside 0..precision, preserving DEFAULT's modifier validation while
-  accepting valid scales of 28 or more.
+  A declared scale of 28 requires no rounding of a value Decimal can represent. Target-scale
+  padding is not promised. Declaration validation now gives CAST, domains and column metadata
+  the same precision range 1..28 and scale range 0..precision (#1438). Bare NUMERIC retains the
+  full Decimal representation, including representable 29-digit coefficients. Converter tests
+  still cover rounding at the coefficient and scale limits directly, without admitting invalid
+  precision-29 declarations into a catalog.
 - **Errors.** `SqlEvaluationException` retains the existing message-prefix convention:
   `COHSQLE012` for character assignment overflow and the existing `COHSQLE002` for numeric
   modifier overflow or an inexact Decimal representation after any target-scale rounding.

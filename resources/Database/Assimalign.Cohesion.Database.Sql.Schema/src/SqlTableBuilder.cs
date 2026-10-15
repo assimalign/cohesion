@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema;
@@ -56,27 +57,37 @@ public sealed class SqlTableBuilder<TRow>
     /// </param>
     /// <exception cref="ArgumentException">
     /// <paramref name="selector"/> does not select a direct row member; <paramref name="sqlType"/> is
-    /// empty, white space or not a type name; or the member was already declared with another SQL type.
+    /// empty or white space; or the member was already declared with another SQL type.
     /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="selector"/> or <paramref name="sqlType"/> is null.</exception>
     /// <remarks>
-    /// This package does not know the engine's types: the name is kept as written, in the compiled
+    /// This package validates built-in modifiers but does not know the engine's domain registrations.
+    /// The name is kept as written, in the compiled
     /// schema's document and hash, and the SQL engine that provisions the schema resolves it as its DDL
     /// does, a built-in type name first and then a domain of its type catalog. The engine's build
     /// refuses a name it does not know, or a type not stored as the member's CLR type is (a domain
     /// over <c>VARCHAR(320)</c> for a <see cref="string"/> member), before it touches any file.
     /// </remarks>
+    /// <exception cref="SqlSchemaValidationException">The SQL type name is malformed or declares invalid length, precision or scale modifiers.</exception>
     public void Column(Expression<Func<TRow, object?>> selector, string sqlType)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sqlType);
+        string name = SelectMember(selector).Member.Name;
         if (!CompiledSchemaTypeNames.IsTypeName(sqlType))
         {
-            throw new ArgumentException(
-                $"'{sqlType}' is not a SQL type name: an identifier, optionally followed by one or two unsigned integer arguments in parentheses.",
-                nameof(sqlType));
+            throw new SqlSchemaValidationException([
+                new SqlSchemaValidationError(SqlSchemaValidationErrorCode.UnsupportedType, $"{_name}.{name}",
+                    $"'{sqlType}' is not a SQL type name: an identifier, optionally followed by one or two unsigned Int32 arguments.")]);
         }
 
-        string name = AddColumn(selector);
+        SqlTypeModifiers.TrySplit(sqlType, out string typeName, out int? first, out int? second);
+        if (SqlTypeModifiers.GetError(typeName, first, second) is { } error)
+        {
+            throw new SqlSchemaValidationException([
+                new SqlSchemaValidationError(SqlSchemaValidationErrorCode.UnsupportedType, $"{_name}.{name}", error)]);
+        }
+
+        AddColumn(selector);
         int index = _columnDefinitions.FindIndex(column => column.Name == name);
         var column = _columnDefinitions[index];
         if (column.SqlType is not null && !string.Equals(column.SqlType, sqlType, StringComparison.Ordinal))

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
@@ -19,7 +20,7 @@ public sealed partial class SqlQueryParser
         return name;
     }
 
-    private string ParseDefinitionType(ref TokenLexer lexer)
+    private string ParseDefinitionType(ref TokenLexer lexer, string subject)
     {
         if (!IsIdentifierOrKeyword(ref lexer))
         {
@@ -27,9 +28,19 @@ public sealed partial class SqlQueryParser
             return "?";
         }
         // Type text retains lexical delimiters so a quoted '(' cannot become a type argument.
+        int start = lexer.Current.Position;
         string type = CurrentText(ref lexer);
         Advance(ref lexer);
-        return lexer.Current.Type == TokenType.LeftParen ? type + ParseTypeArguments(ref lexer) : type;
+        if (lexer.Current.Type == TokenType.LeftParen)
+        {
+            type += ParseTypeArguments(ref lexer, subject);
+        }
+        if (SqlTypeModifiers.TrySplit(type, out string name, out int? first, out int? second) &&
+            SqlTypeModifiers.GetError(name, first, second) is { } error)
+        {
+            AddTypeModifierDiagnostic(subject, error, start, _lastTokenEnd);
+        }
+        return type;
     }
 
     private SqlCreateFunctionExpression ParseCreateFunction(ref TokenLexer lexer, int pos)
@@ -48,13 +59,13 @@ public sealed partial class SqlQueryParser
                         Advance(ref lexer);
                     }
                     string parameter = ParseDefinitionName(ref lexer, "a parameter name");
-                    parameters.Add(new SqlFunctionParameter(parameter, ParseDefinitionType(ref lexer)));
+                    parameters.Add(new SqlFunctionParameter(parameter, ParseDefinitionType(ref lexer, $"Function '{name}' parameter '{parameter}'")));
                 } while (lexer.Current.Type == TokenType.Comma);
             }
             ExpectDdlToken(ref lexer, TokenType.RightParen, "')' after function parameters");
         }
         ExpectKeyword(ref lexer, "RETURNS", "RETURNS and a result type");
-        string returnType = ParseDefinitionType(ref lexer);
+        string returnType = ParseDefinitionType(ref lexer, $"Function '{name}' return type");
         string volatility = "VOLATILE";
         bool strict = false, sawVolatility = false, sawNullBehavior = false;
         while (!IsAtEnd(ref lexer) && !IsKeyword(ref lexer, "RETURN"))
@@ -111,7 +122,7 @@ public sealed partial class SqlQueryParser
                     {
                         Advance(ref lexer);
                     }
-                    types.Add(ParseDefinitionType(ref lexer));
+                    types.Add(ParseDefinitionType(ref lexer, $"Function '{name}' parameter type"));
                 } while (lexer.Current.Type == TokenType.Comma);
             }
             ExpectDdlToken(ref lexer, TokenType.RightParen, "')' after the function signature");
@@ -124,7 +135,7 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer);
         string name = ParseDefinitionName(ref lexer, "a domain name");
         ExpectKeyword(ref lexer, "AS", "AS and a base type");
-        string type = ParseDefinitionType(ref lexer);
+        string type = ParseDefinitionType(ref lexer, $"Domain '{name}'");
         SqlExpression? defaultValue = null, check = null;
         string? constraint = null;
         bool notNull = false;

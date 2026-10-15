@@ -118,8 +118,8 @@ compiler's `DuplicateDeclaration`).
 
 `table.Column(selector, sqlType)` and `schema.Type<T>` (E3, design §5.7) extract with the same
 parity. The SQL type is a compile-time string constant kept as written (`COHDBSDK104` when it is
-not one), checked only for the runtime's shape, an identifier with up to two unsigned integer
-arguments (`COHDBSDK106`), and a member declared with two names is `COHDBSDK105`. **Domains are
+not one), checked for the runtime's identifier/Int32 argument shape and shared modifier
+ranges (`COHDBSDK106`), and a member declared with two names is `COHDBSDK105`. **Domains are
 invisible to the task** as functions are: a column of a domain the application registers on its
 engine builder compiles into the artifact, and the engine's build resolves the name before it
 touches a file. `schema.Type<T>(t => t.Decimal(p, s))` is a domain named for `T`'s simple name, as
@@ -164,7 +164,7 @@ The diagnostics:
 | `COHDBSDK103` | A schema, table, type or principal callback is not an inline lambda. |
 | `COHDBSDK104` | An operation the DSL does not support, or a CHECK's SQL text, column's SQL type, or DefaultSql literal that is not a non-empty constant. |
 | `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, a conflicting column type or DEFAULT literal, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
-| `COHDBSDK106` | A semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
+| `COHDBSDK106` | Invalid type modifiers naming the table/column or domain; or a semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
 | `COHDBSDK108` | `SqlSchemaBuilder.Principal`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal and grant DDL exists. (`SqlSchemaBuilder.Type<T>` was refused here too until E3 made it a domain.) |
 | `COHDBSDK109` | A typed Default value is not a C# compile-time constant; use DefaultSql with a constant SQL literal. |
 
@@ -256,3 +256,15 @@ engine test `BuildAsync_VerifyWithoutScriptsAfterScriptedApply_ShouldAcceptTheSc
 this. Making the pipeline itself script-aware (an artifact carrying each script's name, digest and
 body, applied through a receipt-aware runner rather than plain SQL files) is
 [#1504](https://github.com/assimalign/cohesion/issues/1504).
+
+## Type modifier parity (#1438)
+
+The extractor links the stateless internal Sql.Language/shared/SqlTypeModifiers through
+CohesionSharedSource, alongside the schema package and engine. Column SQL text and Decimal(p,s)
+use one mapping and rule (named Decimal arguments bind by parameter name in either order):
+p 1..28, s 0..p, string/binary length 1..10485760, no modifiers on other
+types or domain references. Omitted bounds stay unbounded. Invalid declarations emit COHDBSDK106
+with their table/column or domain name and source location, and write no schema artifact. The
+compiled-schema validator also covers raw metadata. No new diagnostic id or public API is added;
+valid artifacts and hashes retain runtime parity. Declared scripts remain COHDBSDK110 because
+only runtime provisioning owns their receipts.
