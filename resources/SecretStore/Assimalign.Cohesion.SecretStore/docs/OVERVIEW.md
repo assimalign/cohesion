@@ -12,6 +12,9 @@ in `Assimalign.Cohesion.SecretStore.Hosting`.
 - `ISecretStoreApplicationBuilder` owns secret and certificate declarations and builds an `ISecretStoreApplication`.
 - `ISecretStoreApplicationBuilder.AddSecret` declares first-start secret bytes without overwriting
   later durable versions.
+- `SecretStoreSeedPath` validates those ordinal logical paths. It rejects blank text and exact
+  `trusted-issuers.json`; the builder also refuses `default`. String arguments convert implicitly,
+  so `builder.AddSecret("apps/api/client-secret", secretBytes)` retains its usual syntax.
 - `ISecretStoreApplicationBuilder.AddCertificateAuthority` declares the store's root or
   intermediate authority bootstrap.
 - `CertificateAuthorityOptions` selects explicit PEM seed material, optional Platform enrollment,

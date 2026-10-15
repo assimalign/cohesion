@@ -179,6 +179,19 @@ bad file can't wedge the ring.
 `FileSystemKeyRepository` writes one `<keyId>.key` file via a temp-then-atomic-move so a
 concurrent reader never sees a partial document.
 
+`KeyDocument` takes a generated `KeyDocumentName`, which owns the existing repository rule:
+non-empty, no character from `Path.GetInvalidFileNameChars()`, no `..` substring, and not
+`Path.IsPathRooted`. Invalid strings fail conversion before document construction;
+`KeyDocument` also refuses `default(KeyDocumentName)`, which bypasses value validation.
+Repository reads use `TryCreate` and skip foreign files with invalid names, preserving the
+remaining documents. Storage uses the validated name without repeating its grammar.
+
+This is deliberately the current platform's file-name rule, not a portable-name restriction.
+Both slash and backslash are refused on Windows; Unix refuses slash but accepts backslash as
+a literal file-name character. Other invalid characters and rooted paths also follow the
+platform's `Path` APIs. Names retain exact spelling and use `Ordinal` comparison, matching
+the original string identity rather than adopting a file system's case-folding behavior.
+
 ## Composition happens elsewhere
 
 This library ships **no** DI, logging, configuration, or hosted-service integration. A consumer
@@ -253,3 +266,21 @@ Both conversions are binary-breaking: creation return types change, and the repo
 is removed. Recompile consumers and apply the repository rename. The interfaces, purpose
 isolation, rotation, persistence and argument validation are unchanged. No compatibility facade
 remains. Advisory: not applicable: API shape.
+
+## Preview.1 compatibility — key document names (#1487)
+
+`KeyDocument`'s constructor parameter and `Name` property change from `string` to
+`KeyDocumentName`, a binary break. Implicit string conversions preserve ordinary valid
+construction and string assignment; code that depends on the exact property or constructor
+type must migrate and consumers must recompile. Invalid non-empty names now throw
+`ArgumentException` during conversion/construction, instead of surviving construction until
+`StoreKey` throws `DataProtectionException`. Null and empty names still fail with
+`ArgumentException`; their parameter name changes from `name` to the value object's `value`.
+Files whose document names fail the rule are skipped by `GetAllKeys` instead of being returned.
+No filename restrictions or public repository methods are added.
+
+The delayed-validation defect exists in 10.0.0-preview.1. Its file-system store already
+refused unsafe names before any write, and the key ring constructs names from generated key
+IDs. No unauthenticated remote path to arbitrary document names was found. The change moves
+validation to the public boundary; it does not close a demonstrated traversal or remote
+security exploit.

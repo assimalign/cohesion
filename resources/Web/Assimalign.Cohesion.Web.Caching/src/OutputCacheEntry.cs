@@ -37,8 +37,9 @@ public sealed class OutputCacheEntry
     /// <param name="createdAt">The instant the entry was produced, used to compute the served <c>Age</c>.</param>
     /// <param name="validFor">The time-to-live after which the store treats the entry as absent. Must be positive.</param>
     /// <param name="tags">The eviction tags this entry participates in. Never <see langword="null"/>.</param>
-    /// <param name="varyBy">The response <c>Vary</c> field-names this representation depends on. Never <see langword="null"/>.</param>
+    /// <param name="varyBy">The response <c>Vary</c> field-names this representation depends on. Validated and copied; never <see langword="null"/>.</param>
     /// <exception cref="ArgumentNullException"><paramref name="headers"/>, <paramref name="tags"/>, or <paramref name="varyBy"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A <paramref name="varyBy"/> name is not an RFC 9110 field-name token.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="validFor"/> is not positive.</exception>
     public OutputCacheEntry(
         HttpStatusCode statusCode,
@@ -58,14 +59,25 @@ public sealed class OutputCacheEntry
             throw new ArgumentOutOfRangeException(nameof(validFor), validFor, ErrorMessages.CacheTimeToLiveInvalid);
         }
 
+        string[] varyBySnapshot = new string[varyBy.Count];
+        for (int i = 0; i < varyBySnapshot.Length; i++)
+        {
+            if (!HttpFieldName.TryCreate(varyBy[i], out HttpFieldName name))
+            {
+                throw new ArgumentException(ErrorMessages.CacheFieldNameInvalid, nameof(varyBy));
+            }
+
+            varyBySnapshot[i] = name.Value;
+        }
+
         StatusCode = statusCode;
         Headers = headers;
         Body = body;
         CreatedAt = createdAt;
         ValidFor = validFor;
         Tags = tags;
-        VaryBy = varyBy;
-        Size = ComputeSize(headers, body, varyBy);
+        VaryBy = Array.AsReadOnly(varyBySnapshot);
+        Size = ComputeSize(headers, body, varyBySnapshot);
     }
 
     /// <summary>
@@ -103,6 +115,7 @@ public sealed class OutputCacheEntry
     /// Gets the response <c>Vary</c> field-names this representation depends on. For a vary marker this
     /// is the set of request headers a lookup must fold into the secondary cache key.
     /// </summary>
+    /// <remarks>The names are validated at construction and held in an immutable snapshot.</remarks>
     public IReadOnlyList<string> VaryBy { get; }
 
     /// <summary>
@@ -126,12 +139,12 @@ public sealed class OutputCacheEntry
         for (int i = 0; i < headers.Count; i++)
         {
             OutputCacheHeader header = headers[i];
-            size += header.Name.Length * 2L;
+            size += header.Name.Value.Length * 2L;
 
-            IReadOnlyList<string?> values = header.Values;
+            IReadOnlyList<HttpFieldValue?> values = header.Values;
             for (int v = 0; v < values.Count; v++)
             {
-                size += (values[v]?.Length ?? 0) * 2L;
+                size += (values[v]?.Value.Length ?? 0) * 2L;
             }
         }
 

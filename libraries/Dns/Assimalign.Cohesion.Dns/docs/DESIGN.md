@@ -134,6 +134,16 @@ the dedicated codes for the specific failure mode.
    / MX / TXT / SOA / SRV plus the EDNS OPT pseudo-record. Anything
    else round-trips through `DnsUnknownRecord` per RFC 3597.
 
+### TXT character-string ownership
+
+`DnsTxtRecord` copies its input collection before validating the copy and exposes
+that snapshot through a read-only wrapper. A caller cannot replace, append, or
+remove strings through either the original collection or `Strings`. Strings are
+immutable, so no element-level deep copy is needed. Each non-null string must
+encode to at most 255 UTF-8 octets (RFC 1035 §3.3.14); an empty string is valid,
+and the limit applies independently to each string, not the whole record. This
+keeps the existing `IReadOnlyList<string>` API without adding a public value type.
+
 ### EDNS (RFC 6891)
 
 `DnsOptRecord` re-purposes the underlying record fields per
@@ -200,6 +210,26 @@ Assert.Equal("example.com.", b.Value);   // preserved
 The trailing dot marks a fully-qualified name in presentation form; the
 value type treats names with and without the trailing dot as equal so
 callers don't have to be defensive.
+
+The root `.` and `default(DnsName)` remain equivalent. After removing the one
+optional trailing dot, every non-root label must be nonempty; `a..` is invalid.
+The existing limits remain 63 UTF-16 characters per label and 253 characters in
+the presentation name excluding its optional trailing dot. Non-ASCII input is
+still accepted and preserved, and equality retains invariant lowercasing.
+These checks are not a complete DNS presentation parser or an IDNA conversion;
+callers needing internationalized wire names must supply their ASCII form.
+The handwritten value object stays because its default-root and trailing-dot
+identity differ from the generated string wrapper's contract.
+
+### Compatibility with 10.0.0-preview.1
+
+Names with an empty label before the root terminator (for example `a..`) now
+throw `ArgumentException`. Mutating a collection passed to `DnsTxtRecord` no
+longer changes the record or its serialized bytes, and mutation through an
+`IList<string>` cast of `Strings` throws `NotSupportedException`. Construct a new
+record to change its text. Public signatures, valid TXT encoding, root behavior,
+trailing-dot equivalence, case handling and non-ASCII name behavior are unchanged.
+These are intentional behavioral breaks under the preview compatibility policy.
 
 ## Adding a new package to the family
 

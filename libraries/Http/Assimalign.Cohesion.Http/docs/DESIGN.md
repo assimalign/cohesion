@@ -6,6 +6,25 @@ the design decisions behind the parts of the core that are easy to get wrong;
 it grows as areas are touched rather than attempting to re-document the whole
 surface at once.
 
+## Configured field grammar (#1476)
+
+`HttpFieldName` and `HttpFieldValue` are generated value objects for composition.
+They are base HTTP grammar (decision V2), with no feature-specific contract.
+The name is a non-empty RFC 9110 §5.1 token, refuses pseudo-headers, and uses
+`OrdinalIgnoreCase` identity while preserving spelling. Values use `Ordinal`
+identity, permit empty content and internal HTAB, and reject every other RFC CTL
+(`%x00-1F / %x7F`) and boundary SP/HTAB. All RFC 9110 §5.5 obs-text (`%x80-FF`),
+including Unicode C1 controls (`U+0080-U+009F`), is preserved as field content,
+matching the existing wire normalization rule.
+Their `IsValid` methods compose the existing span-based field syntax checks;
+`TryCreate` supports non-throwing composition. Nullable string conversions preserve
+absence, and consumers reject `default` wherever an actual value is required.
+
+Neither `HttpHeaderKey` nor `HttpHeaderValue` changes, so request parsing does not
+acquire configuration validation. Compared with 10.0.0-preview.1 these two types
+and their generated constructors, conversion, comparison and JSON surfaces are
+additions. Feature packages document the configuration signatures they adopt.
+
 ## Field sections, repeated fields, and trailers
 
 ### The model
@@ -615,6 +634,22 @@ is no floating-point drift when comparing `q=0.7` against `q=0.700` — and keep
 RFC 9110 §12.4.2 grammar (at most three fractional digits, range 0–1) enforceable in
 `TryParse` without rounding heuristics.
 
+### Constructor and parser agreement (#1477)
+
+`HttpMediaTypeParameter`, `HttpForwardedParameter`, `HttpCacheControlExtension`,
+and `HttpQualityValue` reject non-token names or preference values in their public
+constructors with `ArgumentException` and a resource-backed message. They reuse
+`HttpFieldName.IsValid` for RFC 9110 §5.6.2's token grammar, the same grammar their
+parsers apply through the shared field-syntax implementation. Wildcards and every
+other legal token character retain their spelling; optional parameter values keep
+their existing quoted-string semantics. Existing null/empty argument guards remain.
+No public member or value type is added (decision V3).
+
+**Breaking behavior from 10.0.0-preview.1:** these constructors previously retained
+non-empty invalid names and tokens even though their parsers discarded or rejected
+them. They now refuse those inputs during construction. Parser behavior and valid
+inputs are unchanged.
+
 ### Why static parsers/selectors, not interfaces
 
 `HttpAcceptParser` and `HttpContentNegotiation` are `static` helper classes, following
@@ -691,8 +726,18 @@ source break is accepted during the previews.
 
 `CreateMap` still accepts a key with or without its leading dot. A key is always an
 extension, so there is nothing to disambiguate: the key `gltf` maps `.gltf`, and a file
-named `gltf` still maps to nothing. A key with an interior dot (`.tar.gz`) is stored but
-never matched, because neither lookup produces one.
+named `gltf` still maps to nothing. After normalizing the optional leading dot,
+`CreateMap` applies the same `IsExtension` predicate as extension lookup (#1477).
+An empty key, a dot without a suffix, an interior dot (`.tar.gz`) or a path separator
+therefore throws a resource-backed `ArgumentException` during map creation. No new
+extension type or public member is needed. Empty mapping values retain the existing
+skip behavior once their key has passed validation.
+
+**Breaking behavior from 10.0.0-preview.1:** invalid keys previously ignored or
+retained by `CreateMap` now throw. In particular `.tar.gz` and `.` could never be
+matched even by preview.1's combined lookup. Keys containing path separators could
+match that older permissive lookup but cannot match either current lookup; they are
+also refused at composition. Valid bare and dotted single extensions are unchanged.
 
 ### AOT posture
 
@@ -792,6 +837,28 @@ Any malformed token, out-of-range Integer/Date (±999,999,999,999,999), over-lon
 content fails the *entire* field. This is what lets a consumer treat a successful parse as
 a fully validated value.
 
+### Construction uses the serialized range (#1478)
+
+`FromDecimal` checks the result of rounding to three fractional digits with
+round-half-to-even, as [RFC 9651 §4.1.5](https://www.rfc-editor.org/rfc/rfc9651.html#section-4.1.5)
+requires during serialization. For example, `999999999999.9994` is accepted and
+serializes as `999999999999.999`, but `999999999999.9995` is refused because it
+rounds to a thirteen-digit integer component. Negative values follow the same
+rule. The original decimal remains available through `AsDecimal`; validation
+does not normalize stored values. Integer factories already enforce the
+inclusive range ±999,999,999,999,999 and retain that behavior.
+
+`FromDisplayString` checks UTF-16 surrogate pairing before retaining the string.
+This ensures it consists of the Unicode scalar values allowed by RFC 9651 §3.3.8;
+valid surrogate pairs, empty strings, and Unicode scalar boundaries still
+serialize and parse without replacement. Validation scans without allocating an
+encoded byte array, leaving encoding to serialization.
+
+**Breaking from 10.0.0-preview.1:** decimals that round out of range now throw
+`ArgumentOutOfRangeException` at `FromDecimal`, and unpaired surrogates now throw
+`ArgumentException` at `FromDisplayString`, rather than allowing an instance
+whose later serialization throws `HttpException`. Public signatures are unchanged.
+
 ### AOT posture
 
 No reflection, no runtime codegen, no dynamic serialization — a parser built from span
@@ -878,6 +945,18 @@ This core type only formats and parses the value; see the Http.Connections `DESI
 advertisement design. `ma`/`persist` are modeled as data for a future client-side alternative
 cache; honoring a received `Alt-Svc` is a client concern this library does not implement.
 
+### Host validation (#1476)
+
+The constructor and `Http3` factory validate non-null hosts through `HttpFieldValue`
+and additionally refuse SP/HTAB and C1 controls (`U+0080-U+009F`). This host-specific
+restriction does not apply to generic field content, which permits all obs-text.
+Null and empty hosts retain same-host meaning;
+case-insensitive host equality and quoted-string escaping remain unchanged.
+`TryParse` checks the same rule before construction and returns false for an unsafe
+host. This is a behavioral break from 10.0.0-preview.1: control-bearing or spaced
+hosts now fail before formatting or advertising a response. Public signatures stay
+unchanged; the rule is a composition check on the shared grammar type.
+
 ### Tolerant parsing, strict port
 
 Parsing skips OWS, ignores unrecognized parameters (RFC 7838 §3), and treats an empty alt-authority
@@ -909,6 +988,16 @@ carries two generic seam members for it and no feature contract:
   CONNECT latches, so `CanAcceptTunnel` is `false` once `AcceptTunnelAsync` has been called, whether
   or not that call succeeded. The member's documentation carries the full contract. HTTP/1.1's
   control reports `false`, because its `CONNECT` and upgrades take the whole connection over instead.
+
+`Protocol`'s initializer now refuses a non-null value unless `HttpFieldName.IsValid`
+accepts its RFC 9110 token grammar (#1477); spaces, `/`, delimiters and controls
+throw a resource-backed `ArgumentException`. Null continues to mean absent.
+`ValidateExtendedConnect` applies that rule before the transport constructs a context,
+so malformed peer input follows the existing stream-error path. `IsExtendedConnect`
+also requires a token. The `Protocol` initializer postdates 10.0.0-preview.1;
+the validator and classifier existed then, so refusing a non-token protocol on the
+wire or returning false from classification is a breaking behavior change against
+that release. No public surface is added.
 
 The application-facing feature, `IHttpExtendedConnectFeature` (`context.ExtendedConnect`), ships in
 `Assimalign.Cohesion.Http.ExtendedConnect`. Its interceptor installs the feature from `Protocol` and
@@ -1800,6 +1889,33 @@ Interpreting an `X-Forwarded-For` entry as an address is left to the consumer vi
 `HttpForwardedNode.TryParse`, so the same list type serves all three
 `X-Forwarded-*` headers even though their entries mean different things (address
 vs. scheme vs. host).
+
+### Numeric port boundaries (#1478)
+
+`HttpForwardedNode.FromIPAddress` accepts an absent port or a number from 0
+through 65535; an out-of-range number throws `ArgumentOutOfRangeException`.
+Parsing applies both the [RFC 7239 §6](https://www.rfc-editor.org/rfc/rfc7239.html#section-6)
+`1*5DIGIT` grammar and, for IPv4 or IPv6 nodes, the endpoint port range. It
+preserves valid leading zeros and obfuscated ports. Both IPv4 and bracketed
+IPv6 retain their round-trip behavior at 0 and 65535.
+
+An `unknown` or obfuscated nodename has no IP endpoint, so its numeric port
+keeps the full `1*5DIGIT` grammar, through 99999. RFC 7239 §6 explicitly leaves
+interpretation of ports on `unknown` to the proxy. `Port` preserves the spelling
+and `PortNumber` exposes the number without claiming it is an endpoint port.
+Thus `for="unknown:99999";proto=https;host=example.com` round-trips as a whole
+header, and the forwarding middleware can apply a trusted hop's scheme and host
+while retaining the original remote endpoint. Node, whole-header (`for` and
+`by`) and resolver regressions cover this case.
+
+**Breaking from 10.0.0-preview.1:** the factory previously accepted every
+nonnegative `int`, and the parser accepted numeric ports through 99999 based
+only on digit count. The factory now rejects numbers above 65535 immediately;
+`TryParse` returns false and `Parse` throws `HttpException` for IP-node numeric
+ports 65536–99999 that previously parsed. Forwarded elements containing those
+IP nodes are consequently malformed too. Addressless nodes retain preview.1's
+five-digit port behavior; this correction removes the overly broad rejection
+introduced during #1478. Public signatures are unchanged.
 
 ### Deterministic rejection is a security property
 

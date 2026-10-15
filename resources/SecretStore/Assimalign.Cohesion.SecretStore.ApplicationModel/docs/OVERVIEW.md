@@ -88,6 +88,23 @@ IssueCertificate honors the supplied subject and SAN set. An existing certificat
 identity is rejected until deleted; renewal preserves its identity. Private key and leaf storage
 reuse the existing protected CA repository.
 
+Command paths, source expressions, leaf names and individual alternative names are generated
+value objects in the `Assimalign.Cohesion.ApplicationModel` namespace. String arguments convert
+implicitly and invalid values are rejected during composition:
+
+```csharp
+secrets.AddSecret("orders/key", "parameter:credential");
+secrets.IssueCertificate("api", "CN=api.example", ["api.example", "*.internal.example", "127.0.0.1"]);
+```
+
+An existing string collection must be projected explicitly, for example
+`names.Select(static name => (SecretStoreSubjectAlternativeName)name)`. Untrusted input can use
+the generated `TryCreate` methods without exceptions. Required values reject `default` at the
+verb boundary. Paths exclude `trusted-issuers.json` and `certs/`; resource sources contain one
+colon; leaf names cannot be dot segments or contain slash/backslash. Alternative names use the
+certificate encoder's IP/IDN grammar, including supported wildcards. These composition checks
+and typed signatures are breaking changes from 10.0.0-preview.1; see [Design](DESIGN.md).
+
 The control plane also accepts `cohesion.trust.add`, which the SDK manifest deliberately does not
 advertise. It is the gateway's trust-store channel, sent only by the `SecretStoreTrustedIssuerStore`
 provider a gateway registers with `builder.UseSecretStore(store).AsTrustStore()`

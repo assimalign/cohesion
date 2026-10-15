@@ -193,7 +193,7 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
 
         string returnUrl = properties?.RedirectUri ?? CurrentRequestPath();
         _context.Response.Headers[HttpHeaderKey.Location] =
-            AppendReturnUrl(_options.LoginPath, _options.ReturnUrlParameter, returnUrl);
+            AppendReturnUrl(_options.LoginPath.Value, _options.ReturnUrlParameter, returnUrl);
         _context.Response.StatusCode = HttpStatusCode.Found;
         return Task.CompletedTask;
     }
@@ -209,7 +209,7 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
 
         string returnUrl = properties?.RedirectUri ?? CurrentRequestPath();
         _context.Response.Headers[HttpHeaderKey.Location] =
-            AppendReturnUrl(_options.AccessDeniedPath, _options.ReturnUrlParameter, returnUrl);
+            AppendReturnUrl(_options.AccessDeniedPath.Value, _options.ReturnUrlParameter, returnUrl);
         _context.Response.StatusCode = HttpStatusCode.Found;
         return Task.CompletedTask;
     }

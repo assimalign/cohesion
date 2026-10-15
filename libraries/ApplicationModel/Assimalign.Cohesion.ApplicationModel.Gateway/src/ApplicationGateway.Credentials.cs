@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -132,22 +133,14 @@ public abstract partial class ApplicationGateway
     // the telemetry headers document names its scheme, so it is the one carrier that accepts another.
     private static string RequireBearer(ApplicationCredential credential, ApplicationCredentialPurpose purpose)
     {
-        if (!string.Equals(credential.Scheme, bearerScheme, StringComparison.OrdinalIgnoreCase))
+        if (credential.Scheme != (ApplicationCredentialScheme)bearerScheme)
         {
             throw new InvalidOperationException(
-                $"The registered credential issuer returned a '{credential.Scheme}' credential for purpose " +
-                $"'{purpose}', but that credential is presented as a bearer token. Return a Bearer credential, " +
-                "or null to use the default ES256 application-key issuer.");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CredentialSchemeNotBearer,
+                    credential.Scheme, purpose));
         }
 
-        if (credential.Value.AsSpan().IndexOfAny("\r\n") >= 0)
-        {
-            throw new InvalidOperationException(
-                $"The registered credential issuer returned a credential for purpose '{purpose}' whose value " +
-                "contains a line break; a bearer credential must be a single header-safe token.");
-        }
-
-        return credential.Value;
+        return credential.Value.Value;
     }
 
     private void RemoveResourceCredentials(ApplicationName application)

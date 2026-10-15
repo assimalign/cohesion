@@ -230,21 +230,21 @@ public static class HttpFieldNormalization
 
     /// <summary>
     /// Determines whether a request is an <em>extended CONNECT</em> (RFC 8441 /
-    /// RFC 9220): a <c>CONNECT</c> request that carries a non-empty
+    /// RFC 9220): a <c>CONNECT</c> request that carries a token-valued
     /// <c>:protocol</c> pseudo-header. Shared by HTTP/2 and HTTP/3 so both
     /// recognize the extension identically.
     /// </summary>
     /// <remarks>
-    /// An empty <c>:protocol</c> is not a protocol name (a token is
-    /// <c>1*tchar</c>, RFC 9110 §5.6.2), so it never identifies an extended
-    /// CONNECT; <see cref="ValidateExtendedConnect"/> rejects it as malformed.
+    /// A <c>:protocol</c> that is not a token (<c>1*tchar</c>, RFC 9110 §5.6.2)
+    /// never identifies an extended CONNECT; <see cref="ValidateExtendedConnect"/>
+    /// rejects it as malformed.
     /// </remarks>
     /// <param name="method">The decoded <c>:method</c> value, or <see langword="null"/>.</param>
     /// <param name="protocol">The decoded <c>:protocol</c> value, or <see langword="null"/>.</param>
     /// <returns><see langword="true"/> when the request is an extended CONNECT.</returns>
     public static bool IsExtendedConnect(string? method, string? protocol)
     {
-        return !string.IsNullOrEmpty(protocol)
+        return protocol is not null && HttpFieldName.IsValid(protocol, out _)
             && string.Equals(method, HttpMethod.Connect.Value, StringComparison.Ordinal);
     }
 
@@ -260,9 +260,8 @@ public static class HttpFieldNormalization
     /// </summary>
     /// <remarks>
     /// Only <see langword="null"/> means the field is absent. A present but
-    /// empty <c>:protocol</c> is a violation on every method: a protocol name
-    /// is a token, which is <c>1*tchar</c> (RFC 9110 §5.6.2), so an empty value
-    /// names no protocol and the request is malformed.
+    /// non-token <c>:protocol</c> is a violation on every method: a protocol name
+    /// is <c>1*tchar</c> (RFC 9110 §5.6.2), excluding spaces and <c>/</c>.
     /// </remarks>
     /// <param name="method">The decoded <c>:method</c> value, or <see langword="null"/>.</param>
     /// <param name="scheme">The decoded <c>:scheme</c> value, or <see langword="null"/>.</param>
@@ -289,6 +288,11 @@ public static class HttpFieldNormalization
         if (protocol.Length == 0)
         {
             return ErrorMessages.ProtocolPseudoHeaderEmpty;
+        }
+
+        if (!HttpFieldName.IsValid(protocol, out _))
+        {
+            return ErrorMessages.ExtendedConnectProtocolInvalid;
         }
 
         // RFC 8441 §4 — the :protocol pseudo-header is only defined on a

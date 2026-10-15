@@ -172,9 +172,17 @@ public class Http3ErrorCodeRoundTripTests
         await using QuicStream stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken);
 
         // Act
-        await stream.WriteAsync(Combine(
-            HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "localhost"),
-            HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[512])), cancellationToken);
+        try
+        {
+            await stream.WriteAsync(Combine(
+                HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "localhost"),
+                HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[512])), cancellationToken);
+        }
+        catch (QuicException exception) when (exception.QuicError == QuicError.StreamAborted
+            && exception.ApplicationErrorCode == (long)Http3ErrorCode.NoError)
+        {
+            // The response can stop the unread upload before its write completes.
+        }
 
         byte[] responseOctets = await ReadToEndAsync(stream, cancellationToken);
 
@@ -205,7 +213,15 @@ public class Http3ErrorCodeRoundTripTests
         await using QuicStream stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken);
 
         // Act
-        await stream.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "relative/path", "https", "localhost"), completeWrites: true, cancellationToken);
+        try
+        {
+            await stream.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "relative/path", "https", "localhost"), completeWrites: true, cancellationToken);
+        }
+        catch (QuicException exception) when (exception.QuicError == QuicError.StreamAborted
+            && exception.ApplicationErrorCode == (long)Http3ErrorCode.MessageError)
+        {
+            // The malformed head can reset its stream before its write completes.
+        }
 
         // Assert — the response direction is reset with the stream error's code, not the driver's default.
         QuicException reset = await Should.ThrowAsync<QuicException>(() => ReadToEndAsync(stream, cancellationToken));
@@ -231,7 +247,15 @@ public class Http3ErrorCodeRoundTripTests
         await using QuicStream stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken);
 
         // Act
-        await stream.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[4]), cancellationToken);
+        try
+        {
+            await stream.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[4]), cancellationToken);
+        }
+        catch (QuicException exception) when (exception.QuicError == QuicError.ConnectionAborted
+            && exception.ApplicationErrorCode == (long)Http3ErrorCode.UnexpectedFrame)
+        {
+            // DATA before HEADERS can close the connection before its write completes.
+        }
 
         // Assert — the connection closes with the error's code, not the driver's default H3_NO_ERROR.
         QuicException closed = await Should.ThrowAsync<QuicException>(() => ReadToEndAsync(stream, cancellationToken));
@@ -258,7 +282,15 @@ public class Http3ErrorCodeRoundTripTests
         await using QuicStream stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Unidirectional, cancellationToken);
 
         // Act
-        await stream.WriteAsync(new byte[] { 0x21, 0x00, 0x00 }, cancellationToken);
+        try
+        {
+            await stream.WriteAsync(new byte[] { 0x21, 0x00, 0x00 }, cancellationToken);
+        }
+        catch (QuicException exception) when (exception.QuicError == QuicError.StreamAborted
+            && exception.ApplicationErrorCode == (long)Http3ErrorCode.StreamCreationError)
+        {
+            // The server can stop this reserved stream before its write completes.
+        }
 
         // Assert — STOP_SENDING with the code the RFC recommends, not the driver's default.
         QuicException stop = await Should.ThrowAsync<QuicException>(() => stream.WritesClosed.WaitAsync(cancellationToken));

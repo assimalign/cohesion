@@ -14,6 +14,19 @@ Examples below document the intended public shape; some members still throw NotI
 - ConfigurationManager extends that flow for longer-lived provider orchestration.
 - Keys, paths, sections, values, and provider abstractions keep the rest of the configuration family consistent.
 
+## Key Identity
+
+`Key` compares its character span, so `default(Key)`, an empty string, a null string passed to
+the string constructor, and an empty span all represent the same empty key. Ordinal hashing
+uses that same span, including its empty representation. `KeyComparer` delegates key hashing
+to the selected comparison and hashes alternate spans with the matching string comparison,
+so dictionary lookups agree for constructed keys, default keys, and alternate spans.
+
+This is a behavioral change from `10.0.0-preview.1`: the ordinal hash of `default(Key)` is now
+the empty-string hash instead of zero. Dictionaries and sets consequently treat default and
+constructed-empty keys as one key, as equality already requires. Constructors, validation,
+and the public surface are unchanged.
+
 ## Layout Example
 
 ```text

@@ -83,6 +83,14 @@ excludes both.
 
 ### Methods
 
+- **Configured methods use `HttpMethod` validation (#1477).** `WithMethods` retains the existing
+  string arguments and constructs the method values it stores in the builder, so an RFC 9110 token
+  longer than 32 characters fails at composition. `Build` projects those values into the existing
+  immutable string list. This matches routing and CORS preflight's existing length limit; a policy
+  cannot list a method that no preflight can request. Invalid-token messages come from core Http's
+  generated `ErrorMessages`, while CORS owns its empty-value and wildcard errors. No public API is
+  added or changed. The policy implementation was absent from 10.0.0-preview.1, so this is a
+  behavior change only from the development implementation, which silently accepted overlong methods.
 - **Byte-case-sensitive**, as Fetch compares them and as RFC 9110 §9.1 defines them. The requested method
   is read from the raw `Access-Control-Request-Method` header and compared ordinally everywhere: against the
   policy, and against the methods of a route that matched the `OPTIONS` request (#1301). `HttpMethod` is
@@ -490,3 +498,16 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Configured field-name types (#1476)
+
+`WithHeaders` and `WithExposedHeaders` take `params HttpFieldName[]`; `CorsPolicy.Headers` and
+`ExposedHeaders` expose `IReadOnlyList<HttpFieldName>`. Core Http owns the RFC 9110 token grammar
+and ordinal case-insensitive identity. The builder rejects uninitialized `default` names and keeps
+the CORS-specific wildcard restriction. Deduplication preserves the first spelling and order.
+The policy still prepares string-based frozen lookups and rendered response values once at build,
+so request-span parsing and matching do not acquire an extra validation or allocation.
+
+These are source and binary signature changes relative to the prior API. CORS already validated
+malformed strings before this issue; its existing rejection tests pin preserved behavior, not a
+newly fixed validation defect. The CORS policy implementation is absent from 10.0.0-preview.1.

@@ -21,6 +21,26 @@ rejects user information, query strings, and fragments. The package deliberately
 dependency injection, configuration, logging, or Microsoft.Extensions packages. It is a standalone
 NuGet package and is not part of an `App.SecretStore` shared framework.
 
+The stateless certificate-reference grammar in `shared/` is compiled into both this package and
+Hosting through `CohesionSharedSource`. It carries no state or public contract and introduces no
+assembly reference, so the client remains Core-only and Hosting does not acquire a NuGet-only
+client dependency. The generated `SecretStoreCertificateReference.IsValid` and the runtime
+retrieval boundary use this one predicate.
+
+## Certificate references
+
+`ISecretStoreClient.GetCertificateAsync` takes the generated `SecretStoreCertificateReference`.
+The protocol accepts exact `ca/root`, or `certs/` followed by a nonblank segment with neither slash
+nor backslash, excluding `.` and `..`. These are case-sensitive storage identifiers; ordinal
+comparison preserves the protocol's spelling. The generated constructor and implicit string
+conversion reject invalid input before HTTP, and `TryCreate` provides a non-throwing check.
+The client explicitly rejects `default`, whose null value bypasses construction.
+
+Compared with 10.0.0-preview.1, changing the parameter from `string` is a binary and implementer
+source break. Ordinary string call sites retain the implicit conversion. Malformed nonblank
+references now throw `ArgumentException` locally instead of producing a remote request and an
+eventual HTTP refusal.
+
 ## Protocol
 
 The client defines the initial client-side protocol under the endpoint's existing path prefix:

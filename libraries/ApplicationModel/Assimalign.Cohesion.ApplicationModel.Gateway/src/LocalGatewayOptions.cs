@@ -8,6 +8,9 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </summary>
 public sealed class LocalGatewayOptions : ApplicationGatewayOptions
 {
+    private int _livenessFailureThreshold = 3;
+    private int _maximumRestartAttempts = 5;
+
     /// <summary>
     /// The directory searched for a resource's executable. Defaults to the orchestrator's
     /// <see cref="AppContext.BaseDirectory"/> when <see langword="null"/>.
@@ -33,7 +36,16 @@ public sealed class LocalGatewayOptions : ApplicationGatewayOptions
     /// <summary>
     /// The number of consecutive liveness failures that requests a restart. Defaults to 3.
     /// </summary>
-    public int LivenessFailureThreshold { get; set; } = 3;
+    /// <exception cref="ArgumentOutOfRangeException">The value is zero or negative.</exception>
+    public int LivenessFailureThreshold
+    {
+        get => _livenessFailureThreshold;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value, nameof(LivenessFailureThreshold));
+            _livenessFailureThreshold = value;
+        }
+    }
 
     /// <summary>
     /// The first delay before restarting a failed process. Successive delays double up to
@@ -44,8 +56,19 @@ public sealed class LocalGatewayOptions : ApplicationGatewayOptions
     /// <summary>The largest delay between restart attempts. Defaults to 30&#160;seconds.</summary>
     public TimeSpan MaximumRestartBackoff { get; set; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>The maximum number of restart attempts for one resource. Defaults to 5.</summary>
-    public int MaximumRestartAttempts { get; set; } = 5;
+    /// <summary>
+    /// The maximum number of restart attempts for one resource. Defaults to 5; zero disables restarts.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public int MaximumRestartAttempts
+    {
+        get => _maximumRestartAttempts;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value, nameof(MaximumRestartAttempts));
+            _maximumRestartAttempts = value;
+        }
+    }
 
     /// <summary>
     /// How long to wait for a child process to exit during shutdown before it is force-killed.
@@ -66,45 +89,31 @@ public sealed class LocalGatewayOptions : ApplicationGatewayOptions
         ValidateCommon();
         if (ProbeInterval <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(ProbeInterval), "ProbeInterval must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(ProbeInterval), ErrorMessages.ProbeIntervalInvalid);
         }
 
         if (ProbeTimeout <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(ProbeTimeout), "ProbeTimeout must be greater than zero.");
-        }
-
-        if (LivenessFailureThreshold <= 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(LivenessFailureThreshold),
-                "LivenessFailureThreshold must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(ProbeTimeout), ErrorMessages.ProbeTimeoutInvalid);
         }
 
         if (InitialRestartBackoff < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(InitialRestartBackoff),
-                "InitialRestartBackoff must be zero or greater.");
+                ErrorMessages.InitialRestartBackoffInvalid);
         }
 
         if (MaximumRestartBackoff < InitialRestartBackoff)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(MaximumRestartBackoff),
-                "MaximumRestartBackoff must be at least InitialRestartBackoff.");
-        }
-
-        if (MaximumRestartAttempts < 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(MaximumRestartAttempts),
-                "MaximumRestartAttempts must be zero or greater.");
+                ErrorMessages.MaximumRestartBackoffInvalid);
         }
 
         if (StopGrace <= TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(StopGrace), "StopGrace must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(StopGrace), ErrorMessages.StopGraceInvalid);
         }
     }
 }

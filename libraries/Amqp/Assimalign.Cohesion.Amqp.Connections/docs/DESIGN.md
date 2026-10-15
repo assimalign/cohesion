@@ -146,6 +146,41 @@ until *new* bytes arrive, which deadlocks lock-step exchanges. The fix is
 - Sends are serialized by an internal write lock so a header write and a frame write cannot
   interleave; receives are a single-reader pull loop (`ReceiveAsync` yields decoded frames).
 
+### Symbol and frame-size validation (#1484)
+
+`AmqpSymbol` uses `CohesionValueType` with a single ASCII rule in static `IsValid`.
+[AMQP 1.0 Part 1 §1.6.21](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-types-v1.0-os.html#type-symbol)
+defines symbol encoding as seven-bit ASCII; empty text is valid, and generic symbol identity
+has no case-folding rule. `ObjectComparison="Ordinal"` therefore preserves exact spelling.
+The existing constructor, `Value`, conversions and equality members remain available. Generated
+hashing and equality support `default`, which holds a null value distinct from an empty symbol;
+encoding still refuses that missing value. Wire decoding uses `TryCreate` and translates invalid
+symbol text to `AmqpProtocolException`, including symbols inside arrays.
+
+Maximum frame sizes stay numeric. `AmqpTransportOptions.MaxFrameSize`,
+`AmqpOpenPerformative.MaxFrameSize` and the frame encoder reject values below 512 with
+`ArgumentOutOfRangeException` before use, as required by
+[AMQP 1.0 Part 2 MIN-MAX-FRAME-SIZE](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#constant-MIN-MAX-FRAME-SIZE).
+An omitted Open maximum remains valid. The decoder reports a peer's invalid advertised maximum
+as `AmqpProtocolException`.
+
+#### Breaking changes from 10.0.0-preview.1
+
+- Non-ASCII symbol construction and implicit conversion now throw `ArgumentException`; wire
+  decoding rejects non-ASCII scalar and array symbols with `AmqpProtocolException`.
+- A null symbol constructor argument now throws `ArgumentException` instead of
+  `ArgumentNullException`, following the generated struct validation contract.
+- `default(AmqpSymbol).ToString()` returns an empty string instead of null, and hashing default
+  succeeds instead of throwing. Equality stays ordinal, with default distinct from empty.
+- The generated JSON converter represents symbols as JSON strings and default as JSON null,
+  replacing the former ordinary object representation with a `Value` property. It also supports
+  JSON dictionary keys. Existing .NET member signatures remain; the generated validation,
+  comparison and converter members are additive.
+- Setting an Open maximum below 512 now throws during composition. Passing an encoder maximum
+  below 512 throws `ArgumentOutOfRangeException` before body encoding, even when the frame fits;
+  zero previously failed later with `AmqpProtocolException`. Decoding a peer Open below 512 now
+  throws `AmqpProtocolException`.
+
 ## Error model
 
 - **`AmqpProtocolException` is the area-scoped root** (inherits `Exception` directly, per the

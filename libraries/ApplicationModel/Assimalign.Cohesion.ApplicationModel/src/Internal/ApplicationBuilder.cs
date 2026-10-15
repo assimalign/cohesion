@@ -934,26 +934,10 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
 
     private static void ValidateApplicationName(ApplicationName name)
     {
-        string? value = name.ToString();
-        if (string.IsNullOrEmpty(value))
+        // A default struct never passed the generated constructor's validation.
+        if (name.Value is null)
         {
-            throw new InvalidOperationException(
-                "An RFC1123 application name is required. Pass it to Application.CreateBuilder(ApplicationName, args) or call UseName(...) before Build(); only unnamed Local builders use the entry-assembly fallback.");
-        }
-
-        if (value.Length > 63 ||
-            !IsAsciiLetterOrDigit(value[0]) ||
-            !IsAsciiLetterOrDigit(value[^1]))
-        {
-            ThrowInvalidApplicationName(value);
-        }
-
-        foreach (char character in value)
-        {
-            if (!IsAsciiLetterOrDigit(character) && character != '-')
-            {
-                ThrowInvalidApplicationName(value);
-            }
+            throw new InvalidOperationException(ErrorMessages.ApplicationNameRequired);
         }
     }
 
@@ -1000,10 +984,4 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
 
     private static bool IsAsciiLetterOrDigit(char character) =>
         character is >= 'a' and <= 'z' or >= '0' and <= '9';
-
-    private static void ThrowInvalidApplicationName(string value)
-    {
-        throw new InvalidOperationException(
-            $"Application name '{value}' is invalid. Use an RFC1123 label containing 1-63 lowercase letters, numbers, or '-' characters, beginning and ending with a letter or number.");
-    }
 }

@@ -27,6 +27,9 @@ public sealed class QuicConnectionListenerOptions
     private long _defaultCloseErrorCode = 0x100;
     private TimeSpan _closeDeliveryTimeout = TimeSpan.FromSeconds(5);
     private TimeSpan _handshakeTimeout = TimeSpan.FromSeconds(10);
+    private int _backlog = 512;
+    private int _maxBidirectionalStreamCount = 100;
+    private int _maxUnidirectionalStreamCount = 10;
 
     /// <summary>
     /// Creates a new set of QUIC server transport options.
@@ -59,7 +62,19 @@ public sealed class QuicConnectionListenerOptions
     /// <summary>
     /// Gets or sets the listener backlog.
     /// </summary>
-    public int Backlog { get; set; } = 512;
+    /// <remarks>
+    /// Defaults to 512. Zero selects the <see cref="QuicListenerOptions.ListenBacklog"/> default.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is negative.</exception>
+    public int Backlog
+    {
+        get => _backlog;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _backlog = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the time allowed for an inbound QUIC connection's handshake to complete.
@@ -92,10 +107,22 @@ public sealed class QuicConnectionListenerOptions
     /// Gets or sets the maximum number of concurrent inbound bidirectional streams per connection.
     /// </summary>
     /// <remarks>
+    /// Accepts 0 through 65535 inclusive, matching the .NET 10
+    /// <see cref="QuicConnectionOptions.MaxInboundBidirectionalStreams"/> implementation limit.
     /// Captured when the listener binds. Later changes do not alter the bound listener's handshake
     /// allowance or the stream-limit facet on the connections it accepts.
     /// </remarks>
-    public int MaxBidirectionalStreamCount { get; set; } = 100;
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is outside 0 through 65535.</exception>
+    public int MaxBidirectionalStreamCount
+    {
+        get => _maxBidirectionalStreamCount;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, (int)ushort.MaxValue);
+            _maxBidirectionalStreamCount = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the maximum number of concurrent inbound unidirectional streams per connection.
@@ -104,9 +131,20 @@ public sealed class QuicConnectionListenerOptions
     /// Defaults to ten. Zero forbids inbound unidirectional streams when the bound bidirectional
     /// allowance is positive. Only when both allowances are zero does the transport grant one
     /// unidirectional stream so a pending native accept can observe idle peer closure.
-    /// Negative values are rejected when the connection options are used.
+    /// Accepts 0 through 65535 inclusive, matching the .NET 10
+    /// <see cref="QuicConnectionOptions.MaxInboundUnidirectionalStreams"/> implementation limit.
     /// </remarks>
-    public int MaxUnidirectionalStreamCount { get; set; } = 10;
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is outside 0 through 65535.</exception>
+    public int MaxUnidirectionalStreamCount
+    {
+        get => _maxUnidirectionalStreamCount;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, (int)ushort.MaxValue);
+            _maxUnidirectionalStreamCount = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the maximum read buffer size used by each stream pipe.

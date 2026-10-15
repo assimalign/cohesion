@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Amqp.Connections;
@@ -7,6 +8,8 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// </summary>
 public sealed class AmqpOpenPerformative : AmqpPerformative
 {
+    private uint? _maxFrameSize;
+
     /// <summary>
     /// Gets or sets the container identifier.
     /// </summary>
@@ -20,7 +23,20 @@ public sealed class AmqpOpenPerformative : AmqpPerformative
     /// <summary>
     /// Gets or sets the maximum frame size.
     /// </summary>
-    public uint? MaxFrameSize { get; set; }
+    /// <exception cref="ArgumentOutOfRangeException">The assigned value is less than 512 bytes.</exception>
+    public uint? MaxFrameSize
+    {
+        get => _maxFrameSize;
+        set
+        {
+            if (value.HasValue)
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThan(value.Value, 512u, nameof(value));
+            }
+
+            _maxFrameSize = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the maximum channel number.

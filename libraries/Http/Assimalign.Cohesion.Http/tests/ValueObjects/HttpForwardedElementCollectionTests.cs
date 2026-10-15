@@ -84,6 +84,30 @@ public class HttpForwardedElementCollectionTests
         list.Serialize().ShouldBe(raw);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - ForwardedList: Should preserve unknown ports and accompanying metadata")]
+    [InlineData("for")]
+    [InlineData("by")]
+    public void TryParse_UnknownNodeWithFiveDigitPort_ShouldRoundTripMetadata(string parameter)
+    {
+        // Arrange
+        string raw = $"{parameter}=\"unknown:99999\";proto=https;host=example.com";
+
+        // Act
+        bool parsed = HttpForwardedElementCollection.TryParse(raw, out var list);
+
+        // Assert
+        parsed.ShouldBeTrue();
+        list.Count.ShouldBe(1);
+        var node = parameter == "for" ? list[0].For : list[0].By;
+        node.ShouldNotBeNull();
+        node.Value.IsUnknown.ShouldBeTrue();
+        node.Value.PortNumber.ShouldBe(99999);
+        list[0].Proto.ShouldBe("https");
+        list[0].Host.ShouldBe("example.com");
+        list.Serialize().ShouldBe(raw);
+        HttpForwardedElementCollection.Parse(list.Serialize()).ShouldBe(list);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - ForwardedList: Should enumerate elements in wire order")]
     public void Enumerate_ShouldYieldWireOrder()
     {

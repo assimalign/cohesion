@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="DnsNameEmpty" xml:space="preserve"><value>A DNS name cannot be empty.</value></data>
+  <data name="DnsNameTooLong" xml:space="preserve"><value>DNS name exceeds the RFC 1035 limit of 253 characters in presentation form: '{0}'.</value></data>
+  <data name="DnsNameEmptyLabel" xml:space="preserve"><value>DNS name contains an empty label (consecutive dots): '{0}'.</value></data>
+  <data name="DnsLabelTooLong" xml:space="preserve"><value>DNS label '{0}' exceeds the RFC 1035 limit of 63 octets.</value></data>
+  <data name="TxtStringsEmpty" xml:space="preserve"><value>TXT record must carry at least one string.</value></data>
+  <data name="TxtStringNull" xml:space="preserve"><value>TXT record strings cannot be null.</value></data>
+  <data name="TxtStringTooLong" xml:space="preserve"><value>TXT record string exceeds the RFC 1035 limit of 255 octets (got {0}).</value></data>
+  <data name="TxtRDataLengthMismatch" xml:space="preserve"><value>TXT RDATA: declared length {0} but consumed {1} octets</value></data>
+  <data name="TxtRDataEmpty" xml:space="preserve"><value>TXT record must contain at least one string</value></data>
+</root>

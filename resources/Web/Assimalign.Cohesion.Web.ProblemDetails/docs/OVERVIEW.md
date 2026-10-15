@@ -38,6 +38,11 @@ Types surface in the `Assimalign.Cohesion.Web` namespace (documented deviation �
 code uses `Internal Server Error`. Registered codes use their reason phrase. The response helper
 preserves the numeric status, and an explicit `ProblemDetails.Title` is written unchanged.
 
+Assignments validate before writing: `Status` accepts null or 100–599; `Type` and `Instance`
+accept null or a URI reference, including relative paths, query/fragment references and the empty
+reference. Invalid values throw an argument exception from the setter. Percent-encode spaces and
+non-ASCII text in URI references.
+
 ## Scope boundaries
 
 This is the payload only. Error *policy* — when a fault becomes a response and in what shape —

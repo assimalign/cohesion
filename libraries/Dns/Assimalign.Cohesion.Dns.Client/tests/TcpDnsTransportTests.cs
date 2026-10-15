@@ -3,6 +3,8 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Shouldly;
+using Xunit;
 
 namespace Assimalign.Cohesion.Dns.Tests;
 
@@ -196,24 +198,24 @@ public sealed class TcpDnsTransportTests
             () => new TcpDnsTransport(new TcpDnsTransportOptions()));
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Dns] - Constructor: Rejects nonpositive TCP timeouts")]
     public void Constructor_RequiresPositiveTimeouts()
     {
-        Assert.Throws<ArgumentException>(
+        Should.Throw<ArgumentOutOfRangeException>(
             () => new TcpDnsTransport(new TcpDnsTransportOptions
             {
                 EndPoint = new IPEndPoint(IPAddress.Loopback, 53),
                 ConnectTimeout = TimeSpan.Zero,
             }));
 
-        Assert.Throws<ArgumentException>(
+        Should.Throw<ArgumentOutOfRangeException>(
             () => new TcpDnsTransport(new TcpDnsTransportOptions
             {
                 EndPoint = new IPEndPoint(IPAddress.Loopback, 53),
                 QueryTimeout = TimeSpan.Zero,
             }));
 
-        Assert.Throws<ArgumentException>(
+        Should.Throw<ArgumentOutOfRangeException>(
             () => new TcpDnsTransport(new TcpDnsTransportOptions
             {
                 EndPoint = new IPEndPoint(IPAddress.Loopback, 53),

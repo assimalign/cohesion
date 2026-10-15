@@ -42,7 +42,6 @@ namespace Assimalign.Cohesion.ApplicationModel;
 public sealed class SecretStoreAddSecretInputResolver : IResourceCommandInputResolver
 {
     private const string parameterPrefix = "parameter:";
-    private const string literalPrefix = "literal:";
 
     /// <summary>
     /// Gets <c>secretstore.add-secret</c>.
@@ -93,6 +92,11 @@ public sealed class SecretStoreAddSecretInputResolver : IResourceCommandInputRes
         }
 
         string source = ReadDeclaredSource(declared.Payload);
+        if (!SecretStoreCommandGrammar.IsValidSource(source))
+        {
+            throw new InvalidOperationException(ErrorMessages.CommandSourceInvalid);
+        }
+
         ReadOnlyMemory<byte> content;
         if (source.StartsWith(parameterPrefix, StringComparison.Ordinal))
         {
@@ -111,13 +115,6 @@ public sealed class SecretStoreAddSecretInputResolver : IResourceCommandInputRes
         }
         else
         {
-            if (!IsResourceSource(source) || source.StartsWith(literalPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    $"{SecretStoreProtocol.AddSecretCommandKind} sources must use parameter:<name> or " +
-                    "<resource>:<key>; literal sources are forbidden.");
-            }
-
             ResourceMountInput input = await sources
                 .ResolveAsync(source, ResourceMountKind.Secret, cancellationToken)
                 .ConfigureAwait(false);
@@ -161,15 +158,4 @@ public sealed class SecretStoreAddSecretInputResolver : IResourceCommandInputRes
         return source;
     }
 
-    // The gateway's '<resource>:<key>' shape: exactly one ':' with a nonblank name before it and a
-    // nonblank key after it.
-    private static bool IsResourceSource(string source)
-    {
-        int separator = source.IndexOf(':');
-        return separator > 0 &&
-            separator != source.Length - 1 &&
-            source.IndexOf(':', separator + 1) < 0 &&
-            !string.IsNullOrWhiteSpace(source[..separator]) &&
-            !string.IsNullOrWhiteSpace(source[(separator + 1)..]);
-    }
 }

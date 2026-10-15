@@ -129,6 +129,9 @@
   <data name="ServerWindowSizeInvalid" xml:space="preserve">
     <value>The server&apos;s maximum window size must be from 9 to 15 bits.</value>
   </data>
+  <data name="SubprotocolInvalid" xml:space="preserve">
+    <value>A WebSocket subprotocol must be a non-empty HTTP token.</value>
+  </data>
   <data name="SubprotocolNotOffered" xml:space="preserve">
     <value>The subprotocol &apos;{0}&apos; was not offered by the client. Select one of RequestedProtocols, or none.</value>
   </data>

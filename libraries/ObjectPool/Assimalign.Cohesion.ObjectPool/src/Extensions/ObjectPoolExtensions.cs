@@ -19,11 +19,24 @@ public static class ObjectPoolExtensions
             return new DefaultObjectPool<T>(factory, policy);
         }
 
+        /// <summary>Creates a pool with the specified factory, return policy, and retention limit.</summary>
+        /// <param name="factory">The factory used to create objects.</param>
+        /// <param name="policy">The policy that decides whether returned objects can be retained.</param>
+        /// <param name="maximumRetained">The nonnegative number of objects to retain. Zero retains nothing.</param>
+        /// <returns>A pool with the specified retention limit.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="factory"/> or <paramref name="policy"/> is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumRetained"/> is negative.</exception>
         public static ObjectPool<T> Create(ObjectPoolFactory<T> factory, ObjectPoolPolicy<T> policy, int maximumRetained)
         {
             return new DefaultObjectPool<T>(factory, policy, maximumRetained);
         }
 
+        /// <summary>Creates a pool with the specified factory and retention limit.</summary>
+        /// <param name="factory">The factory used to create objects.</param>
+        /// <param name="maximumRetained">The nonnegative number of objects to retain. Zero retains nothing.</param>
+        /// <returns>A pool with the specified retention limit.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumRetained"/> is negative.</exception>
         public static ObjectPool<T> Create(ObjectPoolFactory<T> factory, int maximumRetained)
         {
             return new DefaultObjectPool<T>(factory, maximumRetained);
@@ -59,8 +72,9 @@ public static class ObjectPoolExtensions
         /// <remarks>If the number of returned objects exceeds the specified maximum, excess objects may
         /// be discarded rather than retained for reuse. This method is thread-safe and suitable for use in
         /// multi-threaded scenarios.</remarks>
-        /// <param name="maximumRetained">The maximum number of objects that the pool will retain for reuse. Must be greater than or equal to 0.</param>
+        /// <param name="maximumRetained">The maximum number of objects that the pool will retain for reuse. Must be greater than or equal to 0. Zero retains nothing.</param>
         /// <returns>An ObjectPool<T> instance that can be used to rent and return objects of type T.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumRetained"/> is negative.</exception>
         public static ObjectPool<T> Create(int maximumRetained)
         {
             return new DefaultObjectPool<T>(new DefaultObjectPoolFactory<T>(), maximumRetained);
@@ -80,11 +94,24 @@ public static class ObjectPoolExtensions
             return new DefaultObjectPool<T, TArgs>(factory, policy);
         }
 
+        /// <summary>Creates a pool with the specified factory, return policy, and retention limit.</summary>
+        /// <param name="factory">The factory used to create objects.</param>
+        /// <param name="policy">The policy that decides whether returned objects can be retained.</param>
+        /// <param name="maximumRetained">The nonnegative number of objects to retain. Zero retains nothing.</param>
+        /// <returns>A pool with the specified retention limit.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="factory"/> or <paramref name="policy"/> is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumRetained"/> is negative.</exception>
         public static ObjectPool<T, TArgs> Create(ObjectPoolFactory<T, TArgs> factory, ObjectPoolPolicy<T> policy, int maximumRetained)
         {
             return new DefaultObjectPool<T, TArgs>(factory, policy, maximumRetained);
         }
 
+        /// <summary>Creates a pool with the specified factory and retention limit.</summary>
+        /// <param name="factory">The factory used to create objects.</param>
+        /// <param name="maximumRetained">The nonnegative number of objects to retain. Zero retains nothing.</param>
+        /// <returns>A pool with the specified retention limit.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumRetained"/> is negative.</exception>
         public static ObjectPool<T, TArgs> Create(ObjectPoolFactory<T, TArgs> factory, int maximumRetained)
         {
             return new DefaultObjectPool<T, TArgs>(factory, maximumRetained);

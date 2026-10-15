@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Security.DataProtection;
+using Assimalign.Cohesion.ApplicationModel.Internal;
 using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
@@ -32,6 +33,14 @@ internal sealed class SecretStoreRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(dataPath);
         ArgumentNullException.ThrowIfNull(protector);
         ArgumentNullException.ThrowIfNull(seeds);
+
+        foreach (string path in seeds.Keys)
+        {
+            if (!SecretStoreSeedPath.IsValid(path, out string? message))
+            {
+                throw new ArgumentException(message, nameof(seeds));
+            }
+        }
 
         DataPath = Path.GetFullPath(dataPath);
         _directoryPath = Path.Combine(DataPath, "secrets");
@@ -135,9 +144,9 @@ internal sealed class SecretStoreRepository
     internal async Task StoreCommandSecretAsync(ResourceCommand command, string source, ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
-        if (command.Key is "trusted-issuers.json" || command.Key.StartsWith("certs/", StringComparison.Ordinal))
+        if (!SecretStoreCommandGrammar.IsValidPath(command.Key))
         {
-            throw new ResourceCommandRejectedException($"secretstore.add-secret path '{command.Key}' is reserved for the store protocol.");
+            throw new ResourceCommandRejectedException(ErrorMessages.CommandPathInvalid);
         }
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

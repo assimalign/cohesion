@@ -100,6 +100,29 @@ These are also centrally managed. Don't duplicate per project unless the project
   adopt it when next touched; [#1470](https://github.com/assimalign/cohesion/issues/1470) covers
   Database. No file under `resources/Database/` changes while the owner's Database PR is active.
 
+### Validate single-valued input with generated value objects
+
+Use a value object when a single-valued input has a validity rule and crosses a public boundary:
+a name, token, path, location, HTTP field name or value, or an identifier. Make it a
+`<CohesionValueType>` with `ObjectHasIsValidMethod="true"` (owner decision 60, 2026-10-14;
+`docs/programs/VALUE_OBJECT_ADOPTION_SCOPE.md`).
+
+- **One rule, one place.** The rule lives once, in the type's static `IsValid`. The property or
+  parameter takes the value type, so an invalid string is refused when it is converted, before the
+  setter or method runs. A non-throwing call site uses `TryCreate`.
+- **Never construct to validate.** Do not build an unrelated object, or call a method, only to make
+  it throw on invalid input (the retired `_ = new HttpCookie(options.CookieName)` in a try/catch).
+- **Refuse `default` at the boundary.** `default` never ran `IsValid`. A boundary that accepts the
+  type still refuses `default` where "no value" is invalid, as `HttpAntiforgery.Create` does.
+- **Follow the grammar's case rule.** Set `ObjectComparison` to `Ordinal` or `OrdinalIgnoreCase`
+  as the specification says (RFC 6265 §5.1.3 makes cookie domains case-insensitive), and cite it.
+- **Numbers stay primitives.** Numeric ranges (sizes, counts, thresholds, timeouts) are guarded at
+  composition with `ArgumentOutOfRangeException.ThrowIf*`. A value type is for identifiers and
+  grammar-bearing strings, and each one adds about 40 public members.
+- **Placement.** The type goes in `ValueObjects/` of the package that owns the concept, under its
+  `RootNamespace`. The generator's metadata and surface are in
+  [`docs/build/MSBUILD_COHESION_PROPS.md`](../../docs/build/MSBUILD_COHESION_PROPS.md#value-types).
+
 ### `.NET 10 extension(...)` syntax for extension members
 ```csharp
 public static class DatabaseExtensions

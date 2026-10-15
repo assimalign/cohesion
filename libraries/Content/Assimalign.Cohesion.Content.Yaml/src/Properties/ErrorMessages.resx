@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="AnchorNameInvalid" xml:space="preserve">
+    <value>A YAML anchor name must be nonempty and contain only YAML nonspace characters other than flow indicators.</value>
+  </data>
+  <data name="TagInvalid" xml:space="preserve">
+    <value>A resolved YAML tag must start with '!' or be an absolute URI, and contain only YAML URI characters with complete hexadecimal percent escapes.</value>
+  </data>
+  <data name="DocumentCountInvalid" xml:space="preserve">
+    <value>Expected exactly one document but found {0}.</value>
+  </data>
+  <data name="AliasAnchorMissing" xml:space="preserve">
+    <value>Alias '*{0}' refers to an undefined anchor.</value>
+  </data>
+  <data name="NodeEventUnexpected" xml:space="preserve">
+    <value>Unexpected '{0}' event while composing a node.</value>
+  </data>
+  <data name="EventKindUnexpected" xml:space="preserve">
+    <value>Expected a '{0}' event but found '{1}'.</value>
+  </data>
+  <data name="DocumentStartMissing" xml:space="preserve">
+    <value>Directives must be followed by a '---' document start marker.</value>
+  </data>
+  <data name="YamlDirectiveDuplicate" xml:space="preserve">
+    <value>Only one %YAML directive is allowed per document.</value>
+  </data>
+  <data name="YamlVersionUnsupported" xml:space="preserve">
+    <value>Unsupported YAML version '{0}'; this parser supports the 1.2 line.</value>
+  </data>
+  <data name="TagDirectiveIncomplete" xml:space="preserve">
+    <value>A %TAG directive requires a handle and a prefix.</value>
+  </data>
+  <data name="MappingKeyMultiline" xml:space="preserve">
+    <value>A mapping key must not span multiple lines.</value>
+  </data>
+  <data name="CharacterUnexpected" xml:space="preserve">
+    <value>Unexpected character '{0}'.</value>
+  </data>
+  <data name="FlowCollectionKeySeparatorMissing" xml:space="preserve">
+    <value>Expected ':' after a flow-collection mapping key.</value>
+  </data>
+  <data name="QuotedKeySeparatorMissing" xml:space="preserve">
+    <value>Expected ':' after a quoted mapping key.</value>
+  </data>
+  <data name="SequenceEntryUnexpected" xml:space="preserve">
+    <value>A block sequence entry is not allowed on the same line as a mapping key.</value>
+  </data>
+  <data name="FlowSequenceUnterminated" xml:space="preserve">
+    <value>Unterminated flow sequence.</value>
+  </data>
+  <data name="FlowSequenceSeparatorMissing" xml:space="preserve">
+    <value>Expected ',' or ']' in a flow sequence.</value>
+  </data>
+  <data name="FlowMappingUnterminated" xml:space="preserve">
+    <value>Unterminated flow mapping.</value>
+  </data>
+  <data name="FlowMappingSeparatorMissing" xml:space="preserve">
+    <value>Expected ',' or '}' in a flow mapping.</value>
+  </data>
+  <data name="FlowCharacterUnexpected" xml:space="preserve">
+    <value>Unexpected character '{0}' in flow context.</value>
+  </data>
+  <data name="DoubleQuotedScalarUnterminated" xml:space="preserve">
+    <value>Unterminated double-quoted scalar.</value>
+  </data>
+  <data name="EscapeSequenceUnterminated" xml:space="preserve">
+    <value>Unterminated escape sequence.</value>
+  </data>
+  <data name="EscapeSequenceUnknown" xml:space="preserve">
+    <value>Unknown escape sequence '\{0}'.</value>
+  </data>
+  <data name="HexEscapeInvalid" xml:space="preserve">
+    <value>Invalid hexadecimal escape sequence.</value>
+  </data>
+  <data name="EscapeCodePointUnsupported" xml:space="preserve">
+    <value>Escape sequences beyond U+FFFF are not supported in this parser revision.</value>
+  </data>
+  <data name="SingleQuotedScalarUnterminated" xml:space="preserve">
+    <value>Unterminated single-quoted scalar.</value>
+  </data>
+  <data name="BlockScalarHeaderInvalid" xml:space="preserve">
+    <value>Unexpected content after a block scalar header.</value>
+  </data>
+  <data name="VerbatimTagUnterminated" xml:space="preserve">
+    <value>Unterminated verbatim tag.</value>
+  </data>
+  <data name="TagHandleUnknown" xml:space="preserve">
+    <value>Unknown tag handle '{0}'.</value>
+  </data>
+  <data name="NodeTrailingContent" xml:space="preserve">
+    <value>Unexpected content '{0}' after a node.</value>
+  </data>
+  <data name="NodeTypeUnknown" xml:space="preserve">
+    <value>Unknown node type '{0}'.</value>
+  </data>
+  <data name="MalformedInputLocation" xml:space="preserve">
+    <value>{0} (line {1}, column {2})</value>
+  </data>
+  <data name="MappingKeyMissing" xml:space="preserve">
+    <value>The mapping contains no '{0}' key.</value>
+  </data>
+  <data name="ScalarNotBoolean" xml:space="preserve">
+    <value>Scalar of kind '{0}' is not a boolean.</value>
+  </data>
+  <data name="ScalarNotInteger" xml:space="preserve">
+    <value>Scalar of kind '{0}' is not an integer.</value>
+  </data>
+  <data name="ScalarNotNumber" xml:space="preserve">
+    <value>Scalar of kind '{0}' is not a number.</value>
+  </data>
+</root>

@@ -8,6 +8,15 @@ This implements design item 31b ruling R-1: OTLP/HTTP JSON export of logs, using
 
 OtlpJsonContext is source-generated. LowerCamelCase fields follow the OTLP protobuf-JSON mapping. timeUnixNano and observedTimeUnixNano are decimal string-encoded unsigned nanoseconds. traceId/spanId are lowercase hex (32/16 characters), deliberately the OTLP exception to protobuf bytes/base64. Absent identifiers are omitted. Other future bytes fields would use base64.
 
+`OtlpLogRecord` takes `OtlpTraceId?` and `OtlpSpanId?`. The generated value objects validate
+exactly 32 and 16 ASCII hexadecimal characters in their static `IsValid` methods. Their
+`OrdinalIgnoreCase` identity follows the [OTLP JSON encoding specification](https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding),
+which accepts either hexadecimal letter case; storage retains spelling and export normalizes it.
+Nullable string conversions preserve null. Null and default wrappers both mean absent at this
+optional boundary. Non-throwing producers use `TryCreate` before constructing a record; malformed
+strings throw `ArgumentException` during conversion, including record construction and `with`
+assignments, before the exporter can enqueue them.
+
 AnyValue has exactly one selected member: stringValue, boolValue, intValue (decimal string), doubleValue, arrayValue or kvlistValue. CLR integers, booleans, finite floating point values, arrays and string-keyed dictionaries map accordingly; unknown values use ToString, and null becomes the string "null". Nested values are bounded to depth 16 and arrays to 2048 elements. One resourceLogs entry contains process resource attributes; scopeLogs groups by Category with scope.name set to it. Requests POST application/json to the configured base plus /v1/logs.
 
 The adapter maps Logging levels as follows (None is suppressed):
@@ -42,3 +51,13 @@ Hosting.Telemetry registers an IHostService to flush within the lesser of five s
 ## gRPC deferral
 
 The Cohesion HTTP server has no application/grpc framing or service dispatch. Trailers no longer stand in the way: decision 18 (docs/libraries/Http/DECISIONS.md, ADR 2) ships response trailers on HTTP/2 and HTTP/3, so a handler could stage grpc-status on IHttpResponse.Trailers there, while HTTP/1.1 keeps the unsupported collection. Request trailers are read on all three versions. LocalPlanController.CanRealize already refuses gRPC probes. Implementing gRPC still requires that separate server capability — message framing, serialization, and service dispatch — not just changing a content type; gRPC hosting stays outside the HTTP/Web program.
+
+## Compatibility with 10.0.0-preview.1
+
+The constructor, identifier properties and generated `Deconstruct` signature of `OtlpLogRecord`
+change from nullable strings to nullable value objects: a source/binary break for typed consumers.
+String inputs remain supported by implicit conversion, but malformed non-null identifiers now
+throw `ArgumentException` at construction or assignment instead of dropping a batch during export.
+Identifier equality and record equality now ignore hexadecimal letter case. The nullable/default
+representation remains observable on the record; export omits both. These are intentional preview
+compatibility changes under owner decision 15.

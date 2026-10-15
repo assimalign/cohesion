@@ -35,4 +35,36 @@ root.Add("enabled", new YamlScalar(true));
 var text = YamlText.Write(document);
 ```
 
+Anchor and tag metadata use optional validated value objects. Nullable string conversions preserve
+`null` as absence, and invalid text throws `ArgumentException` before it can reach the emitter:
+
+```csharp
+var service = YamlScalar.FromString("Cohesion");
+service.Anchor = "service";
+service.Tag = "!service";
+
+string? anchorText = service.Anchor;
+string? tagText = service.Tag;
+service.Anchor = (string?)null;
+
+if (YamlAnchorName.TryCreate(anchorText, out var anchor))
+{
+    service.Anchor = anchor;
+}
+```
+
+`YamlEvent.Anchor` and `YamlEvent.Tag` expose the same `YamlAnchorName?` and `YamlTag?` types.
+Use `YamlTag.TryCreate` for non-throwing tag validation. Names omit `&`/`*`; tags contain the
+resolved spelling, such as `tag:yaml.org,2002:str` or `!service`, with percent escapes preserved.
+Local tags begin with `!`; the non-specific `!` is also valid. Global tags must be well-formed
+absolute URIs: bare names and `$:?` are rejected. Validation preserves URI spelling without
+normalizing case, paths or percent escapes.
+Both types compare case-sensitively. A present `default(YamlAnchorName)` or `default(YamlTag)` is
+invalid metadata; use `null` to clear a property.
+
+Writer indentation must be positive. `YamlText.CreateWriter(new YamlWriterOptions { IndentSize = 4 })`
+creates a writer with four-space indentation; zero or negative sizes throw
+`ArgumentOutOfRangeException` at creation. Direct `YamlText.Write` calls enforce the same guard
+before emission.
+
 See [DESIGN.md](./DESIGN.md) for the architecture and the conformance/known-gaps statement.

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Content.Yaml.Internal;
 
@@ -52,7 +53,7 @@ internal static class YamlComposer
             {
                 if (current.Value is null || !anchors.TryGetValue(current.Value, out var target))
                 {
-                    throw new YamlException($"Alias '*{current.Value}' refers to an undefined anchor.", current.Line, current.Column);
+                    throw new YamlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AliasAnchorMissing, current.Value), current.Line, current.Column);
                 }
 
                 return target;
@@ -99,7 +100,7 @@ internal static class YamlComposer
             }
 
             default:
-                throw new YamlException($"Unexpected '{current.Kind}' event while composing a node.", current.Line, current.Column);
+                throw new YamlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.NodeEventUnexpected, current.Kind), current.Line, current.Column);
         }
     }
 
@@ -121,7 +122,7 @@ internal static class YamlComposer
             ? YamlCoreSchema.Resolve(current.Value)
             : YamlScalarKind.String;
 
-        kind = current.Tag switch
+        kind = current.Tag?.Value switch
         {
             "tag:yaml.org,2002:str" => YamlScalarKind.String,
             "tag:yaml.org,2002:null" => YamlScalarKind.Null,
@@ -138,11 +139,11 @@ internal static class YamlComposer
         };
     }
 
-    private static void Register(Dictionary<string, YamlNode> anchors, string? anchor, YamlNode node)
+    private static void Register(Dictionary<string, YamlNode> anchors, YamlAnchorName? anchor, YamlNode node)
     {
-        if (anchor is not null)
+        if (anchor is { } name)
         {
-            anchors[anchor] = node;
+            anchors[name.Value] = node;
         }
     }
 
@@ -151,7 +152,7 @@ internal static class YamlComposer
         var current = events[index++];
         if (current.Kind != kind)
         {
-            throw new YamlException($"Expected a '{kind}' event but found '{current.Kind}'.", current.Line, current.Column);
+            throw new YamlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EventKindUnexpected, kind, current.Kind), current.Line, current.Column);
         }
     }
 }

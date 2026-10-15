@@ -1,9 +1,11 @@
 using System;
+using System.Globalization;
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Dns.Internal;
 
 namespace Assimalign.Cohesion.Dns;
 
@@ -37,7 +39,10 @@ namespace Assimalign.Cohesion.Dns;
 /// </remarks>
 public sealed class TcpDnsTransport : DnsTransport
 {
-    private readonly TcpDnsTransportOptions _options;
+    private readonly EndPoint _endPoint;
+    private readonly TimeSpan _connectTimeout;
+    private readonly TimeSpan _queryTimeout;
+    private readonly TimeSpan _idleTimeout;
     private readonly SemaphoreSlim _exchangeLock;
 
     private Socket? _socket;
@@ -49,40 +54,30 @@ public sealed class TcpDnsTransport : DnsTransport
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="options"/>.<c>EndPoint</c> is <see langword="null"/>
     /// or a timeout is non-positive.</exception>
+    /// <remarks>Configuration values are captured at construction. Later option assignments do not change this instance.</remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A numeric limit or timeout is outside its supported range.</exception>
     public TcpDnsTransport(TcpDnsTransportOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (options.EndPoint is null)
+        _endPoint = DnsEndpointSnapshot.Copy(options.EndPoint!);
+        _connectTimeout = options.ConnectTimeout;
+        _queryTimeout = options.QueryTimeout;
+        _idleTimeout = options.IdleTimeout;
+        if (_endPoint is null)
         {
             throw new ArgumentException(
-                $"{nameof(TcpDnsTransportOptions)}.{nameof(TcpDnsTransportOptions.EndPoint)} is required.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionRequired, nameof(TcpDnsTransportOptions), nameof(TcpDnsTransportOptions.EndPoint)),
                 nameof(options));
         }
-        if (options.ConnectTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentException(
-                $"{nameof(TcpDnsTransportOptions)}.{nameof(TcpDnsTransportOptions.ConnectTimeout)} must be positive.",
-                nameof(options));
-        }
-        if (options.QueryTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentException(
-                $"{nameof(TcpDnsTransportOptions)}.{nameof(TcpDnsTransportOptions.QueryTimeout)} must be positive.",
-                nameof(options));
-        }
-        if (options.IdleTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentException(
-                $"{nameof(TcpDnsTransportOptions)}.{nameof(TcpDnsTransportOptions.IdleTimeout)} must be positive.",
-                nameof(options));
-        }
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_connectTimeout, TimeSpan.Zero, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_queryTimeout, TimeSpan.Zero, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_idleTimeout, TimeSpan.Zero, nameof(options));
 
-        _options = options;
         _exchangeLock = new SemaphoreSlim(1, 1);
     }
 
     /// <inheritdoc />
-    public override EndPoint Endpoint => _options.EndPoint!;
+    public override EndPoint Endpoint => DnsEndpointSnapshot.Copy(_endPoint);
 
     /// <inheritdoc />
     public override async Task<ReadOnlyMemory<byte>> ExchangeAsync(
@@ -93,17 +88,17 @@ public sealed class TcpDnsTransport : DnsTransport
 
         if (request.IsEmpty)
         {
-            throw new ArgumentException("DNS request must be non-empty.", nameof(request));
+            throw new ArgumentException(ErrorMessages.RequestEmpty, nameof(request));
         }
         if (request.Length > ushort.MaxValue)
         {
             throw new ArgumentException(
-                $"DNS request size {request.Length} exceeds the TCP framing limit (65535 octets).",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpRequestTooLarge, request.Length),
                 nameof(request));
         }
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(_options.QueryTimeout);
+        timeoutCts.CancelAfter(_queryTimeout);
 
         try
         {
@@ -111,7 +106,7 @@ public sealed class TcpDnsTransport : DnsTransport
         }
         catch (OperationCanceledException) when (TimedOut(timeoutCts, cancellationToken))
         {
-            DnsException.ThrowTimeout($"TCP exchange queue for {Endpoint}");
+            DnsException.ThrowTimeout(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpQueueTimeout, Endpoint));
             throw; // unreachable
         }
 
@@ -119,7 +114,7 @@ public sealed class TcpDnsTransport : DnsTransport
         {
             // Recycle the connection if it went idle past IdleTimeout. The check happens
             // under the exchange lock so we can't race with another exchange opening.
-            if (_socket is not null && DateTime.UtcNow - _lastActivityUtc > _options.IdleTimeout)
+            if (_socket is not null && DateTime.UtcNow - _lastActivityUtc > _idleTimeout)
             {
                 CloseConnection();
             }
@@ -148,7 +143,7 @@ public sealed class TcpDnsTransport : DnsTransport
                 catch (OperationCanceledException) when (TimedOut(timeoutCts, cancellationToken))
                 {
                     CloseConnection();
-                    DnsException.ThrowTimeout($"TCP exchange with {Endpoint}");
+                    DnsException.ThrowTimeout(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpExchangeTimeout, Endpoint));
                     throw; // unreachable
                 }
                 catch (DnsException ex) when (ex.Code == DnsErrorCode.Transport && reusedConnection && !retried)
@@ -170,7 +165,7 @@ public sealed class TcpDnsTransport : DnsTransport
                 catch (SocketException ex)
                 {
                     CloseConnection();
-                    DnsException.ThrowTransport($"TCP I/O with {Endpoint}: {ex.SocketErrorCode}", ex);
+                    DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpExchangeFailure, Endpoint, ex.SocketErrorCode), ex);
                     throw; // unreachable
                 }
                 catch
@@ -195,7 +190,7 @@ public sealed class TcpDnsTransport : DnsTransport
 
     private async Task ConnectAsync(CancellationTokenSource exchangeTimeoutCts, CancellationToken externalToken)
     {
-        AddressFamily family = _options.EndPoint switch
+        AddressFamily family = _endPoint switch
         {
             IPEndPoint ip => ip.AddressFamily,
             DnsEndPoint dns => dns.AddressFamily,
@@ -208,11 +203,11 @@ public sealed class TcpDnsTransport : DnsTransport
         };
 
         using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(exchangeTimeoutCts.Token);
-        connectCts.CancelAfter(_options.ConnectTimeout);
+        connectCts.CancelAfter(_connectTimeout);
 
         try
         {
-            await socket.ConnectAsync(_options.EndPoint!, connectCts.Token).ConfigureAwait(false);
+            await socket.ConnectAsync(_endPoint, connectCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (externalToken.IsCancellationRequested)
         {
@@ -222,12 +217,12 @@ public sealed class TcpDnsTransport : DnsTransport
         catch (OperationCanceledException)
         {
             socket.Dispose();
-            DnsException.ThrowTimeout($"TCP connect to {Endpoint}");
+            DnsException.ThrowTimeout(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpConnectTimeout, Endpoint));
         }
         catch (SocketException ex)
         {
             socket.Dispose();
-            DnsException.ThrowTransport($"TCP connect to {Endpoint}: {ex.SocketErrorCode}", ex);
+            DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpConnectFailure, Endpoint, ex.SocketErrorCode), ex);
         }
         catch
         {
@@ -256,7 +251,7 @@ public sealed class TcpDnsTransport : DnsTransport
                 .ConfigureAwait(false);
             if (n == 0)
             {
-                DnsException.ThrowTransport($"TCP send to {Endpoint}: socket closed mid-write");
+                DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpWriteClosed, Endpoint));
             }
             sent += n;
         }
@@ -270,7 +265,7 @@ public sealed class TcpDnsTransport : DnsTransport
 
         if (length == 0)
         {
-            DnsException.ThrowMalformed($"TCP response from {Endpoint} declared zero-length message");
+            DnsException.ThrowMalformed(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpResponseEmpty, Endpoint));
         }
 
         byte[] message = new byte[length];
@@ -289,7 +284,7 @@ public sealed class TcpDnsTransport : DnsTransport
 
             if (n == 0)
             {
-                DnsException.ThrowTransport($"TCP receive from {Endpoint}: connection closed before {buffer.Length} octets read");
+                DnsException.ThrowTransport(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TcpReadClosed, Endpoint, buffer.Length));
             }
             received += n;
         }

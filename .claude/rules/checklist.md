@@ -57,6 +57,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] No new `ThrowHelper` / `ThrowHelpers` types introduced
 - [ ] Reusable throw logic, if any, is a static member of the exception type it throws. Extension members only for exception types the assembly does not own (`general-rules.md`, "Direct throws or exception-type members")
 - [ ] Exception messages come from `src/Properties/ErrorMessages.resx` through the build-generated `ErrorMessages` class: no literal or interpolated message strings in a `throw` or an exception constructor (`general-rules.md`, "Exception messages are build-generated resources"; Database adopts this through #1470)
+- [ ] A single-valued input with a validity rule at a public boundary is a `<CohesionValueType>` value object with `IsValid`. Nothing is constructed only to make it throw, the boundary still refuses `default`, and numeric ranges use `ArgumentOutOfRangeException` guards instead (`general-rules.md`, "Validate single-valued input with generated value objects")
 - [ ] Each resource name is a short name for the failure (`CookieNameInvalid`), never the message text or a truncation of it
 - [ ] An exception created on a normal path, such as an abort or cancellation reason, reads its message from a cached `static readonly` field, not on each creation
 - [ ] Exception roots stay scoped to the owning library or area (no new framework-wide `CohesionException`-style ancestry)

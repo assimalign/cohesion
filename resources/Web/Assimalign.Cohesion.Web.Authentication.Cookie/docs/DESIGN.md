@@ -99,6 +99,23 @@ reference (RFC 9110 §10.2.2).
 
 ## Cookie hardening defaults
 
+### Configured redirect paths (#1476)
+
+`LoginPath` and `AccessDeniedPath` are `HttpFieldValue` properties. The base type
+checks HTTP field content; the setters additionally refuse empty/default values,
+SP, HTAB and C1 controls (`U+0080-U+009F`), so a configured Location contains no
+control character or space. The C1 restriction belongs to this redirect boundary;
+generic field content permits those obs-text characters.
+This happens at assignment, including mutations after scheme registration. Paths
+retain their case and existing percent-encoded spelling; encode a space as `%20`.
+
+Compared with 10.0.0-preview.1, both properties change from `string` to
+`HttpFieldValue`, requiring consumers to rebuild and use `.Value` for string
+reads. String assignments remain supported. Invalid paths now fail configuration
+with `ArgumentException` instead of reaching the response writer during challenge
+or forbid. Null, empty and default paths are also refused. These are deliberate
+source/binary and behavior changes under decision 15.
+
 `CookieAuthenticationOptions.CookieName` is an `HttpCookieName`, the Cookies
 package's non-empty RFC 6265 `token` value type. An out-of-grammar string
 (including null, empty, whitespace, separators, controls or non-ASCII text)

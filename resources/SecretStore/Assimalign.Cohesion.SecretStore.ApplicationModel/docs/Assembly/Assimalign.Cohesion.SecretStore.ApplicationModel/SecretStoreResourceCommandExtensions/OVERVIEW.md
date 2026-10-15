@@ -45,6 +45,11 @@ the bare JWK payload. The protected trust document round-trips the optional stri
 or empty means every command kind is allowed. Enroll(platformStore) is deferred to item 31t:
 automatic Platform enrollment needs a gateway-owned mediator and Platform-audience signer.
 
-Blank required strings, invalid single-segment keys and malformed argument values throw argument
-exceptions naming the offending parameter. Build rejects unadvertised kinds or duplicate target
-keys through ResourceCommandValidator. Serialization uses the internal generated JSON context.
+`AddSecret` accepts `SecretStoreCommandPath` and `SecretStoreCommandSource`; `IssueCertificate`
+accepts `SecretStoreCertificateName` and optional
+`IEnumerable<SecretStoreSubjectAlternativeName>`. Scalar strings and collection expressions
+convert implicitly; existing string collections require an explicit value projection.
+Invalid values throw from conversion with parameter `value`. The verb rejects required default
+values with the corresponding method parameter name. These signatures and earlier rejection are
+breaking changes from 10.0.0-preview.1. Build rejects unadvertised kinds or duplicate target keys
+through ResourceCommandValidator. Serialization uses the internal generated JSON context.

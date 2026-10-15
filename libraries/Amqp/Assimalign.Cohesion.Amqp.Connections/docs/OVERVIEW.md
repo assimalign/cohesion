@@ -38,6 +38,22 @@ and messaging semantics are out of scope — they belong to the sibling
 - `AmqpProtocolCodec`, `AmqpFrameCodec`, `AmqpMessageCodec` — static encode/decode facades.
 - `AmqpProtocolException` — the area exception root.
 
+## Validated values
+
+Construct an `AmqpSymbol` from non-null seven-bit ASCII text; an empty symbol is allowed and
+letter case is significant. Use `AmqpSymbol.TryCreate(text, out var symbol)` when invalid input
+is expected. A default symbol has no value and can be compared or used as a dictionary key,
+but cannot be encoded as a symbol. Its `ToString()` returns an empty string.
+
+Set transport and Open maximum frame sizes to at least 512 bytes. The standalone frame encoder
+enforces the same minimum before encoding. `AmqpOpenPerformative.MaxFrameSize = null` omits
+the advertised limit. Invalid assignments and encoder limits throw `ArgumentOutOfRangeException`;
+invalid peer symbols and advertised limits throw `AmqpProtocolException` during decoding.
+
+The symbol's generated JSON converter writes a JSON string (or null for default), including
+when used with source-generated JSON serialization. See [DESIGN.md](DESIGN.md#symbol-and-frame-size-validation-1484)
+for the behavior changes from 10.0.0-preview.1.
+
 ## Source Layout
 
 - `src/` — transports, connection/context guided bases, performative and message DTOs, value

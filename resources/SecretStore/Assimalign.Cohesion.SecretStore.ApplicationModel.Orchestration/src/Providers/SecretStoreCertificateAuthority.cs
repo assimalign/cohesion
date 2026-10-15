@@ -89,9 +89,11 @@ public sealed class SecretStoreCertificateAuthority : IResourceCertificateAuthor
     /// <paramref name="request"/> or <paramref name="authority"/> is <see langword="null"/>.
     /// </exception>
     /// <exception cref="ArgumentException">
-    /// <see cref="ResourceCertificateRequest.LeafName"/> is blank; <paramref name="authority"/>
+    /// <see cref="ResourceCertificateRequest.LeafName"/> is blank, contains <c>/</c> or <c>\</c>,
+    /// or equals <c>.</c> or <c>..</c>; <paramref name="authority"/>
     /// connects to a resource that is not a SecretStore; its control-plane address is not an HTTP(S)
-    /// endpoint; or its bearer credential is blank.
+    /// endpoint; or its bearer credential is blank. Leaf names are case-sensitive, unprefixed
+    /// storage identifiers; invalid leaf names are rejected locally before any HTTP request is sent.
     /// </exception>
     /// <exception cref="HttpRequestException">
     /// The store cannot be reached or refuses either read; <see cref="HttpRequestException.StatusCode"/>

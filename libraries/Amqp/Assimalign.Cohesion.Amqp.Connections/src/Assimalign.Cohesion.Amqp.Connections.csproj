@@ -8,4 +8,13 @@
         <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
     </ItemGroup>
+    <ItemGroup>
+        <CohesionValueType Include="ValueObjects\AmqpSymbol.cs"
+                           ObjectRuntimeType="String"
+                           ObjectNamespace="Assimalign.Cohesion.Amqp.Connections"
+                           ObjectAccessModifier="public"
+                           ObjectHasImplicitOperators="true"
+                           ObjectHasIsValidMethod="true"
+                           ObjectComparison="Ordinal" />
+    </ItemGroup>
 </Project>

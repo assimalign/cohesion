@@ -170,8 +170,8 @@ internal static partial class AmqpEncoding
             0xb0 => reader.ReadBytes(reader.ReadInt32()).ToArray(),
             0xa1 => _utf8.GetString(reader.ReadBytes(reader.ReadByte())),
             0xb1 => _utf8.GetString(reader.ReadBytes(reader.ReadInt32())),
-            0xa3 => new AmqpSymbol(_utf8.GetString(reader.ReadBytes(reader.ReadByte()))),
-            0xb3 => new AmqpSymbol(_utf8.GetString(reader.ReadBytes(reader.ReadInt32()))),
+            0xa3 => ReadSymbol(reader.ReadBytes(reader.ReadByte())),
+            0xb3 => ReadSymbol(reader.ReadBytes(reader.ReadInt32())),
             0x45 => Array.Empty<object?>(),
             0xc0 => ReadList(ref reader, reader.ReadByte(), false),
             0xd0 => ReadList(ref reader, reader.ReadInt32(), true),
@@ -181,6 +181,16 @@ internal static partial class AmqpEncoding
             0xf0 => ReadArray(ref reader, reader.ReadInt32(), true),
             _ => throw new AmqpProtocolException($"The AMQP format code '0x{formatCode:x2}' is not supported.")
         };
+    }
+
+    private static AmqpSymbol ReadSymbol(ReadOnlySpan<byte> bytes)
+    {
+        if (!AmqpSymbol.TryCreate(_utf8.GetString(bytes), out AmqpSymbol symbol))
+        {
+            throw new AmqpProtocolException(ErrorMessages.SymbolInvalid);
+        }
+
+        return symbol;
     }
 
     private static (object Descriptor, object? Value) ReadDescribedRaw(ref AmqpBufferReader reader)

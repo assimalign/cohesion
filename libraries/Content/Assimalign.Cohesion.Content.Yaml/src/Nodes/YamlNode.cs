@@ -1,3 +1,5 @@
+using System;
+
 namespace Assimalign.Cohesion.Content.Yaml;
 
 /// <summary>
@@ -16,12 +18,38 @@ public abstract class YamlNode
     }
 
     /// <summary>Gets or sets the anchor name declared for this node, without the leading <c>&amp;</c>.</summary>
-    public string? Anchor { get; set; }
+    /// <exception cref="ArgumentException">The assigned value wraps a default, uninitialized anchor name.</exception>
+    public YamlAnchorName? Anchor
+    {
+        get;
+        set
+        {
+            if (value is { } anchor && anchor.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.AnchorNameInvalid, nameof(value));
+            }
+
+            field = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the node's resolved tag, for example <c>tag:yaml.org,2002:str</c> or an
     /// application-specific <c>!name</c> tag. <see langword="null"/> when no explicit tag applies
     /// beyond core-schema resolution.
     /// </summary>
-    public string? Tag { get; set; }
+    /// <exception cref="ArgumentException">The assigned value wraps a default, uninitialized tag.</exception>
+    public YamlTag? Tag
+    {
+        get;
+        set
+        {
+            if (value is { } tag && tag.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.TagInvalid, nameof(value));
+            }
+
+            field = value;
+        }
+    }
 }

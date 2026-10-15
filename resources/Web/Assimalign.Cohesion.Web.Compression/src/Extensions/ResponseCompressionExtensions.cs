@@ -29,7 +29,7 @@ public static class ResponseCompressionExtensions
         /// </param>
         /// <returns>The same <see cref="IWebApplicationPipelineBuilder"/> for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">Both <c>EnableGzip</c> and <c>EnableBrotli</c> were disabled, leaving no coding to offer.</exception>
+        /// <exception cref="ArgumentException">Both <c>EnableGzip</c> and <c>EnableBrotli</c> were disabled, leaving no coding to offer, or a configured media-type pattern is invalid.</exception>
         /// <remarks>
         /// Register this early in the pipeline so it wraps the response body of every middleware whose
         /// output it should compress. It composes with the exception boundary and content-negotiated

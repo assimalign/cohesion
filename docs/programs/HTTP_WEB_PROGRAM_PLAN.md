@@ -1629,6 +1629,19 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
       - `ResourceControlPlane` and `JsonWebTokenWriter` keep their names as public types, so Database's calls compile unchanged.
       - Web.Health's `HealthChecks.CreateBuilder()`, which Database.Hosting calls, waits.
       - #1470 records all three conventions for the Database area.
+60. **PR #1094 merged; the value-object adoption approved (owner, 2026-10-14; #1463).**
+    - **The merge.** The owner squash-merged PR #1094 into main (`1ccedc73`). The value-object follow-ups continue on `feature/L03.01.01.49-value-object-adoption` and land as a new PR.
+    - **Every recommendation in `VALUE_OBJECT_ADOPTION_SCOPE.md` §5 is approved:**
+      - V1: the Http/Web buckets landed in #1094. The other areas' buckets (H–O) become items under their area epics and are worked on the new branch.
+      - V2: `HttpFieldName` and `HttpFieldValue` join core Http (#1476).
+      - V3: numeric ranges stay primitives with composition guards (#1477, #1478, bucket O).
+      - V4: the value-object standard joins `general-rules.md` and `checklist.md`.
+      - V5: value objects stay structs, and boundaries keep refusing `default`.
+      - V6: generator hooks land with the first item that needs them.
+      - V7: private drafts GHSA-78wx-w47w-cjpx (#1474) and GHSA-2cp9-9fw3-w7xw (#1475), to publish with the next preview.
+    - **Issue bookkeeping:**
+      - #1463 stays open as the parent of #1476–#1478 and closes with the new PR.
+      - The merge closed #829 through a stray link. It was reopened, because the IdentityModel program still owns it.
 
 ### 7.5 Lineup
 

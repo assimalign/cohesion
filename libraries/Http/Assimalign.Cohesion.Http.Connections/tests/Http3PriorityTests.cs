@@ -211,8 +211,15 @@ public class Http3PriorityTests
             string priority = oversized ? "u=1, " + new string('x', 17 * 1024) : "u=1";
 
             // Act
-            await control.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
-                [], ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(streamId, priority))));
+            try
+            {
+                await control.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
+                    [], ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(streamId, priority))));
+            }
+            catch (ConnectionResetException exception) when (exception.ApplicationErrorCode == (long)Http3ErrorCode.IdError)
+            {
+                // The invalid stream ID can close the connection before its flush completes.
+            }
 
             // Assert — no request was dispatched, and the whole connection carries the RFC error.
             (await receive.WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeFalse();

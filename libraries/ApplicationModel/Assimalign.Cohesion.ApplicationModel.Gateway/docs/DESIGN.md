@@ -146,6 +146,14 @@ the registration under the same lock.
   under `OnFailure` (default), `Always`, or `Never`, with 1-second exponential backoff capped at
   30 seconds and five restart attempts. A restart observes
   `Degraded → Stopping → Starting → Running`; dependents are never re-gated.
+- **Supervision option invariants**: `LocalGatewayOptions.LivenessFailureThreshold` remains an
+  `int` greater than zero (default 3), and `MaximumRestartAttempts` remains a nonnegative `int`
+  (default 5; zero disables restarts). Each setter uses an `ArgumentOutOfRangeException` guard
+  before storing the value. The gateway retains the caller's options, so valid later assignments
+  remain supported, while an invalid assignment leaves the previous value intact and cannot
+  reach `LocalGatewayProcessSupervisor`. This follows numeric-range rule V3 without adding a
+  value type or changing the public property signatures. Remaining option-validation messages
+  use build-generated `ErrorMessages` resources with their existing text preserved.
 - **Mounts**: resources receive `COHESION_MOUNT_<M>_PATH` rooted at
   `.cohesion/<application>/<resource>/<mount>`. POSIX directories/files use exact 0700/0600
   modes. A Composite plan's flattened `<member>-<mount>` claim instead receives the outer carrier
@@ -191,6 +199,14 @@ the registration under the same lock.
   shared teardown task; persisted ports and mounts are not removed until process exit and PID
   cleanup complete.
 
+**Compatibility with 10.0.0-preview.1 (#1495).** Assigning a nonpositive liveness threshold or a
+negative restart limit now throws immediately, including in an object initializer and after
+gateway construction. Previously those assignments succeeded, initial invalid values failed at
+gateway construction, and later invalid values could reach supervision. This is a behavioral
+breaking change; source and binary signatures are unchanged. These two guards now use BCL
+exception messages and populate `ArgumentOutOfRangeException.ActualValue`; `ParamName` remains
+the property name.
+
 ## Item #968 — late-bound inputs, application trust, and opaque workloads
 
 ### Gateway-owned mount-source resolution (O13, through registered providers)
@@ -217,7 +233,17 @@ consume already-resolved inputs and never pull orchestration data themselves. Ea
   mount receives the provider's entries, which the gateway itself encodes as a JSON object with
   ordinally sorted keys and `null` values kept. A Volume mount cannot declare a source.
 
-Missing parameters, malformed references, missing registrations, unavailable endpoints, provider
+`ResourceMountSource` owns the syntax shared by manifest validation, provider validation, and this
+resolver. `literal:` permits an empty payload and embedded colons; `parameter:` requires a nonblank
+name and preserves any colons within it; another source requires exactly one colon between
+nonblank source and key. All comparisons are ordinal, and spelling and whitespace are preserved.
+Manifest source DTOs retain `string?` for the owner's Database freeze (#1168), with typed DTO
+adoption deferred to #1470. Their malformed text fails manifest validation with
+`InvalidDataException` through `ResourceMountSource.TryCreate`, before reconcile. Plan
+`MountBinding.Source` remains typed; invalid inputs fail conversion or plan validation. A string
+passed directly to the source-resolver seam uses `TryCreate` and returns an unresolved input.
+
+Missing parameters, malformed direct references, missing registrations, unavailable endpoints, provider
 failures, and kind mismatches produce a typed unresolved `ResourceMountInput` with the
 source-specific reason. `LocalPlanController` refuses that input before applying the process; every
 platform controller must preserve the same no-partial-realization rule.
@@ -501,14 +527,33 @@ A default-issuer credential lives `BootstrapCredentialLifetime` (24 hours by def
 than a pass, so for it the one-credential-per-key rule within a pass is unchanged.
 
 **Schemes.** `ApplicationCredential.Scheme` travels where the carrier has a place for it. The
-telemetry headers document writes `Authorization: <scheme> <value>` (and refuses a scheme with
-whitespace or a value with a line break, which would forge header lines). Every other carrier — the
+typed `ApplicationCredentialScheme` requires the HTTP authentication token grammar and compares
+ignoring case, following [RFC 9110 section 11.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-11.1).
+`ApplicationCredentialValue` requires nonblank contents without CR or LF. Both rules run when an
+issuer constructs or copies the credential, before it can enter a gateway cache. Default components
+are refused by the record's constructor and guarded `init` properties, including in `with`
+expressions. These rules live in ApplicationModel's generated value objects; the gateway only
+checks carrier policy. The telemetry headers document writes `Authorization: <scheme> <value>`.
+Every other carrier — the
 bootstrap file and the probes that present it, command clients, provider connections, the peer
 client, and the developer token — is a bearer carrier, so a non-`Bearer` scheme (case-insensitive)
-or a value with a line break is refused with an `InvalidOperationException` naming the purpose.
+is refused with an `InvalidOperationException` naming the purpose.
 Issuer exceptions are not caught: they fail the reconcile pass, except inside command delivery,
 which already records `InvalidOperationException` and `HttpRequestException` as a Rejected
 observation.
+
+Credential values supply a fixed `<redacted>` `ToString()` and debugger display through the
+generator's custom-display option. There is no implicit conversion back to string: transports
+explicitly read `credential.Value.Value`, while ordinary interpolation and concatenation remain
+redacted. The existing per-purpose tests continue to assert exact bootstrap, access, telemetry,
+peer, and developer token contents.
+
+Compared with `10.0.0-preview.1`, invalid issuer output throws `ArgumentException` during credential
+construction rather than reaching a cache and failing a gateway carrier check. Full HTTP token
+validation also rejects separator and non-ASCII scheme characters that previously passed the
+telemetry whitespace check. The constructor, properties, and deconstruction now use the two value
+types, requiring consumer recompilation; the ApplicationModel design lists the corresponding API
+changes. Valid credentials keep their original wire contents.
 
 ```mermaid
 flowchart TD
@@ -814,10 +859,16 @@ manifest's `controlPlane.endpoint` that forms a Cohesion endpoint with the manif
 `controlPlane.path` through `Uri.TryCreateEndpoint`. Local delivery previously built it with
 `UriBuilder` from the first name match; it now uses the same helper as provider connections and
 the served control plane's dispatcher, so the one `ResourceControlPlaneCommandClient` receives an
-identical URL for local and peer-served delivery: IPv6 hosts are bracketed the same way, a path
-without a leading slash is normalized the same way, and an unusable observation (no host, port 0) is
-skipped rather than turned into a malformed URI. `GatewayControlPlaneTests` pins it with an IPv6
-target whose manifest path is `cohesion/v1/`.
+identical URL for local and peer-served delivery: IPv6 hosts are bracketed the same way, and an
+unusable observation (no host, port 0) is skipped rather than turned into a malformed URI.
+`ResourceHttpPath` requires a leading slash and forbids query and fragment delimiters for control
+planes and HTTP probes. The manifest DTO paths retain their string types for the Database freeze;
+manifest validation checks them with `ResourceHttpPath.IsValid` and throws `InvalidDataException`
+for invalid text. Plan validation uses `TryCreate` before reconcile. `GatewayControlPlaneTests`
+pins address handling with an IPv6 target whose manifest path is `/cohesion/v1/`. Compared with
+`10.0.0-preview.1`, a relative control-plane
+path is refused instead of normalized, and a relative probe path fails validation before the local
+preparer calls `ProbeSpec.Http`.
 
 Because the default client serves every kind, a kind that had no adapter before (Web, for
 example) now has its commands delivered to `<control plane>/commands` instead of being rejected

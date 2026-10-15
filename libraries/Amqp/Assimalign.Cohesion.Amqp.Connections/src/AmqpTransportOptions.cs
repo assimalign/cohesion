@@ -28,10 +28,7 @@ public sealed class AmqpTransportOptions
         get => _maxFrameSize;
         set
         {
-            if (value < 512u)
-            {
-                throw new ArgumentOutOfRangeException(nameof(value), "AMQP frame size must be at least 512 bytes.");
-            }
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 512u);
 
             _maxFrameSize = value;
         }

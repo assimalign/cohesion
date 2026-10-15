@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 
 using Shouldly;
 
 using Xunit;
+
+using Assimalign.Cohesion.Http.Connections.Internal;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests;
 
@@ -45,6 +49,98 @@ public class Http3ConnectionListenerOptionsTests
         Http3QPackOptions qpack = new();
 
         Should.Throw<ArgumentOutOfRangeException>(() => qpack.MaxBlockedStreams = -1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3QPackOptions: Rejects a table capacity above the wire range")]
+    [InlineData(1L << 62)]
+    [InlineData(long.MaxValue)]
+    public void MaxTableCapacity_OnValueAboveWireRange_ShouldThrow(long value)
+    {
+        // Arrange
+        Http3QPackOptions qpack = new() { MaxTableCapacity = 4096 };
+
+        // Act
+        ArgumentOutOfRangeException exception = Should.Throw<ArgumentOutOfRangeException>(
+            () => qpack.MaxTableCapacity = value);
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        qpack.MaxTableCapacity.ShouldBe(4096);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3QPackOptions: Rejects a blocked-stream limit above the wire range")]
+    [InlineData(1L << 62)]
+    [InlineData(long.MaxValue)]
+    public void MaxBlockedStreams_OnValueAboveWireRange_ShouldThrow(long value)
+    {
+        // Arrange
+        Http3QPackOptions qpack = new() { MaxBlockedStreams = 16 };
+
+        // Act
+        ArgumentOutOfRangeException exception = Should.Throw<ArgumentOutOfRangeException>(
+            () => qpack.MaxBlockedStreams = value);
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        qpack.MaxBlockedStreams.ShouldBe(16);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3QPackOptions: Boundary settings round-trip over the wire")]
+    [InlineData(0L, 0L)]
+    [InlineData(1L, 0L)]
+    [InlineData(1L, (1L << 62) - 1)]
+    [InlineData((1L << 62) - 1, (1L << 62) - 1)]
+    public void EncodePayload_OnBoundaryQPackSettings_ShouldRoundTrip(long capacity, long blockedStreams)
+    {
+        // Arrange
+        Http3QPackOptions qpack = new()
+        {
+            MaxTableCapacity = capacity,
+            MaxBlockedStreams = blockedStreams,
+        };
+        Dictionary<long, long> settings = new();
+
+        // Act
+        byte[] payload = Http3LocalSettings.EncodePayload(qpack);
+        int index = 0;
+        while (index < payload.Length)
+        {
+            long identifier = QuicVariableLengthInteger.Decode(payload, ref index);
+            settings.Add(identifier, QuicVariableLengthInteger.Decode(payload, ref index));
+        }
+
+        // Assert
+        settings[Http3SettingId.QPackMaxTableCapacity].ShouldBe(capacity);
+        if (capacity > 0)
+        {
+            settings[Http3SettingId.QPackBlockedStreams].ShouldBe(blockedStreams);
+        }
+        else
+        {
+            settings.ContainsKey(Http3SettingId.QPackBlockedStreams).ShouldBeFalse();
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3QPackOptions: Boundary table capacity round-trips through a prefixed instruction")]
+    [InlineData(0L)]
+    [InlineData((1L << 62) - 1)]
+    public void MaxTableCapacity_OnBoundaryValue_ShouldRoundTripPrefixedInstruction(long capacity)
+    {
+        // Arrange
+        Http3QPackOptions qpack = new() { MaxTableCapacity = capacity };
+        QPackDynamicTable table = new(qpack.MaxTableCapacity);
+        using MemoryStream instruction = new();
+
+        // Act
+        QPackPrefixedInteger.Encode(instruction, capacity, 5, 0b0010_0000);
+        byte[] encoded = instruction.ToArray();
+        bool complete = QPackEncoderInstructionParser.TryApplyNext(encoded, table, out int consumed, out bool inserted);
+
+        // Assert
+        complete.ShouldBeTrue();
+        consumed.ShouldBe(encoded.Length);
+        inserted.ShouldBeFalse();
+        table.Capacity.ShouldBe(capacity);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3QPackOptions: Defaults the decoded field-section size to 16 KB")]

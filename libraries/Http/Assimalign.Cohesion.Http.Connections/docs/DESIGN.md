@@ -1501,8 +1501,8 @@ final head before writing it.
 Each interim flush uses the response minimum data rate, including its per-request
 override, through the same helper as automatic `100` (#1384). Reading that setting
 does not freeze it. The active interim's own rate gate bounds the final head's
-claim wait, including the interim frame's byte credit: a 2 KB `103` at 1,000 B/s
-with 300 ms grace can legitimately wait 800 ms for credit. The final head must not
+claim wait, including the interim frame's byte credit: a 4 KiB `103` at 1,024 B/s
+with three seconds of grace can legitimately wait five seconds for credit. The final head must not
 impose a separate zero-byte gate that expires after grace alone. Caller and
 exchange cancellation still end the claim wait, and an interim that exceeds its
 allowance resets the request stream and cancels the waiting head. With the rate
@@ -1514,6 +1514,15 @@ corrects a post-preview.1 regression in the claim's rate enforcement; preview.1
 had neither the claim nor the response rate gate. Automatic `100 Continue` uses
 the same handoff and accounting, superseding the separate final-wait gate
 described in the earlier #1385 section above.
+
+The allowance regression (#1499) uses those numbers, with a value QPACK leaves
+uncompressed and an assertion on the encoded credit: five seconds is two beyond
+the final head's grace and at least two short of the interim's allowance. After
+the interim releases the writer, the test withholds the final head's credit for
+one second, leaving at least two seconds of its fresh grace for scheduling slip.
+Charging the claim wait to the final gate exhausts it before that write. Both
+heads must reach the wire in order without cancellation or concurrent writer use.
+The test takes about six seconds, with a twenty-second overall watchdog.
 
 **Breaking behavior from 10.0.0-preview.1 (decision 15):** concurrent application
 interims and final heads now serialize or reject the interim cleanly instead of
@@ -2517,6 +2526,22 @@ one octet per 100 ms) and require an I/O failure plus the protocol's 408/reset o
 A test deadline is not an acceptable substitute for that rejection. This changes
 test scheduling only; no transport behavior or preview.1 compatibility changes.
 
+### Malformed-stream keep-alive test scheduling (#1499)
+
+The HTTP/2 and HTTP/3 regressions use a six-second keep-alive and send a malformed
+stream after four seconds, leaving two seconds to deliver it before the original
+deadline. They measure from before opening/sending the stream through receive-loop
+completion. A correct close is about two seconds later; restarting the deadline
+would take six. The four-second assertion bound leaves two seconds on either
+side for timer and scheduling slip, while the reset and graceful GOAWAY assertions
+still verify the protocol outcome. Each passing test takes about six seconds.
+These calls opt into a twenty-second observation watchdog in the test peers so
+even the defective ten-second total close reaches the timing assertion.
+
+The connection contexts use `TimeProvider.System` without an injectable clock.
+These tests therefore retain real timers and scale their margins; no product API,
+dependency or behavior changes, including against 10.0.0-preview.1.
+
 ### Not covered
 
 - **`MinResponseDataRate` on HTTP/2 and HTTP/3.** Closed by #1384: a peer that grants no
@@ -3095,6 +3120,19 @@ application's fault observer, and recorded a `500` on the server span for a stre
   `ClientFaultStatusCode` remains `null`. A body fault already latched still wins over cancellation.
   Web.Hosting consequently records `request_canceled`, without an Error log, `OnException`, or a
   staged `500`. The transport supplies the cancellation; the host's existing boundary handles it.
+
+**Test trigger scheduling (#1501).** A client write that deliberately causes a connection close or
+stream reset can observe that reset before its flush completes. The live in-memory tests accept only
+`ConnectionResetException` with the triggering case's exact `ApplicationErrorCode`; raw QUIC tests
+also require the expected `QuicError` (`ConnectionAborted` or `StreamAborted`). Other exceptions,
+missing codes and different codes still fail. The abort-code, cancellation, read and response
+assertions after the trigger remain independent and unchanged. This covers forbidden control DATA,
+invalid QPACK encoder instructions and priority IDs, malformed request heads, reserved streams and
+the raw QUIC unread-upload stop. In the connection-loss theory, control FIN completes synchronously
+without checking connection loss; control reset and driver abort likewise only signal the failure.
+Those three triggers need no exception handling. A temporary post-flush barrier reproduced all four
+forbidden-control cases failing with `0x105` before the filter and passing after it; the barrier was
+removed. This is test reliability only, with no shipped behavior, dependency or preview.1 break.
 
 **Behavior and advisory triage (#1430).** This replaces the post-preview streaming body's former
 `IOException` contract. The scoped defect is absent from 10.0.0-preview.1, which buffered the complete
@@ -5232,6 +5270,18 @@ otherwise-hard problems:
 
 ### Dynamic table (opt-in)
 
+`Http3QPackOptions.MaxTableCapacity` and `MaxBlockedStreams` accept 0 through
+2^62 - 1 and reject other values in their setters with `ArgumentOutOfRangeException`
+(#1478). Both settings must fit the QUIC variable-length integer in SETTINGS
+([RFC 9000 §16](https://www.rfc-editor.org/rfc/rfc9000.html#section-16)). The maximum
+capacity also fits the 62-bit prefixed integers every QPACK implementation must
+decode ([RFC 9204 §4.1.1](https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1)),
+including the five-bit-prefix Set Dynamic Table Capacity instruction. The numeric
+options stay `long`; validation happens before assignment so a failed update retains
+the previous setting. This is a behavioral break against 10.0.0-preview.1: values
+from 2^62 through `long.MaxValue` previously succeeded, then lost their high bits in
+SETTINGS while the decoder retained the configured value. Signatures are unchanged.
+
 Opting in is a per-listener, public configuration choice:
 `options.UseHttp3(listener, o => o.QPack.MaxTableCapacity = 4096)`. The public
 `Http3ConnectionListenerOptions.QPack` (an `Http3QPackOptions`) carries the advertised
@@ -5563,6 +5613,13 @@ Recognition (`:protocol`), validation, and the `IsExtendedConnect` /
 `CONNECT` (no `:protocol`) has no `Protocol` and cannot accept a tunnel.
 
 ### Deterministic validation (RFC 8441 §4 / RFC 9220)
+
+`HttpFieldNormalization.ValidateExtendedConnect` now applies `HttpFieldName.IsValid` to
+every present protocol name (#1477). Internal spaces, slashes and every other non-token
+character are refused before context construction; the public context initializer also guards
+direct construction. HTTP/2 and HTTP/3 regressions verify stream-local refusal and continued
+service of sibling streams. Against 10.0.0-preview.1, accepting non-token protocol names is
+replaced by `PROTOCOL_ERROR` / `H3_MESSAGE_ERROR` stream rejection, a behavioral break.
 
 - A **present but empty** `:protocol` is malformed on every method. A
   protocol name is a token, `1*tchar` (RFC 9110 §5.6.2), so `""` names no
@@ -5941,6 +5998,19 @@ alt-authority with optional host + required port, `ma`, `persist`, and the speci
 `clear` token — with round-trip `Format`/`TryParse`), and the **emission** here,
 where the listener is the only component that knows whether an HTTP/3
 `IMultiplexedConnectionListener` is registered alongside the stream listeners.
+
+### Configured authority validation (#1476)
+
+`Authority` retains its nullable string signature and validates each non-null
+assignment through `HttpFieldValue.TryCreate`, additionally refusing SP/HTAB and
+C1 controls (`U+0080-U+009F`). This authority-specific restriction is separate from
+generic field content, which permits every obs-text character.
+Null and empty retain endpoint-derived authority behavior. Validation applies even
+when advertisement is currently disabled, so enabling it later cannot activate an
+unsafe value. Compared with 10.0.0-preview.1, control-bearing or spaced authority
+text now throws `ArgumentException` at assignment, before listener construction
+or binding, instead of failing each advertised response during encoding.
+Port syntax still uses the existing binding check; no per-response work is added.
 
 ### Where the advertisement is decided and injected
 

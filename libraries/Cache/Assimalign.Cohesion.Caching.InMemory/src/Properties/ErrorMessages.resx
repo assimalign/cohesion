@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ExpirationScanFrequencyInvalid" xml:space="preserve">
+    <value>ExpirationScanFrequency must be greater than zero.</value>
+  </data>
+  <data name="SizeLimitInvalid" xml:space="preserve">
+    <value>SizeLimit must be greater than or equal to zero.</value>
+  </data>
+  <data name="CompactionPercentageInvalid" xml:space="preserve">
+    <value>CompactionPercentage must be in the (0, 1] range.</value>
+  </data>
+</root>

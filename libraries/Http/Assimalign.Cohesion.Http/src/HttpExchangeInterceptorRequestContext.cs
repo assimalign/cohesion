@@ -71,13 +71,26 @@ public sealed class HttpExchangeInterceptorRequestContext
     /// request, including every HTTP/1.1 request and a classic <c>CONNECT</c>.
     /// </summary>
     /// <remarks>
-    /// The transport sets it only after validating the request as an extended CONNECT: the value is not
-    /// empty, the method is <c>CONNECT</c>, and the request also carries <c>:scheme</c>, <c>:path</c>
+    /// The transport sets it only after validating the request as an extended CONNECT: the value is
+    /// an RFC 9110 token, the method is <c>CONNECT</c>, and the request also carries <c>:scheme</c>, <c>:path</c>
     /// and <c>:authority</c>. A non-<see langword="null"/> value therefore identifies a request that may be
     /// answered with a stream tunnel (<see cref="IHttpExchangeControl.AcceptTunnelAsync"/>), which
     /// <see cref="Method"/> alone cannot tell apart from a classic <c>CONNECT</c>.
     /// </remarks>
-    public string? Protocol { get; init; }
+    /// <exception cref="ArgumentException">A non-null value is not an RFC 9110 token.</exception>
+    public string? Protocol
+    {
+        get;
+        init
+        {
+            if (value is not null && !HttpFieldName.IsValid(value, out _))
+            {
+                throw new ArgumentException(ErrorMessages.ExtendedConnectProtocolInvalid, nameof(value));
+            }
+
+            field = value;
+        }
+    }
 
     /// <summary>
     /// Gets whether reading the request body can still detect a client fault after dispatch: content

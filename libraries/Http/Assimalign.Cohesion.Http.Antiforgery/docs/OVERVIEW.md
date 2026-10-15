@@ -22,3 +22,9 @@ encodings now select the first token.
 
 See [DESIGN](DESIGN.md) for token protection, dependency direction, and Web
 pipeline integration.
+
+## Configured field names
+
+`options.HeaderName = "X-CSRF-TOKEN"` converts to `HttpFieldName`. Invalid RFC 9110 field names,
+pseudo-headers and `default` are refused at assignment. Use `options.HeaderName.Value` when passing
+the name to a raw request-header collection. This property was a `string` in 10.0.0-preview.1.

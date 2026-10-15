@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="OptionRequired" xml:space="preserve">
+    <value>{0}.{1} is required.</value>
+  </data>
+  <data name="ClientCookieLength" xml:space="preserve">
+    <value>{0}.{1} must be exactly 8 octets when set.</value>
+  </data>
+  <data name="QuestionTypeRequired" xml:space="preserve">
+    <value>Question type must be set.</value>
+  </data>
+  <data name="ForwardersRequired" xml:space="preserve">
+    <value>{0}.{1} must contain at least one transport.</value>
+  </data>
+  <data name="ForwarderNull" xml:space="preserve">
+    <value>Forwarder list contains a null entry.</value>
+  </data>
+  <data name="ForwardersNotAttempted" xml:space="preserve">
+    <value>no forwarders attempted</value>
+  </data>
+  <data name="ReferralOutsideBailiwick" xml:space="preserve">
+    <value>referral from zone {0} delegates to {1} which is not strictly below it</value>
+  </data>
+  <data name="UnknownZone" xml:space="preserve">
+    <value>&lt;unknown&gt;</value>
+  </data>
+  <data name="RootEndpointsRequired" xml:space="preserve">
+    <value>{0}.{1} must contain at least one endpoint.</value>
+  </data>
+  <data name="ResolutionCycle" xml:space="preserve">
+    <value>resolution cycle detected for {0}</value>
+  </data>
+  <data name="AuthorityUnavailable" xml:space="preserve">
+    <value>no reachable authority for zone {0}</value>
+  </data>
+  <data name="NameServersUnresolved" xml:space="preserve">
+    <value>could not resolve any NS for delegation to {0}</value>
+  </data>
+  <data name="ReferralDepthExceeded" xml:space="preserve">
+    <value>referral depth limit ({0}) exceeded resolving {1}</value>
+  </data>
+  <data name="QueryBudgetExceeded" xml:space="preserve">
+    <value>iterative query budget exhausted ({0})</value>
+  </data>
+  <data name="UdpRequestTooLarge" xml:space="preserve">
+    <value>UDP request size {0} exceeds the configured MaxResponseSize {1}</value>
+  </data>
+  <data name="UdpSendTimeout" xml:space="preserve">
+    <value>UDP send to {0}</value>
+  </data>
+  <data name="UdpSendFailure" xml:space="preserve">
+    <value>UDP send to {0}: {1}</value>
+  </data>
+  <data name="UdpReceiveTimeout" xml:space="preserve">
+    <value>UDP receive from {0}</value>
+  </data>
+  <data name="UdpReceiveFailure" xml:space="preserve">
+    <value>UDP receive from {0}: {1}</value>
+  </data>
+  <data name="RequestEmpty" xml:space="preserve">
+    <value>DNS request must be non-empty.</value>
+  </data>
+  <data name="TcpRequestTooLarge" xml:space="preserve">
+    <value>DNS request size {0} exceeds the TCP framing limit (65535 octets).</value>
+  </data>
+  <data name="TcpQueueTimeout" xml:space="preserve">
+    <value>TCP exchange queue for {0}</value>
+  </data>
+  <data name="TcpExchangeTimeout" xml:space="preserve">
+    <value>TCP exchange with {0}</value>
+  </data>
+  <data name="TcpExchangeFailure" xml:space="preserve">
+    <value>TCP I/O with {0}: {1}</value>
+  </data>
+  <data name="TcpConnectTimeout" xml:space="preserve">
+    <value>TCP connect to {0}</value>
+  </data>
+  <data name="TcpConnectFailure" xml:space="preserve">
+    <value>TCP connect to {0}: {1}</value>
+  </data>
+  <data name="TcpWriteClosed" xml:space="preserve">
+    <value>TCP send to {0}: socket closed mid-write</value>
+  </data>
+  <data name="TcpResponseEmpty" xml:space="preserve">
+    <value>TCP response from {0} declared zero-length message</value>
+  </data>
+  <data name="TcpReadClosed" xml:space="preserve">
+    <value>TCP receive from {0}: connection closed before {1} octets read</value>
+  </data>
+</root>

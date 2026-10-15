@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="ProblemTypeInvalid" xml:space="preserve">
+    <value>The problem type must be a URI reference.</value>
+  </data>
+  <data name="ProblemStatusInvalid" xml:space="preserve">
+    <value>The problem status must be an HTTP status code from 100 through 599.</value>
+  </data>
+  <data name="ProblemInstanceInvalid" xml:space="preserve">
+    <value>The problem instance must be a URI reference.</value>
+  </data>
+</root>

@@ -27,6 +27,10 @@ See [Diagnostics in the design](DESIGN.md#diagnostics) for events and payloads.
 
 ## Usage
 
+`DefaultDocuments` entries must be valid bare file names of at most 255 characters. Invalid
+characters (for example `?`) fail when `UseStaticFiles` is called. `MapFallbackToFile` similarly
+rejects paths that cannot parse inside the web-root mount, including `bad?.html`, during registration.
+
 The parameterless verb serves the application's web root: `wwwroot` under the content root
 (`IWebApplicationContext.WebRootPath`, set by the hosting runtime). It never serves the content
 root itself or the working directory, and it passes every request through when the application
@@ -55,6 +59,11 @@ app.UseStaticFiles(contentRoot, options =>
     options.ServePrecompressedAssets = true;           // default: .br/.gz siblings negotiate
 });
 ```
+
+`ContentTypeMappings` values and `FallbackContentType` must be non-empty HTTP field values.
+Registration rejects RFC CTLs other than interior HTAB, plus leading or trailing SP/HTAB,
+using `HttpFieldValue`; case and obs-text (including C1 characters) are preserved. The fallback is checked even when
+`ServeUnknownContentTypes` is disabled.
 
 A `ContentTypeMappings` key maps an extension, never a whole file name, so no key types a file
 without one, such as `apple-app-site-association`. Give such files a mount of their own whose

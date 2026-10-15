@@ -237,3 +237,13 @@ preserves those inputs locally. Existing validation guards remain in place. This
 public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
 signatures require rebuilding; the source and binary breaks are recorded in the JWT and
 DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.
+
+## Validated resource paths (#1481)
+
+Command dispatch receives the manifest control-plane prefix as a string. The DTO keeps that
+type for the owner's Database freeze (#1168), with typed DTO adoption deferred to #1470.
+ApplicationModel validates the prefix through `ResourceHttpPath.IsValid`: it must be absolute
+and contain no query or fragment. Relative values accepted by 10.0.0-preview.1 now fail manifest
+validation with `InvalidDataException` before command dispatch. The IPv6 command-dispatch fixtures
+use an absolute `/cohesion/v1/` prefix while retaining the existing trailing-slash normalization
+and endpoint selection coverage. Wire routes and valid endpoint handling are unchanged.

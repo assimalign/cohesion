@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Http;
+
 namespace Assimalign.Cohesion.Web.Caching;
 
 /// <summary>
@@ -20,24 +22,36 @@ public sealed class OutputCacheHeader
     /// </summary>
     /// <param name="name">The header field name.</param>
     /// <param name="values">The header field values, in order. An empty array is permitted.</param>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="null"/> or empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> or a present value is <see langword="default"/>.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="values"/> is <see langword="null"/>.</exception>
-    public OutputCacheHeader(string name, string?[] values)
+    public OutputCacheHeader(HttpFieldName name, HttpFieldValue?[] values)
     {
-        ArgumentException.ThrowIfNullOrEmpty(name);
+        if (name.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.CacheFieldNameInvalid, nameof(name));
+        }
         ArgumentNullException.ThrowIfNull(values);
 
+        HttpFieldValue?[] snapshot = (HttpFieldValue?[])values.Clone();
+        foreach (HttpFieldValue? value in snapshot)
+        {
+            if (value is { } present && present.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.CacheFieldValueInvalid, nameof(values));
+            }
+        }
+
         Name = name;
-        Values = values;
+        Values = Array.AsReadOnly(snapshot);
     }
 
     /// <summary>
     /// Gets the header field name.
     /// </summary>
-    public string Name { get; }
+    public HttpFieldName Name { get; }
 
     /// <summary>
     /// Gets the header field values, in order.
     /// </summary>
-    public IReadOnlyList<string?> Values { get; }
+    public IReadOnlyList<HttpFieldValue?> Values { get; }
 }

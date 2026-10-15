@@ -88,4 +88,23 @@ public class FileSystemKeyRepositoryTests
         repository.GetAllKeys().Count.ShouldBe(1);
         Encoding.UTF8.GetString(repository.GetAllKeys()[0].Content.Span).ShouldBe("second");
     }
+
+    [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - FileRepository: Should skip foreign files with unsafe document names")]
+    public void GetAllKeys_UnsafeFileName_ShouldKeepValidDocuments()
+    {
+        // Arrange
+        using TempDirectory temp = new();
+        FileSystemKeyRepository repository = FileSystemKeyRepository.Create(temp.Path);
+        repository.StoreKey(new KeyDocument("valid", _sample));
+        File.WriteAllBytes(Path.Combine(temp.Path, "bad..name.key"), _sample);
+
+        // Act
+        var documents = repository.GetAllKeys();
+
+        // Assert
+        documents.Count.ShouldBe(1);
+        string name = documents[0].Name;
+        name.ShouldBe("valid");
+        documents[0].Content.ToArray().ShouldBe(_sample);
+    }
 }

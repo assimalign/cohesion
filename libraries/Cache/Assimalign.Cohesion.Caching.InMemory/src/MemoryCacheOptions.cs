@@ -29,7 +29,7 @@ public sealed class MemoryCacheOptions
                 throw new ArgumentOutOfRangeException(
                     nameof(value),
                     value,
-                    "ExpirationScanFrequency must be greater than zero.");
+                    ErrorMessages.ExpirationScanFrequencyInvalid);
             }
 
             _expirationScanFrequency = value;
@@ -56,7 +56,7 @@ public sealed class MemoryCacheOptions
                 throw new ArgumentOutOfRangeException(
                     nameof(value),
                     value,
-                    "SizeLimit must be greater than or equal to zero.");
+                    ErrorMessages.SizeLimitInvalid);
             }
 
             _sizeLimit = value;
@@ -68,19 +68,19 @@ public sealed class MemoryCacheOptions
     /// compaction pass triggered by a capacity-driven eviction.
     /// </summary>
     /// <remarks>
-    /// Must be strictly greater than zero and at most one. Defaults to 0.05 (five percent).
+    /// Must be finite, strictly greater than zero and at most one. Defaults to 0.05 (five percent).
     /// </remarks>
     public double CompactionPercentage
     {
         get => _compactionPercentage;
         set
         {
-            if (value is <= 0 or > 1)
+            if (!double.IsFinite(value) || value is <= 0 or > 1)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(value),
                     value,
-                    "CompactionPercentage must be in the (0, 1] range.");
+                    ErrorMessages.CompactionPercentageInvalid);
             }
 
             _compactionPercentage = value;

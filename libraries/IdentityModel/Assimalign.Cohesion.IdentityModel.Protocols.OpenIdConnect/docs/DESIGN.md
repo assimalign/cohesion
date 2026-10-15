@@ -39,6 +39,19 @@ contracts here (`OpenIdConnectIdToken`, `OpenIdConnectLogoutToken`) from parsed
 JWTs and owns signature / `at_hash` / `c_hash` verification — the one crypto
 concern. Each Core §3.1.3.7 rule therefore has exactly one owner.
 
+## Validation policy bounds
+
+`OpenIdConnectIdTokenValidationOptions.MaxAge` remains a nullable `long` because
+it is a numeric policy range. Its setter rejects negative seconds with
+`ArgumentOutOfRangeException`, before token validation can mistake an invalid
+policy for stale authentication. Null removes the age requirement; zero keeps
+the existing immediate-authentication check, with the configured clock skew.
+The descriptor contracts continue to preserve protocol evidence for validation.
+
+This is a behavioral breaking change from `10.0.0-preview.1`: assigning a
+negative maximum age now throws instead of retaining the value and later
+reporting `MaxAgeExceeded` for even a newly authenticated token.
+
 ## AOT posture
 
 `<IsAotCompatible>true</IsAotCompatible>`. No reflection or serializers on any

@@ -175,29 +175,32 @@ public class Http2ConnectionTimeoutTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A malformed stream on an idle connection should not restart the keep-alive deadline")]
     public async Task ReceiveAsync_OnMalformedStreamWhileIdle_ShouldKeepTheKeepAliveDeadline()
     {
-        // Arrange — the connection is idle from acceptance under a one-second keep-alive.
-        TimeSpan keepAlive = TimeSpan.FromSeconds(1);
+        // Arrange — six seconds of keep-alive leave two seconds to send the malformed stream after
+        // the four-second delay. Allow twenty seconds for observation, including the defective close.
+        TimeSpan keepAlive = TimeSpan.FromSeconds(6);
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(configure: http2 =>
         {
             http2.Limits.KeepAliveTimeout = keepAlive;
             http2.Limits.RequestHeadersTimeout = _longTimeout;
         });
-        Task receiveEnded = peer.WaitForReceiveEndAsync();
+        Task receiveEnded = peer.WaitForReceiveEndAsync(TimeSpan.FromSeconds(20));
 
-        // Act — at 0.8 × the keep-alive, a HEADERS frame without :method opens stream 1, which the server
-        // resets as malformed (RFC 9113 §8.1.1) without handing it to the host.
-        await Task.Delay(keepAlive * 0.8);
-        await peer.SendHeadersAsync(1, endStream: true, (":scheme", "http"), (":path", "/malformed"), (":authority", "api.test"));
+        // Act — after four seconds, a HEADERS frame without :method opens stream 1, which the server
+        // resets as malformed (RFC 9113 §8.1.1) without handing it to the host. Start measuring before
+        // the send so a delayed send continuation cannot hide a restarted deadline.
+        await Task.Delay(TimeSpan.FromSeconds(4));
         Stopwatch sinceMalformed = Stopwatch.StartNew();
+        await peer.SendHeadersAsync(1, endStream: true, (":scheme", "http"), (":path", "/malformed"), (":authority", "api.test"));
         await receiveEnded;
         TimeSpan closedAfter = sinceMalformed.Elapsed;
 
-        // Assert — the stream was reset, and the connection closed at about 1 × the keep-alive from its
-        // acceptance, not a whole keep-alive after the malformed stream.
+        // Assert — the reset is followed by a graceful close about two seconds after the malformed
+        // stream; restarting the deadline would take six. The four-second bound leaves two seconds
+        // on either side for timer/scheduling slip. The passing test takes about six seconds total.
         IReadOnlyList<Http2WireFrame> frames = await peer.Output.ReadUntilAsync(observed => observed.Any(frame => frame.IsGoAway), "the idle GOAWAY");
         frames.ShouldContain(frame => frame.IsRstStream && frame.StreamId == 1);
         frames.Single(frame => frame.IsGoAway).GetGoAwayErrorCode().ShouldBe(Http2ErrorCode.NoError);
-        closedAfter.ShouldBeLessThan(keepAlive * 0.6);
+        closedAfter.ShouldBeLessThan(TimeSpan.FromSeconds(4));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A request-headers deadline that fires while a received head is processed should not close the connection")]

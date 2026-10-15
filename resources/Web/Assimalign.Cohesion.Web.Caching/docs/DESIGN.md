@@ -484,3 +484,55 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Configured and stored field grammar (#1476)
+
+`OutputCachePolicy.VaryByHeaders` is an `IList<HttpFieldName>` and `VaryByHeader` takes
+`params HttpFieldName[]`. The generated type owns RFC 9110 field-name syntax. An internal
+collection refuses `default` on both insertion and replacement, including policy mutations after
+composition, so key construction cannot discover an empty configured name during a request.
+
+`OutputCacheHeader` takes `HttpFieldName` and `HttpFieldValue?[]`, exposing the same name and an
+`IReadOnlyList<HttpFieldValue?>`. The constructor refuses uninitialized names and present default
+values. Null values remain absent; empty values remain valid. It copies the caller's values and
+exposes a read-only wrapper, so a custom store cannot change a previously validated array before
+replay. Generated conversions reject malformed stored names and values before a carrier can be
+replayed. Case and value order are preserved; raw `HttpHeaderKey`/`HttpHeaderValue` request parsing
+is unchanged.
+
+After successful response completion, capture removes only surrounding SP and HTAB from each
+non-null response value before converting it to `HttpFieldValue`. Response writers accept that
+optional whitespace without changing the response collection: HTTP/1 sends it as OWS, while
+HTTP/2 and HTTP/3 trim it. The cache stores the field content, retaining internal SP/HTAB and
+all obs-text, including C1 characters. Null entries stay absent, empty strings stay empty, and
+OWS-only strings become empty. The original response collection is unchanged. Completion tests
+cover the stored/replayed sequence and final starting-callback headers over HTTP/1 and HTTP/2.
+
+**Breaking from 10.0.0-preview.1:** the policy property and method, the header constructor, and
+`OutputCacheHeader.Name`/`Values` change their public types as described above. Empty names passed
+to `VaryByHeader` are refused rather than silently skipped. RFC CTLs other than internal
+HTAB, leading/trailing SP or HTAB, and malformed names are refused before replay. A caller's
+later mutation of a source value array no longer changes a cache header.
+Captured headers now store normalized field content instead of retaining surrounding OWS, a
+behavioral change under decision 15; custom stores must supply already-normalized field values.
+The C1 rejection and OWS capture exceptions were regressions introduced by #1476 after preview.1.
+
+Custom stores' `OutputCacheEntry.VaryBy` names also cross a configuration boundary before variant
+lookup. The constructor validates each through `HttpFieldName.TryCreate`, then retains an immutable
+snapshot. Its `IReadOnlyList<string>` signature is unchanged. Against 10.0.0-preview.1, malformed
+stored vary names now fail during entry construction, and later source-list mutations no longer
+change lookup dimensions or introduce names that fail during a request.
+
+## Per-policy byte-budget validation (#1477)
+
+`OutputCachePolicy.MaximumBodySize` keeps its nullable `long` signature. Assigning zero or a
+negative override now throws a resource-backed `ArgumentOutOfRangeException`, using the same
+positive-budget rule and error message as `OutputCacheOptions.MaximumBodySize`. Null continues
+to select the middleware-wide budget, and every positive value remains accepted. The setter
+covers base, named, and inline policies, including later mutations of a retained policy.
+
+**Breaking from 10.0.0-preview.1 (decision 15):** nonpositive overrides formerly passed composition
+and effectively suppressed body capture; they now fail on assignment. This defect exists in the
+released tag. It requires application-controlled configuration and is not directly settable by an
+unauthenticated client. Its impact is lost caching under misconfiguration (CWE-20, low severity),
+with no independently reachable confidentiality or integrity impact. No public API is added.

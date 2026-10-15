@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Net;
 using System.Threading;
@@ -33,7 +34,10 @@ namespace Assimalign.Cohesion.Dns;
 /// </remarks>
 public sealed class StubDnsClient : DnsClient
 {
-    private readonly StubDnsClientOptions _options;
+    private readonly DnsTransport _transport;
+    private readonly TimeSpan _queryTimeout;
+    private readonly bool _recursionDesired;
+    private readonly ushort _ednsPayloadSize;
     private readonly DnsCookieStore? _cookies;
 
     /// <summary>
@@ -42,29 +46,29 @@ public sealed class StubDnsClient : DnsClient
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="options"/>.<c>Transport</c> is
     /// <see langword="null"/> or the timeout is non-positive.</exception>
+    /// <remarks>Configuration values are captured at construction. Later option assignments do not change this instance.</remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A numeric limit or timeout is outside its supported range.</exception>
     public StubDnsClient(StubDnsClientOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (options.Transport is null)
+        _transport = options.Transport!;
+        _queryTimeout = options.QueryTimeout;
+        _recursionDesired = options.RecursionDesired;
+        _ednsPayloadSize = options.EdnsPayloadSize;
+        if (_transport is null)
         {
             throw new ArgumentException(
-                $"{nameof(StubDnsClientOptions)}.{nameof(StubDnsClientOptions.Transport)} is required.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionRequired, nameof(StubDnsClientOptions), nameof(StubDnsClientOptions.Transport)),
                 nameof(options));
         }
-        if (options.QueryTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentException(
-                $"{nameof(StubDnsClientOptions)}.{nameof(StubDnsClientOptions.QueryTimeout)} must be positive.",
-                nameof(options));
-        }
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_queryTimeout, TimeSpan.Zero, nameof(options));
         if (options.EdnsClientCookie is { } cc && cc.Length != 8)
         {
             throw new ArgumentException(
-                $"{nameof(StubDnsClientOptions)}.{nameof(StubDnsClientOptions.EdnsClientCookie)} must be exactly 8 octets when set.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientCookieLength, nameof(StubDnsClientOptions), nameof(StubDnsClientOptions.EdnsClientCookie)),
                 nameof(options));
         }
 
-        _options = options;
         _cookies = options.EnableEdnsCookies
             ? options.EdnsClientCookie is { } seed
                 ? new DnsCookieStore(seed)
@@ -78,11 +82,11 @@ public sealed class StubDnsClient : DnsClient
         ThrowIfDisposed();
         if (question.Type == default)
         {
-            throw new ArgumentException("Question type must be set.", nameof(question));
+            throw new ArgumentException(ErrorMessages.QuestionTypeRequired, nameof(question));
         }
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(_options.QueryTimeout);
+        timeoutCts.CancelAfter(_queryTimeout);
 
         DnsMessage response = await ExchangeAsync(question, timeoutCts, cancellationToken).ConfigureAwait(false);
 
@@ -102,9 +106,9 @@ public sealed class StubDnsClient : DnsClient
         CancellationTokenSource timeoutCts,
         CancellationToken externalToken)
     {
-        IPAddress? serverIp = TryGetServerIp(_options.Transport!.Endpoint);
+        IPAddress? serverIp = TryGetServerIp(_transport.Endpoint);
         IReadOnlyList<DnsEdnsOption>? options = null;
-        if (_cookies is not null && serverIp is not null && _options.EdnsPayloadSize > 0)
+        if (_cookies is not null && serverIp is not null && _ednsPayloadSize > 0)
         {
             options = new DnsEdnsOption[] { _cookies.BuildOption(serverIp) };
         }
@@ -112,12 +116,12 @@ public sealed class StubDnsClient : DnsClient
         DnsMessage query = DnsQueryHelper.BuildQuery(
             DnsQueryHelper.NewTransactionId(),
             question,
-            recursionDesired: _options.RecursionDesired,
-            ednsPayloadSize: _options.EdnsPayloadSize,
+            recursionDesired: _recursionDesired,
+            ednsPayloadSize: _ednsPayloadSize,
             ednsOptions: options);
 
         DnsMessage response = await DnsQueryHelper.ExchangeAsync(
-            _options.Transport!,
+            _transport,
             query,
             timeoutCts,
             externalToken).ConfigureAwait(false);

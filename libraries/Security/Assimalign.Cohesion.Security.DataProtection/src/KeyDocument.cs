@@ -16,15 +16,15 @@ public sealed class KeyDocument
     /// </summary>
     /// <param name="name">
     /// A stable, unique, storage-safe name for the document (the key ring uses the key id).
-    /// Must be non-empty and contain no directory-separator or path-traversal characters.
+    /// Validated by <see cref="KeyDocumentName"/> for the current platform.
     /// </param>
     /// <param name="content">The opaque serialized key bytes.</param>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="null"/> or empty.</exception>
-    public KeyDocument(string name, ReadOnlyMemory<byte> content)
+    /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
+    public KeyDocument(KeyDocumentName name, ReadOnlyMemory<byte> content)
     {
-        if (string.IsNullOrEmpty(name))
+        if (name.Value is null)
         {
-            throw new ArgumentException("A key document name must be a non-empty string.", nameof(name));
+            throw new ArgumentException(ErrorMessages.KeyDocumentNameRequired, nameof(name));
         }
 
         Name = name;
@@ -34,7 +34,7 @@ public sealed class KeyDocument
     /// <summary>
     /// Gets the stable, unique name identifying this document within its repository.
     /// </summary>
-    public string Name { get; }
+    public KeyDocumentName Name { get; }
 
     /// <summary>
     /// Gets the opaque serialized key bytes.

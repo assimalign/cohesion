@@ -123,7 +123,7 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
 
     private bool HasHeaderToken(IHttpRequest request)
     {
-        return request.Headers.TryGetValue(_registration.Options.HeaderName, out HttpHeaderValue token)
+        return request.Headers.TryGetValue(_registration.Options.HeaderName.Value, out HttpHeaderValue token)
             && !string.IsNullOrEmpty(token.Value);
     }
 

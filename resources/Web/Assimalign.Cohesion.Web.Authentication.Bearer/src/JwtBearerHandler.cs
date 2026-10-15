@@ -179,8 +179,8 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
     {
         // RFC 6750 §3.1: an authenticated-but-insufficient request answers 403 with an
         // insufficient_scope challenge.
-        string challenge = _options.Realm is { Length: > 0 } realm
-            ? $"Bearer realm=\"{Sanitize(realm)}\", error=\"insufficient_scope\""
+        string challenge = _options.Realm?.Value is { Length: > 0 } realm
+            ? $"Bearer realm=\"{EscapeRealm(realm)}\", error=\"insufficient_scope\""
             : "Bearer error=\"insufficient_scope\"";
 
         _context.Response.Headers.AppendValue(HttpHeaderKey.WWWAuthenticate, challenge);
@@ -294,9 +294,9 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
     {
         var parameters = new List<string>(3);
 
-        if (_options.Realm is { Length: > 0 } realm)
+        if (_options.Realm?.Value is { Length: > 0 } realm)
         {
-            parameters.Add($"realm=\"{Sanitize(realm)}\"");
+            parameters.Add($"realm=\"{EscapeRealm(realm)}\"");
         }
 
         // Surface the last authenticate failure per RFC 6750 §3 so a client learns why.
@@ -340,6 +340,10 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
 
         return false;
     }
+
+    // RFC 9110 quoted-pair preserves a configured realm's quotes and backslashes.
+    private static string EscapeRealm(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
 
     // Strip characters that would break the quoted-string in a WWW-Authenticate header value.
     private static string Sanitize(string value)

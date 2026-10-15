@@ -452,6 +452,104 @@ public class GenericPlannerTests
         new PortBinding("http", 8080, "tcp").Certificate.ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - CreatePlan: Should reject invalid mount sources before constructing bindings")]
+    [InlineData("parameter:   ")]
+    [InlineData("store:   ")]
+    [InlineData("   :key")]
+    public void CreatePlan_InvalidMountSource_ShouldRejectBeforeBinding(string source)
+    {
+        // Arrange
+        ResourceManifest original = CreateWebManifest();
+        ResourceManifest manifest = original with
+        {
+            Mounts = [original.Mounts[0] with { Source = source }]
+        };
+
+        // Act and Assert
+        Should.Throw<InvalidOperationException>(() => GenericPlanner.CreatePlan(CreateContext(manifest)));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Legacy plan omission cannot conceal a default manifest control-plane path")]
+    public void Validate_LegacyPlanWithDefaultManifestPath_ShouldThrow()
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest();
+        ResourcePlan original = GenericPlanner.CreatePlan(CreateContext(manifest));
+        ResourcePlan legacy = CopyPlan(original, original.Workload, original.Container, new ControlPlaneSpec());
+        ResourceManifest invalid = manifest with
+        {
+            ControlPlane = manifest.ControlPlane with { Path = null! }
+        };
+
+        // Act and Assert
+        Should.Throw<InvalidOperationException>(() => ResourcePlanValidator.Validate(legacy, invalid));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Empty manifest HTTP probe paths cannot enter a plan")]
+    public void Validate_EmptyManifestHttpPath_ShouldThrow()
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest() with
+        {
+            Probes = new ResourceManifestProbes
+            {
+                Readiness = new ResourceManifestProbe { Endpoint = "http", Http = string.Empty }
+            }
+        };
+        ResourcePlan plan = GenericPlanner.CreatePlan(CreateContext(manifest));
+
+        // Act and Assert
+        Should.Throw<InvalidOperationException>(() => ResourcePlanValidator.Validate(plan, manifest));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Validate: HTTP probe union values use the canonical path grammar")]
+    [InlineData("ready")]
+    [InlineData("/ready?full=true")]
+    [InlineData("/ready#state")]
+    public void Validate_InvalidPlanHttpPath_ShouldReportPathGrammar(string path)
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest() with
+        {
+            Probes = new ResourceManifestProbes
+            {
+                Readiness = new ResourceManifestProbe { Endpoint = "http", Http = "/ready" }
+            }
+        };
+        ResourcePlan original = GenericPlanner.CreatePlan(CreateContext(manifest));
+        ContainerSpec container = new(original.Container.Name, original.Container.Artifact,
+            original.Container.Ports, original.Container.Mounts, original.Container.Environment,
+            [new ProbeMapping("readiness", "http", ProbeKind.Http, path, [])]);
+        ResourcePlan plan = CopyPlan(original, original.Workload, container);
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(plan, manifest));
+
+        // Assert
+        error.Message.ShouldContain("begin with '/'", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Nonlegacy plan control-plane paths use the canonical grammar")]
+    [InlineData("cohesion/v1")]
+    [InlineData("/cohesion?version=1")]
+    [InlineData("/cohesion#version")]
+    public void Validate_InvalidPlanControlPlanePath_ShouldReportPathGrammar(string path)
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest();
+        ResourcePlan original = GenericPlanner.CreatePlan(CreateContext(manifest));
+        ResourcePlan plan = CopyPlan(original, original.Workload, original.Container,
+            new ControlPlaneSpec(manifest.ControlPlane.Endpoint, path));
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(plan, manifest));
+
+        // Assert
+        error.Message.ShouldContain("begin with '/'", Case.Sensitive);
+    }
+
     private static PlanContext CreateContext(
         ResourceManifest manifest,
         IResourceOptions? options = null)

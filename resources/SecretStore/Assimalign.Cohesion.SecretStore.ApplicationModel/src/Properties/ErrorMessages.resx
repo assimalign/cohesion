@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CommandSourceInvalid" xml:space="preserve">
+    <value>A secret source must use parameter:&lt;name&gt; or &lt;resource&gt;:&lt;key&gt; with exactly one resource separator; literal sources are forbidden.</value>
+  </data>
+  <data name="CommandPathInvalid" xml:space="preserve">
+    <value>A secret command path must be nonblank and must not be trusted-issuers.json or begin with certs/.</value>
+  </data>
+  <data name="CertificateNameInvalid" xml:space="preserve">
+    <value>A certificate name must be one nonblank segment other than '.' or '..' and contain neither slash nor backslash.</value>
+  </data>
+  <data name="SubjectAlternativeNameInvalid" xml:space="preserve">
+    <value>A certificate alternative name must be a nonblank IP address or an encodable certificate DNS name.</value>
+  </data>
+</root>

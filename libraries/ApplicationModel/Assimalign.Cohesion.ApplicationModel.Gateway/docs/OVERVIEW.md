@@ -4,6 +4,12 @@ The gateway realizes an immutable application graph in dependency order, waits f
 readiness gate, applies its resource commands, and then admits dependents. Runtime stop preserves
 owned declarations; teardown removes commands and realized resources in reverse order.
 
+Configure local supervision with `LocalGatewayOptions.LivenessFailureThreshold` (positive,
+default 3) and `MaximumRestartAttempts` (nonnegative, default 5; zero disables restarts). Both
+properties throw `ArgumentOutOfRangeException` on invalid assignment and preserve their previous
+value, including after gateway construction. Valid later assignments remain supported. This
+changes 10.0.0-preview.1 behavior, where only gateway construction checked these limits.
+
 Out-of-process command delivery uses `ApplicationGatewayOptions.CommandClients`, which by default
 holds one `ResourceControlPlaneCommandClient`. That client serves every resource kind
 (`IGatewayResourceCommandClient.AnyKind`) over the standard control-plane `commands` route.
@@ -30,12 +36,27 @@ unresolved input naming it, and a Local `--realize` closure's mounts are unresol
 cross-application limit named. Cross-application store sources are rejected until a peer-credential
 design lands.
 
+Mount-source syntax is shared with manifest and provider validation through `ResourceMountSource`:
+`literal:` may be empty or contain colons, `parameter:` needs a nonblank name, and other sources
+need exactly one colon between nonblank source and key. Probe and control-plane path validation
+uses `ResourceHttpPath`: paths begin with `/` and contain no query or fragment. These manifest DTO
+properties retain their string types for the owner's Database freeze (#1168), with typed DTO
+adoption deferred to #1470. Manifest validation checks those strings through the value objects'
+`IsValid`/`TryCreate` rules and rejects invalid text with `InvalidDataException` before reconcile;
+plan `MountBinding.Source` remains a value type.
+
 Every credential the gateway mints — each resource's bootstrap credential, its own calls to resource
 control planes and stores, telemetry-emitter credentials, peer-gateway calls, and developer tokens —
 goes through the application's registered `IApplicationCredentialIssuer` first and falls back to the
 default ES256 application-key issuer, whose tokens are unchanged. Resources that must accept an
 identity provider's credentials register a matching verifier with
 `ResourceRuntime.RegisterCredentialVerifier`.
+
+Issuer results use `ApplicationCredentialScheme` and `ApplicationCredentialValue`. String inputs
+still convert when constructing a credential, but schemes must be HTTP tokens and values must be
+nonblank without CR or LF. Invalid replacements are also refused in `with` expressions. Credential
+value displays are redacted; custom transports read `credential.Value.Value` explicitly to obtain
+the secret. Bearer-only carriers continue to refuse another valid authentication scheme.
 
 See [DESIGN.md](DESIGN.md) for dependency boundaries, ownership, credential restrictions, the
 provider registrations, the identity seams, and the scope of commands-only model replacement.

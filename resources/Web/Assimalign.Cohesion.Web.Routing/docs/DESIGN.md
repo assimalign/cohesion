@@ -1055,6 +1055,16 @@ configuration error and throws at build time). This was chosen over type-testing
 
 ## Error model: template errors name the problem (#1051)
 
+Direct construction of `RoutePatternLiteralSegment` validates the same nonempty, question-mark-free
+content as `RoutePatternFactory.LiteralPart` (#1477). The constructor owns the check, and the factory
+delegates to it, so a direct call cannot bypass the `?` restriction. Rejection uses
+`ArgumentException` and the existing `LiteralRouteSegmentInvalid` error resource.
+
+**Breaking behavior from 10.0.0-preview.1 (decision 15):** direct literal construction now rejects
+null, empty and `?`-containing text, which the released constructor retained (with only a debug
+assertion for null/empty). The factory's rejection behavior and valid literal text are unchanged.
+No public API is added or changed.
+
 Every invalid template throws `RoutePatternException`. Its `Pattern` is the template, and its
 message names the template, the part of it that is wrong, and the fix:
 

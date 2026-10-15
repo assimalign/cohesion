@@ -34,14 +34,19 @@ public sealed class Http3QPackOptions
     /// <summary>
     /// Gets or sets the decoder's advertised <c>QPACK_MAX_TABLE_CAPACITY</c> in
     /// octets. A value of 0 (the default) disables the dynamic table.
+    /// The maximum is 2^62 - 1, the SETTINGS wire limit (RFC 9000 §16), which also
+    /// fits the QPACK prefixed-integer range required by RFC 9204 §4.1.1.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown when set to a negative value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when set to a negative value or a value greater than 2^62 - 1.
+    /// </exception>
     public long MaxTableCapacity
     {
         get => _maxTableCapacity;
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, maxSettingValue);
             _maxTableCapacity = value;
         }
     }
@@ -50,14 +55,18 @@ public sealed class Http3QPackOptions
     /// Gets or sets the decoder's advertised <c>QPACK_BLOCKED_STREAMS</c> — the
     /// maximum number of streams permitted to block on not-yet-received
     /// insertions (RFC 9204 §2.1.2). Ignored when the dynamic table is disabled.
+    /// The maximum is 2^62 - 1, the SETTINGS wire limit (RFC 9000 §16).
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown when set to a negative value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when set to a negative value or a value greater than 2^62 - 1.
+    /// </exception>
     public long MaxBlockedStreams
     {
         get => _maxBlockedStreams;
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, maxSettingValue);
             _maxBlockedStreams = value;
         }
     }

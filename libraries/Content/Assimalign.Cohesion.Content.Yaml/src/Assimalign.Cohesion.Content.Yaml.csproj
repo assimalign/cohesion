@@ -6,4 +6,20 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Content" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Text" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\YamlAnchorName.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.Content.Yaml"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true"
+			ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\YamlTag.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.Content.Yaml"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true"
+			ObjectComparison="Ordinal" />
+	</ItemGroup>
 </Project>

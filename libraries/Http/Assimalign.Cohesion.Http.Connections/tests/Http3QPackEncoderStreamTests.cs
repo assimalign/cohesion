@@ -35,7 +35,14 @@ public class Http3QPackEncoderStreamTests
         await using IDuplexConnection encoder = await peer.OpenUnidirectionalStreamAsync();
 
         // Act
-        await encoder.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(instruction), timeout.Token);
+        try
+        {
+            await encoder.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(instruction), timeout.Token);
+        }
+        catch (ConnectionResetException exception) when (exception.ApplicationErrorCode == (long)Http3ErrorCode.QPackEncoderStreamError)
+        {
+            // The invalid instruction can close the connection before its flush completes.
+        }
         await WaitForCloseAsync(peer, timeout.Token);
 
         // Assert
@@ -61,7 +68,14 @@ public class Http3QPackEncoderStreamTests
         await using IDuplexConnection encoder = await peer.OpenUnidirectionalStreamAsync();
 
         // Act — no instruction continuation and no FIN follow this byte.
-        await encoder.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream([prefix]), timeout.Token);
+        try
+        {
+            await encoder.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream([prefix]), timeout.Token);
+        }
+        catch (ConnectionResetException exception) when (exception.ApplicationErrorCode == (long)Http3ErrorCode.QPackEncoderStreamError)
+        {
+            // The invalid prefix can close the connection before its flush completes.
+        }
         await WaitForCloseAsync(peer, timeout.Token);
 
         // Assert

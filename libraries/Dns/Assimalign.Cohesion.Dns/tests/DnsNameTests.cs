@@ -1,4 +1,5 @@
 using System;
+using Shouldly;
 using Assimalign.Cohesion.Dns;
 
 namespace Assimalign.Cohesion.Dns.Tests;
@@ -9,6 +10,36 @@ namespace Assimalign.Cohesion.Dns.Tests;
 /// </summary>
 public class DnsNameTests
 {
+    [Theory(DisplayName = "Cohesion Test [Dns] - DnsName: a trailing dot cannot hide an empty non-root label")]
+    [InlineData("a..")]
+    [InlineData("example.com..")]
+    public void Constructor_EmptyLabelBeforeRoot_ThrowsArgumentException(string value)
+    {
+        // Arrange
+        // A single trailing dot is the root terminator; the preceding label must be nonempty.
+
+        // Act
+        var exception = Should.Throw<ArgumentException>(() => new DnsName(value));
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Dns] - DnsName: non-ASCII presentation behavior is preserved")]
+    public void Constructor_NonAsciiPresentation_PreservesExistingCharacterRules()
+    {
+        // Arrange
+        string label = new string('\u00e9', 63);
+
+        // Act
+        var name = new DnsName(label + ".");
+
+        // Assert
+        name.Value.ShouldBe(label + ".");
+        name.ShouldBe(new DnsName(label.ToUpperInvariant()));
+        name.GetLabels().ShouldBe(new[] { label });
+    }
+
     [Fact(DisplayName = "Cohesion Test [Dns] - DnsName: default value is the root")]
     public void Default_IsRoot()
     {

@@ -15,6 +15,7 @@ namespace Assimalign.Cohesion.Core.Tests;
 [JsonSerializable(typeof(GeneratedGuid))]
 [JsonSerializable(typeof(GeneratedUlid))]
 [JsonSerializable(typeof(GeneratedValidatedString))]
+[JsonSerializable(typeof(GeneratedRedactedString))]
 [JsonSerializable(typeof(GeneratedRangeInt))]
 [JsonSerializable(typeof(GeneratedIgnoreCaseString))]
 [JsonSerializable(typeof(GeneratedStringClass))]

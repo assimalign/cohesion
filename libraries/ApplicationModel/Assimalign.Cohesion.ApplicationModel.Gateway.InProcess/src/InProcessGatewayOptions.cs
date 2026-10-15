@@ -7,6 +7,9 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// </summary>
 public sealed class InProcessGatewayOptions : ApplicationGatewayOptions
 {
+    private int _livenessFailureThreshold = 3;
+    private int _maximumRestartAttempts = 5;
+
     /// <summary>
     /// Gets or sets the root for persisted loopback allocations and private claims. Defaults
     /// to <c>.cohesion</c> under the current working directory.
@@ -23,7 +26,16 @@ public sealed class InProcessGatewayOptions : ApplicationGatewayOptions
     /// Gets or sets the consecutive liveness failures that trigger a nested restart.
     /// Defaults to three.
     /// </summary>
-    public int LivenessFailureThreshold { get; set; } = 3;
+    /// <exception cref="ArgumentOutOfRangeException">The value is zero or negative.</exception>
+    public int LivenessFailureThreshold
+    {
+        get => _livenessFailureThreshold;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value, nameof(LivenessFailureThreshold));
+            _livenessFailureThreshold = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the first delay before a nested restart. Successive delays double up to
@@ -34,8 +46,19 @@ public sealed class InProcessGatewayOptions : ApplicationGatewayOptions
     /// <summary>Gets or sets the largest delay between restart attempts. Defaults to 30 seconds.</summary>
     public TimeSpan MaximumRestartBackoff { get; set; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Gets or sets the maximum restart attempts per member. Defaults to five.</summary>
-    public int MaximumRestartAttempts { get; set; } = 5;
+    /// <summary>
+    /// Gets or sets the maximum restart attempts per member. Defaults to five; zero disables restarts.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public int MaximumRestartAttempts
+    {
+        get => _maximumRestartAttempts;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value, nameof(MaximumRestartAttempts));
+            _maximumRestartAttempts = value;
+        }
+    }
 
     internal void Validate()
     {
@@ -45,7 +68,7 @@ public sealed class InProcessGatewayOptions : ApplicationGatewayOptions
         if (StateDirectory is not null && string.IsNullOrWhiteSpace(StateDirectory))
         {
             throw new ArgumentException(
-                "StateDirectory must not be empty when specified.",
+                ErrorMessages.StateDirectoryEmpty,
                 nameof(StateDirectory));
         }
 
@@ -53,42 +76,28 @@ public sealed class InProcessGatewayOptions : ApplicationGatewayOptions
         {
             throw new ArgumentOutOfRangeException(
                 nameof(ProbeInterval),
-                "ProbeInterval must be greater than zero.");
+                ErrorMessages.ProbeIntervalInvalid);
         }
 
         if (ProbeTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(ProbeTimeout),
-                "ProbeTimeout must be greater than zero.");
-        }
-
-        if (LivenessFailureThreshold <= 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(LivenessFailureThreshold),
-                "LivenessFailureThreshold must be greater than zero.");
+                ErrorMessages.ProbeTimeoutInvalid);
         }
 
         if (InitialRestartBackoff < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(InitialRestartBackoff),
-                "InitialRestartBackoff must be zero or greater.");
+                ErrorMessages.InitialRestartBackoffInvalid);
         }
 
         if (MaximumRestartBackoff < InitialRestartBackoff)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(MaximumRestartBackoff),
-                "MaximumRestartBackoff must be at least InitialRestartBackoff.");
-        }
-
-        if (MaximumRestartAttempts < 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(MaximumRestartAttempts),
-                "MaximumRestartAttempts must be zero or greater.");
+                ErrorMessages.MaximumRestartBackoffInvalid);
         }
     }
 }

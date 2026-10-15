@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Assimalign.Cohesion.Content.Yaml;
 
 /// <summary>
@@ -13,7 +15,7 @@ public class YamlException : ContentFormatException
     /// <param name="line">The one-based line at which the problem was detected.</param>
     /// <param name="column">The one-based column at which the problem was detected.</param>
     public YamlException(string message, int line, int column)
-        : base($"{message} (line {line}, column {column})")
+        : base(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MalformedInputLocation, message, line, column))
     {
         Line = line;
         Column = column;

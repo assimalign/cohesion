@@ -23,12 +23,47 @@
 			ObjectRuntimeType="String"
 			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
 			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true" />
+			ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true"
+			ObjectComparison="Ordinal" />
 		<CohesionValueType
 			Include="ValueObjects\EnvironmentName.cs"
 			ObjectRuntimeType="String"
 			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
+		<CohesionValueType
+			Include="ValueObjects\ResourceHttpPath.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true"
+			ObjectComparison="Ordinal" />
+		<CohesionValueType
+			Include="ValueObjects\ResourceMountSource.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true"
+			ObjectComparison="Ordinal" />
+		<CohesionValueType
+			Include="ValueObjects\ApplicationCredentialScheme.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true"
+			ObjectHasIsValidMethod="true"
+			ObjectComparison="OrdinalIgnoreCase" />
+		<CohesionValueType
+			Include="ValueObjects\ApplicationCredentialValue.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="false"
+			ObjectHasIsValidMethod="true"
+			ObjectComparison="Ordinal"
+			ObjectHasCustomToString="true" />
 	</ItemGroup>
 </Project>

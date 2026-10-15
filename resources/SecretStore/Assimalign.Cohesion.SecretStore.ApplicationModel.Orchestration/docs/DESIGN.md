@@ -248,7 +248,11 @@ The package defines no exception types. Its failures are the BCL exceptions the 
 classifies:
 
 - `ArgumentNullException` / `ArgumentException` — a missing connection, a connection to a resource
-  of another kind, a blank key, leaf name, owner, or credential. Thrown before any I/O.
+  of another kind, a blank key, leaf name, owner, or credential, or a malformed certificate reference
+  or leaf name. `ReadCertificateAsync` accepts exact `ca/root` or `certs/<leaf>`; `IssueAsync` takes
+  the unprefixed leaf. References and leaf names are case-sensitive, and a leaf must be nonblank,
+  contain neither `/` nor `\`, and equal neither `.` nor `..`. Invalid inputs are rejected locally
+  before any HTTP request is sent.
 - `NotSupportedException` — a Configuration mount on the source provider (the default
   `ReadConfigurationAsync` body, and `ReadSecretAsync`/`ReadCertificateAsync` for a non-Secret
   mount kind).
@@ -337,3 +341,19 @@ imported members with equal resource names each register `UseSecretStore("secret
 member's Secret mount resolves through the real `SecretStoreSourceProvider` against its own loopback
 store double, with an audience-bound bearer credential issued for that member. The roles chained on
 one member stay off the other, and a member without the registration fails at set start, named.
+
+## Shared command-source validation (#1482)
+
+The resolver uses `SecretStoreCommandGrammar` from the declaring package's `shared/` folder, also
+used by generated `SecretStoreCommandSource.IsValid` and the runtime command handler. A source
+is exact `parameter:` plus a nonblank name (colons remain valid inside that parameter name), or
+an ASCII letter/digit/dash/underscore/dot resource prefix, one colon, and a nonblank key. The
+`literal:` prefix is forbidden ignoring case. Invalid source expressions fail before invoking the
+source provider. Linking stateless source adds no ApplicationModel or Hosting assembly dependency;
+the existing COHRES001/003/004 boundaries and NuGet-only delivery remain intact.
+
+Compared with 10.0.0-preview.1, malformed raw resource prefixes and blank parameter names now fail
+at the resolver boundary. The public resolver signature is unchanged. Its client dependency now
+refuses malformed certificate references locally with `ArgumentException`, before HTTP, instead
+of waiting for an HTTP rejection. Typed declaration and client signature changes are recorded in
+their owning package designs.

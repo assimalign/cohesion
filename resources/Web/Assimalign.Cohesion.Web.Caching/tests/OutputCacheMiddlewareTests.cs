@@ -81,6 +81,38 @@ public class OutputCacheMiddlewareTests
         counter.Count.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: Successful completion trims only response OWS before capture")]
+    public async Task Invoke_SurroundingResponseWhitespace_ShouldNormalizeOnlyOwsAfterCompletion()
+    {
+        // Arrange
+        OutputCacheMiddleware middleware = CreateMiddleware(out InMemoryOutputCacheStore store);
+        using InMemoryOutputCacheStore ownedStore = store;
+        Counter counter = new();
+        HttpHeaderKey name = new("X-Values");
+        string?[] original = [" \tvalue \t", "\t ", null, "", " \ta \t b \t", "\u00a0value\u00a0"];
+        string?[] expected = ["value", "", null, "", "a \t b", "\u00a0value\u00a0"];
+        OutputCacheTestContext firstContext = new();
+        OutputCacheTestContext hitContext = new();
+
+        // Act
+        string first = await RunAsync(middleware, firstContext,
+            Handler(counter, "payload", context => context.Response.Headers[name] = new HttpHeaderValue(original)));
+        string hit = await RunAsync(middleware, hitContext, Handler(counter, "unexpected"));
+
+        // Assert
+        first.ShouldBe("payload");
+        hit.ShouldBe("payload");
+        counter.Count.ShouldBe(1);
+        hitContext.Response.Headers.ContainsKey(HttpHeaderKey.Age).ShouldBeTrue();
+        HttpHeaderValue captured = hitContext.Response.Headers[name];
+        captured.Count.ShouldBe(expected.Length);
+        for (int i = 0; i < expected.Length; i++)
+        {
+            captured[i].ShouldBe(expected[i]);
+            firstContext.Response.Headers[name][i].ShouldBe(original[i]);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: A server without completion notification never stores a miss")]
     public async Task Invoke_NoCompletionFeature_ShouldNotStore()
     {

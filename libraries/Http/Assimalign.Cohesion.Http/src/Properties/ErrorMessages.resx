@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     Microsoft ResX Schema
@@ -515,5 +515,26 @@
   </data>
   <data name="XForwardedListInvalid" xml:space="preserve">
     <value>The value is not a valid X-Forwarded-* list: &apos;{0}&apos;.</value>
+  </data>
+  <data name="FieldNameInvalid" xml:space="preserve">
+    <value>An HTTP field name must be a non-empty ASCII token, without a pseudo-header prefix.</value>
+  </data>
+  <data name="FieldValueInvalid" xml:space="preserve">
+    <value>An HTTP field value must not contain controls other than internal HTAB, or leading or trailing SP or HTAB.</value>
+  </data>
+  <data name="AltServiceHostInvalid" xml:space="preserve">
+    <value>An alternative-service host must not contain control characters or spaces.</value>
+  </data>
+  <data name="TokenNameInvalid" xml:space="preserve">
+    <value>The name must be a non-empty RFC 9110 token.</value>
+  </data>
+  <data name="PreferenceTokenInvalid" xml:space="preserve">
+    <value>A preference value must be a non-empty RFC 9110 token.</value>
+  </data>
+  <data name="ContentTypeExtensionInvalid" xml:space="preserve">
+    <value>A content-type extension must contain characters after its optional leading dot and no other dot or path separator.</value>
+  </data>
+  <data name="ExtendedConnectProtocolInvalid" xml:space="preserve">
+    <value>An extended CONNECT ':protocol' must be a non-empty RFC 9110 token.</value>
   </data>
 </root>
