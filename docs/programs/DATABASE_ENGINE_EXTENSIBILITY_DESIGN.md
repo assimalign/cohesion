@@ -1928,3 +1928,20 @@ Decisions raised while B2 and 49a were implemented, answered by the owner on 202
 77. **DROP TABLE.** 49a assumed every drop is catalog-only; DROP TABLE still reclaims its pages
     inline, which grows with the table. *Owner:* defer it as 49a defers other data-scaling steps:
     unpublish in Build, reclaim afterwards (#1443).
+78. **Scripts and typed objects.** A declared script may create its own objects, add an index to a
+    typed table and run DML, but may not alter or drop an object the typed schema declares
+    (`COHSQLS005`, refused before any file opens); a change to a typed object belongs in the typed
+    declaration. *Owner (2026-10-15):* agree.
+79. **Script receipts are kept.** Every applied script statement keeps its receipt in the catalog,
+    so the catalog grows with each applied statement; iteration 1 has no compaction.
+    *Owner (2026-10-15):* agree.
+80. **Scripts run inline.** Scripts, and the typed migration before them, run inside Build: a
+    script's `CREATE INDEX` on a populated table is not deferred to 49a's provisioning worker and
+    adds to Build latency. *Owner (2026-10-15):* agree.
+81. **The catalog's script publication surface.** `SqlCatalog` publishes a script statement through
+    an explicit receipt-bearing overload of each mutation (`SqlCatalogScriptPublication` before the
+    final `CancellationToken`) rather than one publication family over typed mutation commands.
+    *Owner (2026-10-15):* agree; revisit if a second caller appears.
+82. **Scripts and the SDK artifact.** `Sdk.Database` keeps the v4 schema artifact typed-only, and a
+    `CohesionDatabaseProject=true` project that declares `Script(...)` fails with `COHDBSDK110`
+    rather than emitting an incomplete migration. *Owner:* pending; context requested 2026-10-15.
