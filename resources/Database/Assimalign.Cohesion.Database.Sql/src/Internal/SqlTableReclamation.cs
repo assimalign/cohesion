@@ -3,10 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 
-using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
-using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
-using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -32,6 +29,7 @@ internal sealed class SqlTableReclamation
     internal long ReclaimedPages => Interlocked.Read(ref _reclaimedPages);
     internal bool HasWork => Volatile.Read(ref _running) != 0 || Volatile.Read(ref _discover) != 0 || Volatile.Read(ref _pendingCount) != 0;
     internal Action<ulong, CancellationToken>? BeforeBatch { get; set; }
+    internal Action<ulong, CancellationToken>? BeforeBatchCommit { get; set; }
     internal Action<ulong, int>? AfterBatch { get; set; }
 
     internal void Request()
@@ -94,6 +92,7 @@ internal sealed class SqlTableReclamation
                     using (var bracket = _database.DataStorage.BeginTransaction())
                     {
                         reclaimed = _database.DataStorage.FreeOwnerPages(bracket, pending.ObjectId, BatchSize);
+                        BeforeBatchCommit?.Invoke(pending.ObjectId, token);
                         token.ThrowIfCancellationRequested();
                         bracket.Commit();
                     }
@@ -106,9 +105,7 @@ internal sealed class SqlTableReclamation
                         // Data durability precedes intent removal. A crash in between just
                         // visits the remaining owner directory again; freed pages have no owner.
                         token.ThrowIfCancellationRequested();
-                        using var completion = _database.CatalogStorage.BeginTransaction();
-                        _database.CatalogStorage.DeleteRow(completion, pending.PageId, pending.SlotIndex);
-                        completion.Commit();
+                        _database.Catalog.CompleteTableReclamationAsync(pending.ObjectId, token).GetAwaiter().GetResult();
                         _pending.Remove(pending.ObjectId);
                         Volatile.Write(ref _pendingCount, _pending.Count);
                         SqlDatabaseEventSource.Log.TableReclamationCompleted(_database, pending.ObjectId, pending.Pages);
@@ -121,24 +118,12 @@ internal sealed class SqlTableReclamation
 
     private void Discover(CancellationToken cancellationToken)
     {
-        using var iterator = _database.CatalogStorage.GetUnitIterator();
-        while (iterator.MoveNext())
+        // The catalog copies committed identities under its publication lock. Discovery
+        // never reads mutable slotted pages, and no catalog lock covers fencing or data I/O.
+        foreach (ulong objectId in _database.Catalog.GetPendingTableReclamations())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var unit = iterator.Current;
-            var reader = new DatabaseKeyReader(unit.Data.Span);
-            if (reader.ReadInt32() != SqlReclamationRecord.Kind) { continue; }
-            var intent = SqlReclamationRecord.Decode(ref reader);
-            if (_pending.ContainsKey(intent.ObjectId)) { continue; }
-
-            // Reading raw storage may see the intent while its catalog bracket is
-            // still applying. The locked catalog lookup waits for that publication.
-            if (_database.Catalog.TryGetTable(intent.Schema, intent.Name, out var table)
-                && table.ObjectId == intent.ObjectId)
-            {
-                Volatile.Write(ref _discover, 1);
-                continue;
-            }
+            if (_pending.ContainsKey(objectId)) { continue; }
 
             // Allocate the fence AFTER observing the committed unpublication, never
             // use the DROP transaction's earlier begin sequence. Every possible old
@@ -154,7 +139,7 @@ internal sealed class SqlTableReclamation
             {
                 _database.Coordinator.RollbackAsync(fence, CancellationToken.None).AsTask().GetAwaiter().GetResult();
             }
-            _pending.Add(intent.ObjectId, new Pending(intent.ObjectId, unit.PageId, unit.SlotIndex, fence.Sequence, epoch));
+            _pending.Add(objectId, new Pending(objectId, fence.Sequence, epoch));
             Volatile.Write(ref _pendingCount, _pending.Count);
         }
     }
@@ -177,17 +162,13 @@ internal sealed class SqlTableReclamation
 
     private sealed class Pending
     {
-        internal Pending(ulong objectId, PageId pageId, int slotIndex, TransactionSequence fence, long epoch)
+        internal Pending(ulong objectId, TransactionSequence fence, long epoch)
         {
             ObjectId = objectId;
-            PageId = pageId;
-            SlotIndex = slotIndex;
             Fence = fence;
             Epoch = epoch;
         }
         internal ulong ObjectId { get; }
-        internal PageId PageId { get; }
-        internal int SlotIndex { get; }
         internal TransactionSequence Fence { get; }
         internal long Epoch { get; }
         internal bool Started { get; set; }

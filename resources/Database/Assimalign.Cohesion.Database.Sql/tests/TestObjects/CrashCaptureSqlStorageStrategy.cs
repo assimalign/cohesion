@@ -18,23 +18,33 @@ using Assimalign.Cohesion.Database.Storage.Tests;
 /// <see cref="CaptureDurableImages"/> returns the byte images a real crash would
 /// leave behind. A second strategy constructed over those images "reopens the
 /// files" — both data and journal travel together, as they must.
+/// With None durability, images model a process crash instead: every OS write survives,
+/// including journal writes, without making a power-loss guarantee for unflushed bytes.
 /// </summary>
 internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 {
     private readonly Dictionary<string, (GatedStream Data, GatedStream Journal, GatedStream Backup)> _live = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)> _images = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
+    private readonly StorageCommitDurability _durability;
     private CrashPointRecorder? _recorder;
 
     /// <summary>
     /// Initializes an empty strategy (databases are created through the engine).
     /// </summary>
-    public CrashCaptureSqlStorageStrategy() { }
+    /// <param name="durability">The commit policy, also selecting power-loss or process-crash images.</param>
+    public CrashCaptureSqlStorageStrategy(StorageCommitDurability durability = StorageCommitDurability.Synchronous)
+    {
+        _durability = durability;
+    }
 
-    private CrashCaptureSqlStorageStrategy(Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)> images)
+    private CrashCaptureSqlStorageStrategy(Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)> images, StorageCommitDurability durability)
     {
         _images = images;
+        _durability = durability;
     }
+
+    internal StorageCommitDurability Durability => _durability;
 
     /// <summary>
     /// Captures the durable byte image of every storage this strategy has created
@@ -48,14 +58,14 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     {
         lock (_sync)
         {
-            return new CrashCaptureSqlStorageStrategy(CaptureImagesLocked());
+            return new CrashCaptureSqlStorageStrategy(CaptureImagesLocked(), _durability);
         }
     }
 
     /// <summary>
-    /// Starts recording a crash point after every change to the durable image of any
-    /// storage this strategy holds: each write to a write-through stream, each flush,
-    /// and each length change. A crash point is the set of durable images a process
+    /// Starts recording a crash point before every storage write and after every change
+    /// to the retained image: each write-through write, flush, and length change.
+    /// A crash point is the set of images under the selected persistence contract a process
     /// crash at that instant would leave behind, so reopening every recorded point
     /// crashes the work in between at every place it touches a file. The recording
     /// starts with the images as they are when it is armed and stops when the returned
@@ -91,14 +101,26 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     }
 
     internal Action? DurableChanged { get; set; }
+    internal Action<bool>? DurableStorageChanged { get; set; }
+    internal Action<bool>? StorageWriteStarting { get; set; }
 
-    private void OnDurableChange()
+    private void OnWriteStarting(bool catalog)
+    {
+        lock (_sync)
+        {
+            _recorder?.Add(CaptureImagesLocked());
+        }
+        StorageWriteStarting?.Invoke(catalog);
+    }
+
+    private void OnDurableChange(bool catalog)
     {
         DurableChanged?.Invoke();
         lock (_sync)
         {
             _recorder?.Add(CaptureImagesLocked());
         }
+        DurableStorageChanged?.Invoke(catalog);
     }
 
     private void StopRecording(CrashPointRecorder recorder)
@@ -115,7 +137,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
     /// <summary>
     /// The crash points <see cref="RecordCrashPoints"/> collected: the durable images
-    /// before the first recorded change, after every change, and when the recording
+    /// before the first recorded change, before each write, after every change, and when the recording
     /// stopped. Consecutive identical points are kept, so the count measures how many
     /// durable changes the recorded work made.
     /// </summary>
@@ -157,7 +179,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
                     images[name] = ((byte[])image.Data.Clone(), (byte[])image.Journal.Clone(), (byte[])image.Backup.Clone());
                 }
 
-                return new CrashCaptureSqlStorageStrategy(images);
+                return new CrashCaptureSqlStorageStrategy(images, _owner._durability);
             }
         }
 
@@ -206,12 +228,17 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
             // Data write-through: the worst case for steal (every page write is
             // immediately "on disk"); the journal honors flush-gated durability.
-            var streams = (Data: new GatedStream(writeThrough: true, OnDurableChange), Journal: new GatedStream(writeThrough: false, OnDurableChange),
-                Backup: new GatedStream(writeThrough: true, OnDurableChange));
+            // None promises process-crash persistence only: retain bytes written to the OS,
+            // without pretending that its unflushed journal survives a power loss.
+            Action changed = () => OnDurableChange(catalog);
+            Action writing = () => OnWriteStarting(catalog);
+            var streams = (Data: new GatedStream(writeThrough: true, changed, writing),
+                Journal: new GatedStream(writeThrough: _durability == StorageCommitDurability.None, changed, writing),
+                Backup: new GatedStream(writeThrough: true, changed, writing));
             _live[key] = streams;
             return SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
-                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), GetLabel(databaseName, catalog));
+                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), GetLabel(databaseName, catalog), _durability);
         }
     }
 
@@ -226,16 +253,18 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
                 throw new DatabaseException($"Crash-capture storage for '{key}' does not exist.");
             }
 
-            var streams = (Data: new GatedStream(image.Data, writeThrough: true, OnDurableChange),
-                Journal: new GatedStream(image.Journal, writeThrough: false, OnDurableChange),
-                Backup: new GatedStream(image.Backup, writeThrough: true, OnDurableChange));
+            Action changed = () => OnDurableChange(catalog);
+            Action writing = () => OnWriteStarting(catalog);
+            var streams = (Data: new GatedStream(image.Data, writeThrough: true, changed, writing),
+                Journal: new GatedStream(image.Journal, writeThrough: _durability == StorageCommitDurability.None, changed, writing),
+                Backup: new GatedStream(image.Backup, writeThrough: true, changed, writing));
             _live[key] = streams;
 
             // Deferred checkpoint per the strategy contract: the engine analyzes
             // the recovered journal before truncation.
             return SqlStorage.Open(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
-                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), checkpointOnOpen: false, durability: null, cancellationToken);
+                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), checkpointOnOpen: false, _durability, cancellationToken);
         }
     }
 
@@ -278,17 +307,19 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         private readonly MemoryStream _liveBuffer;
         private readonly bool _writeThrough;
         private readonly Action _onDurableChange;
+        private readonly Action _onWriteStarting;
         private byte[] _durable;
 
-        internal GatedStream(bool writeThrough, Action onDurableChange)
+        internal GatedStream(bool writeThrough, Action onDurableChange, Action onWriteStarting)
         {
             _liveBuffer = new MemoryStream();
             _durable = Array.Empty<byte>();
             _writeThrough = writeThrough;
             _onDurableChange = onDurableChange;
+            _onWriteStarting = onWriteStarting;
         }
 
-        internal GatedStream(byte[] content, bool writeThrough, Action onDurableChange)
+        internal GatedStream(byte[] content, bool writeThrough, Action onDurableChange, Action onWriteStarting)
         {
             // Copy into an expandable stream: MemoryStream(byte[]) cannot grow.
             _liveBuffer = new MemoryStream();
@@ -297,6 +328,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
             _durable = (byte[])content.Clone();
             _writeThrough = writeThrough;
             _onDurableChange = onDurableChange;
+            _onWriteStarting = onWriteStarting;
         }
 
         internal byte[] CaptureDurable() => (byte[])_durable.Clone();
@@ -335,6 +367,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
         public override void Write(byte[] buffer, int offset, int count)
         {
+            _onWriteStarting();
             _liveBuffer.Write(buffer, offset, count);
 
             if (_writeThrough)

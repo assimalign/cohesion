@@ -1166,7 +1166,10 @@ SELECT did not take a table lock. An in-flight scan could skip pages the stateme
 iterator's type/owner checks avoided decoding a reused page as the old table. Cleanup now waits
 for every potentially older reader. After observing committed catalog unpublication, discovery
 allocates and ends a fresh logical transaction as a fence. Both `Manager.OldestActive` and the
-coordinator's open contexts must be newer than that fence. Using DROP's begin sequence would be
+coordinator's open contexts must be newer than that fence. Discovery receives a snapshot of committed
+retired identities from the catalog's own locked state, loaded at open and updated after DROP and
+retirement commits. It never reads a slotted catalog page. The metadata lock ends before the fence
+transaction begins and before any data-page reclamation. Using DROP's begin sequence would be
 unsafe for a snapshot begun during DROP. In addition, a per-statement epoch lease spans planning
 through result materialization; every lease at or before discovery must end, even if another flow
 rolls its transaction back mid-scan. No newly bound statement can resolve the retired identity.
@@ -1191,17 +1194,25 @@ storage; the durable intent resumes on the next open. Memory and file strategies
 
 SQL data/catalog format **11** (formerly 10) requires kind 14 and table owner tags on all newly
 allocated index pages, including split siblings/roots and abandoned allocations. The engine refuses
-older formats; the storage header and B-tree node formats are unchanged. A stateless shared tuple
-codec lets catalog and worker agree on the record without a public maintenance bridge or friend
-assembly grant. Pending space alone does **not** report Degraded: the requested catalog is complete
+older formats; the storage header and B-tree node formats are unchanged. The kind-14 tuple
+codec belongs to the catalog alone. The review's narrow catalog snapshot/completion API carries
+identities, never record locations or a mutable collection; no friend assembly grant is added.
+The review keeps unreleased format 11 unchanged. Pending space alone does **not** report Degraded: the requested catalog is complete
 and the database is usable. Existing worker failure health still applies to actual cleanup failures.
 EventSource IDs 23/24 report reclamation started/completed with engine, database and retired id;
 completion includes pages reclaimed by that process (after a crash it counts remaining work).
 
 `SqlTableReclamationTests` forces batches during Build and verifies zero reclamation for typed and
 scripted empty/populated drops. Its real worker tests cover name reuse, multiple drops, old snapshots,
-mid-scan rollback, shutdown and 49a reservations. Durable images before the first batch and after
-one batch converge through both session and `Database.Sql.Client` paths. Client tests additionally
+mid-scan rollback, shutdown and 49a reservations. Three concurrent sessions repeatedly CREATE/DROP
+tables with 6,000-character defaults in memory and on disk until minimum DDL and worker counters
+are met, with a time ceiling; every retired identity is reclaimed and cumulative worker failures
+remain zero. The durable-image recorder covers every write through an actively interrupted batch,
+its rollback/retry, the final data commit before retirement, and I/O inside retirement. Every image
+reopens through both session and `Database.Sql.Client` paths, verifies replacement rows/index seeks,
+reuses freed pages, and compares both FSMs with a full page-header walk. Synchronous and grouped
+durability model power loss; None models only its documented process-crash guarantee, retaining OS
+writes without promising that unflushed bytes survive power loss. Client tests additionally
 check exact FSM accounting and physical file-length stability when the freed pages are reused.
 The Release/NativeAOT `Q8D` benchmark records both full Build (including open/recovery) and its
 provisioning DROP phase; decision 77 in the program design records the measurements.

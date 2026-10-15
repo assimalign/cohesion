@@ -2,8 +2,6 @@ using System.IO;
 
 using Assimalign.Cohesion.Database.Types;
 
-// Deviates from the repo namespace-matches-assembly rule: this stateless durable-record codec
-// is shared with SQL's worker; no instance or mutable state crosses an assembly boundary.
 namespace Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 
 internal static class SqlReclamationRecord

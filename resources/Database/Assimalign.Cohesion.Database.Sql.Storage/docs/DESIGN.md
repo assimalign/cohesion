@@ -31,6 +31,10 @@ by — `Assimalign.Cohesion.Database.Storage`.
   rebuild both directories and the FSM, making repeated batches crash-safe. Data frees
   are durable before the intent is removed from the separate catalog file set. No SQL
   storage layout/header version changes; the SQL engine's format gate moved from 10 to 11.
+  The catalog caches pending identities under its metadata lock and owns intent retirement;
+  the worker no longer walks mutable catalog records. Its identity snapshot releases that lock
+  before any data-page batch. Review crash tests cover active-batch interruption and final
+  retirement in synchronous/grouped modes, and process-crash persistence for None.
 - **The journal is a public composition seam.** `WriteAheadJournal` returns the
   storage's `StorageJournal`, matching Documents, Graph, and Blob storage.
   It replaces the shipped-to-shipped friend grant and hands the

@@ -1,4 +1,6 @@
 using System;
+using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -7,6 +9,7 @@ using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
+using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Connections.InMemory;
@@ -15,6 +18,8 @@ using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -22,6 +27,73 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlLockWaitCollection.Name)]
 public sealed class SqlTableReclamationTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public SqlTableReclamationTests(ITestOutputHelper output) { _output = output; }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Concurrent large catalog CREATE/DROP never fails maintenance and reclaims every retired identity")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DropTable_ConcurrentLargeDefinitions_ShouldReclaimWithoutMaintenanceFailures(bool fileBacked)
+    {
+        // Arrange: each definition occupies a catalog page which DROP can clear and reuse.
+        string path = Path.Combine(Environment.CurrentDirectory, "_out", "1443", Guid.NewGuid().ToString("N"));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        try
+        {
+            var options = new SqlDatabaseEngineOptions { MaintenanceInterval = TimeSpan.FromMilliseconds(2) };
+            if (fileBacked) { options.RootPath = path; }
+            await using var engine = SqlDatabaseEngine.Create("catalog-discovery-race", options);
+            var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+            var worker = engine.Workers.OfType<SqlVersionPurgeWorker>().Single();
+            var retired = new ConcurrentBag<ulong>();
+            int passes = 0;
+            int batches = 0;
+            worker.BeforeFullPass = _ => Interlocked.Increment(ref passes);
+            database.TableReclamation.AfterBatch = (_, _) => Interlocked.Increment(ref batches);
+            string payload = new('x', 6000);
+            var elapsed = Stopwatch.StartNew();
+
+            // Act: only public session operations drive DDL, alongside the normal engine worker.
+            var cycles = await Task.WhenAll(Enumerable.Range(0, 3).Select(index => Task.Run(async () =>
+            {
+                await using var session = await database.CreateSessionAsync(timeout.Token);
+                int completed = 0;
+                do
+                {
+                    await session.ExecuteAsync($"CREATE TABLE t{index} (id INT, payload VARCHAR(7000) DEFAULT '{payload}')", cancellationToken: timeout.Token);
+                    retired.Add(TableId(database, $"t{index}"));
+                    await session.ExecuteAsync($"INSERT INTO t{index} (id) VALUES (1)", cancellationToken: timeout.Token);
+                    await session.ExecuteAsync($"DROP TABLE t{index}", cancellationToken: timeout.Token);
+                    completed++;
+                } while (elapsed.Elapsed < TimeSpan.FromSeconds(15) || completed < 1000
+                    || Volatile.Read(ref passes) < 50 || Volatile.Read(ref batches) < 50);
+                return completed;
+            }, timeout.Token)));
+            await WaitDoneAsync(database, timeout.Token);
+
+            // Assert: cumulative failures cannot be hidden by a later successful retry.
+            cycles.ShouldAllBe(count => count >= 1000);
+            passes.ShouldBeGreaterThanOrEqualTo(50);
+            batches.ShouldBeGreaterThanOrEqualTo(50);
+            foreach (ulong id in retired)
+            {
+                database.DataStorage.GetOwnerPages(id).ShouldBeEmpty();
+                database.CatalogStorage.GetOwnerPages(id).ShouldBeEmpty();
+            }
+            database.Catalog.Tables.ShouldBeEmpty();
+            database.TableReclamation.ReclaimedPages.ShouldBe(retired.Count);
+            AssertSpaceMap(database.DataStorage);
+            AssertSpaceMap(database.CatalogStorage);
+            _output.WriteLine($"DDL cycles={retired.Count}; full passes={passes}; completed batches={batches}; failures={worker.FailureCount}");
+            worker.FailureCount.ShouldBe(0, worker.Fault?.ToString());
+        }
+        finally
+        {
+            if (Directory.Exists(path)) { Directory.Delete(path, recursive: true); }
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - DROP unpublishes immediately, then reclaims bounded batches and reuses rows and indexes")]
     [InlineData(false)]
     [InlineData(true)]
@@ -84,82 +156,170 @@ public sealed class SqlTableReclamationTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Durable DROP crash images resume before and during reclamation")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task Reopen_PartialReclamation_ShouldConvergeAndPreserveReplacement(bool midBatch, bool wire)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Every DROP crash image through interrupted batches and retirement converges")]
+    [InlineData(StorageCommitDurability.Synchronous, false)]
+    [InlineData(StorageCommitDurability.Synchronous, true)]
+    [InlineData(StorageCommitDurability.Grouped, false)]
+    [InlineData(StorageCommitDurability.Grouped, true)]
+    [InlineData(StorageCommitDurability.None, false)]
+    [InlineData(StorageCommitDurability.None, true)]
+    public async Task Reopen_InterruptedReclamationAndRetirement_ShouldConvergeAtEveryWrite(StorageCommitDurability durability, bool wire)
     {
-        // Arrange
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var strategy = new CrashCaptureSqlStorageStrategy();
-        CrashCaptureSqlStorageStrategy? image = null;
-        using var captured = new ManualResetEventSlim();
-        using var pause = new ManualResetEventSlim();
+        // Arrange: durable modes model power loss; None models a process crash (OS writes survive).
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var strategy = new CrashCaptureSqlStorageStrategy(durability);
+        CrashCaptureSqlStorageStrategy.CrashPointRecorder recorder;
+        var retirementPoints = new ConcurrentBag<int>();
+        var retirementWriteStarts = new ConcurrentBag<int>();
         ulong oldId;
         ulong replacementId;
+        int oldPages;
         long pages;
-        await using (var engine = await Builder(strategy).BuildAsync(timeout.Token))
+        int interruptedPoint = -1;
+        int finalPoint = -1;
+        int interrupted = 0;
+        int finalBatches = 0;
+        int batches = 0;
+        var builder = Builder(strategy);
+        builder.Options.PageWriteBackInterval = TimeSpan.FromHours(1);
+        builder.Options.CheckpointJournalSize = 0;
+        await using (var engine = await builder.BuildAsync(timeout.Token))
         {
             var database = await engine.CreateDatabaseAsync("db", timeout.Token);
             await using var session = await database.CreateSessionAsync(timeout.Token);
-            await SeedAsync(session, "t", 300, timeout.Token);
+            await SeedAsync(session, "t", 140, timeout.Token);
             oldId = TableId(database, "t");
+            oldPages = database.DataStorage.GetOwnerPages(oldId).Count;
+            oldPages.ShouldBeGreaterThan(SqlTableReclamation.BatchSize);
             pages = database.DataStorage.PageManager.PageCount;
-            int batches = 0;
-            database.TableReclamation.BeforeBatch = (_, token) =>
-            {
-                if (!midBatch || Volatile.Read(ref batches) > 0)
-                {
-                    captured.Set();
-                    pause.Wait(token);
-                }
-            };
-            database.TableReclamation.AfterBatch = (_, _) => Interlocked.Increment(ref batches);
-
-            // Act: retain a real durable image, then cancel the blocked worker by closing.
-            if (wire)
-            {
-                await ExecuteWireAsync(engine, "DROP TABLE t", timeout.Token);
-            }
+            database.TableReclamation.BeforeBatch = (_, token) => { entered.Set(); release.Wait(token); };
+            if (wire) { await ExecuteWireAsync(engine, "DROP TABLE t", timeout.Token); }
             else { await session.ExecuteAsync("DROP TABLE t", cancellationToken: timeout.Token); }
-            captured.Wait(timeout.Token);
-            if (midBatch) { database.TableReclamation.ReclaimedPages.ShouldBe(SqlTableReclamation.BatchSize); }
-            else { database.TableReclamation.ReclaimedPages.ShouldBe(0); }
+            entered.Wait(timeout.Token);
             await SeedAsync(session, "t", 1, timeout.Token);
             replacementId = TableId(database, "t");
             replacementId.ShouldBeGreaterThan(oldId);
-            image = strategy.CaptureDurableImages();
+            database.DataStorage.Checkpoint();
+            database.CatalogStorage.Checkpoint();
+
+            // Act: retain every durable change through rollback, all data commits, and retirement.
+            using (recorder = strategy.RecordCrashPoints())
+            {
+                database.TableReclamation.BeforeBatchCommit = (_, _) =>
+                {
+                    if (Interlocked.Exchange(ref interrupted, 1) != 0) { return; }
+                    database.TableReclamation.ReclaimedPages.ShouldBe(0);
+                    // Force steal of uncommitted frees, with their WAL pre-images, then interrupt
+                    // the actual bracket before Commit. Its disposal must restore every page.
+                    database.DataStorage.WriteBackDirtyPages(int.MaxValue).ShouldBeGreaterThan(0);
+                    interruptedPoint = recorder.Count - 1;
+                    throw new OperationCanceledException("Injected active reclamation batch interruption.");
+                };
+                database.TableReclamation.AfterBatch = (_, count) =>
+                {
+                    Interlocked.Increment(ref batches);
+                    if (count < SqlTableReclamation.BatchSize)
+                    {
+                        database.DataStorage.GetOwnerPages(oldId).ShouldBeEmpty();
+                        database.CatalogStorage.GetOwnerPages(oldId).Count.ShouldBe(1);
+                        finalPoint = recorder.Count - 1;
+                        Interlocked.Increment(ref finalBatches);
+                    }
+                };
+                strategy.DurableStorageChanged = catalog =>
+                {
+                    if (catalog && Volatile.Read(ref finalBatches) > 0)
+                    {
+                        // These callbacks run inside retirement I/O, before its Commit returns.
+                        retirementPoints.Add(recorder.Count - 1);
+                    }
+                };
+                strategy.StorageWriteStarting = catalog =>
+                {
+                    if (catalog && Volatile.Read(ref finalBatches) > 0)
+                    {
+                        retirementWriteStarts.Add(recorder.Count - 1);
+                    }
+                };
+                release.Set();
+                await WaitDoneAsync(database, timeout.Token);
+                strategy.DurableStorageChanged = null;
+                strategy.StorageWriteStarting = null;
+            }
+
+            // Assert the corpus covers the required boundaries, not merely pauses between batches.
+            interrupted.ShouldBe(1);
+            interruptedPoint.ShouldBeGreaterThan(0);
+            finalBatches.ShouldBe(1);
+            batches.ShouldBeGreaterThanOrEqualTo(2);
+            finalPoint.ShouldBeGreaterThan(interruptedPoint);
+            retirementPoints.ShouldNotBeEmpty();
+            retirementWriteStarts.ShouldNotBeEmpty();
+            retirementWriteStarts.ShouldAllBe(point => point > finalPoint);
+            retirementPoints.ShouldAllBe(point => point > finalPoint);
+            recorder.Count.ShouldBeGreaterThan(retirementPoints.Max());
+            engine.Workers.Single(worker => worker.Kind == DatabaseEngineWorkerKind.VersionPurge).FailureCount.ShouldBe(1);
+            _output.WriteLine($"{durability}, wire={wire}: {recorder.Count} crash images; interrupted={interruptedPoint}; final data commit={finalPoint}; retirement=[{string.Join(", ", retirementPoints.Order())}]");
         }
 
-        // Assert: recovery replays committed frees exactly once and preserves the retired id.
-        using var resume = new ManualResetEventSlim();
-        var recovering = Builder(image.ShouldNotBeNull());
-        recovering.AddWorker(engine =>
+        for (int point = 0; point < recorder.Count; point++)
         {
-            engine.BeforeProvisioning = database => database.TableReclamation.BeforeBatch = (_, token) => resume.Wait(token);
-            return new RecordingWorker(engine);
-        });
-        await using var reopened = await recovering.BuildAsync(timeout.Token);
-        var recovered = await reopened.OpenDatabaseAsync("db", timeout.Token);
-        await using var replacement = await recovered.CreateSessionAsync(timeout.Token);
-        TableId(recovered, "t").ShouldBe(replacementId);
-        (await CountAsync(replacement, "t", timeout.Token)).ShouldBe(1);
-        recovered.TableReclamation.ReclaimedPages.ShouldBe(0);
-        resume.Set();
-        await WaitDoneAsync(recovered, timeout.Token);
-        recovered.DataStorage.GetOwnerPages(oldId).ShouldBeEmpty();
-        recovered.CatalogStorage.GetOwnerPages(oldId).ShouldBeEmpty();
-        long free = recovered.DataStorage.FreeSpaceMap.FreePageCount;
-        free.ShouldBe(recovered.DataStorage.PageManager.PageCount - 4); // two header slots, replacement's row page and primary-key root
-        recovered.TableReclamation.RunBatch(timeout.Token);
-        recovered.DataStorage.FreeSpaceMap.FreePageCount.ShouldBe(free);
-        await replacement.ExecuteAsync("DELETE FROM t", cancellationToken: timeout.Token);
-        await FillAsync(replacement, "t", 300, timeout.Token);
-        recovered.DataStorage.PageManager.PageCount.ShouldBeLessThanOrEqualTo(pages + 2);
-        (await CountAsync(replacement, "t", timeout.Token)).ShouldBe(300);
-        if (wire) { await ExecuteWireAsync(reopened, "SELECT * FROM t", timeout.Token); }
+            // Assert: freeze resumed reclamation so each recovered intermediate state is checked.
+            using var resume = new ManualResetEventSlim();
+            var recovering = Builder(recorder.Open(point));
+            recovering.Options.PageWriteBackInterval = TimeSpan.FromHours(1);
+            recovering.Options.CheckpointJournalSize = 0;
+            recovering.AddWorker(engine =>
+            {
+                engine.BeforeProvisioning = database => database.TableReclamation.BeforeBatch = (_, token) => resume.Wait(token);
+                return new RecordingWorker(engine);
+            });
+            await using var reopened = await recovering.BuildAsync(timeout.Token);
+            var recovered = await reopened.OpenDatabaseAsync("db", timeout.Token);
+            await using var replacement = await recovered.CreateSessionAsync(timeout.Token);
+            TableId(recovered, "t").ShouldBe(replacementId);
+            (await CountAsync(replacement, "t", timeout.Token)).ShouldBe(1);
+            if (point == interruptedPoint)
+            {
+                recovered.DataStorage.GetOwnerPages(oldId).Count.ShouldBe(oldPages);
+            }
+            if (point == finalPoint)
+            {
+                recovered.DataStorage.GetOwnerPages(oldId).ShouldBeEmpty();
+                recovered.CatalogStorage.GetOwnerPages(oldId).Count.ShouldBe(1);
+            }
+            if (retirementWriteStarts.Contains(point))
+            {
+                // Retirement has begun but its journal write has not reached the backing store.
+                recovered.CatalogStorage.GetOwnerPages(oldId).Count.ShouldBe(1);
+            }
+            AssertSpaceMap(recovered.DataStorage);
+            AssertSpaceMap(recovered.CatalogStorage);
+            resume.Set();
+            await WaitDoneAsync(recovered, timeout.Token);
+            recovered.DataStorage.GetOwnerPages(oldId).ShouldBeEmpty();
+            recovered.CatalogStorage.GetOwnerPages(oldId).ShouldBeEmpty();
+            AssertSpaceMap(recovered.DataStorage, oldId);
+            AssertSpaceMap(recovered.CatalogStorage, oldId);
+            long free = recovered.DataStorage.FreeSpaceMap.FreePageCount;
+            free.ShouldBe(recovered.DataStorage.PageManager.PageCount - 4); // headers, replacement row and PK root
+            recovered.TableReclamation.Request();
+            recovered.TableReclamation.RunBatch(timeout.Token);
+            recovered.DataStorage.FreeSpaceMap.FreePageCount.ShouldBe(free);
+            await replacement.ExecuteAsync("DELETE FROM t", cancellationToken: timeout.Token);
+            await FillAsync(replacement, "t", 140, timeout.Token);
+            recovered.DataStorage.PageManager.PageCount.ShouldBeLessThanOrEqualTo(pages + 2);
+            (await CountAsync(replacement, "t", timeout.Token)).ShouldBe(140);
+            var seek = (await replacement.ExecuteAsync("SELECT payload FROM t WHERE id = 139", cancellationToken: timeout.Token)).ShouldBeAssignableTo<QueryResultSet>();
+            int found = 0;
+            await foreach (var row in seek.GetRowsAsync(timeout.Token)) { row.GetValue(0).ShouldBe(new string('x', 1800)); found++; }
+            found.ShouldBe(1);
+            AssertSpaceMap(recovered.DataStorage, oldId);
+            reopened.Workers.ShouldAllBe(worker => worker.FailureCount == 0);
+            if (wire) { await ExecuteWireAsync(reopened, "SELECT * FROM t", timeout.Token); }
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - DROP coexists with deferred provisioning and waits for the same table")]
@@ -441,6 +601,7 @@ public sealed class SqlTableReclamationTests
     {
         var builder = SqlDatabaseEngine.CreateBuilder("reclamation");
         builder.Options.StorageStrategy = strategy;
+        builder.Options.Durability = strategy.Durability;
         return builder;
     }
 
@@ -486,6 +647,29 @@ public sealed class SqlTableReclamationTests
         var result = (await session.ExecuteAsync($"SELECT COUNT(*) FROM {table}", cancellationToken: cancellationToken)).ShouldBeAssignableTo<QueryResultSet>();
         await foreach (var row in result.GetRowsAsync(cancellationToken)) { return (long)row.GetValue(0)!; }
         throw new InvalidOperationException();
+    }
+
+    private static void AssertSpaceMap(Assimalign.Cohesion.Database.Storage.Storage storage, ulong? retired = null)
+    {
+        // Flush committed cached images before walking the file directly: GetPage deliberately
+        // refuses free pages, and using IsAllocated to skip them would make this check circular.
+        storage.WriteBackDirtyPages(int.MaxValue);
+        long free = 0;
+        // The two alternating file-header slots are reserved outside the buffer pool.
+        storage.FreeSpaceMap.IsAllocated((PageId)0L).ShouldBeTrue();
+        storage.FreeSpaceMap.IsAllocated((PageId)1L).ShouldBeTrue();
+        byte[] bytes = new byte[Page.Size];
+        for (long id = 2; id < storage.PageManager.PageCount; id++)
+        {
+            storage.Data.ReadPage((PageId)id, bytes);
+            // Storage's fixed page header: type at byte 21, UInt64 owner at byte 64.
+            bool isFree = (PageType)bytes[21] == PageType.Free;
+            storage.FreeSpaceMap.IsAllocated((PageId)id).ShouldBe(!isFree);
+            if (isFree) { free++; }
+            if (retired is { } owner) { BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(64)).ShouldNotBe(owner); }
+        }
+        storage.FreeSpaceMap.FreePageCount.ShouldBe(free);
+        storage.Data.Length.ShouldBe(storage.FreeSpaceMap.TotalPageCount * Page.Size);
     }
 
     private static async Task WaitDoneAsync(SqlDatabase database, CancellationToken cancellationToken)

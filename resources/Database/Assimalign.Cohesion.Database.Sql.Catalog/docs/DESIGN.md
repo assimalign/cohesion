@@ -16,13 +16,22 @@ normal metadata uses owner zero. Maintenance can therefore remove it without mod
 catalog page. Load rejects duplicate retired identities and an identity both live and retired,
 and advances the identity allocator past every pending id. Reusing a name never reuses its id.
 
-The stateless `shared/SqlReclamationRecord.cs` tuple codec is compiled into catalog and engine;
-no public maintenance API or shipped friend grant is needed. The SQL version-purge worker discovers
-intents after Build, confirms committed unpublication through a locked catalog lookup, waits for
-older transactions/statements, and frees owner-tagged data/index pages in bounded durable batches.
-Only after data durability does it delete the intent. Recovery restores free headers and the FSM
+The catalog retains each decoded intent's identity and record location at open, adds it only after
+the DROP commit, and removes it only after the retirement commit, all under its metadata lock.
+`GetPendingTableReclamations()` returns an independent read-only snapshot of the committed identities;
+`CompleteTableReclamationAsync()` idempotently retires an identity without advancing the DDL
+generation. Record locations and the kind-14 codec stay private to this assembly. These two concrete
+catalog members are the narrow boundary change requested in review #1443; no interface, friend grant,
+or dependency is added. An unconfirmed retirement commit fences cached reads until reopen, just like DDL.
+
+The SQL version-purge worker discovers identities after Build from that snapshot, releases the
+catalog lock before allocating reader fences or reclaiming data, waits for older transactions/statements,
+and frees owner-tagged data/index pages in bounded durable batches. It never walks mutable catalog
+pages: a storage iterator's pin does not protect a record against ordinary deletion and page reuse.
+Only after data durability does it ask the catalog to retire the intent. Recovery restores free headers and the FSM
 before resumption: no cursor or cross-file atomic commit is required. An intent with no remaining
 pages is harmless and completes on retry. Catalog itself never walks or frees the data file.
+This review changes no records or format marker: unreleased record-space format 11 remains 11.
 
 ## Durable pending migrations (49a)
 
