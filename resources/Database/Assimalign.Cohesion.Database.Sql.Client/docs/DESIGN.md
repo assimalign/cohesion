@@ -79,6 +79,13 @@ and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures
 keep the connection reusable.
 
+Application function cancellation follows the statement token (#1419): an
+`OperationCanceledException` from a scalar, any aggregate phase or a domain CHECK is
+`COHSQLE007`, naming the function, unless the server statement's own token is canceled.
+This includes application calls inside SQL functions and SQL domains. The coded error is
+an `ExecutionFailure` with `ConnectionUsable = true`; the next command uses the same
+connection. Actual server cancellation retains the existing session teardown behavior.
+
 A failed dial reaches `ConnectAsync` as the core's `DatabaseClientException` with
 `ProtocolErrorCode.ConnectionFailure` (owner decision 39; the core's `DESIGN.md`,
 "Lifecycle and errors"). The mapper translates it like a handshake rejection, to
