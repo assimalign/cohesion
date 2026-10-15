@@ -53,6 +53,12 @@ public sealed class WebApplicationServerBuilder
     {
         _builder = builder;
 
+        // Instance registrations expose each stateless default to application replacement before
+        // Build. Every application interceptor follows these defaults in registration order.
+        _builder.Services.AddSingleton<IHttpExchangeInterceptor>(new HttpRequestLimitsInterceptor());
+        _builder.Services.AddSingleton<IHttpExchangeInterceptor>(new HttpProtocolUpgradeInterceptor());
+        _builder.Services.AddSingleton<IHttpExchangeInterceptor>(new HttpExtendedConnectInterceptor());
+
         // The default server is the first IWebApplicationServer registration, made when the
         // application builder is constructed, so it precedes every AddServer/UseServer server in
         // lifecycle order. It is inert when no listener was configured through this builder: a
@@ -70,7 +76,13 @@ public sealed class WebApplicationServerBuilder
             int featureCount = _builder.StampedFeatureCount;
 
             HttpConnectionListenerOptions options = new();
-            ApplyDefaultInterceptors(options);
+            // Resolve the shared interceptor aggregate once, at default-server composition.
+            // Custom servers own their listeners and do not consume these registrations.
+            foreach (IHttpExchangeInterceptor interceptor in
+                serviceProvider.GetRequiredService<IEnumerable<IHttpExchangeInterceptor>>())
+            {
+                options.Interceptors.Add(interceptor);
+            }
             options.ExchangeFeatureCapacity = featureCount;
 
             foreach (var action in _configurations)
@@ -203,9 +215,13 @@ public sealed class WebApplicationServerBuilder
     /// Configures the default web server's HTTP connection listener.
     /// </summary>
     /// <remarks>
-    /// The hosting module's HTTP default interceptors and its
-    /// <see cref="HttpConnectionListenerOptions.ExchangeFeatureCapacity"/> are set before
-    /// <paramref name="configure"/> runs. The capacity counts the application features the pipeline stamps onto every exchange.
+    /// The default server resolves all <see cref="IHttpExchangeInterceptor"/> singleton registrations
+    /// from the application's service provider once, in registration order, before
+    /// <paramref name="configure"/> runs. The hosting module registers request limits, protocol upgrade,
+    /// and extended CONNECT first; applications may remove or replace those registrations through
+    /// <see cref="WebApplicationBuilder.Services"/>. Custom servers own their listeners and do not consume them.
+    /// <see cref="HttpConnectionListenerOptions.ExchangeFeatureCapacity"/> is also set before the callback;
+    /// it counts the application features the pipeline stamps onto every exchange.
     /// The server adds its own feature allowance after configuration. A middleware that installs
     /// its own feature on every exchange, such as routing on a matched request or response compression,
     /// is not counted; add one slot for each (<c>options.ExchangeFeatureCapacity += 1</c>). After every
@@ -226,7 +242,7 @@ public sealed class WebApplicationServerBuilder
     /// Configures the default web server's HTTP connection listener using application services.
     /// </summary>
     /// <remarks>
-    /// Runs in registration order after the server's defaults, as described for
+    /// Runs in registration order after the interceptor registrations have been resolved, as described for
     /// <see cref="UseServer(Action{HttpConnectionListenerOptions})"/>, including the rounding of
     /// <see cref="HttpConnectionListenerOptions.ExchangeFeatureCapacity"/> after the last configuration.
     /// </remarks>
@@ -265,17 +281,5 @@ public sealed class WebApplicationServerBuilder
             OwnEndpointCertificate,
             ContentRootPath,
             UseConfiguredConnectionLimit));
-    }
-
-    /// <summary>
-    /// Installs HTTP policy defaults before application configuration. The server prepends its
-    /// own client-fault and response-starting interceptors when it constructs the listener.
-    /// </summary>
-    /// <param name="options">The listener options being composed.</param>
-    internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
-    {
-        options.Interceptors.Add(new HttpRequestLimitsInterceptor());
-        options.Interceptors.Add(new HttpProtocolUpgradeInterceptor());
-        options.Interceptors.Add(new HttpExtendedConnectInterceptor());
     }
 }

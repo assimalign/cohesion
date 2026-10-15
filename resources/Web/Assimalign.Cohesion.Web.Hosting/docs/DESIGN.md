@@ -85,6 +85,7 @@ dependency the host runs with is a registration in it, and the root
 | `IWebApplicationBuilder.AddServer(...)`, `Server.UseServer<TServer>(...)` | `IWebApplicationServer` |
 | `IWebApplicationBuilder.AddFeature(...)`, the feature packages' `builder.Services.Add<Feature>(...)` verbs | `IHttpFeature` (singleton only) |
 | `AddHealthCheck(name, check)` | `IHealthContributor` |
+| HTTP policy defaults, `Services.AddSingleton<IHttpExchangeInterceptor>(...)` | `IHttpExchangeInterceptor` (singleton only; default server) |
 
 A value becomes an instance registration, which stays owned by its caller; a
 `Func<IWebApplicationContext, T>` becomes a factory registration invoked once with the
@@ -111,7 +112,9 @@ slot to get the same guarantee.
 provider once, and resolves the application services, running each factory exactly once
 against the final context. Servers resolve once at host start, because the default
 server captures the composed pipeline and middleware is added to the built application.
-Features resolve once at pipeline build (below). Nothing resolves per request.
+Features resolve once at pipeline build (below). HTTP exchange interceptors resolve once
+inside the default server factory, before its listener configurations run. Custom servers own
+their listeners and do not consume that aggregate. Nothing resolves per request.
 
 **The application owns the provider.** Disposing a `WebApplication` stops the host, then
 disposes the provider, which disposes every factory-created service in reverse creation
@@ -950,13 +953,16 @@ HTTP policy defaults does not remove response starting or client-fault reporting
 
 ### Public HTTP interceptor construction (#1465)
 
-`ApplyDefaultInterceptors` constructs the same three HTTP policy interceptors with
+`WebApplicationServerBuilder` registers the three HTTP policy defaults as
+`IHttpExchangeInterceptor` singleton instances in its constructor, before application code runs:
+
 `new HttpRequestLimitsInterceptor()`, `new HttpProtocolUpgradeInterceptor()`, and
 `new HttpExtendedConnectInterceptor()`, in that order. These are the public sealed
 implementations introduced with private constructors by owner decision 59.
 Owner decision 61, 2026-10-15 replaces their parameterless factories with public constructors. The server's own
 client-fault and response-starting interceptors keep their existing descriptive names and behavior.
-No default, ordering, or listener option changes in this cleanup.
+The defaults retain their relative order. Their registrations can now be removed or replaced
+before the application is built.
 
 The removed Http factory calls are source- and binary-breaking API changes on decision 15's preview
 terms; their package DESIGN files record exactly which calls shipped in `10.0.0-preview.1` and the
@@ -973,15 +979,53 @@ that package's preview.1 compatibility section.
 
 ### What it is
 
-Hosting installs request limits, protocol upgrade and extended CONNECT before user configurations
-run. The server then prepends its own client-fault and response-starting hooks. The effective order is:
+The default server factory resolves `IEnumerable<IHttpExchangeInterceptor>` once and adds every
+registration to `HttpConnectionListenerOptions.Interceptors` in registration order, before any
+`UseServer` listener callback runs. The server then prepends its own client-fault and
+response-starting hooks. With the default registrations retained, the effective order is:
 
 1. Web.Server client fault.
 2. Web.Server response starting.
 3. Http.RequestLimits.
 4. Http.ProtocolUpgrade.
 5. Http.ExtendedConnect.
-6. User configurations' interceptors, in registration order.
+6. Application `IHttpExchangeInterceptor` registrations, in registration order.
+7. Interceptors added by `UseServer` callbacks, in callback order.
+
+Only the default server consumes the interceptor aggregate. Custom servers own their listeners;
+a custom-only composition with no listener configured does not resolve the aggregate at all.
+Direct construction in Web.Server remains DI-free and adds only that engine's own interceptors.
+
+**Override through Services.** Add an interceptor with
+`builder.Services.AddSingleton<IHttpExchangeInterceptor>(interceptor)` (a factory is supported
+too). To replace a default, remove its descriptor first; the defaults use instances so their
+concrete types identify them without resolving a service. With `System.Linq` and
+`Assimalign.Cohesion.DependencyInjection` imported:
+
+```csharp
+var defaultUpgrade = builder.Services.Container.Single(descriptor =>
+    descriptor.ServiceType == typeof(IHttpExchangeInterceptor) &&
+    descriptor.ImplementationInstance is HttpProtocolUpgradeInterceptor);
+builder.Services.Container.Unregister(defaultUpgrade);
+builder.Services.AddSingleton<IHttpExchangeInterceptor>(replacement);
+```
+
+Here `replacement` is the application's `IHttpExchangeInterceptor` instance. It follows the
+remaining defaults because it was registered later. Unregister without adding a replacement to
+drop just that default. To replace the entire list, call
+`builder.Services.RemoveAll<IHttpExchangeInterceptor>()` before registering replacements.
+Both APIs are available on `WebApplicationBuilder.Services`; no hosting-specific override API
+is needed. A callback may still edit the listener's list after these registrations are added.
+
+**Validate the aggregate's contract.** Beside feature validation, `WebApplicationBuilder.Build`
+checks descriptors before adding build-owned registrations or calling `MakeReadOnly`. Every
+`IHttpExchangeInterceptor` registration must be a singleton: the listener shares the stateless
+instance across all connections and requests. A service type assignable to
+`IHttpExchangeInterceptor` but narrower than that exact contract (including
+`HttpExchangeInterceptor` or a concrete implementation) is rejected because it would never
+join the aggregate. Each resource-backed error names the descriptor's position, lifetime,
+service type and known implementation, using the same description as feature errors. Validation
+also applies to custom-only compositions, while only the default server resolves the aggregate.
 
 The first two hooks only publish their own features and attach response callbacks; they neither
 read nor change the HTTP policy features. The HTTP defaults retain their relative order and still
