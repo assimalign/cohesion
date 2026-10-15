@@ -66,18 +66,33 @@ runs:
         }
         ./installer/scripts/Install-Local.ps1 @install
 
-    - name: Restore ${{ inputs.project }}
+    - name: Restore ${{ inputs.project }} and its tests
       shell: pwsh
-      run: dotnet restore "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj"
+      # One restore covers the library and its test project. Restore evaluates the whole
+      # project-reference graph, so restoring the two separately evaluated their shared closure
+      # twice: 7 s (Linux) to 15 s (Windows) per job in Web.Hosting's legs of run 38714836423.
+      # The transient two-project solution also covers the test projects that do not reference
+      # their library (Amqp, EmailHub, Rezolvr, Templates).
+      run: |
+        $project = Join-Path (Get-Location).Path '${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}'
+        $paths = @(Join-Path $project 'src/${{ inputs.project }}.csproj')
+        $tests = Join-Path $project 'tests/${{ inputs.project }}.Tests.csproj'
+        if (Test-Path -LiteralPath $tests -PathType Leaf) {
+          $paths += $tests
+        }
+
+        $solution = Join-Path $env:RUNNER_TEMP 'cohesion-restore.slnx'
+        $entries = $paths | ForEach-Object { '  <Project Path="{0}" />' -f [System.Security.SecurityElement]::Escape($_) }
+        Set-Content -LiteralPath $solution -Value (@('<Solution>') + $entries + @('</Solution>')) -Encoding utf8
+
+        dotnet restore $solution
+        if ($LASTEXITCODE -ne 0) {
+          throw "Restoring ${{ inputs.project }} failed with exit code $LASTEXITCODE."
+        }
 
     - name: Build ${{ inputs.project }}
       shell: pwsh
       run: dotnet build "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj" --configuration Release --no-restore
-
-    - name: Restore tests for ${{ inputs.project }}
-      if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.area, inputs.category, inputs.project)) != '' }}
-      shell: pwsh
-      run: dotnet restore "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj"
 
     - name: Test ${{ inputs.project }}
       if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.area, inputs.category, inputs.project)) != '' }}

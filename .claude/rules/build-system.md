@@ -410,6 +410,33 @@ Per-area CI and the publish-less SDK consumer smoke prove the branch; **the rele
 
 Path-filtered on push, each a thin matrix over project names calling the shared composite action at `.github/actions/build/action.yml` across ubuntu/windows/macos. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.
 
+Runner slots, not job time, bound CI latency. The organization's plan runs at most 20 jobs at
+once, 5 of them macOS, and one push touching every workflow fans out to about 700 jobs. In run
+`38714836423`, Web's legs ran 1.5 to 2.5 minutes each after waiting 66 to 108 minutes on average.
+Three settings follow from that:
+
+- **Superseded runs are cancelled.** Each per-area workflow's `concurrency` group is the workflow
+  plus the ref, with `cancel-in-progress: true`, so a newer push to a branch or pull request
+  cancels the older run. Every `main` commit gets its own group (the run id), so no `main` run is
+  cancelled or queued behind another. Superseded feature-branch runs used at least 872
+  job-minutes, 570 of them macOS, from 2026-10-11 to 2026-10-15.
+- **Every matrix sets `fail-fast: false`** (#1093). One failing Http leg on macOS cancelled 21
+  queued legs in run `38714836433`, so the rerun repeated them all.
+- **The action restores once.** It restores the library and its test project with one
+  `dotnet restore` of a transient two-project `.slnx` in `$RUNNER_TEMP`. Restoring them
+  separately evaluated the shared reference graph twice: 7 s on Linux and 15 s on Windows per
+  Web.Hosting leg. The solution also covers test projects that do not reference their library.
+
+No job caches NuGet packages or the .NET SDK, because a cache would cost about what it saves.
+Package downloads took about 2 s per leg on Linux and macOS and about 15 s on Windows. Restore
+time is MSBuild graph evaluation, which a cache does not skip. One leg's package folder is 314 MB
+unpacked, and downloading and extracting it costs about as much as downloading the packages.
+`setup-dotnet` spends 8 s on Linux and 35 to 45 s on Windows. Most of the Windows time is archive
+extraction, which a cache restore repeats. Revisit if a job starts restoring large packages on
+every run.
+
+The Database workflow keeps its own settings until #1470 rewrites it.
+
 The shared test step uses a five-minute blame hang timeout and mini dumps. Recent healthy runs
 completed the Http.Connections test step in at most 78 seconds and Web.Hosting's in 41 seconds
 (runs `38563034652` and `38558592445`).

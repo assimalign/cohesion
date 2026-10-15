@@ -12,11 +12,21 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch (or pull request) supersedes this run, so the older run is
+# cancelled instead of holding runner slots: the organization's plan runs at most 20 jobs at once,
+# 5 of them macOS. Every main commit keeps its own run, because the run id makes its group unique.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
+      # Every leg reports its own result: with fail-fast, one failing leg cancels the rest of the
+      # matrix and leaves the other projects without a signal (#1093).
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
