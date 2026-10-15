@@ -85,7 +85,7 @@ public class Http2HeadResponseTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Request("HEAD", "/events"));
         IHttpContext exchange = await peer.ReceiveContextAsync();

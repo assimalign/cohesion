@@ -134,8 +134,8 @@ public class HttpResponseConnectionFieldTests
 
     private static void Configure(HttpConnectionListenerOptions options)
     {
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
-        options.Interceptors.Add(HttpInterimResponseInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
+        options.Interceptors.Add(new HttpInterimResponseInterceptor());
     }
 
     // Opens stream 1 with a GET, sends the head under test, and returns the first field section the

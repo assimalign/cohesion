@@ -4,7 +4,8 @@ The Web server engine and the contracts it publishes on each exchange. Construct
 `WebApplicationServer` with a pipeline and listener options to serve requests without the hosting
 module. The server installs its own client-fault and response-starting interceptors; middleware
 and handlers read its exchange features from `context.Features`. Web.Hosting composes the same
-public engine behind a non-owning `WebApplicationServerHostService`.
+public engine through `UseServer` or `AddServer`, with an internal, non-owning
+`WebApplicationServerHostService` joining it to the host lifecycle.
 
 ## Scope
 

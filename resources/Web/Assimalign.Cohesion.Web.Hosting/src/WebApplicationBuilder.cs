@@ -32,15 +32,17 @@ namespace Assimalign.Cohesion.Web.Hosting;
 /// <summary>
 /// Composes a Web application. Every dependency the application runs with is a registration in
 /// <see cref="Services"/>: lifecycle services (<see cref="IHostService"/>), servers
-/// (<see cref="IWebApplicationServer"/>), request features (<see cref="IHttpFeature"/>), and
-/// health contributions (<see cref="IHealthContributor"/>).
+/// (<see cref="IWebApplicationServer"/>), request features (<see cref="IHttpFeature"/>), HTTP exchange
+/// interceptors (<see cref="IHttpExchangeInterceptor"/>), and health contributions
+/// (<see cref="IHealthContributor"/>).
 /// </summary>
 /// <remarks>
 /// The root <see cref="IWebApplicationBuilder"/> verbs are implemented explicitly as shims over
 /// those registrations, so feature libraries compose against the dependency-free root contract
 /// while this module owns the container. <see cref="Build"/> closes registration, creates the
 /// service provider once, and resolves the lifecycle services; servers and features are resolved
-/// once at their own composition boundary (host start and pipeline build). Nothing is resolved
+/// once at their own composition boundary (host start and pipeline build). The default server
+/// resolves HTTP exchange interceptors once when it is created. Nothing is resolved
 /// per request.
 /// </remarks>
 public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
@@ -258,6 +260,9 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// <see cref="IHttpFeature"/> instance or implementation type that is <see cref="IDisposable"/> or
     /// <see cref="IAsyncDisposable"/> fails the build. A disposable feature a factory registration produces
     /// is rejected when the pipeline is built, because the product exists only once it is resolved.
+    /// HTTP exchange interceptors must be registered as <see cref="IHttpExchangeInterceptor"/> singletons:
+    /// the default listener shares each instance across all connections. A scoped or transient
+    /// registration, or a registration under a narrower interceptor service type, fails the build.
     /// </remarks>
     /// <returns>The built application.</returns>
     /// <exception cref="InvalidOperationException">
@@ -265,7 +270,9 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// an <see cref="IHttpFeature"/> registration is not a singleton; a registration's service type
     /// derives from <see cref="IHttpFeature"/> without being <see cref="IHttpFeature"/>; or an
     /// <see cref="IHttpFeature"/> registration's instance or implementation type is disposable. Each feature
-    /// error names the registration's position in <see cref="Services"/>.
+    /// error names the registration's position in <see cref="Services"/>. An
+    /// <see cref="IHttpExchangeInterceptor"/> registration with a non-singleton lifetime or a narrower
+    /// service type is also rejected with its registration position.
     /// </exception>
     public WebApplication Build()
     {
@@ -275,6 +282,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             "Web application servers require serial host lifecycle execution so they start in registration order and stop in reverse order.");
 
         ValidateFeatureRegistrations();
+        ValidateInterceptorRegistrations();
 
         if (_controlPlane is not null && _resourceContext?.GatewayName is not null &&
             (_controlPlane.ObservedEndpoints.ContainsKey("http") || _controlPlane.ObservedEndpoints.ContainsKey("https")))
@@ -511,6 +519,32 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             {
                 throw new InvalidOperationException(
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.RequestFeatureServiceTypeInvalid, DescribeRegistration(descriptor, index), descriptor.ServiceType.FullName));
+            }
+
+            index++;
+        }
+    }
+
+    // A listener shares stateless interceptor instances across every connection. Only registrations
+    // under the aggregate's exact contract reach it, and factory lifetimes escape DI validation.
+    // Check before adding build-owned registrations or making the container read-only.
+    private void ValidateInterceptorRegistrations()
+    {
+        int index = 0;
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ServiceType == typeof(IHttpExchangeInterceptor))
+            {
+                if (descriptor.Lifetime != ServiceLifetime.Singleton)
+                {
+                    throw new InvalidOperationException(
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpInterceptorLifetimeInvalid, DescribeRegistration(descriptor, index), descriptor.Lifetime));
+                }
+            }
+            else if (typeof(IHttpExchangeInterceptor).IsAssignableFrom(descriptor.ServiceType))
+            {
+                throw new InvalidOperationException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpInterceptorServiceTypeInvalid, DescribeRegistration(descriptor, index), descriptor.ServiceType.FullName));
             }
 
             index++;

@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// package that selected it.
 /// </para>
 /// </remarks>
-public interface IWebEndpointFeature : IHttpFeature
+public interface IRouterEndpointFeature : IHttpFeature
 {
     /// <summary>
     /// Gets the delegate the pipeline's terminal runs for the selected endpoint.

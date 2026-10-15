@@ -4,7 +4,7 @@ using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.WebSockets.Tests.TestObjects;
 
-internal sealed class DiagnosticEndpointFeature : IWebEndpointFeature
+internal sealed class DiagnosticEndpointFeature : IRouterEndpointFeature
 {
     public int ReadCount { get; private set; }
 

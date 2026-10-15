@@ -35,7 +35,7 @@ flowchart LR
 | --- | --- | --- |
 | `IHttpExtendedConnectFeature` | public | The contract: `Protocol` and `AcceptAsync`. |
 | `HttpExtendedConnectExtensions` | public | `context.ExtendedConnect` (the feature, or `null`) and `context.IsExtendedConnect`. |
-| `HttpExtendedConnectInterceptor` | public sealed | `Create()` returns a new stateless interceptor; it installs the feature on an extended CONNECT and binds it to the exchange control. |
+| `HttpExtendedConnectInterceptor` | public sealed | A public parameterless constructor creates a new stateless interceptor; it installs the feature on an extended CONNECT and binds it to the exchange control. |
 | `HttpExtendedConnectFeature` | internal | The feature: `Protocol`, and an `AcceptAsync` that calls the control's `AcceptTunnelAsync`. |
 
 The package surfaces its types under the `Assimalign.Cohesion.Http` namespace (not the assembly name)
@@ -66,8 +66,8 @@ package.
 
 ## The interceptor
 
-`HttpExtendedConnectInterceptor.Create()` returns a new instance on each call. It is not a singleton,
-but it is stateless, so the listener that registers it shares it across all of its exchanges, and
+`new HttpExtendedConnectInterceptor()` creates a stateless instance. The listener that
+registers it shares it across all of its exchanges, and
 per-exchange state lives in the exchange's features. It declares `HttpInterceptorScopes.Request`:
 
 1. **`AfterRequestHead`.** On an HTTP/2 or HTTP/3 `CONNECT` whose `Protocol` is set, it installs an
@@ -110,7 +110,7 @@ Checked against the `v10.0.0-preview.1` tag:
   accessor ignored it (#1369 now rejects it). Extended CONNECT
   detection therefore worked on a bare listener, with nothing registered, although the feature
   could only report `Protocol`. The transport now publishes nothing to `Items`, and the feature
-  exists only on a listener that registers `HttpExtendedConnectInterceptor.Create()`. The Web host
+  exists only on a listener that registers `new HttpExtendedConnectInterceptor()`. The Web host
   registers it by default; a listener built directly on `Http.Connections` must add it, and code
   that read `Items[":protocol"]` reads `context.ExtendedConnect` instead.
 - **`IHttpExchangeControl` gained `CanAcceptTunnel` and `AcceptTunnelAsync`.** The interface
@@ -192,16 +192,18 @@ and the accessors are one feature lookup each, so the package is trimming- and N
 ## Public interceptor and compatibility against 10.0.0-preview.1 (#1465)
 
 `HttpExtendedConnectInterceptor` is the public sealed implementation of the existing
-`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its private constructor is
-reached through `HttpExtendedConnectInterceptor.Create()`, which returns its concrete type. The
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Decision 59 introduced a private constructor
+and a parameterless static factory returning the concrete type. The
 interface remains the listener registration contract and the per-exchange feature remains internal.
 This is the factory-to-implementation convention approved by owner decision 59.
+Owner decision 61, 2026-10-15 amends that creation shape to a public parameterless constructor
+with no `Create()`, a source and binary break for callers of the intervening factory.
 
 The `v10.0.0-preview.1` tag shipped neither `HttpExtendedConnect` nor the interceptor: #1368 added
 the factory after that tag. Removing the current `HttpExtendedConnect.CreateInterceptor()` API is
 therefore a **source- and binary-breaking change** for consumers of the intervening branch, accepted
 on decision 15's preview terms, but removes no preview.1 factory API. Those consumers replace the
-call with `HttpExtendedConnectInterceptor.Create()` and rebuild. For preview.1 consumers, the
+call with `new HttpExtendedConnectInterceptor()` and rebuild. For preview.1 consumers, the
 registration migration remains the one described above under "Behavior change from
 10.0.0-preview.1". Registration order, scope, feature installation, and tunnel behavior are unchanged
 by this API-shape change.

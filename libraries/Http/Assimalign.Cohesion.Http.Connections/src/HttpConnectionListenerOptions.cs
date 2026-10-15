@@ -73,7 +73,7 @@ public sealed class HttpConnectionListenerOptions
     /// Gets the ordered list of exchange interceptors — the transport's single extension seam for
     /// participating in an exchange's lifecycle. See <see cref="IHttpExchangeInterceptor"/> for
     /// the hook contract; feature packages register through their factory (for example
-    /// <c>HttpResponseStreamingInterceptor.Create()</c>) and derive from
+    /// <c>new HttpResponseStreamingInterceptor()</c>) and derive from
     /// <see cref="HttpExchangeInterceptor"/> to override only the hooks they need.
     /// </summary>
     /// <remarks>

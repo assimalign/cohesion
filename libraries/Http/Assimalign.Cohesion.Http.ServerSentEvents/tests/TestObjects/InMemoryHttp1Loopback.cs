@@ -45,7 +45,7 @@ internal sealed class InMemoryHttp1Loopback : IAsyncDisposable
         options.UseHttp1(new SingleConnectionListener(server));
         // Enable incremental response streaming by registering its response interceptor — the same
         // opt-in a real host performs. The transport itself has no streaming/SSE dependency.
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         _listener = new HttpConnectionListener(options);
     }
 

@@ -83,8 +83,8 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
     IWebApplicationPipeline IWebApplicationPipelineBuilder.Build()
     {
         // The terminal honors the root endpoint contract as WebApplication's does: it runs the endpoint
-        // UseRouting published (IWebEndpointFeature); an unhandled request completes untouched.
-        WebApplicationMiddleware pipeline = context => context.Features.Get<IWebEndpointFeature>() is { } endpoint
+        // UseRouting published (IRouterEndpointFeature); an unhandled request completes untouched.
+        WebApplicationMiddleware pipeline = context => context.Features.Get<IRouterEndpointFeature>() is { } endpoint
             ? endpoint.Endpoint.Invoke(context)
             : Task.CompletedTask;
         for (int i = _middleware.Count - 1; i >= 0; i--)

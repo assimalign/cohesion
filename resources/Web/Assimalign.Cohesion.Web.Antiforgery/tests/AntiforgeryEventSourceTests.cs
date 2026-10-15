@@ -54,7 +54,7 @@ public sealed class AntiforgeryEventSourceTests
         await using AntiforgeryTestContext context = CreateContext();
         RequestIdFeature requestId = new();
         context.Features.Set<IWebRequestIdFeature>(requestId);
-        context.Features.Set<IWebEndpointFeature>(new EndpointFeature());
+        context.Features.Set<IRouterEndpointFeature>(new EndpointFeature());
         IDataProtector dataProtector = DataProtectionProvider.Create(new InMemoryKeyRepository()).CreateProtector("events");
         DataProtectionAntiforgeryProtector protector = new(dataProtector);
         long before = source.RejectedRequests;
@@ -215,7 +215,7 @@ public sealed class AntiforgeryEventSourceTests
         RequestIdFeature requestId = new();
         EndpointFeature endpoint = new();
         context.Features.Set<IWebRequestIdFeature>(requestId);
-        context.Features.Set<IWebEndpointFeature>(endpoint);
+        context.Features.Set<IRouterEndpointFeature>(endpoint);
         long before = source.RejectedRequests;
 
         // Act
@@ -325,9 +325,9 @@ public sealed class AntiforgeryEventSourceTests
         }
     }
 
-    private sealed class EndpointFeature : IWebEndpointFeature
+    private sealed class EndpointFeature : IRouterEndpointFeature
     {
-        public string Name => nameof(IWebEndpointFeature);
+        public string Name => nameof(IRouterEndpointFeature);
         public WebApplicationMiddleware Endpoint => _ => Task.CompletedTask;
         public int Reads { get; private set; }
         public string RouteTemplate

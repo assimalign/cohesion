@@ -20,11 +20,11 @@ public class ContentNegotiationTests
     private static readonly HttpMediaType _problemJson = HttpMediaType.Parse("application/problem+json");
     private static readonly HttpMediaType _textJson = HttpMediaType.Parse("text/json");
 
-    private static IHttpContentSerializationFeature Compose(params IHttpContentWriter[] writers)
+    private static IContentSerializationFeature Compose(params IContentWriter[] writers)
     {
         ContentSerializationBuilder composition = new();
 
-        foreach (IHttpContentWriter writer in writers)
+        foreach (IContentWriter writer in writers)
         {
             composition.AddWriter(writer);
         }
@@ -36,7 +36,7 @@ public class ContentNegotiationTests
     public void TryNegotiate_NoWriters_ShouldReturnFalse()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = Compose();
+        IContentSerializationFeature feature = Compose();
 
         // Act
         bool negotiated = feature.TryNegotiate("application/json", out HttpMediaType selected);
@@ -50,7 +50,7 @@ public class ContentNegotiationTests
     public void TryNegotiate_NoAcceptHeader_ShouldSelectServerPreferred()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = Compose(
+        IContentSerializationFeature feature = Compose(
             new FakeContentWriter(HttpMediaType.ApplicationJson),
             new FakeContentWriter(HttpMediaType.ApplicationXml));
 
@@ -66,7 +66,7 @@ public class ContentNegotiationTests
     public void TryNegotiate_ExactMatch_ShouldSelectRequested()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = Compose(
+        IContentSerializationFeature feature = Compose(
             new FakeContentWriter(HttpMediaType.ApplicationJson),
             new FakeContentWriter(HttpMediaType.ApplicationXml));
 
@@ -82,7 +82,7 @@ public class ContentNegotiationTests
     public void TryNegotiate_QualityWeights_ShouldPreferHigherQuality()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = Compose(
+        IContentSerializationFeature feature = Compose(
             new FakeContentWriter(HttpMediaType.ApplicationJson),
             new FakeContentWriter(HttpMediaType.ApplicationXml));
 
@@ -98,7 +98,7 @@ public class ContentNegotiationTests
     public void TryNegotiate_ZeroQuality_ShouldRejectThatType()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(HttpMediaType.ApplicationJson));
+        IContentSerializationFeature feature = Compose(new FakeContentWriter(HttpMediaType.ApplicationJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("application/json;q=0", out HttpMediaType selected);
@@ -112,7 +112,7 @@ public class ContentNegotiationTests
     public void TryNegotiate_WildcardAccept_ShouldFollowRegistrationOrder()
     {
         // Arrange — XML registered first, so it is the server-preferred representation for */*.
-        IHttpContentSerializationFeature feature = Compose(
+        IContentSerializationFeature feature = Compose(
             new FakeContentWriter(HttpMediaType.ApplicationXml),
             new FakeContentWriter(HttpMediaType.ApplicationJson));
 
@@ -128,7 +128,7 @@ public class ContentNegotiationTests
     public void TryNegotiate_AlternateMediaType_ShouldBeSelectable()
     {
         // Arrange — the writer canonically emits application/json but also advertises text/json.
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(HttpMediaType.ApplicationJson, _textJson));
+        IContentSerializationFeature feature = Compose(new FakeContentWriter(HttpMediaType.ApplicationJson, _textJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("text/json", out HttpMediaType selected);
@@ -143,7 +143,7 @@ public class ContentNegotiationTests
     {
         // Arrange — only a problem+json writer is registered; a client asking for application/json
         // should be served it rather than a spurious 406.
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
+        IContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("application/json", out HttpMediaType selected);
@@ -157,7 +157,7 @@ public class ContentNegotiationTests
     public void TryNegotiate_SuffixFallback_ShouldNotWidenSuffixedAccept()
     {
         // Arrange — a client asking for a specific +json schema must not be handed a different one.
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
+        IContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("application/vnd.foo+json", out HttpMediaType selected);
@@ -172,7 +172,7 @@ public class ContentNegotiationTests
     {
         // Arrange — both a plain json and a problem+json writer exist; application/json must bind
         // to the exact writer, not the suffixed fallback.
-        IHttpContentSerializationFeature feature = Compose(
+        IContentSerializationFeature feature = Compose(
             new FakeContentWriter(HttpMediaType.ApplicationJson),
             new FakeContentWriter(_problemJson));
 
@@ -189,7 +189,7 @@ public class ContentNegotiationTests
     {
         // Arrange — the client broadly accepts json but explicitly refuses problem+json; the suffix
         // fallback must not serve the crossed-out representation.
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
+        IContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("application/json, application/problem+json;q=0", out HttpMediaType selected);

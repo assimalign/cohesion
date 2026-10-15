@@ -34,7 +34,7 @@ public static class WebApplicationExtensions
         /// <summary>
         /// Maps a health endpoint at <paramref name="path"/>. A matching <c>GET</c>/<c>HEAD</c>
         /// request runs the selected checks, maps the aggregate status to a code (200/503 by
-        /// default), attaches an <see cref="IHttpHealthFeature"/>, writes the report, and
+        /// default), attaches an <see cref="IHealthFeature"/>, writes the report, and
         /// short-circuits the pipeline. Any other request is passed through.
         /// </summary>
         /// <param name="path">The endpoint path.</param>
@@ -65,7 +65,7 @@ public static class WebApplicationExtensions
 
                 HealthReport report = await service.CheckHealthAsync(options.Predicate, context.RequestCancelled);
 
-                context.Features.Set(new HttpHealthFeature(report));
+                context.Features.Set(new HealthFeature(report));
                 context.Response.StatusCode = options.StatusCodeFor(report.Status);
 
                 if (!options.AllowCachingResponses)

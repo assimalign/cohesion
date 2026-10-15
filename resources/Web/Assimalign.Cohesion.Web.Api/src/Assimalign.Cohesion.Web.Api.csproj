@@ -8,4 +8,18 @@
 		<!-- Typed-binding failure semantics (RFC 9457) render through the ProblemDetails writer. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
 	</ItemGroup>
+	<ItemGroup>
+		<!-- Typed Map* overloads need the endpoint-binding generator in direct NuGet consumers. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
+	</ItemGroup>
+	<ItemGroup>
+		<None
+			Include="..\buildTransitive\Assimalign.Cohesion.Web.Api.props"
+			Pack="true"
+			PackagePath="buildTransitive\Assimalign.Cohesion.Web.Api.props" />
+		<None
+			Include="..\buildTransitive\Assimalign.Cohesion.Web.Api.targets"
+			Pack="true"
+			PackagePath="buildTransitive\Assimalign.Cohesion.Web.Api.targets" />
+	</ItemGroup>
 </Project>

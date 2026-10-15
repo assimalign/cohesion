@@ -123,7 +123,7 @@ public class HttpResponseFieldSyntaxTests
     public async Task Http1EarlyHints_OnInvalidFieldValue_ShouldRefuseBeforeWriting()
     {
         // Arrange
-        await using Http1Exchange exchange = await Http1Exchange.OpenAsync(static options => options.Interceptors.Add(HttpInterimResponseInterceptor.Create()));
+        await using Http1Exchange exchange = await Http1Exchange.OpenAsync(static options => options.Interceptors.Add(new HttpInterimResponseInterceptor()));
         HttpHeaderCollection hints = new();
         hints[HttpHeaderKey.Link] = "</a.css>; rel=preload\r\nSet-Cookie: injected=1";
 
@@ -143,7 +143,7 @@ public class HttpResponseFieldSyntaxTests
     public async Task Http1StreamingWrite_OnInvalidFieldValue_ShouldRefuseAndWithdrawChunkedCoding()
     {
         // Arrange
-        await using Http1Exchange exchange = await Http1Exchange.OpenAsync(static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
+        await using Http1Exchange exchange = await Http1Exchange.OpenAsync(static options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
         exchange.Context.Response.Headers[_field] = "a\r\nSet-Cookie: injected=1";
 
         // Act — the first write commits the head, so it is the write that fails.
@@ -341,7 +341,7 @@ public class HttpResponseFieldSyntaxTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/events"));
         IHttpContext context = await peer.ReceiveContextAsync();
@@ -364,7 +364,7 @@ public class HttpResponseFieldSyntaxTests
     {
         // Arrange — the head and the body are out before the trailers are known.
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/events"));
         IHttpContext context = await peer.ReceiveContextAsync();
@@ -390,7 +390,7 @@ public class HttpResponseFieldSyntaxTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpInterimResponseInterceptor.Create());
+        options.Interceptors.Add(new HttpInterimResponseInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/page"));
         IHttpContext context = await peer.ReceiveContextAsync();
@@ -413,7 +413,7 @@ public class HttpResponseFieldSyntaxTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+        options.Interceptors.Add(new HttpExtendedConnectInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: false, (":method", "CONNECT"), (":protocol", "websocket"), (":scheme", "http"), (":path", "/chat"), (":authority", "api.test"));
         IHttpContext context = await peer.ReceiveContextAsync();
@@ -562,7 +562,7 @@ public class HttpResponseFieldSyntaxTests
         TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/events", "https", "a"));
         (IHttpConnectionContext connection, IHttpContext context) = await ReceiveHttp3Async(
             stream,
-            static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
+            static options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
         context.Response.Headers[_field] = "a\0b";
 
         // Act
@@ -582,7 +582,7 @@ public class HttpResponseFieldSyntaxTests
         TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/events", "https", "a"));
         (IHttpConnectionContext connection, IHttpContext context) = await ReceiveHttp3Async(
             stream,
-            static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
+            static options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
         await context.Response.Streaming.WriteAsync(Encoding.ASCII.GetBytes("chunk"));
         await context.Response.Streaming.FlushAsync();
         StageTrailerThenCorrupt(context);
@@ -603,7 +603,7 @@ public class HttpResponseFieldSyntaxTests
         TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/page", "https", "a"));
         (IHttpConnectionContext connection, IHttpContext context) = await ReceiveHttp3Async(
             stream,
-            static options => options.Interceptors.Add(HttpInterimResponseInterceptor.Create()));
+            static options => options.Interceptors.Add(new HttpInterimResponseInterceptor()));
         HttpHeaderCollection hints = new();
         hints[HttpHeaderKey.Link] = "</a.css>; rel=preload\rx";
 
@@ -622,7 +622,7 @@ public class HttpResponseFieldSyntaxTests
     {
         // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
-            configureListener: static options => options.Interceptors.Add(HttpExtendedConnectInterceptor.Create()));
+            configureListener: static options => options.Interceptors.Add(new HttpExtendedConnectInterceptor()));
         IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"), (":protocol", "websocket"), (":scheme", "https"), (":path", "/chat"), (":authority", "api.test")));

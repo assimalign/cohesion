@@ -601,7 +601,7 @@ public class LinkGeneratorTests
         context.Features.Set(feature);
 
         // Act
-        ILinkGenerator generator = context.GetLinkGenerator();
+        IRouterLinkGenerator generator = context.GetLinkGenerator();
 
         // Assert
         generator.GetPathByName("user", new RouteValueDictionary { ["id"] = 42 }).ShouldBe("/users/42");

@@ -4,7 +4,7 @@ using Assimalign.Cohesion.Web.Routing;
 namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 
 /// <summary>
-/// The <see cref="IWebPathBaseFeature"/> a rewrite inside a <c>Map(path)</c> branch publishes: the branch's
+/// The <see cref="IRouterPathBaseFeature"/> a rewrite inside a <c>Map(path)</c> branch publishes: the branch's
 /// path base, unchanged, over the rewritten path below it.
 /// </summary>
 /// <remarks>
@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// <see cref="IHttpFeature.Name"/>, and both use the contract's name), so a reader resolves exactly one view.
 /// The rewrite middleware puts the branch's feature back when the rest of the pipeline returns.
 /// </remarks>
-internal sealed class RewritePathBaseFeature : IWebPathBaseFeature
+internal sealed class RewritePathBaseFeature : IRouterPathBaseFeature
 {
     public RewritePathBaseFeature(HttpPath pathBase, HttpPath path)
     {
@@ -21,7 +21,7 @@ internal sealed class RewritePathBaseFeature : IWebPathBaseFeature
     }
 
     /// <inheritdoc />
-    public string Name => nameof(IWebPathBaseFeature);
+    public string Name => nameof(IRouterPathBaseFeature);
 
     /// <inheritdoc />
     public HttpPath PathBase { get; }

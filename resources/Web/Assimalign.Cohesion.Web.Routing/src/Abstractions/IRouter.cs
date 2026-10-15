@@ -24,7 +24,7 @@ public interface IRouter
     /// The generator is built together with the router, so route-name registration errors
     /// (duplicate names) surface when the route table is built, not at request time.
     /// </remarks>
-    ILinkGenerator LinkGenerator { get; }
+    IRouterLinkGenerator LinkGenerator { get; }
 
     /// <summary>
     /// Evaluates the request against the configured routes without invoking a handler or mutating the response.

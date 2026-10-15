@@ -283,7 +283,7 @@ public sealed class RequestTimeoutEventSourceTests
         TimeoutTestContext context = new("/private-input");
         identity = new RequestIdentity();
         context.Features.Set<IWebRequestIdFeature>(identity);
-        context.Features.Set<IWebEndpointFeature>(new TestEndpoint());
+        context.Features.Set<IRouterEndpointFeature>(new TestEndpoint());
         return context;
     }
 
@@ -306,9 +306,9 @@ public sealed class RequestTimeoutEventSourceTests
         }
     }
 
-    private sealed class TestEndpoint : IWebEndpointFeature
+    private sealed class TestEndpoint : IRouterEndpointFeature
     {
-        public string Name => nameof(IWebEndpointFeature);
+        public string Name => nameof(IRouterEndpointFeature);
         public WebApplicationMiddleware Endpoint => _ => Task.CompletedTask;
         public string RouteTemplate => "/jobs/{id}";
     }

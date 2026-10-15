@@ -1,0 +1,13 @@
+<Project>
+	<!-- Package and targeting-pack analyzers are resolved before CoreCompile in real and design-time builds. -->
+	<Target Name="_CohesionWebApiRemoveDuplicateGenerator" BeforeTargets="CoreCompile">
+		<ItemGroup>
+			<_CohesionWebApiGenerator Include="@(Analyzer)"
+				Condition="'%(Analyzer.Filename)%(Analyzer.Extension)' == 'Assimalign.Cohesion.SourceGeneration.Web.dll'" />
+		</ItemGroup>
+		<!-- Keep the other source's copy: App.Web's generator matches its reference assemblies in Sdk.Web projects. -->
+		<ItemGroup Condition="'@(_CohesionWebApiGenerator->Count())' &gt; '1'">
+			<Analyzer Remove="@(_CohesionWebApiGenerator->WithMetadataValue('NuGetPackageId', 'Assimalign.Cohesion.Web.Api'))" />
+		</ItemGroup>
+	</Target>
+</Project>

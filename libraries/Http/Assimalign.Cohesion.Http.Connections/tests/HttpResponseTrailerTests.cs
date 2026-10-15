@@ -102,7 +102,7 @@ public class HttpResponseTrailerTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/events"));
         IHttpContext exchange = await peer.ReceiveContextAsync();
@@ -127,7 +127,7 @@ public class HttpResponseTrailerTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/events"));
         IHttpContext exchange = await peer.ReceiveContextAsync();
@@ -197,7 +197,7 @@ public class HttpResponseTrailerTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Request("HEAD", "/events"));
         IHttpContext exchange = await peer.ReceiveContextAsync();
@@ -287,7 +287,7 @@ public class HttpResponseTrailerTests
         TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/events", "https", "a"));
         (IHttpConnectionContext connectionContext, IHttpContext context) = await ReceiveHttp3Async(
             stream,
-            static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
+            static options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
         await context.Response.Streaming.WriteAsync(Encoding.ASCII.GetBytes("chunk"));
         await context.Response.Streaming.FlushAsync();
 

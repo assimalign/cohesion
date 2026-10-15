@@ -22,7 +22,7 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_RegisteredType_ShouldReturnWriterContract()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
+        IContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
 
         // Act
         bool found = feature.TryGetJsonTypeInfo(typeof(TestOrder), out JsonTypeInfo? typeInfo);
@@ -39,7 +39,7 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_ConfiguredOptions_ShouldMatchTheWire()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default, options => options.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower).Build();
+        IContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default, options => options.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower).Build();
 
         // Act
         bool found = feature.TryGetJsonTypeInfo(typeof(TestReceipt), out JsonTypeInfo? typeInfo);
@@ -53,7 +53,7 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_UnregisteredType_ShouldReturnFalse()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
+        IContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
 
         // Act
         bool found = feature.TryGetJsonTypeInfo(typeof(UnregisteredModel), out JsonTypeInfo? typeInfo);
@@ -67,7 +67,7 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_CustomJsonWriterFirst_ShouldReturnFalse()
     {
         // Arrange — the custom writer is registered first, so application/json resolves to it.
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder()
+        IContentSerializationFeature feature = new ContentSerializationBuilder()
             .AddWriter(new FakeContentWriter(HttpMediaType.ApplicationJson))
             .AddJson(TestJsonContext.Default)
             .Build();
@@ -84,7 +84,7 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_NoJsonWriter_ShouldReturnFalse()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder()
+        IContentSerializationFeature feature = new ContentSerializationBuilder()
             .AddWriter(new FakeContentWriter(HttpMediaType.TextPlain))
             .Build();
 
@@ -100,7 +100,7 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_NullType_ShouldThrow()
     {
         // Arrange
-        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
+        IContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
 
         // Act / Assert
         Should.Throw<ArgumentNullException>(() => feature.TryGetJsonTypeInfo(null!, out _));

@@ -1656,8 +1656,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         builder.Append(indent).AppendLine("{");
         string inner = indent + "    ";
 
-        builder.Append(inner).Append("global::Assimalign.Cohesion.Web.Serialization.IHttpContentSerializationFeature? __serializer").Append(index)
-            .AppendLine(" = context.Features.Get<global::Assimalign.Cohesion.Web.Serialization.IHttpContentSerializationFeature>();");
+        builder.Append(inner).Append("global::Assimalign.Cohesion.Web.Serialization.IContentSerializationFeature? __serializer").Append(index)
+            .AppendLine(" = context.Features.Get<global::Assimalign.Cohesion.Web.Serialization.IContentSerializationFeature>();");
         builder.Append(inner).Append("if (__serializer").Append(index).AppendLine(" is not null");
         builder.Append(inner).Append("    && (!global::Assimalign.Cohesion.Http.HttpMediaType.TryParse(context.Request.Headers.GetValue(global::Assimalign.Cohesion.Http.HttpHeaderKey.ContentType), out var __mediaType")
             .Append(index).AppendLine(")");

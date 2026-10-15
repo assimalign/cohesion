@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 
 /// <summary>
 /// Typed response-body writes over the content-serialization registry: a registered
-/// <see cref="IHttpContentWriter"/> serializes the value and stamps the <c>Content-Type</c>
+/// <see cref="IContentWriter"/> serializes the value and stamps the <c>Content-Type</c>
 /// header, without per-call-site serializer ceremony. The status code is never touched — that
 /// stays the handler's decision, per the area's middleware-first model.
 /// </summary>
@@ -43,9 +43,9 @@ public static class HttpResponseSerializationExtensions
         {
             ArgumentNullException.ThrowIfNull(response);
 
-            IHttpContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(response.HttpContext);
+            IContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(response.HttpContext);
 
-            IHttpContentWriter writer;
+            IContentWriter writer;
             HttpMediaType target;
 
             if (response.Headers.TryGetValue(HttpHeaderKey.ContentType, out HttpHeaderValue header)
@@ -93,9 +93,9 @@ public static class HttpResponseSerializationExtensions
                 throw new ArgumentException(ErrorMessages.ResponseContentTypeInvalid, nameof(contentType));
             }
 
-            IHttpContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(response.HttpContext);
+            IContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(response.HttpContext);
 
-            IHttpContentWriter writer = feature.GetWriter(contentType)
+            IContentWriter writer = feature.GetWriter(contentType)
                 ?? throw new HttpContentSerializationException(
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.ContentWriterNotRegistered, contentType));
 

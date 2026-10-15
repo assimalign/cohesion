@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Web.Rewrite;
 /// the rewritten request, such as a sign-in redirect's return URL, carries the rewritten path.
 /// </para>
 /// </remarks>
-public interface IWebRewriteFeature : IHttpFeature
+public interface IRewriteFeature : IHttpFeature
 {
     /// <summary>
     /// Gets the request path before the first rewrite: the full, percent-decoded path the client sent.

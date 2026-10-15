@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Web.Routing.Metadata;
 /// <summary>
 /// Endpoint metadata that names a route for outbound URL generation. Attach an instance to a
 /// route's <see cref="IRouterRouteMetadataCollection"/> to make the route addressable by name
-/// through an <see cref="ILinkGenerator"/>.
+/// through an <see cref="IRouterLinkGenerator"/>.
 /// </summary>
 /// <remarks>
 /// <para>

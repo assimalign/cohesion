@@ -25,7 +25,7 @@ public class HttpInterimResponseFeatureTests
         RecordingControl control = new();
         HttpExchangeInterceptorResponseContext context = CreateContext(control);
 
-        HttpInterimResponseInterceptor interceptor = HttpInterimResponseInterceptor.Create();
+        HttpInterimResponseInterceptor interceptor = new HttpInterimResponseInterceptor();
         interceptor.BeforeResponse(context);
 
         context.Features.Get<IHttpInterimResponseFeature>().ShouldNotBeNull();
@@ -36,7 +36,7 @@ public class HttpInterimResponseFeatureTests
     {
         HttpExchangeInterceptorResponseContext context = CreateContext(control: null);
 
-        HttpInterimResponseInterceptor.Create().BeforeResponse(context);
+        new HttpInterimResponseInterceptor().BeforeResponse(context);
 
         context.Features.Get<IHttpInterimResponseFeature>().ShouldBeNull();
     }
@@ -136,14 +136,14 @@ public class HttpInterimResponseFeatureTests
     private static IHttpInterimResponseFeature CreateFeature(IHttpExchangeControl control)
     {
         HttpExchangeInterceptorResponseContext context = CreateContext(control);
-        HttpInterimResponseInterceptor.Create().BeforeResponse(context);
+        new HttpInterimResponseInterceptor().BeforeResponse(context);
         return context.Features.Get<IHttpInterimResponseFeature>()!;
     }
 
     private static FakeHttpContext CreateContextWithFeature(IHttpExchangeControl control)
     {
         HttpExchangeInterceptorResponseContext interceptorContext = CreateContext(control);
-        HttpInterimResponseInterceptor.Create().BeforeResponse(interceptorContext);
+        new HttpInterimResponseInterceptor().BeforeResponse(interceptorContext);
         return new FakeHttpContext(interceptorContext.Features);
     }
 

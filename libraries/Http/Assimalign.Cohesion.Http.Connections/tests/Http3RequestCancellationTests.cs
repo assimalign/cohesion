@@ -105,7 +105,7 @@ public class Http3RequestCancellationTests
         // Arrange — this driver reports its own closure synchronously from AbortRead, before FIN.
         StallingMultiplexedConnection? transport = null;
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
-            configureListener: options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()),
+            configureListener: options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()),
             decorate: inner => transport = new StallingMultiplexedConnection(inner, signalClosedOnReadAbort: true));
         IDuplexConnection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));

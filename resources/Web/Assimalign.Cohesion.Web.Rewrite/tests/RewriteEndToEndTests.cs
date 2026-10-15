@@ -28,7 +28,7 @@ namespace Assimalign.Cohesion.Web.Rewrite.Tests;
 /// selects the other endpoint and names the server span by its route while the span keeps the client's path,
 /// static files serve the rewritten path (at the application level and in a path branch), a rewritten query
 /// reaches the source-generated query binding, a redirect is followed with its method kept, the endpoint
-/// reads the client's URL from <see cref="IWebRewriteFeature"/>, and a target no request can carry is a 400.
+/// reads the client's URL from <see cref="IRewriteFeature"/>, and a target no request can carry is a 400.
 /// </summary>
 public class RewriteEndToEndTests
 {
@@ -223,7 +223,7 @@ public class RewriteEndToEndTests
         factory.Application.UseRewrite(rules => rules.AddRewrite("^/shop/(.*)$", "/store/$1?ref=shop"));
         factory.Application.UseRouting().Map(CohesionHttpMethod.Get, "/store/{**rest}", Text(context =>
         {
-            IWebRewriteFeature feature = context.Features.Get<IWebRewriteFeature>()!;
+            IRewriteFeature feature = context.Features.Get<IRewriteFeature>()!;
             return $"{feature.OriginalPath}?{feature.OriginalQuery["page"]}|{context.Request.Path}?{context.Request.Query["ref"]}";
         }));
 

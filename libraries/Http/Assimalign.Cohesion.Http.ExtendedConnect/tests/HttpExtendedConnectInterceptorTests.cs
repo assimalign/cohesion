@@ -24,7 +24,7 @@ public class HttpExtendedConnectInterceptorTests
     public void Scopes_ShouldBeRequestOnly()
     {
         // Arrange
-        HttpExtendedConnectInterceptor interceptor = HttpExtendedConnectInterceptor.Create();
+        HttpExtendedConnectInterceptor interceptor = new HttpExtendedConnectInterceptor();
 
         // Act / Assert
         interceptor.Scopes.ShouldBe(HttpInterceptorScopes.Request);
@@ -36,7 +36,7 @@ public class HttpExtendedConnectInterceptorTests
     public void AfterRequestHead_OnExtendedConnect_ShouldInstallFeatureAndJoinResponsePhase(HttpVersion version)
     {
         // Arrange
-        IHttpExchangeInterceptor interceptor = HttpExtendedConnectInterceptor.Create();
+        IHttpExchangeInterceptor interceptor = new HttpExtendedConnectInterceptor();
         HttpExchangeInterceptorRequestContext context = CreateHeadContext(version, HttpMethod.Connect, "websocket");
 
         // Act
@@ -60,7 +60,7 @@ public class HttpExtendedConnectInterceptorTests
     {
         // Arrange — a classic CONNECT, an ordinary request, and hand-built contexts no transport sends.
         // Empty protocols cannot reach this hook: the context initializer rejects them (#1477).
-        IHttpExchangeInterceptor interceptor = HttpExtendedConnectInterceptor.Create();
+        IHttpExchangeInterceptor interceptor = new HttpExtendedConnectInterceptor();
         HttpExchangeInterceptorRequestContext context = CreateHeadContext(version, HttpMethod.GetCanonicalizedValue(method), protocol);
 
         // Act
@@ -138,7 +138,7 @@ public class HttpExtendedConnectInterceptorTests
     public async Task AcceptAsync_OnUnboundFeature_ShouldThrowInvalidOperationException()
     {
         // Arrange — the request hook ran, but no response phase ever bound the feature.
-        IHttpExchangeInterceptor interceptor = HttpExtendedConnectInterceptor.Create();
+        IHttpExchangeInterceptor interceptor = new HttpExtendedConnectInterceptor();
         HttpExchangeInterceptorRequestContext context = CreateHeadContext(HttpVersion.Http20, HttpMethod.Connect, "websocket");
         interceptor.AfterRequestHead(context);
         IHttpExtendedConnectFeature feature = context.Features.Get<IHttpExtendedConnectFeature>()!;
@@ -151,7 +151,7 @@ public class HttpExtendedConnectInterceptorTests
     public void BeforeResponse_OnNoFeature_ShouldDoNothing()
     {
         // Arrange
-        IHttpExchangeInterceptor interceptor = HttpExtendedConnectInterceptor.Create();
+        IHttpExchangeInterceptor interceptor = new HttpExtendedConnectInterceptor();
         FakeTunnelControl control = new(Stream.Null);
         HttpFeatureCollection features = new();
 
@@ -170,7 +170,7 @@ public class HttpExtendedConnectInterceptorTests
     /// </summary>
     private static void RunInterceptors(FakeHttpContext context, HttpVersion version, IHttpExchangeControl? control)
     {
-        IHttpExchangeInterceptor interceptor = HttpExtendedConnectInterceptor.Create();
+        IHttpExchangeInterceptor interceptor = new HttpExtendedConnectInterceptor();
         HttpExchangeInterceptorRequestContext headContext = CreateHeadContext(version, HttpMethod.Connect, "websocket", context.Features);
         interceptor.AfterRequestHead(headContext);
 

@@ -36,7 +36,7 @@ public class HttpUnregisteredStatusCodeTests
         HttpConnectionListenerOptions options = new() { AddDateHeader = false };
         if (streamed)
         {
-            options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+            options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         }
         byte[] request = protocol switch
         {

@@ -55,7 +55,7 @@ internal sealed class SecurityHeadersEventSource : EventSource
             // unwind branch could observe an earlier commit; a starting callback cannot.
             HeadersNotApplied(
                 context.Response.StatusCode.Value,
-                context.Features.Get<IWebEndpointFeature>()?.RouteTemplate ?? string.Empty,
+                context.Features.Get<IRouterEndpointFeature>()?.RouteTemplate ?? string.Empty,
                 committedBeforeTurn: false,
                 suppressedCount,
                 context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHexString() ?? string.Empty);

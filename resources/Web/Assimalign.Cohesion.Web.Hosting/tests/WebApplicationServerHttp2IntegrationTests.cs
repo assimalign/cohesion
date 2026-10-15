@@ -150,7 +150,7 @@ public class WebApplicationServerHttp2IntegrationTests
         ConcurrentQueue<string?> connections = new();
 
         await using WebApplicationTestFactory factory = CreateHttp2Factory();
-        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
 
         factory.Application.Use(async (context, next) =>
         {

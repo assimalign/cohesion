@@ -16,7 +16,7 @@ feature on `IHttpContext`.
 The feature is installed by an exchange interceptor, so register it on the listener:
 
 ```csharp
-options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+options.Interceptors.Add(new HttpExtendedConnectInterceptor());
 ```
 
 The Web host (`Assimalign.Cohesion.Web.Hosting`) registers it by default. Without it, an extended

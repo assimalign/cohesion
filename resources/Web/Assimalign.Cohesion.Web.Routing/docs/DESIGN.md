@@ -33,12 +33,12 @@ Scope of this library:
 - **Route groups** (`IRouterGroupBuilder`, via `MapGroup`) — builder-time composition of a path
   prefix, shared parameter policies, and shared endpoint metadata onto child routes (#786).
 - **Named routes and outbound URL generation** (`RouteNameMetadata` in `Metadata/`,
-  `ILinkGenerator`) — the inverse direction: from a route name (or route values) back to a path
+  `IRouterLinkGenerator`) — the inverse direction: from a route name (or route values) back to a path
   or absolute URI (#787).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through
   the router.
-- The **endpoint seam and the pipeline terminal** (`IWebEndpointFeature`, `WebApplicationTerminal`)
-  and the **non-rejoining branches** (`Map(path)`, `MapWhen`, `IWebPathBaseFeature`,
+- The **endpoint seam and the pipeline terminal** (`IRouterEndpointFeature`, `WebApplicationTerminal`)
+  and the **non-rejoining branches** (`Map(path)`, `MapWhen`, `IRouterPathBaseFeature`,
   `GetPathBase()`, `GetEffectivePath()`), moved here from the Web root by #1379 (see "Pipeline
   branching and the terminal").
 
@@ -562,7 +562,7 @@ at that read, so a route never observes two different metadata sets.
 When the pipeline is built, the `UseRouting` middleware factory builds the application's router
 (see "Router lifecycle" below). For each request the middleware **selects** the endpoint and calls
 `next`. It never runs the endpoint and never short-circuits (#1054). The pipeline's terminal
-(`WebApplicationTerminal`) runs whatever was selected, through `IWebEndpointFeature`. Both are this
+(`WebApplicationTerminal`) runs whatever was selected, through `IRouterEndpointFeature`. Both are this
 package's since #1379 (see "Pipeline branching and the terminal" below).
 
 ```mermaid
@@ -577,9 +577,9 @@ flowchart TD
 The middleware calls `router.Match(context)` once and publishes the result:
 
 - `Matched` → `SetRouteMatch` publishes the route as an `IRouteMatchFeature`, which is also the
-  exchange's `IWebEndpointFeature`, with the route's template for telemetry (below). The terminal
+  exchange's `IRouterEndpointFeature`, with the route's template for telemetry (below). The terminal
   invokes the handler with the request's `RequestCancelled` token.
-- `MethodNotAllowed` → a 405 endpoint is published. It is an `IWebEndpointFeature` only, not a route
+- `MethodNotAllowed` → a 405 endpoint is published. It is an `IRouterEndpointFeature` only, not a route
   match, so metadata consumers see no endpoint. The terminal sets `405` and the `Allow` header.
 - A **CORS preflight** to a path that no route accepts `OPTIONS` on → routing matches again with the
   method named in `Access-Control-Request-Method` (`IRouter.Match(context, method)`), parsed as sent:
@@ -626,7 +626,7 @@ The endpoint runs at the pipeline's terminal; there is no `UseEndpoints` step. A
 middleware would silently turn every existing application into a 404 server: its routes would match
 and publish, and nothing would run them. The terminal is the pipeline builder's (`WebApplication` in
 Web.Hosting composes its pipeline around it), and the selected endpoint reaches it through
-`IWebEndpointFeature`, which carries the delegate to run and the route template telemetry names it
+`IRouterEndpointFeature`, which carries the delegate to run and the route template telemetry names it
 by. The route, its values and its metadata stay in `IRouteMatchFeature`. `RouteMatchFeature`
 implements both contracts.
 
@@ -639,7 +639,7 @@ references Web.Routing for the terminal and for the `RouteTemplate` its telemetr
 
 The default server names each request's span `GET /orders/{id}` and tags it, and its
 `http.server.request.duration` measurement, with `http.route`. It reads the template from
-`IWebEndpointFeature.RouteTemplate` once the exchange is finalized, the same seam the terminal
+`IRouterEndpointFeature.RouteTemplate` once the exchange is finalized, the same seam the terminal
 runs, so routing needs no telemetry code and no reference to the hosting module:
 
 - A matched route (and a preflight's candidate) publishes its pattern's raw text with a leading `/`.
@@ -698,7 +698,7 @@ would reject exactly the group-plus-override shape the convention verbs make rou
   holds but an opt-in has no effect.
 - **Compression follows the cache.** `UseResponseCompression` must sit inside `UseOutputCache`, so in
   an application that caches it moves after `UseRouting` too (Web.Caching DESIGN, "Ordering").
-- **Custom pipeline builders** must honor `IWebEndpointFeature` at their terminal: run the endpoint
+- **Custom pipeline builders** must honor `IRouterEndpointFeature` at their terminal: run the endpoint
   when present, and apply their unhandled-request behavior otherwise.
 
 ### Per-application router state (the isolation rule) (#789)
@@ -823,9 +823,9 @@ compile without them, moved here:
 
 | Type | Kind | Reads or publishes |
 |---|---|---|
-| `IWebEndpointFeature` | contract, `Abstractions/` | published by `UseRouting`; run by the terminal; read by Web.Server's telemetry |
-| `WebApplicationTerminal` | static class | runs `IWebEndpointFeature`, else a bodyless 404 |
-| `IWebPathBaseFeature` | contract, `Abstractions/` | published by `Map(path)` and by Web.Rewrite inside a branch |
+| `IRouterEndpointFeature` | contract, `Abstractions/` | published by `UseRouting`; run by the terminal; read by Web.Server's telemetry |
+| `WebApplicationTerminal` | static class | runs `IRouterEndpointFeature`, else a bodyless 404 |
+| `IRouterPathBaseFeature` | contract, `Abstractions/` | published by `Map(path)` and by Web.Rewrite inside a branch |
 | `WebApplicationBranchingExtensions` | `Map(path)`, `MapWhen`, `GetPathBase()`, `GetEffectivePath()` | end in the terminal; read and publish the path base |
 
 The rejoining `UseWhen` and `Run` stay in the root (`WebApplicationExtensions`): they depend on no
@@ -859,7 +859,7 @@ The pipeline a path branch builds, in order:
 ```mermaid
 flowchart TD
     Match["UseWhen predicate: effective path starts with the prefix"] -->|no| Next["The rest of the containing pipeline"]
-    Match -->|yes| Base["Install IWebPathBaseFeature, restore the enclosing view on return"]
+    Match -->|yes| Base["Install IRouterPathBaseFeature, restore the enclosing view on return"]
     Base --> Branch["The branch's own middleware"]
     Branch --> Terminal["WebApplicationTerminal: the selected endpoint, or 404"]
 ```
@@ -869,7 +869,7 @@ The predicate is allocation-free; the path below the prefix is computed once the
 **`Map(path)` does not rewrite the request.** `IHttpRequest.Path` is read-only on the interface, and
 the Web area's model is to publish an effective view rather than mutate the request (owner decision
 3, the forwarded-headers model; Web ADR 1 for rewrites). A path branch publishes
-`IWebPathBaseFeature`: the accumulated `PathBase` (outermost prefix first) and the `Path` below it.
+`IRouterPathBaseFeature`: the accumulated `PathBase` (outermost prefix first) and the `Path` below it.
 Middleware that can be mounted in a branch reads `context.GetEffectivePath()`, which Web.StaticFiles
 and Web.Rewrite do. Absolute URLs keep using the full `IHttpRequest.Path`, which also keeps a
 redirect such as static files' add-a-slash correct inside a branch. A nested `Map` matches against
@@ -891,7 +891,7 @@ alternative, keeping `Assimalign.Cohesion.Web` on these four types as a marked d
 taken: it needs the deviation protocol's owner approval, and most call sites already import this
 namespace for `UseRouting`.
 
-The source break: code that names `IWebEndpointFeature`, `IWebPathBaseFeature` or
+The source break: code that names `IRouterEndpointFeature`, `IRouterPathBaseFeature` or
 `WebApplicationTerminal`, or calls `Map(path, branch)`, `MapWhen`, `GetPathBase()` or
 `GetEffectivePath()`, adds `using Assimalign.Cohesion.Web.Routing;`. A library that does so adds a
 reference to this package (Web.Rewrite did). `UseWhen` and `Run` keep the root assembly and namespace
@@ -991,9 +991,9 @@ that is its start: `UseRouting` builds the router when the pipeline is built (#1
 lifecycle" above). Per-application isolation (#789) scopes uniqueness naturally: two applications
 in one process can both have a route named `user`.
 
-### The `ILinkGenerator` surface
+### The `IRouterLinkGenerator` surface
 
-`ILinkGenerator` is exposed as `IRouter.LinkGenerator` (the router owns the route table; the
+`IRouterLinkGenerator` is exposed as `IRouter.LinkGenerator` (the router owns the route table; the
 generator is its outbound view) and, at request time, through
 `HttpContextRoutingExtensions.GetLinkGenerator()`, which resolves the per-application
 `IRouterFeature`. Two addressing modes:
@@ -1129,7 +1129,7 @@ and a child, such as a repeated parameter name, reports through the same message
 
 ## Server dependency boundary
 
-Web.Server references Web.Routing to read `IWebEndpointFeature.RouteTemplate` for the server
+Web.Server references Web.Routing to read `IRouterEndpointFeature.RouteTemplate` for the server
 span's `http.route` and bounded diagnostic route payloads. **Web.Routing must never reference
 Web.Server:** the reverse reference would form a cycle. Routing continues to publish endpoint
 and path-base features independently of the server engine and its exchange features.

@@ -25,7 +25,7 @@ public static class HttpContextRoutingExtensions
         /// <summary>
         /// Stores the matched route and route values on the current HTTP context
         /// as an <see cref="IRouteMatchFeature"/>, and selects the route as the exchange's
-        /// endpoint (<see cref="IWebEndpointFeature"/>): the pipeline's terminal runs its handler.
+        /// endpoint (<see cref="IRouterEndpointFeature"/>): the pipeline's terminal runs its handler.
         /// Replaces any previously selected endpoint.
         /// </summary>
         /// <param name="route">The matched route.</param>
@@ -39,7 +39,7 @@ public static class HttpContextRoutingExtensions
 
             // Replace-on-set: the feature collection is name-keyed, and every endpoint publication
             // (a RouteMatchFeature, or routing's 405 endpoint) reports the same stable Name
-            // (nameof(IWebEndpointFeature)), so re-routing overwrites the prior endpoint in the same
+            // (nameof(IRouterEndpointFeature)), so re-routing overwrites the prior endpoint in the same
             // slot rather than accumulating stale entries.
             context.Features.Set<IRouteMatchFeature>(new RouteMatchFeature(route, values));
         }
@@ -142,13 +142,13 @@ public static class HttpContextRoutingExtensions
         /// Gets the link generator for the application the current request belongs to, used to
         /// generate outbound URLs from named routes and route values.
         /// </summary>
-        /// <returns>The application's <see cref="ILinkGenerator"/>.</returns>
+        /// <returns>The application's <see cref="IRouterLinkGenerator"/>.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         /// <exception cref="InvalidOperationException">
         /// Routing has not been registered on the application (call
         /// <c>builder.Services.AddRouting</c>).
         /// </exception>
-        public ILinkGenerator GetLinkGenerator()
+        public IRouterLinkGenerator GetLinkGenerator()
         {
             ArgumentNullException.ThrowIfNull(context);
 

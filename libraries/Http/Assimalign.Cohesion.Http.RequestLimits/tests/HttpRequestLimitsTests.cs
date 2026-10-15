@@ -19,7 +19,7 @@ public class HttpRequestLimitsTests
     public void AfterRequestHead_ShouldAttachFeature()
     {
         HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpMaxRequestBodySizeInterceptor interceptor = HttpMaxRequestBodySizeInterceptor.Create();
+        HttpMaxRequestBodySizeInterceptor interceptor = new HttpMaxRequestBodySizeInterceptor();
 
         interceptor.AfterRequestHead(context);
 
@@ -33,7 +33,7 @@ public class HttpRequestLimitsTests
     public void Feature_ShouldWriteThroughToContext()
     {
         HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpMaxRequestBodySizeInterceptor.Create().AfterRequestHead(context);
+        new HttpMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         // Feature write is visible on the context (the enforced value)…
@@ -49,7 +49,7 @@ public class HttpRequestLimitsTests
     public void Feature_ReadOnly_ShouldDelegateToContextFreeze()
     {
         HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpMaxRequestBodySizeInterceptor.Create().AfterRequestHead(context);
+        new HttpMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         context.FreezeMaxRequestBodySize();
@@ -63,14 +63,14 @@ public class HttpRequestLimitsTests
     public void Feature_OnNegative_ShouldThrow()
     {
         HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpMaxRequestBodySizeInterceptor.Create().AfterRequestHead(context);
+        new HttpMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         Should.Throw<ArgumentOutOfRangeException>(() => feature.MaxRequestBodySize = -1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Limits interceptor: Should attach one feature carrying the body-size cap and the request-body data rate")]
-    public void CreateInterceptor_AfterRequestHead_ShouldAttachOneFeatureForEveryLimit()
+    public void AfterRequestHead_CombinedLimits_ShouldAttachOneFeatureForEveryLimit()
     {
         // Arrange
         HttpMinDataRate seeded = new(240, TimeSpan.FromSeconds(5));
@@ -78,7 +78,7 @@ public class HttpRequestLimitsTests
         context.MinRequestBodyDataRate = seeded;
 
         // Act
-        HttpRequestLimitsInterceptor interceptor = HttpRequestLimitsInterceptor.Create();
+        HttpRequestLimitsInterceptor interceptor = new HttpRequestLimitsInterceptor();
         interceptor.AfterRequestHead(context);
 
         // Assert — one object, under the body-size feature's historical name, found by either contract.
@@ -100,7 +100,7 @@ public class HttpRequestLimitsTests
         // Arrange
         HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
         context.MinRequestBodyDataRate = new HttpMinDataRate(240, TimeSpan.FromSeconds(5));
-        HttpRequestLimitsInterceptor.Create().AfterRequestHead(context);
+        new HttpRequestLimitsInterceptor().AfterRequestHead(context);
         IHttpMinRequestBodyDataRateFeature feature = context.Features.Get<IHttpMinRequestBodyDataRateFeature>()!;
         HttpMinDataRate raised = new(4096, TimeSpan.FromSeconds(1));
 
@@ -118,7 +118,7 @@ public class HttpRequestLimitsTests
         HttpMinDataRate seeded = new(240, TimeSpan.FromSeconds(5));
         HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
         context.MinRequestBodyDataRate = seeded;
-        HttpRequestLimitsInterceptor.Create().AfterRequestHead(context);
+        new HttpRequestLimitsInterceptor().AfterRequestHead(context);
         IHttpMinRequestBodyDataRateFeature rate = context.Features.Get<IHttpMinRequestBodyDataRateFeature>()!;
         IHttpMaxRequestBodySizeFeature size = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
@@ -142,7 +142,7 @@ public class HttpRequestLimitsTests
         HttpMinDataRate seeded = new(240, TimeSpan.FromSeconds(5));
         HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
         context.MinResponseDataRate = seeded;
-        HttpRequestLimitsInterceptor.Create().AfterRequestHead(context);
+        new HttpRequestLimitsInterceptor().AfterRequestHead(context);
         IHttpMinResponseDataRateFeature? feature = context.Features.Get<IHttpMinResponseDataRateFeature>();
 
         // Act and assert — the same object as the other limits, viewing the response knob.
@@ -165,7 +165,7 @@ public class HttpRequestLimitsTests
     {
         // Arrange
         HttpExchangeInterceptorRequestContext parse = CreateContext(maxRequestBodySize: null);
-        HttpRequestLimitsInterceptor.Create().AfterRequestHead(parse);
+        new HttpRequestLimitsInterceptor().AfterRequestHead(parse);
         HttpContextDouble exchange = new(parse.Features);
 
         // Act
@@ -180,7 +180,7 @@ public class HttpRequestLimitsTests
     {
         // Arrange
         HttpExchangeInterceptorRequestContext parse = CreateContext(maxRequestBodySize: null);
-        HttpRequestLimitsInterceptor.Create().AfterRequestHead(parse);
+        new HttpRequestLimitsInterceptor().AfterRequestHead(parse);
         HttpContextDouble exchange = new(parse.Features);
 
         // Act
@@ -196,7 +196,7 @@ public class HttpRequestLimitsTests
         // Demonstrates the stream-override capability of the seam: each interceptor receives the
         // previous result, so the last registered ends up outermost.
         HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
-        IHttpExchangeInterceptor limits = HttpMaxRequestBodySizeInterceptor.Create();
+        IHttpExchangeInterceptor limits = new HttpMaxRequestBodySizeInterceptor();
         IHttpExchangeInterceptor wrapper = new ReadOnlyWrappingInterceptor();
 
         using MemoryStream original = new(new byte[] { 1, 2, 3 });

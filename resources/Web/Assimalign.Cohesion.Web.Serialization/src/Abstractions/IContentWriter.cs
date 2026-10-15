@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// <para>
 /// Writers are registered at composition time through
 /// <see cref="ContentSerializationBuilder.AddWriter"/> and resolved per request from the
-/// <see cref="IHttpContentSerializationFeature"/>. The first entry of <see cref="MediaTypes"/>
+/// <see cref="IContentSerializationFeature"/>. The first entry of <see cref="MediaTypes"/>
 /// must be a concrete (wildcard-free) media type — it is the writer's canonical content type,
 /// used when a call site does not name one. Implementations are shared across concurrent
 /// exchanges and must be thread-safe.
@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// from the <c>WriteContentAsync&lt;T&gt;</c> extension, which forwards <c>typeof(T)</c>.
 /// </para>
 /// </remarks>
-public interface IHttpContentWriter
+public interface IContentWriter
 {
     /// <summary>
     /// Gets the media types (or media ranges) this writer can serialize to. The first entry is

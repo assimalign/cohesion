@@ -29,7 +29,7 @@ public static class HttpResponseStreamingExtensions
         /// </summary>
         /// <exception cref="NotSupportedException">
         /// Response streaming is not enabled for this exchange (its interceptor was not registered on
-        /// the transport). Register <see cref="HttpResponseStreamingInterceptor.Create"/> on the
+        /// the transport). Register <see cref="HttpResponseStreamingInterceptor()"/> on the
         /// transport's response interceptors, or check <see cref="SupportsStreaming"/> first.
         /// </exception>
         public IHttpResponseStreamingFeature Streaming

@@ -142,7 +142,7 @@ public class RouteMatchFeatureTests
         context.SetRouteMatch(route, new RouteValueDictionary());
 
         // Assert
-        context.Features.Get<IWebEndpointFeature>()!.RouteTemplate.ShouldBe(expected);
+        context.Features.Get<IRouterEndpointFeature>()!.RouteTemplate.ShouldBe(expected);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - RouteMatch: The route template is computed once per route, not per request")]
@@ -158,9 +158,9 @@ public class RouteMatchFeatureTests
         second.SetRouteMatch(route, new RouteValueDictionary());
 
         // Assert
-        string? template = first.Features.Get<IWebEndpointFeature>()!.RouteTemplate;
+        string? template = first.Features.Get<IRouterEndpointFeature>()!.RouteTemplate;
         template.ShouldBe("/users/{id:int}");
-        second.Features.Get<IWebEndpointFeature>()!.RouteTemplate.ShouldBeSameAs(template);
+        second.Features.Get<IRouterEndpointFeature>()!.RouteTemplate.ShouldBeSameAs(template);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - RouteMatch: GetEndpointMetadata returns empty without a match")]

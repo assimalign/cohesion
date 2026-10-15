@@ -412,7 +412,7 @@ when no listener is enabled. Pass-through requests are not counted. There is no 
 or counter, and neither Verbose event is throttled.
 
 Every event reads the request id from `IWebRequestIdFeature` and the route template from
-`IWebEndpointFeature` inside `IsEnabled`. It never reads `Activity.Current` or a request path. The
+`IRouterEndpointFeature` inside `IsEnabled`. It never reads `Activity.Current` or a request path. The
 origin is a single serialized Origin value, empty when missing, repeated or malformed, truncated to
 256 characters inside `IsEnabled`; the first rejected header name is truncated there to 64 characters.
 The requested method has already passed the preflight token check and its 32-character limit. Other
@@ -478,7 +478,7 @@ headers on its `500`; streamed heads enforcing the policy after handler changes;
 
 ## HTTP interceptor consumer compatibility (#1465)
 
-The streamed-response test hosts now register `HttpResponseStreamingInterceptor.Create()` in place
+The streamed-response test hosts now register `new HttpResponseStreamingInterceptor()` in place
 of `HttpResponseStreaming.CreateInterceptor()`. Applications that register this Http.Streaming
 interceptor directly make the same replacement and rebuild for its upstream source and binary
 break against `10.0.0-preview.1`, accepted on decision 15's terms and documented in

@@ -10,16 +10,13 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 public sealed class HttpResponseStreamingInterceptor : HttpExchangeInterceptor
 {
-    private HttpResponseStreamingInterceptor()
-    {
-    }
-
     /// <summary>
     /// Creates the response interceptor that makes <see cref="IHttpResponseStreamingFeature"/>
     /// available on every exchange served by the transport it is registered on.
     /// </summary>
-    /// <returns>The response interceptor to add to the transport's response-interceptor list.</returns>
-    public static HttpResponseStreamingInterceptor Create() => new HttpResponseStreamingInterceptor();
+    public HttpResponseStreamingInterceptor()
+    {
+    }
 
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;

@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <para>
 /// The method and the <c>:protocol</c>, <c>:scheme</c>, <c>:path</c> and <c>:authority</c>
 /// pseudo-headers are already checked: the extended CONNECT interceptor
-/// (<c>HttpExtendedConnectInterceptor.Create()</c>) installs
+/// (<c>new HttpExtendedConnectInterceptor()</c>) installs
 /// <see cref="IHttpExtendedConnectFeature"/> only on an extended CONNECT the transport validated, and
 /// <see cref="HttpWebSocketBootstrap.Select"/> checks the protocol. The stream's <c>DATA</c> is the
 /// tunnel, so there is no request content to refuse, unlike the HTTP/1.1 <c>GET</c>.

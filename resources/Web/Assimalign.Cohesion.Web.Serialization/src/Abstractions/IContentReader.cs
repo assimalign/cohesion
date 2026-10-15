@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// <para>
 /// Readers are registered at composition time through
 /// <see cref="ContentSerializationBuilder.AddReader"/> and resolved per request from the
-/// <see cref="IHttpContentSerializationFeature"/> by matching the request's <c>Content-Type</c>
+/// <see cref="IContentSerializationFeature"/> by matching the request's <c>Content-Type</c>
 /// against <see cref="MediaTypes"/>. Implementations are shared across concurrent exchanges and
 /// must be thread-safe.
 /// </para>
@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// from the <c>ReadContentAsync&lt;T&gt;</c> extension, which forwards <c>typeof(T)</c> and casts.
 /// </para>
 /// </remarks>
-public interface IHttpContentReader
+public interface IContentReader
 {
     /// <summary>
     /// Gets the media types (or media ranges) this reader can deserialize. Matching uses

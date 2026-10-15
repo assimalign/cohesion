@@ -68,7 +68,7 @@ public class EndpointBindingGeneratorTests
         string source = Preamble + "\n" + types + "\n\npublic static class Endpoints\n{\n" + members + "\n    public static void Configure(WebApplication app)\n    {\n" + body + "\n    }\n}\n";
 
         string antiforgeryAssembly = typeof(Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata).Assembly.Location;
-        string serializationAssembly = typeof(Assimalign.Cohesion.Web.Serialization.IHttpContentSerializationFeature).Assembly.Location;
+        string serializationAssembly = typeof(Assimalign.Cohesion.Web.Serialization.IContentSerializationFeature).Assembly.Location;
         string validationAssembly = typeof(Assimalign.Cohesion.Web.Validation.ValidationMetadata).Assembly.Location;
 
         // The test host's trusted platform assemblies include every assembly this project references,
@@ -330,6 +330,29 @@ public class EndpointBindingGeneratorTests
         generated.ShouldContain("HttpStatusCode.UnsupportedMediaType", Case.Sensitive);
         generated.ShouldContain("catch (global::System.Text.Json.JsonException)", Case.Sensitive);
         generated.ShouldContain("using Assimalign.Cohesion.Web.Serialization;", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generate: body-bound Map verbs compile against the serialization contract")]
+    [InlineData("Map(HttpMethod.Post, ")]
+    [InlineData("MapGet(")]
+    [InlineData("MapPost(")]
+    [InlineData("MapPut(")]
+    [InlineData("MapPatch(")]
+    [InlineData("MapDelete(")]
+    public void Generate_BodyBoundEndpoint_ShouldCompileAgainstSerializationContract(string mapping)
+    {
+        // Arrange — Generate references the real Web.Serialization assembly, not a contract stub.
+        string endpoint = $$"""app.{{mapping}}"/widgets", ([FromBody] Widget widget) => widget.Name);""";
+
+        // Act
+        GeneratorRun run = Generate(endpoint);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        run.Generated.ShouldContain("context.Features.Get<global::Assimalign.Cohesion.Web.Serialization.IContentSerializationFeature>()", Case.Sensitive);
+        run.Generated.ShouldContain("ReadContentAsync<global::Widget>", Case.Sensitive);
+        AssertEveryTypedCallSiteIsIntercepted(run);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a body read leaves serialization faults to the exception boundary")]

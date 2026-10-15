@@ -61,7 +61,7 @@ Mapped health middleware:
 
 1. Passes through requests whose path or method does not match.
 2. Runs `IHealthCheckService.CheckHealthAsync` with the endpoint predicate and request cancellation.
-3. Attaches `IHttpHealthFeature` so other HTTP components can inspect the completed report.
+3. Attaches `IHealthFeature` so other HTTP components can inspect the completed report.
 4. Maps `Healthy` and `Degraded` to 200 and `Unhealthy` to 503 by default.
 5. Disables response caching unless explicitly allowed.
 6. Writes the response and terminates the matching pipeline branch.
@@ -76,7 +76,8 @@ serialization. Diagnostic data is handled through a closed primitive-value switc
 fallback. Custom behavior is available through `IHealthResponseWriter`.
 
 The registration, evaluation, and default response path remains trim- and NativeAOT-compatible.
-The optional contributor adapter has its own hosting-family package and tests.
+The contributor adapter and its tests live in `Assimalign.Cohesion.Web.Hosting` under
+`src/Health/` and `tests/Health/`, respectively (owner decision 57, 2026-10-13).
 
 ## Exception detail
 
@@ -135,7 +136,7 @@ descriptions verbatim. It does not restore the preview.1 output:
   preview.1 wrote its `ToString()`.
 
 **Server-side detail.** The exception object stays on the in-process report. An application reads
-it through `IHttpHealthFeature.Report` on the exchange, from `IHealthCheckService.CheckHealthAsync`
+it through `IHealthFeature.Report` on the exchange, from `IHealthCheckService.CheckHealthAsync`
 directly, or in its own `IHealthResponseWriter`, which receives the whole report and decides what
 to publish. The internal `HealthCheckEventSource` reports status transitions and failed probes
 with their exception type and message (see Diagnostics).

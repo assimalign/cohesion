@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The terminal runs the endpoint a selecting middleware published (<see cref="IWebEndpointFeature"/>,
+/// The terminal runs the endpoint a selecting middleware published (<see cref="IRouterEndpointFeature"/>,
 /// for example a route <c>UseRouting</c> matched). With no endpoint selected the request went unhandled,
 /// and the terminal sets a bodyless <c>404 Not Found</c> rather than completing silently, which would
 /// hand the transport an empty <c>200</c>. A response a middleware already shaped is left untouched: a
@@ -38,7 +38,7 @@ public static class WebApplicationTerminal
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context.Features.Get<IWebEndpointFeature>() is { } endpoint)
+        if (context.Features.Get<IRouterEndpointFeature>() is { } endpoint)
         {
             return endpoint.Endpoint.Invoke(context);
         }

@@ -19,8 +19,8 @@ What used to live here and where it went (#1379):
 
 | Moved | New home | Namespace |
 |---|---|---|
-| `IWebEndpointFeature`, `WebApplicationTerminal` | `Assimalign.Cohesion.Web.Routing` | `Assimalign.Cohesion.Web.Routing` |
-| `IWebPathBaseFeature`, `Map(path, branch)`, `MapWhen`, `GetPathBase()`, `GetEffectivePath()` | `Assimalign.Cohesion.Web.Routing` | `Assimalign.Cohesion.Web.Routing` |
+| `IRouterEndpointFeature`, `WebApplicationTerminal` | `Assimalign.Cohesion.Web.Routing` | `Assimalign.Cohesion.Web.Routing` |
+| `IRouterPathBaseFeature`, `Map(path, branch)`, `MapWhen`, `GetPathBase()`, `GetEffectivePath()` | `Assimalign.Cohesion.Web.Routing` | `Assimalign.Cohesion.Web.Routing` |
 | `IWebRequestIdFeature`, `IWebResponseCompletionFeature`, `IWebServerDrainFeature` | `Assimalign.Cohesion.Web.Server` | `Assimalign.Cohesion.Web` (unchanged) |
 | `UseWhen`, `Run` (class `WebApplicationBranchingExtensions`) | this package, class `WebApplicationExtensions` | `Assimalign.Cohesion.Web` (unchanged) |
 

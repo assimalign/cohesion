@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 
 /// <summary>
 /// Server-driven content negotiation over the content-serialization registry (#149): picks which
-/// registered <see cref="IHttpContentWriter"/> serves a request from its <c>Accept</c> header, and
+/// registered <see cref="IContentWriter"/> serves a request from its <c>Accept</c> header, and
 /// writes the negotiated representation. Negotiation composes <em>over</em> the registry — it never
 /// redesigns the #864 matching rules; the q-value / precedence core is the shared
 /// <see cref="HttpContentNegotiation"/> primitive (#771).
@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// </remarks>
 public static class HttpContentNegotiationExtensions
 {
-    extension(IHttpContentSerializationFeature feature)
+    extension(IContentSerializationFeature feature)
     {
         /// <summary>
         /// Selects the best concrete media type for an <c>Accept</c> header from the registry's
@@ -70,7 +70,7 @@ public static class HttpContentNegotiationExtensions
         {
             ArgumentNullException.ThrowIfNull(context);
 
-            IHttpContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(context);
+            IContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(context);
             string? acceptHeader = context.Request.Headers.GetValue(HttpHeaderKey.Accept);
 
             return ContentNegotiator.TryNegotiate(feature.Writers, acceptHeader, out mediaType);
@@ -105,7 +105,7 @@ public static class HttpContentNegotiationExtensions
         {
             ArgumentNullException.ThrowIfNull(context);
 
-            IHttpContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(context);
+            IContentSerializationFeature feature = ContentSerializationFeatureResolver.GetRequired(context);
             IHttpResponse response = context.Response;
 
             // The chosen representation depends on the request's Accept header, so downstream caches

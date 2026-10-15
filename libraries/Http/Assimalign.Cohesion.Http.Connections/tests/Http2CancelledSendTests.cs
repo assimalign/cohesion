@@ -66,7 +66,7 @@ public class Http2CancelledSendTests
     {
         // Arrange — the application streamed part of its response through the raw sink.
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/events"));
         IHttpContext exchange = await peer.ReceiveContextAsync();
@@ -176,7 +176,7 @@ public class Http2CancelledSendTests
         TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Http2OutputTapConnection? tap = null;
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+        options.Interceptors.Add(new HttpExtendedConnectInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options, decorate: transport => tap = new Http2OutputTapConnection(transport));
         await peer.SendHeadersAsync(1, endStream: false, ExtendedConnect());
         IHttpContext exchange = await peer.ReceiveContextAsync();

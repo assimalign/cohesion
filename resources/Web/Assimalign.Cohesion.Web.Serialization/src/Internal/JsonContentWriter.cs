@@ -17,11 +17,11 @@ namespace Assimalign.Cohesion.Web.Serialization.Internal;
 /// points only, so the path is reflection-free under NativeAOT. The body is streamed, so no
 /// <c>Content-Length</c> is set; transports frame the response per protocol.
 /// </summary>
-internal sealed class JsonHttpContentWriter : IHttpContentWriter
+internal sealed class JsonContentWriter : IContentWriter
 {
     private readonly JsonSerializerOptions _options;
 
-    public JsonHttpContentWriter(JsonSerializerOptions options)
+    public JsonContentWriter(JsonSerializerOptions options)
     {
         _options = options;
     }
@@ -39,7 +39,7 @@ internal sealed class JsonHttpContentWriter : IHttpContentWriter
     /// <summary>
     /// Resolves the contract this writer serializes <paramref name="type"/> with, from the frozen
     /// options the JSON pair was registered with. Backs the public
-    /// <c>IHttpContentSerializationFeature.TryGetJsonTypeInfo</c> seam.
+    /// <c>IContentSerializationFeature.TryGetJsonTypeInfo</c> seam.
     /// </summary>
     /// <param name="type">The declared CLR type.</param>
     /// <param name="typeInfo">The contract, when the registered resolver covers the type.</param>

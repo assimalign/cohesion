@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// a query string using query encoding, in the order they were supplied.
 /// </para>
 /// </remarks>
-public interface ILinkGenerator
+public interface IRouterLinkGenerator
 {
     /// <summary>
     /// Attempts to generate a relative path (with any surplus values as a query string) for the

@@ -567,7 +567,7 @@ public class Http3TransportTests
         TestMultiplexedConnection connection = new(stream);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
-        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+        options.Interceptors.Add(new HttpExtendedConnectInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();
@@ -596,7 +596,7 @@ public class Http3TransportTests
         TestMultiplexedConnection connection = new(stream);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
-        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+        options.Interceptors.Add(new HttpExtendedConnectInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptAsync()).OpenAsync();

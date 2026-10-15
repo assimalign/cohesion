@@ -15,14 +15,14 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// <c>builder.Services.AddContentSerialization(serialization => serialization.AddJson(...))</c> callback.
 /// That verb is a component integration (<c>Properties/ComponentIntegrations.cs</c>, owner decision 34):
 /// it creates the builder, runs the callback, calls <see cref="Build"/>, and registers the resulting
-/// <see cref="IHttpContentSerializationFeature"/> as an <c>IHttpFeature</c> singleton. A composition
+/// <see cref="IContentSerializationFeature"/> as an <c>IHttpFeature</c> singleton. A composition
 /// surface without a service container registers <see cref="Build"/>'s result through
 /// <c>IWebApplicationBuilder.AddFeature</c>.
 /// </remarks>
 public sealed class ContentSerializationBuilder
 {
-    private readonly List<IHttpContentReader> _readers = new();
-    private readonly List<IHttpContentWriter> _writers = new();
+    private readonly List<IContentReader> _readers = new();
+    private readonly List<IContentWriter> _writers = new();
 
     /// <summary>
     /// Initializes a builder with no formats registered.
@@ -39,7 +39,7 @@ public sealed class ContentSerializationBuilder
     /// <returns>The builder, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="reader"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="reader"/> declares no media types.</exception>
-    public ContentSerializationBuilder AddReader(IHttpContentReader reader)
+    public ContentSerializationBuilder AddReader(IContentReader reader)
     {
         ArgumentNullException.ThrowIfNull(reader);
 
@@ -63,7 +63,7 @@ public sealed class ContentSerializationBuilder
     /// <paramref name="writer"/> declares no media types, or its first media type is not concrete
     /// (the first entry is the writer's canonical content type and must be wildcard-free).
     /// </exception>
-    public ContentSerializationBuilder AddWriter(IHttpContentWriter writer)
+    public ContentSerializationBuilder AddWriter(IContentWriter writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
@@ -88,9 +88,9 @@ public sealed class ContentSerializationBuilder
     /// <remarks>
     /// The registry holds a snapshot of the registrations: formats added after this call do not reach it.
     /// </remarks>
-    /// <returns>The registry, an <see cref="IHttpContentSerializationFeature"/> for the application to register.</returns>
-    public IHttpContentSerializationFeature Build()
+    /// <returns>The registry, an <see cref="IContentSerializationFeature"/> for the application to register.</returns>
+    public IContentSerializationFeature Build()
     {
-        return new HttpContentSerializationFeature(_readers.ToArray(), _writers.ToArray());
+        return new ContentSerializationFeature(_readers.ToArray(), _writers.ToArray());
     }
 }

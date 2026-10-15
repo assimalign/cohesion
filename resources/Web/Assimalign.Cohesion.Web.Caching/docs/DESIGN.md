@@ -355,7 +355,7 @@ callback, so the final head after response-starting callbacks decides the reason
 cancelled exchanges and failed transmission never run that callback and emit no cache decision.
 There is no successful-response event. Request ids come from `IWebRequestIdFeature`, including
 when an unrelated ambient activity exists. A custom server without that feature reports an empty id.
-Routes come only from `IWebEndpointFeature.RouteTemplate`, never the request path.
+Routes come only from `IRouterEndpointFeature.RouteTemplate`, never the request path.
 
 `EntryDeclined` reports at most once per second across the process. Its next report carries the
 number suppressed while listening; the `declined-entries` PollingCounter counts every decline even

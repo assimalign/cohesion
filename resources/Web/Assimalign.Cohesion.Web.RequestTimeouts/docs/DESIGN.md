@@ -221,7 +221,7 @@ Nothing in the package (or its tests) needs dynamic code.
 The internal `RequestTimeoutEventSource` is named
 `Assimalign.Cohesion.Web.RequestTimeouts`. It reports timeout outcomes on the request flow,
 never in the timer callback. It reads `requestId` from `IWebRequestIdFeature` and the route
-from `IWebEndpointFeature` only inside the enabled-event check; it never reads the ambient
+from `IRouterEndpointFeature` only inside the enabled-event check; it never reads the ambient
 activity, request path, query, headers or body. The Web.Server dependency
 supplies correlation and the client-fault markers without a hosting dependency.
 

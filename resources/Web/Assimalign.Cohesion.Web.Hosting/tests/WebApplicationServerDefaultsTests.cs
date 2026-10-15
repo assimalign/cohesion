@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
@@ -106,6 +107,12 @@ public class WebApplicationServerDefaultsTests
         // Arrange
         TrackingApplicationServer customServer = new();
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        int interceptorFactoryCalls = 0;
+        builder.Services.AddSingleton<IHttpExchangeInterceptor>(_ =>
+        {
+            interceptorFactoryCalls++;
+            return new RequestHookInterceptor();
+        });
         builder.Server.UseServer(customServer);
         await using WebApplication application = builder.Build();
 
@@ -115,6 +122,7 @@ public class WebApplicationServerDefaultsTests
         // Assert
         customServer.StartCount.ShouldBe(1);
         application.Context.Servers.Single().ShouldBeSameAs(customServer);
+        interceptorFactoryCalls.ShouldBe(0);
 
         await ((IWebApplication)application).StopAsync();
         customServer.StopCount.ShouldBe(1);
@@ -123,7 +131,7 @@ public class WebApplicationServerDefaultsTests
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: HTTP/3 request hooks should run inline with every default interceptor")]
     [InlineData("GET", true)]
     [InlineData("POST", false)]
-    public async Task ApplyDefaultInterceptors_OnBufferedHttp3Head_ShouldRunRequestHooksInline(string method, bool endStream)
+    public async Task UseServer_OnBufferedHttp3Head_ShouldRunRequestHooksInline(string method, bool endStream)
     {
         // Arrange — queue the complete head before ReceiveAsync starts, so accepting the stream and
         // parsing its head require no asynchronous I/O. Use the real hosting composition, including
@@ -166,16 +174,17 @@ public class WebApplicationServerDefaultsTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the request-limits interceptor first")]
-    public void ApplyDefaultInterceptors_ShouldInstallRequestLimitsFirst()
+    public async Task Build_DefaultInterceptors_ShouldInstallRequestLimitsFirst()
     {
-        // The web host composes the listener options with the default interceptors ahead of any
-        // user configuration, so the RequestLimits interceptor occupies slot 0 — guaranteeing
+        // Arrange — the registered defaults precede application registrations and listener callbacks,
+        // so RequestLimits occupies aggregate slot 0 — guaranteeing
         // every request carries the typed feature and later head hooks can observe it.
-        HttpConnectionListenerOptions options = new();
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        await using WebApplication application = builder.Build();
+        IHttpExchangeInterceptor[] interceptors = application.Context.ServiceProvider
+            .GetRequiredService<IEnumerable<IHttpExchangeInterceptor>>().ToArray();
 
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
-
-        options.Interceptors.Count.ShouldBe(3);
+        interceptors.Length.ShouldBe(3);
 
         // Prove slot 0 is the RequestLimits interceptor by behavior: its head hook attaches the
         // typed feature as a write-through view over the context knob.
@@ -194,8 +203,10 @@ public class WebApplicationServerDefaultsTests
             MinRequestBodyDataRate = rate,
         };
 
-        options.Interceptors[0].AfterRequestHead(context);
+        // Act
+        interceptors[0].AfterRequestHead(context);
 
+        // Assert
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();
         feature!.MaxRequestBodySize.ShouldBe(2048);
@@ -209,21 +220,23 @@ public class WebApplicationServerDefaultsTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the HTTP/1.1 protocol-upgrade interceptor after request limits")]
-    public void ApplyDefaultInterceptors_ShouldInstallProtocolUpgradeSecond()
+    public async Task Build_DefaultInterceptors_ShouldInstallProtocolUpgradeSecond()
     {
-        // Decision 16 (Http ADR 1): the upgrade interceptor is on by default, so a WebSocket
+        // Arrange — Decision 16 (Http ADR 1): the upgrade interceptor is on by default, so a WebSocket
         // handshake reaches context.Upgrade without any listener configuration.
-        HttpConnectionListenerOptions options = new();
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        await using WebApplication application = builder.Build();
+        IHttpExchangeInterceptor[] interceptors = application.Context.ServiceProvider
+            .GetRequiredService<IEnumerable<IHttpExchangeInterceptor>>().ToArray();
 
         HttpHeaderCollection requestHeaders = new();
         requestHeaders[HttpHeaderKey.Connection] = "Upgrade";
         requestHeaders[HttpHeaderKey.Upgrade] = "websocket";
         HttpFeatureCollection features = new();
 
-        // Prove slot 1 is the upgrade interceptor by behavior: its head hook records the upgrade
+        // Act — prove slot 1 is the upgrade interceptor by behavior: its head hook records the upgrade
         // signal and its response hook installs the feature context.Upgrade reads.
-        options.Interceptors[1].AfterRequestHead(new HttpExchangeInterceptorRequestContext
+        interceptors[1].AfterRequestHead(new HttpExchangeInterceptorRequestContext
         {
             Version = HttpVersion.Http11,
             Method = HttpMethod.Get,
@@ -235,7 +248,7 @@ public class WebApplicationServerDefaultsTests
             ConnectionInfo = HttpConnectionInfo.Empty,
             MaxRequestBodySize = null,
         });
-        options.Interceptors[1].BeforeResponse(new HttpExchangeInterceptorResponseContext
+        interceptors[1].BeforeResponse(new HttpExchangeInterceptorResponseContext
         {
             Version = HttpVersion.Http11,
             Headers = new HttpHeaderCollection(),
@@ -245,6 +258,7 @@ public class WebApplicationServerDefaultsTests
             Control = new TakeoverOnlyControl(),
         });
 
+        // Assert
         IHttpProtocolUpgrade? upgrade = features.Get<IHttpProtocolUpgradeFeature>()?.Upgrade;
         upgrade.ShouldNotBeNull();
         upgrade!.Kind.ShouldBe(HttpProtocolUpgradeKind.Upgrade);
@@ -252,18 +266,20 @@ public class WebApplicationServerDefaultsTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the extended CONNECT interceptor after the protocol-upgrade interceptor")]
-    public async Task ApplyDefaultInterceptors_ShouldInstallExtendedConnectThird()
+    public async Task Build_DefaultInterceptors_ShouldInstallExtendedConnectThird()
     {
         // Arrange — #1368: the extended CONNECT feature is installed by an interceptor, so a WebSocket
         // over HTTP/2 or HTTP/3 reaches context.ExtendedConnect only because the host registers it.
-        HttpConnectionListenerOptions options = new();
-        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        await using WebApplication application = builder.Build();
+        IHttpExchangeInterceptor[] interceptors = application.Context.ServiceProvider
+            .GetRequiredService<IEnumerable<IHttpExchangeInterceptor>>().ToArray();
         HttpFeatureCollection features = new();
         TunnelOnlyControl control = new();
 
         // Act — prove slot 2 is the extended CONNECT interceptor by behavior: its head hook installs the
         // feature for a validated :protocol, and its response hook binds it to the exchange control.
-        options.Interceptors[2].AfterRequestHead(new HttpExchangeInterceptorRequestContext
+        interceptors[2].AfterRequestHead(new HttpExchangeInterceptorRequestContext
         {
             Version = HttpVersion.Http20,
             Method = HttpMethod.Connect,
@@ -276,7 +292,7 @@ public class WebApplicationServerDefaultsTests
             ConnectionInfo = HttpConnectionInfo.Empty,
             MaxRequestBodySize = null,
         });
-        options.Interceptors[2].BeforeResponse(new HttpExchangeInterceptorResponseContext
+        interceptors[2].BeforeResponse(new HttpExchangeInterceptorResponseContext
         {
             Version = HttpVersion.Http20,
             Headers = new HttpHeaderCollection(),

@@ -72,7 +72,7 @@ public class HttpLoggingRequestViewTests
                 handledQuery = context.Request.Query["source"].Value;
                 requestContextMatches = ReferenceEquals(context.Request.HttpContext, context);
                 handlerCancellation = context.RequestCancelled;
-                sawRewrite = context.Features.Get<IWebRewriteFeature>() is not null;
+                sawRewrite = context.Features.Get<IRewriteFeature>() is not null;
                 sawTimeout = context.Features.Get<IRequestTimeoutFeature>() is not null;
                 context.Response.StatusCode = HttpStatusCode.Ok;
                 // Reading through the request's context must still observe the logging stream.
@@ -128,7 +128,7 @@ public class HttpLoggingRequestViewTests
             {
                 handledPath = context.Request.Path.Value;
                 handledQuery = context.Request.Query["source"].Value;
-                originalPath = context.Features.Get<IWebRewriteFeature>()?.OriginalPath.Value;
+                originalPath = context.Features.Get<IRewriteFeature>()?.OriginalPath.Value;
                 context.Response.StatusCode = HttpStatusCode.Ok;
                 await context.Request.Body.CopyToAsync(context.Response.Body, context.RequestCancelled);
             });
