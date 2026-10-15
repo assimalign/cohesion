@@ -19,7 +19,7 @@ library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web` producers, a
 takes such a reference only for runtime machinery it composes itself, because each one ships in all
 18 area frameworks. Routing and Server supply the terminal and server engine, whose contracts left the Web root
 under owner decision 33: `Web.Routing` for the pipeline terminal (`WebApplicationTerminal`) and the
-`IWebEndpointFeature` it dispatches, and `Web.Server` for the engine and the per-exchange features
+`IRouterEndpointFeature` it dispatches, and `Web.Server` for the engine and the per-exchange features
 it publishes. Web.Health supplies the independent
 health model that this module's Hosting.Health adapter uses. Applications still see the whole Web family because the
 `App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
@@ -360,9 +360,9 @@ The count covers only what the host knows every exchange carries. Middleware ins
 exchange passes through them, and in an ordinary application those sit on most exchanges:
 
 - **Routing** installs one feature on every matched request. `RouteMatchFeature` implements both
-  `IRouteMatchFeature` and `IWebEndpointFeature` under the one name `IWebEndpointFeature`, so it takes
-  one slot; a 405 takes the same slot with `MethodNotAllowedEndpointFeature`. In a routed application
-  a matched request is the ordinary exchange. A `Map` branch also installs `IWebPathBaseFeature` on
+  `IRouteMatchFeature` and `IRouterEndpointFeature` under the one name `IRouterEndpointFeature`, so it takes
+  one slot; a 405 takes the same slot with `MethodNotAllowedRouterEndpointFeature`. In a routed application
+  a matched request is the ordinary exchange. A `Map` branch also installs `IRouterPathBaseFeature` on
   each request that enters it.
 - **One feature on every exchange that passes through:** `UseForwardedHeaders`,
   `UseResponseCompression` (not on a `HEAD`, nor over HTTPS unless `EnableForHttps` is set),
@@ -441,7 +441,7 @@ no longer grow the collection past three slots.
 terminal reached only when every registered middleware chained to `next`.
 
 **Endpoint dispatch (#1054).** When an endpoint-selecting middleware (`UseRouting`)
-published an `IWebEndpointFeature`, the terminal runs that endpoint. That is
+published an `IRouterEndpointFeature`, the terminal runs that endpoint. That is
 where a matched route's handler runs, after every middleware registered behind
 `UseRouting`, and where routing's 405 is written. The terminal is
 `WebApplicationTerminal.InvokeAsync` (#1056), shared with every non-rejoining pipeline

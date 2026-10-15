@@ -97,7 +97,7 @@ Each interceptor:
 - Emits inline binding per parameter: route (`TryGetRouteValues` + boxed fast-path/`TryParse`
   fallback), query/form (`TryGetValue` + `TryParse`), header (`GetValue` + `TryParse`), body, and
   direct injections. The body is probed through the registry's non-throwing lookup first: a missing or
-  unparseable `Content-Type`, or one `IHttpContentSerializationFeature.GetReader` has no reader for,
+  unparseable `Content-Type`, or one `IContentSerializationFeature.GetReader` has no reader for,
   is a 415. `ReadContentAsync<T>` then reads it, and a `JsonException` is a 400. An
   `InvalidDataException` is a 400 too, with `errors` keyed `$body` (#1340): the transport's body
   stream throws it for a malformed message framing (a broken chunk size or trailer section) and

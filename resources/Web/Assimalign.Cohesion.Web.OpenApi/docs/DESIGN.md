@@ -224,7 +224,7 @@ default), nullability and converters drift from the wire. `Web.Serialization` ke
 internal, so it gained one public extension member:
 
 ```csharp
-bool IHttpContentSerializationFeature.TryGetJsonTypeInfo(Type type, out JsonTypeInfo? typeInfo)
+bool IContentSerializationFeature.TryGetJsonTypeInfo(Type type, out JsonTypeInfo? typeInfo)
 ```
 
 It resolves the writer the registry selects for `application/json` and, when that is the built-in JSON

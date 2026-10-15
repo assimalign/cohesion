@@ -15,7 +15,7 @@ and `/livez` pipeline endpoints.
 - **Filtering:** `HealthTags` and `HealthCheckPredicates` for aggregate, readiness, and liveness
   views.
 - **HTTP delivery:** `MapHealthChecks`, `MapReadinessCheck`, `MapLivenessCheck`,
-  `HealthEndpointOptions`, `IHealthResponseWriter`, and `IHttpHealthFeature`.
+  `HealthEndpointOptions`, `IHealthResponseWriter`, and `IHealthFeature`.
 
 ## Dependencies
 
@@ -82,7 +82,7 @@ writes descriptions as the checks returned them, and writes an exception in `dat
 It writes no exception type or stack trace, and it does not affect a custom `ResponseWriter`. It
 does not restore the 10.0.0-preview.1 output: a thrown or timed-out check keeps its fixed
 description either way ([breaking changes](DESIGN.md#exception-detail)). The exception object itself is always available
-in process, through `IHttpHealthFeature.Report` or a custom `IHealthResponseWriter`
+in process, through `IHealthFeature.Report` or a custom `IHealthResponseWriter`
 ([DESIGN](DESIGN.md#exception-detail)).
 
 Hosting contributor integration ships in `Assimalign.Cohesion.Web.Hosting`, using the

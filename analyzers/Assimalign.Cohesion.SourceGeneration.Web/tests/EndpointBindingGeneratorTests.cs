@@ -332,6 +332,29 @@ public class EndpointBindingGeneratorTests
         generated.ShouldContain("using Assimalign.Cohesion.Web.Serialization;", Case.Sensitive);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generate: body-bound Map verbs compile against the serialization contract")]
+    [InlineData("Map(HttpMethod.Post, ")]
+    [InlineData("MapGet(")]
+    [InlineData("MapPost(")]
+    [InlineData("MapPut(")]
+    [InlineData("MapPatch(")]
+    [InlineData("MapDelete(")]
+    public void Generate_BodyBoundEndpoint_ShouldCompileAgainstSerializationContract(string mapping)
+    {
+        // Arrange — Generate references the real Web.Serialization assembly, not a contract stub.
+        string endpoint = $$"""app.{{mapping}}"/widgets", ([FromBody] Widget widget) => widget.Name);""";
+
+        // Act
+        GeneratorRun run = Generate(endpoint);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        run.Generated.ShouldContain("context.Features.Get<global::Assimalign.Cohesion.Web.Serialization.IContentSerializationFeature>()", Case.Sensitive);
+        run.Generated.ShouldContain("ReadContentAsync<global::Widget>", Case.Sensitive);
+        AssertEveryTypedCallSiteIsIntercepted(run);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a body read leaves serialization faults to the exception boundary")]
     public void Generator_BodyParameter_LetsSerializationFaultsPropagate()
     {

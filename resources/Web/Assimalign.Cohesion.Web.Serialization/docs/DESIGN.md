@@ -21,7 +21,7 @@ layer, composing over the same seam.
 ## Why-this-not-that decisions
 
 - **Two halves, not one `ISerializer`.** Request deserialization and response serialization are
-  registered and resolved independently (`IHttpContentReader` / `IHttpContentWriter`). A single
+  registered and resolved independently (`IContentReader` / `IContentWriter`). A single
   god interface forces every format to implement both directions and couples negotiation to
   deserialization; the halves keep asymmetric formats (a read-only form parser, a write-only
   event stream) honest.
@@ -95,13 +95,13 @@ layer, composing over the same seam.
 Server-driven negotiation composes *over* the registry as a thin layer, never redoing its work:
 the q-value / precedence engine is the shared `HttpContentNegotiation` primitive (#771), and the
 selectable representations are exactly the registry's writers. `HttpContentNegotiationExtensions`
-ships three members — `IHttpContentSerializationFeature.TryNegotiate(acceptHeader, out mediaType)`
+ships three members — `IContentSerializationFeature.TryNegotiate(acceptHeader, out mediaType)`
 (the pure seam), `IHttpContext.TryNegotiateContentType(out mediaType)` (the same, reading the
 exchange's `Accept`), and `IHttpContext.WriteNegotiatedContentAsync<T>(value, ct)` (negotiate →
 write, or compose the `406`).
 
 - **A seam, not a feature.** Negotiation is a stateless function of *(registered writers, `Accept`
-  header)*, so it is an extension surface over the existing `IHttpContentSerializationFeature`,
+  header)*, so it is an extension surface over the existing `IContentSerializationFeature`,
   not a second feature seeded onto the exchange. A separate `IHttpContentNegotiator` feature
   would need its own builder wiring and would only re-read the writers the registry already holds;
   the extension composes with zero new composition surface and no DI, usable from any middleware.
@@ -156,7 +156,7 @@ with System.Text.Json's `JsonSchemaExporter`. The options live inside the built-
 package exposes one read-only seam:
 
 ```csharp
-bool IHttpContentSerializationFeature.TryGetJsonTypeInfo(Type type, out JsonTypeInfo? typeInfo)
+bool IContentSerializationFeature.TryGetJsonTypeInfo(Type type, out JsonTypeInfo? typeInfo)
 ```
 
 - **Which contract.** The writer the registry selects for `application/json` (`GetWriter`: most specific

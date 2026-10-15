@@ -7,9 +7,9 @@ ceremony — reflection-free under NativeAOT.
 
 ## What it provides
 
-- **The registry** — `IHttpContentSerializationFeature`, a typed feature on every exchange with
-  distinct request-deserialization (`IHttpContentReader`) and response-serialization
-  (`IHttpContentWriter`) halves, keyed by `HttpMediaType`.
+- **The registry** — `IContentSerializationFeature`, a typed feature on every exchange with
+  distinct request-deserialization (`IContentReader`) and response-serialization
+  (`IContentWriter`) halves, keyed by `HttpMediaType`.
 - **Builder-time registration** — `builder.Services.AddJsonSerialization(AppJsonContext.Default)`
   registers the built-in JSON pair over a source-generated `IJsonTypeInfoResolver`;
   `builder.Services.AddContentSerialization(serialization => ...)` and its `ContentSerializationBuilder`

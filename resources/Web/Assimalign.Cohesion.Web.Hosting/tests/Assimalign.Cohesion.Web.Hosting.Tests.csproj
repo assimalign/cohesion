@@ -44,7 +44,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
 		<!-- The tests map routes with UseRouting. The runtime module references Web.Routing too, for
-		     the pipeline terminal and the IWebEndpointFeature.RouteTemplate its telemetry reads (#1064,
+		     the pipeline terminal and the IRouterEndpointFeature.RouteTemplate its telemetry reads (#1064,
 		     #1379); the routing verbs the tests call are not runtime machinery. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
     <!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->

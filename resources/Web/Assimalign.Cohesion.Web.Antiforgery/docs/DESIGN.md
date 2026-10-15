@@ -377,7 +377,7 @@ Transport-classified form failures belong exclusively to
 increment. The combined-source `Web.Hosting` tests verify invalid chunk framing
 on a protected form-token endpoint, with and without `UseErrorHandling`.
 
-The two middleware events read `IWebRequestIdFeature` and `IWebEndpointFeature.RouteTemplate` only
+The two middleware events read `IWebRequestIdFeature` and `IRouterEndpointFeature.RouteTemplate` only
 inside `IsEnabled`. They never use ambient activities. The protector seam has no request context:
 `TokenUnprotectFailed` is the context-free attempt event specified by the scope, and has no fabricated
 request id. In contrast, `RejectionAborted` includes the available request id in addition to the scope's

@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Web.Serialization.Tests;
 /// Registry matching semantics: most-specific declared range wins, registration order breaks
 /// ties, and no match means <see langword="null"/> (the outcome-friendly, non-throwing surface).
 /// </summary>
-public class HttpContentSerializationFeatureTests
+public class ContentSerializationFeatureTests
 {
     private static IContentSerializationFeature Compose(params IContentReader[] readers)
     {

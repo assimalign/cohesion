@@ -264,7 +264,7 @@ application registered no serialization at all, or its source-generated resolver
 parameter's type. Before #1173 the read path caught that exception and answered 415, which told the
 client it had sent the wrong media type when the server was misconfigured. The distinction needed no
 change in `Web.Serialization`: its lookup surface already separates "no reader for this media type"
-(`GetReader` returns `null`) from "no contract for this type" (`IHttpContentReader.CanRead` is
+(`GetReader` returns `null`) from "no contract for this type" (`IContentReader.CanRead` is
 `false`, and the read throws), per its faults-vs-outcomes model. An empty registry stays a 415 because
 the registry then truthfully accepts no media type; a missing registry is a composition error, as it
 is for a negotiated write.
@@ -327,7 +327,7 @@ OpenAPI adapter (#152) first. Every typed endpoint it maps carries, as route-lev
 #152 closed the one gap this left: an adapter needs the `JsonTypeInfo` the JSON writer serializes a
 described type with, and `Web.Serialization` keeps the writer's options internal. `Web.Serialization`
 now answers that question and no other, through
-`IHttpContentSerializationFeature.TryGetJsonTypeInfo(type, out typeInfo)` (its DESIGN, "Contract
+`IContentSerializationFeature.TryGetJsonTypeInfo(type, out typeInfo)` (its DESIGN, "Contract
 lookup"), so the description follows the wire's names and converters without the application passing
 its context twice.
 

@@ -20,7 +20,7 @@ The Web area has two precedents, and they point different ways.
 
 - **Effective values.** The original request stays as it is, and consumers opt in to reading the new values.
   - Forwarded headers publish `IHttpForwardedFeature`, and consumers read `context.EffectiveScheme`, `EffectiveHost` and the rest (decision 3).
-  - Path branches publish `IWebPathBaseFeature` (Stage 6).
+  - Path branches publish `IRouterPathBaseFeature` (Stage 6).
   - Today only nested `Map` and StaticFiles read the effective path. Routing matches `Request.Path` (`Route.cs`).
 - **Request views.** Web.Compression and Web.RequestTimeouts hand the rest of the pipeline a wrapped request or context (`RequestDecompressionHttpRequest`, `RequestTimeoutMiddleware`), so every later reader sees the new value with no change on its side.
 
@@ -29,8 +29,8 @@ An effective-path design would work only if every reader migrated. Today that is
 ### Decision
 
 1. **A rewrite hands the rest of the pipeline a request view.** The view's `Path` and `Query` are the rewritten values, and everything else delegates to the original request.
-2. **The original values stay readable** through an `IWebRewriteFeature` (`OriginalPath`, `OriginalQuery`).
-3. **Inside a `Map` branch,** the rewrite applies to the branch's effective path and publishes a matching `IWebPathBaseFeature`.
+2. **The original values stay readable** through an `IRewriteFeature` (`OriginalPath`, `OriginalQuery`).
+3. **Inside a `Map` branch,** the rewrite applies to the branch's effective path and publishes a matching `IRouterPathBaseFeature`.
 4. **A new package, `Assimalign.Cohesion.Web.Rewrite`** (resources/Web), provides `UseRewrite(rules => ...)`, which runs before `UseRouting`. Its rules run in order:
    - an internal rewrite, which continues the pipeline;
    - a redirect, with status 301, 302, 307 or 308 and a `Location`;
