@@ -1944,4 +1944,7 @@ Decisions raised while B2 and 49a were implemented, answered by the owner on 202
     *Owner (2026-10-15):* agree; revisit if a second caller appears.
 82. **Scripts and the SDK artifact.** `Sdk.Database` keeps the v4 schema artifact typed-only, and a
     `CohesionDatabaseProject=true` project that declares `Script(...)` fails with `COHDBSDK110`
-    rather than emitting an incomplete migration. *Owner:* pending; context requested 2026-10-15.
+    rather than emitting an incomplete migration. *Owner (2026-10-15):* keep the refusal; the
+    workaround is a separate Apply-mode migrator that declares the scripts, ahead of a Verify-mode
+    application (pinned by `BuildAsync_VerifyWithoutScriptsAfterScriptedApply_ShouldAcceptTheScriptsObjects`).
+    A script-aware SDK pipeline is the follow-up #1504.

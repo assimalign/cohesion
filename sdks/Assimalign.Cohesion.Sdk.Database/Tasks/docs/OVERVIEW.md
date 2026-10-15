@@ -70,3 +70,10 @@ to validate and render DEFAULT literals, and supports required column additions 
 literal defaults, matching runtime migrations.
 Key-value compilation and migration requests fail explicitly until that model supplies its own
 schema contract.
+
+Declared scripts (`database.Script(name, sql)`) record a receipt per statement at run time, which
+generated migration files cannot, so a project with `CohesionDatabaseProject` set refuses them with
+`COHDBSDK110`. To use scripts with SDK migrations, declare them in a separate executable that
+declares the same database and runs once in Apply mode during deployment, then start the
+application in Verify mode ([DESIGN.md](DESIGN.md#e4-script-artifact-decision);
+[#1504](https://github.com/assimalign/cohesion/issues/1504) tracks script-aware migrations).

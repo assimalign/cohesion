@@ -45,6 +45,36 @@ public sealed partial class SqlDefinedFunctionTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - A Verify build without scripts accepts a database a separate Apply build provisioned with them")]
+    public async Task BuildAsync_VerifyWithoutScriptsAfterScriptedApply_ShouldAcceptTheScriptsObjects()
+    {
+        // Arrange: the COHDBSDK110 workaround (design decision 82). A migrator declares the typed
+        // schema and the scripts and provisions in Apply mode; the application declares the same
+        // typed schema without the scripts, so its SDK extraction can run, and starts in Verify mode.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-e4", Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var migrator = await ScriptBuilder(root: root).BuildAsync()) { }
+            var application = SqlDatabaseEngine.CreateBuilder("sql-script");
+            application.Options.RootPath = root;
+            application.AddDatabase("functions", database =>
+            {
+                database.Provisioning = SqlProvisioningMode.Verify;
+                database.Schema(schema => schema.Table<ScriptRow>("typed_rows", table => table.Key(row => row.Id)));
+            });
+
+            // Act
+            await using var engine = await application.BuildAsync();
+
+            // Assert: the scripts' objects and data serve the application, and the migrator's receipt stays.
+            var database = await engine.OpenDatabaseAsync("functions");
+            await using var session = await database.CreateSessionAsync();
+            (await RowsAsync(session, "SELECT inc(n), id FROM items")).ShouldBe([[4, 1]]);
+            database.Catalog.Scripts.ShouldHaveSingleItem().CompletedStatements.ShouldBe(5);
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Declared scripts converge at every durable crash point without replaying data")]
     public async Task BuildAsync_CrashAtEveryWrite_ShouldConvergeWithoutDuplicateInsert()
     {

@@ -240,8 +240,19 @@ dependency closure.
 
 Iteration 1 keeps declared scripts outside the v4 typed schema. They require runtime statement
 receipts and checksummed history that generated SQL alone cannot establish. The extractor emits
-COHDBSDK110 for SqlDatabaseBuilder.Script, preventing incomplete artifacts. Keep runtime script
-declarations outside SDK-analyzed schema compilation and provision them in an Apply-mode deployment
-before a Verify-mode application starts. A future artifact carrying names, digests and bodies needs
-a corresponding journal-aware migration runner. Typed runtime/SDK document and hash parity remain
-unchanged; this decision requires no schema-document format bump.
+COHDBSDK110 for SqlDatabaseBuilder.Script, preventing incomplete artifacts: migration files that
+carried a script without its receipt would leave a Verify-mode application unable to start, and a
+later Apply run would execute the script a second time. Typed runtime/SDK document and hash parity
+remain unchanged; this decision requires no schema-document format bump. The owner kept the refusal
+(decision 82, 2026-10-15).
+
+**Scripts with SDK migrations, today.** Declare the scripts in a separate small executable that does
+not set `CohesionDatabaseProject`: it declares the same database with the same typed schema plus its
+`Script(...)` calls, and runs once in Apply mode during deployment. The application keeps the SDK
+pipeline and the typed schema only, and starts in Verify mode. Verify checks receipts only for the
+scripts the application itself declares, and typed reconciliation tracks script-created objects, so
+the migrator's tables, functions, domains and data serve the application without drift. The SQL
+engine test `BuildAsync_VerifyWithoutScriptsAfterScriptedApply_ShouldAcceptTheScriptsObjects` pins
+this. Making the pipeline itself script-aware (an artifact carrying each script's name, digest and
+body, applied through a receipt-aware runner rather than plain SQL files) is
+[#1504](https://github.com/assimalign/cohesion/issues/1504).
