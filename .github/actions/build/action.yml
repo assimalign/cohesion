@@ -227,6 +227,12 @@ runs:
           if ($exitCode -ne 0) {
             Write-Host "::error title=Tests failed::$($item.Name): $counts (exit code $exitCode)."
           }
+          elseif ($counts -eq 'no results') {
+            # dotnet test exits 0 without running anything when the project is not a test project
+            # (an unimported Microsoft.NET.Test.Sdk). The per-project jobs passed that silently too.
+            $counts = 'no tests ran'
+            Write-Host "::warning title=No tests ran::$($item.Name) exited 0 without writing test results."
+          }
 
           $result.Add([pscustomobject]@{
             Name    = $item.Name
