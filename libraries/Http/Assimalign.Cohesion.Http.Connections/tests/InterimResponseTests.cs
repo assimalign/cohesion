@@ -24,11 +24,11 @@ public class InterimResponseTests
 {
     // The application-facing interim-response feature (103 Early Hints, manual 100 Continue) is an
     // opt-in feature package that plugs in via the response-interceptor seam — registered here the
-    // same way the streaming tests register HttpResponseStreamingInterceptor.Create(). The automatic
+    // same way the streaming tests register new HttpResponseStreamingInterceptor(). The automatic
     // Expect: 100-continue handshake and the 1xx-as-final-status guard are transport behavior and do
     // NOT need this.
     private static void EnableInterimResponses(HttpConnectionListenerOptions options)
-        => options.Interceptors.Add(HttpInterimResponseInterceptor.Create());
+        => options.Interceptors.Add(new HttpInterimResponseInterceptor());
 
     // ------------------------------------------------------------------ HTTP/1.1
 
@@ -169,7 +169,7 @@ public class InterimResponseTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);

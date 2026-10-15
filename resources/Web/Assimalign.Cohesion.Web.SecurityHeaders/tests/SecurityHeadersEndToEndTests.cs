@@ -607,7 +607,7 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
-        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
         factory.Application.UseSecurityHeaders();
         factory.Application.Use(async (context, next) =>
         {
@@ -647,7 +647,7 @@ public class SecurityHeadersEndToEndTests
         {
             Protocol = WebApplicationTestProtocol.Http2,
         });
-        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()));
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
         factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
             .ScriptSrc(sources => sources.Nonce())));
         factory.Application.Use((context, next) => context.Request.Path.ToString() == "/stream"

@@ -29,7 +29,7 @@ public class HttpContextTransportExtensionsTests
             "GET /stream HTTP/1.1\r\nHost: api.test\r\n\r\n"));
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
@@ -78,7 +78,7 @@ public class HttpContextTransportExtensionsTests
         TestConnection connection = new(HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/stream", "http", "api.test"));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();
@@ -103,7 +103,7 @@ public class HttpContextTransportExtensionsTests
         TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/stream", "https", "api.test"));
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(new TestMultiplexedConnection(stream)));
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();

@@ -8,7 +8,8 @@ per-exchange contracts it publishes:
 `IWebServerDrainFeature`, `IWebClientFaultFeature`, `IWebResponseClientFaultFeature` and
 `IWebResponseStartingFeature`. Applications can construct the engine without Web.Hosting;
 its own interceptors install the same features on both direct and hosted paths. Web.Hosting
-composes options, pipelines and a non-owning host-service wrapper.
+composes options, pipelines and an internal, non-owning host-service wrapper. Servers join
+the host lifecycle through `UseServer` or `AddServer`.
 
 The package exists because of two rules that point in opposite directions:
 
@@ -307,7 +308,7 @@ connection task releases its slot only after its drain completes.
 **Bind before Started.** `StartAsync` first awaits the aggregate HTTP listener's
 `BindAsync`. Only after every transport endpoint is bound does it schedule the
 stored accept-loop task and return. A direct server reports and propagates the original
-transport exception. In the hosted path, `WebApplicationServerHostService` wraps a default
+transport exception. In the hosted path, the internal `WebApplicationServerHostService` wraps a default
 server's bind failure in `HostStartupException`, retaining the original inner exception for
 host startup classification. The wrapper has its own service id and does not own or dispose
 the server. `WebApplicationContext` wraps every server, including one that also implements

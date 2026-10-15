@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 public class HttpResponseStreamingTests
 {
     private static void EnableStreaming(HttpConnectionListenerOptions options)
-        => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        => options.Interceptors.Add(new HttpResponseStreamingInterceptor());
 
     // ------------------------------------------------------------------ HTTP/1.1
 

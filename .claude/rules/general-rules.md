@@ -341,7 +341,9 @@ namespace Assimalign.Cohesion.Database;
 ## Access modifiers
 
 1. **Implementation classes:** `internal` by default. An implementation that consumers construct
-   directly is `public sealed`, with a private constructor and static `Create` methods. It is never
+   directly is `public sealed`, with a private constructor and static `Create` methods when
+   creation takes arguments. Parameterless creation uses a public parameterless constructor and
+   no `Create()` (owner decision 61, 2026-10-15). It is never
    an internal type behind a static factory class (see "Creation-only facades become public
    implementations" below; owner decision 59, #1465).
    ```csharp
@@ -363,11 +365,14 @@ implementation `public sealed`, keep its constructor private (internal only when
 constructs it elsewhere), and move the creation methods onto it. Keep their parameters and
 validation, return the concrete type, and delete the static class. Interfaces remain the contracts
 consumers can depend on; this is the approved exception to the default internal implementation rule
-(owner decision 59, #1464 and #1465).
+(owner decision 59, #1464 and #1465). When creation takes no arguments, expose a public
+parameterless constructor and no `Create()` instead (owner decision 61, 2026-10-15). Creation
+methods that take arguments and validate them keep the decision-59 shape.
 
 The implementation takes the static class's name when that name describes the object returned
 (`AuthenticationService`, `ResourceControlPlane`, `DataProtectionProvider`). Otherwise keep its
-descriptive name (`HttpProtocolUpgradeInterceptor`, `CookieAuthenticationHandler`) and use `Create`.
+descriptive name (`EcdsaJsonWebTokenSignatureVerifier`, `CookieAuthenticationHandler`) and use
+`Create(...)` for creation with arguments.
 When a facade creates different implementations, each implementation owns its creation method.
 Use `git mv` when promoting or renaming the implementation, and document every public member,
 including inherited contracts and their argument validation.

@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Http;
 /// <remarks>
 /// <para>
 /// Implementations are produced by this package's interceptor
-/// (<see cref="HttpProtocolUpgradeInterceptor.Create"/>, registered on the server
+/// (<see cref="HttpProtocolUpgradeInterceptor()"/>, registered on the server
 /// transport's listener options) when an incoming request matches the wire-level conditions for
 /// a transition (RFC 9110 §7.8 for <c>Upgrade</c>, RFC 9110 §9.3.6 + RFC 9112 §3.2.3 for
 /// <c>CONNECT</c>). Application code obtains the capability from <c>context.Upgrade</c>:

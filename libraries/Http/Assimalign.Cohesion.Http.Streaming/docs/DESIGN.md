@@ -24,13 +24,13 @@ coupling:
   the core.
 
 Streaming is therefore **opt-in**: a host enables it by registering
-`HttpResponseStreamingInterceptor.Create()` on the transport's response
+`new HttpResponseStreamingInterceptor()` on the transport's response
 interceptors. Where it is not registered, the transport uses its buffered response
 path with zero streaming overhead.
 
 ## How it works
 
-1. A host adds `HttpResponseStreamingInterceptor.Create()` to
+1. A host adds `new HttpResponseStreamingInterceptor()` to
    `HttpConnectionListenerOptions.Interceptors`.
 2. Per exchange, the transport creates its per-protocol raw response body sink and
    runs the registered response interceptors, exposing the sink as
@@ -120,15 +120,17 @@ No reflection, no runtime code generation. The feature wraps a `Stream` and the 
 ## Public interceptor and breaking changes since 10.0.0-preview.1 (#1465)
 
 `HttpResponseStreamingInterceptor` is the public sealed implementation of the existing
-`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Its constructor is private;
-`HttpResponseStreamingInterceptor.Create()` creates a new stateless instance and returns its concrete type.
+`IHttpExchangeInterceptor` contract through `HttpExchangeInterceptor`. Decision 59 introduced a private constructor
+and a parameterless static factory returning the concrete type.
 The interface remains the contract for listener registration and custom interceptors. Feature
 implementations remain internal. This is the factory-to-implementation convention approved by
 owner decision 59.
+Owner decision 61, 2026-10-15 amends that creation shape to a public parameterless constructor
+with no `Create()`, a source and binary break for callers of the intervening factory.
 
 The `v10.0.0-preview.1` tag shipped `HttpResponseStreaming.CreateInterceptor()` returning
 `IHttpExchangeInterceptor`. That static factory class is removed. Consumers must replace the call
-with `HttpResponseStreamingInterceptor.Create()` and rebuild. Removing the old type and method is a
+with `new HttpResponseStreamingInterceptor()` and rebuild. Removing the old type and method is a
 **source- and binary-breaking change**, accepted during previews on decision 15's terms.
 Assignments to `IHttpExchangeInterceptor` continue to work after the call is renamed. The
 interceptor's registration order, scopes, feature installation, and request/response behavior

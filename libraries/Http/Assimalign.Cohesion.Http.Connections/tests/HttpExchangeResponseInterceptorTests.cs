@@ -101,7 +101,7 @@ public class HttpExchangeResponseInterceptorTests
     public async Task ProtocolUpgradeInterceptor_OnOrdinaryRequest_ShouldKeepTheFastPath(Protocol protocol)
     {
         // Arrange — the interceptor the Web host registers on every listener by default.
-        await using Exchange exchange = await Exchange.OpenAsync(protocol, claim: false, HttpProtocolUpgradeInterceptor.Create());
+        await using Exchange exchange = await Exchange.OpenAsync(protocol, claim: false, new HttpProtocolUpgradeInterceptor());
 
         // Act
         exchange.Context.Response.StatusCode = HttpStatusCode.Ok;
@@ -123,9 +123,9 @@ public class HttpExchangeResponseInterceptorTests
         await using Exchange exchange = await Exchange.OpenAsync(
             protocol,
             claim: false,
-            HttpMaxRequestBodySizeInterceptor.Create(),
-            HttpProtocolUpgradeInterceptor.Create(),
-            HttpExtendedConnectInterceptor.Create());
+            new HttpMaxRequestBodySizeInterceptor(),
+            new HttpProtocolUpgradeInterceptor(),
+            new HttpExtendedConnectInterceptor());
 
         // Act
         exchange.Context.Response.StatusCode = HttpStatusCode.Ok;
@@ -145,8 +145,8 @@ public class HttpExchangeResponseInterceptorTests
         // control (#1368). That needs the response phase, so this exchange, and only an extended
         // CONNECT, gets the sink and the control.
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
-        options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+        options.Interceptors.Add(new HttpProtocolUpgradeInterceptor());
+        options.Interceptors.Add(new HttpExtendedConnectInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
 
         // Act
@@ -171,8 +171,8 @@ public class HttpExchangeResponseInterceptorTests
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             configureListener: static options =>
             {
-                options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
-                options.Interceptors.Add(HttpExtendedConnectInterceptor.Create());
+                options.Interceptors.Add(new HttpProtocolUpgradeInterceptor());
+                options.Interceptors.Add(new HttpExtendedConnectInterceptor());
             });
         IDuplexConnection request = await peer.OpenRequestStreamAsync();
 
@@ -199,7 +199,7 @@ public class HttpExchangeResponseInterceptorTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.Interceptors.Add(HttpProtocolUpgradeInterceptor.Create());
+        options.Interceptors.Add(new HttpProtocolUpgradeInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptAsync()).OpenAsync();

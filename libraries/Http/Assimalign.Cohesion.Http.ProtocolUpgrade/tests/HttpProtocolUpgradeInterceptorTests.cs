@@ -502,7 +502,7 @@ public class HttpProtocolUpgradeInterceptorTests
     {
         // A response-scoped interceptor makes the transport build a response sink and an exchange
         // control for every exchange; the upgrade needs them only for the exchanges that ask.
-        HttpProtocolUpgradeInterceptor.Create().Scopes.ShouldBe(HttpInterceptorScopes.Request);
+        new HttpProtocolUpgradeInterceptor().Scopes.ShouldBe(HttpInterceptorScopes.Request);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: An h1 upgrade or CONNECT joins that exchange's response phase")]
@@ -518,7 +518,7 @@ public class HttpProtocolUpgradeInterceptorTests
             headers[HttpHeaderKey.Upgrade] = "websocket";
         }
 
-        HttpProtocolUpgradeInterceptor interceptor = HttpProtocolUpgradeInterceptor.Create();
+        HttpProtocolUpgradeInterceptor interceptor = new HttpProtocolUpgradeInterceptor();
         HttpExchangeInterceptorRequestContext headContext = CreateHeadContext(new FakeHttpContext(), HttpVersion.Http11, new HttpMethod(method), headers);
 
         // Act
@@ -540,7 +540,7 @@ public class HttpProtocolUpgradeInterceptorTests
         HttpExchangeInterceptorRequestContext headContext = CreateHeadContext(new FakeHttpContext(), version, new HttpMethod(method), new HttpHeaderCollection());
 
         // Act
-        HttpProtocolUpgradeInterceptor.Create().AfterRequestHead(headContext);
+        new HttpProtocolUpgradeInterceptor().AfterRequestHead(headContext);
 
         // Assert
         headContext.ResponseInterceptors.ShouldBeEmpty();
@@ -570,7 +570,7 @@ public class HttpProtocolUpgradeInterceptorTests
         string? initialDate = null)
     {
         HttpExchangeInterceptorRequestContext headContext = CreateHeadContext(context, version, method, requestHeaders);
-        IHttpExchangeInterceptor interceptor = HttpProtocolUpgradeInterceptor.Create();
+        IHttpExchangeInterceptor interceptor = new HttpProtocolUpgradeInterceptor();
         interceptor.AfterRequestHead(headContext);
 
         responseHeaders = new HttpHeaderCollection();

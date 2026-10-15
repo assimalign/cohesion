@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Http;
 /// An extended CONNECT is a <c>CONNECT</c> request that also carries the <c>:protocol</c>
 /// pseudo-header, plus <c>:scheme</c>, <c>:path</c>, and <c>:authority</c>. A client uses it to run
 /// another protocol over one HTTP/2 or HTTP/3 stream; WebSocket (<c>:protocol = websocket</c>) is
-/// the common case. The interceptor <see cref="HttpExtendedConnectInterceptor.Create"/> produces
+/// the common case. The interceptor <see cref="HttpExtendedConnectInterceptor()"/> produces
 /// installs this feature on every exchange the HTTP/2 or HTTP/3 server transport validated as an
 /// extended CONNECT and on no other exchange, so the interceptor must be registered on the listener;
 /// the Web host registers it by default. The feature remains only if the transport's exchange

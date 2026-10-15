@@ -26,10 +26,10 @@ public static class HttpContextWebSocketExtensions
         /// </para>
         /// <para>
         /// On HTTP/1.1 the attempt is detected through <c>context.Upgrade</c>, which needs the
-        /// protocol-upgrade interceptor (<c>HttpProtocolUpgradeInterceptor.Create()</c>) on the
+        /// protocol-upgrade interceptor (<c>new HttpProtocolUpgradeInterceptor()</c>) on the
         /// listener; without it, every HTTP/1.1 request reads as an ordinary one. On HTTP/2 and
         /// HTTP/3 it is detected through <see cref="IHttpExtendedConnectFeature"/>, which needs the
-        /// extended CONNECT interceptor (<c>HttpExtendedConnectInterceptor.Create()</c>) on the
+        /// extended CONNECT interceptor (<c>new HttpExtendedConnectInterceptor()</c>) on the
         /// listener; without it, every HTTP/2 and HTTP/3 request reads as an ordinary one. The Web
         /// host registers both interceptors by default.
         /// </para>

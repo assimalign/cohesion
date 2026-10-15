@@ -184,7 +184,7 @@ public class Http1ResponseClientFaultTests
             StallingConnection transport = new(inner);
             CaptureControlInterceptor capture = new();
             HttpConnectionListenerOptions options = new();
-            options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+            options.Interceptors.Add(new HttpResponseStreamingInterceptor());
             options.Interceptors.Add(capture);
             options.UseHttp1(new TestConnectionListener(transport), http1 => http1.Limits.MinResponseDataRate = rate);
             HttpConnectionListener listener = new(options);

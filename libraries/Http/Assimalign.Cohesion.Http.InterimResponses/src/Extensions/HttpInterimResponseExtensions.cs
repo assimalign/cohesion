@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Http;
 /// Ergonomic access to the per-exchange <see cref="IHttpInterimResponseFeature"/>: resolving it from
 /// the feature collection and emitting the two common interim responses (<c>100 Continue</c> and
 /// <c>103 Early Hints</c>) without the caller assembling status codes or header collections by hand.
-/// Available once <see cref="HttpInterimResponseInterceptor.Create"/> is registered on the transport.
+/// Available once <see cref="HttpInterimResponseInterceptor()"/> is registered on the transport.
 /// </summary>
 public static class HttpInterimResponseExtensions
 {

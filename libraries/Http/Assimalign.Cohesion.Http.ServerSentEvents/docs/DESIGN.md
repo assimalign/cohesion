@@ -113,7 +113,7 @@ and NativeAOT-safe. `Format(event)` is the convenience overload returning a
 `Assimalign.Cohesion.Http.Streaming`). Each serializes the event and does
 `WriteAsync` + `FlushAsync` so the peer observes it immediately. This is where SSE
 meets the streaming write path — no transport dependency, just the feature contract.
-A host enables streaming by registering `HttpResponseStreamingInterceptor.Create()`
+A host enables streaming by registering `new HttpResponseStreamingInterceptor()`
 on the transport; a handler then resolves the feature via `context.Response.Streaming`.
 
 ### Header-commit and content type

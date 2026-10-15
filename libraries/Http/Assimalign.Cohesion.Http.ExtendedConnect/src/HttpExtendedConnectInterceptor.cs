@@ -36,17 +36,14 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpExtendedConnectInterceptor : HttpExchangeInterceptor
 {
-    private HttpExtendedConnectInterceptor()
-    {
-    }
-
     /// <summary>
     /// Creates the exchange interceptor that surfaces an HTTP/2 or HTTP/3 extended CONNECT as an
     /// <see cref="IHttpExtendedConnectFeature"/> over the transport's exchange control. Add it to
     /// the transport's interceptor list.
     /// </summary>
-    /// <returns>The interceptor to add to the transport's interceptor list.</returns>
-    public static HttpExtendedConnectInterceptor Create() => new HttpExtendedConnectInterceptor();
+    public HttpExtendedConnectInterceptor()
+    {
+    }
 
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;

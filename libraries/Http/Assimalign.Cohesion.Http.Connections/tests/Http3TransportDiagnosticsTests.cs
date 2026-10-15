@@ -302,7 +302,7 @@ public class Http3TransportDiagnosticsTests
         StallingMultiplexedConnection? server = null;
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             static http3 => http3.Limits.MinResponseDataRate = new HttpMinDataRate(1_000_000, TimeSpan.FromMilliseconds(100)),
-            static options => options.Interceptors.Add(HttpResponseStreamingInterceptor.Create()),
+            static options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()),
             inner => server = new StallingMultiplexedConnection(inner));
         await using MultiplexedConnectionStream request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/diagnostics-secret", "https", "a"), timeout.Token);

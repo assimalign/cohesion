@@ -172,7 +172,7 @@ public class Http2StreamSlotTests
         // Arrange — a HEAD response streamed through the raw sink ends the stream with its HEADERS frame
         // (RFC 9110 §9.3.2) while the handler that wrote it keeps running; one stream is allowed.
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(HttpResponseStreamingInterceptor.Create());
+        options.Interceptors.Add(new HttpResponseStreamingInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options, static http2 => http2.Limits.MaxStreamsPerConnection = 1);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Request("HEAD", "/head"));
         IHttpContext head = await peer.ReceiveContextAsync();

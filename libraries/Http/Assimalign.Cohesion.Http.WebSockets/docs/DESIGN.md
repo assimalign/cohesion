@@ -165,7 +165,7 @@ cannot carry. A `426` carries `Sec-WebSocket-Version: 13` only: `Upgrade` and `C
 connection-specific, which HTTP/2 and HTTP/3 prohibit (RFC 9113 §8.2.2, RFC 9114 §4.2), and an
 HTTP/2 client treats a response that carries them as malformed.
 
-These protocols need the extended CONNECT interceptor (`HttpExtendedConnectInterceptor.Create()`)
+These protocols need the extended CONNECT interceptor (`new HttpExtendedConnectInterceptor()`)
 on the listener, as HTTP/1.1 needs the protocol-upgrade interceptor; the Web host registers both by
 default. Without it the transport still advertises extended CONNECT, so a client sends the
 handshake, but no feature surfaces it: `IsWebSocketRequest` is `false` and the request is served as
