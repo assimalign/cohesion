@@ -2641,6 +2641,20 @@ function Get-ChangesBlock {
         if ($prevOffset.ContainsKey($b) -and $curOffset.ContainsKey($b) -and $prevOffset[$b] -ne $curOffset[$b]) { $reasons.Add('band-resized') }
         if ($c.placement -in @('tier', 'tier-inherited', 'prerequisite') -and $prevOffset.ContainsKey($b) -and $curOffset.ContainsKey($b) -and ([int]$p.stage - $prevOffset[$b]) -ne ([int]$c.stage - $curOffset[$b])) { $reasons.Add('dependency') }
         if ([string]$p.stageSource -ne [string]$c.stageSource -and -not $reasons.Contains('dependency')) { $reasons.Add('dependency') }
+        if ($c.placement -eq 'bars') {
+            # A bar spans its sub-issues: it moves when one of them moves, changes status, or joins or leaves it.
+            $pk = @(@($p.children) | ForEach-Object { [int]$_ } | Sort-Object); $ck = @(@($c.children) | ForEach-Object { [int]$_ } | Sort-Object)
+            $subMoved = (($pk -join ',') -ne ($ck -join ','))
+            if (-not $subMoved) {
+                foreach ($ch in $ck) {
+                    $chId = "i$ch"
+                    if (-not ($prevNodes.ContainsKey($chId) -and $curNodes.ContainsKey($chId))) { continue }
+                    $pc = $prevNodes[$chId]; $cc = $curNodes[$chId]
+                    if ([int]$pc.stage -ne [int]$cc.stage -or [int]$pc.stageEnd -ne [int]$cc.stageEnd -or [string]$pc.status -ne [string]$cc.status) { $subMoved = $true; break }
+                }
+            }
+            if ($subMoved) { $reasons.Add('sub-issues') }
+        }
         if (-not $reasons.Count) { $reasons.Add('unexplained') }
         $moved.Add([ordered]@{ id = $id; from = [ordered]@{ stage = [int]$p.stage; stageEnd = [int]$p.stageEnd; placement = [string]$p.placement }; to = [ordered]@{ stage = [int]$c.stage; stageEnd = [int]$c.stageEnd; placement = [string]$c.placement }; reasons = @($reasons) })
     }

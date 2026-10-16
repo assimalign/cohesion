@@ -8,9 +8,10 @@
     "realign-v2/roadmap-model.md, realign-v2/skill-changes.md (this skill)",
     "realign-v2/taxonomy.json (carried here as data/taxonomy.json)",
     "realign-v2/hardening.md, realign-v2/hardening-ops.json",
-    "realign-v2/tooling.md section 6.4 (window order)"
+    "realign-v2/tooling.md section 6.4 (window order)",
+    "the regenerated v2 executor's dry run of 2026-10-16 (request counts)"
   ],
-  "executorState": "The executor's plan files still encode v1 and must be regenerated from the approved v2 data, dry-run and recounted before W1 (delta section 4).",
+  "executorState": "The v2 executor was regenerated from the approved data and dry-run on 2026-10-16: W1 394, W2 389 (384 plus 5 Tier writes for #1576-#1580), W3 391 and W4 391 requests, about 3 h 55 min at 400 per hour. W1A (Stage 0, 6 requests) can run now; W1B waits for the realignment tooling PR on main; W2 waits for programs.json with the gate entry on main. An independent review of the executor is running.",
   "decisions": [
     { "id": 1, "group": "gates-run", "title": "Hardening (D1 v2): #1511 stays open as the program gate; its 8 features move to their code's categories; Program on 62 items and 33 blocked-by links.", "runsIn": ["W2"] },
     { "id": 2, "group": "gates-run", "title": "Withdraw R5: no scaffold child leaves the story that defines it.", "runsIn": ["W1", "W2"] },
@@ -57,7 +58,7 @@
   ],
   "seam": {
     "title": "Execution seam: generic execution package and per-model session types (owner request, 2026-10-16)",
-    "note": "Filed and linked after the realignment was approved. The T1 items that write against the seam wait on the rename task, the last code change in the story.",
+    "note": "Filed and linked after the realignment was approved. The T1 items that write against the seam wait on the rename task, the last code change in the story. The story and its four tasks carry Tier Prerequisite in tiers.json (owner request, 2026-10-16); W2 sets the same Tier on the board.",
     "checks": [
       { "issue": 1576, "exists": true, "parent": 1255 },
       { "issue": 1577, "exists": true, "parent": 1576 },
@@ -86,7 +87,7 @@
       "endState": "4 epics have categories; #31 peaked at 80 sub-issues and ends at 21, #4 at 22. Nothing has left #1511. No field value is set."
     },
     {
-      "id": "W2", "name": "Graph, Tooling, Mapping and the L03.02.09 epic; the Hardening gate; the 27 cross-epic moves; the #1511 note; Tier, Program and issue type", "requests": 380,
+      "id": "W2", "name": "Graph, Tooling, Mapping and the L03.02.09 epic; the Hardening gate; the 27 cross-epic moves; the #1511 note; Tier, Program and issue type", "requests": 389,
       "ops": [
         { "type": "epic", "wbs": "L03.02.09" },
         { "type": "create", "epics": ["L03.02.05", "L03.02.06", "L03.02.07", "L03.02.09"] },
@@ -102,7 +103,7 @@
       "endState": "Tree final: #31 at 18, #4 at 7, #1511 with no sub-issues and 33 blockers. Gate live. Tier, Program and issue type set. Safe to pause for days."
     },
     {
-      "id": "W3", "name": "Category on every item", "requests": 399,
+      "id": "W3", "name": "Category on every item", "requests": 391,
       "ops": [ { "type": "field", "field": "Category" } ],
       "endState": "Category roll-ups complete."
     },
@@ -112,5 +113,5 @@
       "endState": "Field pass complete: the roadmap reads no carried category or program."
     }
   ],
-  "windowsNote": "Window order and request counts from realign-v2/delta-for-reapproval.md section 4 [Likely: expect +-10% once the plan is regenerated]. Decisions 11-13 were planned inside W3/W4; they were applied directly on 2026-10-16, before any window."
+  "windowsNote": "Window order from realign-v2/delta-for-reapproval.md section 4; request counts from the regenerated v2 executor's dry run of 2026-10-16, W2 including the 5 Tier writes for the execution seam. W1 runs as W1A (Stage 0, 6 requests) and W1B. Decisions 11-13 were planned inside W3/W4; they were applied directly on 2026-10-16, before any window."
 }

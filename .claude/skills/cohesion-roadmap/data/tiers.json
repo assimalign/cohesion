@@ -1,7 +1,7 @@
 {
   "schema": "cohesion.database.tiers/2",
   "generated": "2026-10-16",
-  "revised": "2026-10-16: v2 roadmap model (realign-v2/skill-changes.md 4.1). The 110 issue-body dependency edges left this file: the live bodies and native links supply them on every run. Plan decisions D4a and D5a recorded; board fields (status, priority, wave, state) removed from items, because the board is read live.",
+  "revised": "2026-10-16: v2 roadmap model (realign-v2/skill-changes.md 4.1). The 110 issue-body dependency edges left this file: the live bodies and native links supply them on every run. Plan decisions D4a and D5a recorded; board fields (status, priority, wave, state) removed from items, because the board is read live. Later on 2026-10-16: the two MISSING owner calls recorded as decisions D2a and D2b, and the execution seam #1576-#1580 added as Prerequisite items (owner request).",
   "source": {
     "plan": "Database query languages: what runs, what to add (owner-approved 2026-09-30, decisions D1-D6)",
     "planDump": "plan-tiers.txt",
@@ -62,6 +62,18 @@
       "date": "2026-10-16",
       "topic": "Order (owner clarification of D5)",
       "ruling": "#190 (Documents wire server and client) runs BEFORE OQL T1 - not alongside #1126. Every OQL T1 task waits on it."
+    },
+    {
+      "id": "D2a",
+      "date": "2026-10-16",
+      "topic": "MISSING truth table (owner call under D2)",
+      "ruling": "#1126 implements the Couchbase truth table for MISSING, not the PartiQL one."
+    },
+    {
+      "id": "D2b",
+      "date": "2026-10-16",
+      "topic": "QueryRow.IsMissing (owner call under D2)",
+      "ruling": "Retracted: the additive QueryRow.IsMissing would be a public virtual member, which database-area.md rule 4 forbids (public members are non-virtual). #1126 designs a rule-4-compliant way to expose MISSING when it starts."
     }
   ],
   "epics": [
@@ -539,7 +551,7 @@
       "tiers": ["T1"],
       "items": { "T1": [1126] },
       "unfiled": [],
-      "notes": "Not a table row; D2 plus the filed task. Owner still owes two calls: an additive QueryRow.IsMissing, and the Couchbase vs PartiQL MISSING truth table."
+      "notes": "Not a table row; D2 plus the filed task. Both MISSING calls were decided on 2026-10-16: the Couchbase truth table (D2a), and no additive QueryRow.IsMissing (D2b)."
     },
     {
       "id": "oql-collection-ddl",
@@ -1764,6 +1776,57 @@
       "title": "Documents wire server and client: serve OQL and document operations over the model protocol"
     },
     {
+      "number": 1576,
+      "type": "Story",
+      "wbs": "L03.02.01.56.10",
+      "parent": 1255,
+      "language": "Shared",
+      "tier": "Prerequisite",
+      "title": "Generic execution package and per-model session types",
+      "children": [1577, 1578, 1579, 1580],
+      "note": "Owner request 2026-10-16: the execution seam lands before the T1 work, so the story and its four tasks carry Tier Prerequisite. Not a plan family."
+    },
+    {
+      "number": 1577,
+      "type": "Task",
+      "wbs": "L03.02.01.56.10.01",
+      "parent": 1576,
+      "language": "Shared",
+      "tier": "Prerequisite",
+      "title": "Move Diagnostic, DiagnosticSeverity and DiagnosticLocation to Database.Types",
+      "note": "Execution seam (owner request 2026-10-16)."
+    },
+    {
+      "number": 1578,
+      "type": "Task",
+      "wbs": "L03.02.01.56.10.02",
+      "parent": 1576,
+      "language": "Shared",
+      "tier": "Prerequisite",
+      "title": "Split the execute seam into typed and language session bases",
+      "note": "Execution seam (owner request 2026-10-16)."
+    },
+    {
+      "number": 1579,
+      "type": "Task",
+      "wbs": "L03.02.01.56.10.03",
+      "parent": 1576,
+      "language": "Shared",
+      "tier": "Prerequisite",
+      "title": "Rename the Database.Execution types from Query* to Database*",
+      "note": "Execution seam (owner request 2026-10-16); blocks #1102, #1103, #1104, #190 and #1138."
+    },
+    {
+      "number": 1580,
+      "type": "Task",
+      "wbs": "L03.02.01.56.10.04",
+      "parent": 1576,
+      "language": "Shared",
+      "tier": "Prerequisite",
+      "title": "Update the docs and rule file for the generic execution seam",
+      "note": "Execution seam (owner request 2026-10-16)."
+    },
+    {
       "number": 1030,
       "type": "Feature",
       "wbs": "L03.02.02.12",
@@ -1874,7 +1937,8 @@
     "note": "Engine work merged on the integration branch that the plan's SQL rows depend on; not T1 tasks.",
     "items": [1357, 1358, 1359, 1360, 1354, 1355, 1356, 1349, 1418, 1442, 1443, 1438, 1419, 1437]
   },
-  "openOwnerCalls": ["Add an additive QueryRow.IsMissing.", "Choose the Couchbase or the PartiQL MISSING truth table."],
+  "openOwnerCalls": [],
+  "openOwnerCallsNote": "The plan's open owner calls, one string each. Empty since 2026-10-16: the two MISSING calls became decisions D2a and D2b.",
   "executionCoverage": {
     "asOf": "plan draft",
     "sql": { "declared": 49, "executing": 33 },

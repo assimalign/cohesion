@@ -107,10 +107,8 @@
   "pins": [],
   "waveWindows": {},
   "waveWindowsNote": "Optional pins: \"W03\": { \"bands\": [\"t2\"], \"reason\": \"...\" } sets a window to the full span of the named bands instead of the computed calibration. Every pin is echoed in overlay.applied.",
-  "openCallTargets": {
-    "Add an additive QueryRow.IsMissing.": { "affects": [1264, 1130], "wouldChange": "scope" },
-    "Choose the Couchbase or the PartiQL MISSING truth table.": { "affects": [1130, 1131], "wouldChange": "scope" }
-  },
+  "openCallTargets": {},
+  "openCallTargetsNote": "Keyed by the exact text of a tiers.json openOwnerCalls entry: the nodes the call would move and what it would change. Empty since the two MISSING calls were decided on 2026-10-16 (tiers.json D2a, D2b).",
   "openCalls": [
     {
       "id": "C7",

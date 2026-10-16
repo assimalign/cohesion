@@ -609,7 +609,7 @@
         },
         "reasons": {
           "type": "array",
-          "items": { "enum": ["tier", "placement", "status", "wave", "priority", "pin", "window-recalibrated", "band-resized", "dependency", "unexplained"] },
+          "items": { "enum": ["tier", "placement", "status", "wave", "priority", "pin", "window-recalibrated", "band-resized", "dependency", "sub-issues", "unexplained"] },
           "description": ""
         }
       }

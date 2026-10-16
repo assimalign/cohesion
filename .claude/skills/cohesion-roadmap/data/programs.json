@@ -313,7 +313,7 @@
       ],
       "tierRelation": [
         "Structural prerequisite rather than a tier input: P6 removed the root interfaces every model and client names, so language work lands on the post-P6 shape.",
-        "P8 is the one that touches QueryRow / QueryResultSet / QueryResult / QueryRequest - the same result types SQL T1 #1117 (RETURNING + affected count on SqlResultSet), shared T1 #1104 (EXPLAIN as rows in one shared shape) and the open OQL 'additive QueryRow.IsMissing' question need. Sequencing P8 against those is a real roadmap decision, not a formality."
+        "P8 is the one that touches QueryRow / QueryResultSet / QueryResult / QueryRequest - the same result types SQL T1 #1117 (RETURNING + affected count on SqlResultSet), shared T1 #1104 (EXPLAIN as rows in one shared shape) and OQL #1126's MISSING exposure need (the additive QueryRow.IsMissing was retracted on 2026-10-16, tiers.json D2b). Sequencing P8 against those is a real roadmap decision, not a formality."
       ]
     },
     {

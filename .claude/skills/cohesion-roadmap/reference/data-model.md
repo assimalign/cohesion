@@ -40,7 +40,7 @@ Sources are abbreviated:
 | `sources.inputs[]` | array | computed | one row per input: the snapshot and every carried file present, with `schema`, `sha256`, `generated` |
 | `sources.carried` | object | computed | what the carried data placed this run: `categoryFromCarried`, `programFromCarried`, `tierFromField`, `tierFromPlan`, whether each field exists, and the sentence the page prints |
 | `sources.plan`, `integrationBranch`, `integrationPr`, `codeBaseline` | | tiers, programs | the plan this roadmap renders; what `delivered-unmerged` means |
-| `legend.tiers` / `statuses` / `placements` / `decisions` | | tiers, computed | `decisions` is `tiers.decisions`, D1–D6 plus the 2026-10-16 clarifications D4a and D5a |
+| `legend.tiers` / `statuses` / `placements` / `decisions` | | tiers, computed | `decisions` is `tiers.decisions`, D1–D6 plus the 2026-10-16 rulings D2a and D2b (the two MISSING calls), D4a and D5a |
 | `placement` | object | computed | the window rule, every Wave and Priority window, band spans and offsets (§5) |
 | `stages[]`, `lanes[]`, `categories[]` | | §4, §6, §7 | |
 | `nodes[]`, `edges[]` | | §2, §3 | |
@@ -177,8 +177,9 @@ Each window records `{ value, field, lo, hi, basis, n, droppedBands[], pinned }`
 **Prerequisite pull (rule 5).** The layout runs once without it, decides the pulls from that first pass,
 and runs again with the pulled items as members of their band. A successor's position never caps a
 window otherwise. A tiered item that still waits on an untiered item placed at or after it raises the
-`scheduled-after-dependent` contradiction. On 2026-10-16 the pull placed #1577, #1578 and #1579 (the
-execution seam) in the gate band, ahead of #190 and the T1 work their rename task blocks. It is a
+`scheduled-after-dependent` contradiction. The first live run of 2026-10-16 pulled #1577, #1578 and #1579
+(the execution seam) into the gate band, ahead of #190 and the T1 work their rename task blocks. The owner
+then gave #1576–#1580 Tier Prerequisite, so they place by tier and the live board has no pulls. It is a
 generalisation of `skill-changes.md` §2.7, which applied no successor ceiling at all and would have drawn
 the seam after the work that waits on it.
 
@@ -271,7 +272,8 @@ owningCode?, carriedName? }`. `itemCount` counts work items only; slots are `slo
 
 `{ previous, moved[], added[], removed[], statusChanged[], unexplained }`. Each moved row is
 `{ id, from { stage, stageEnd, placement }, to {...}, reasons[] }` with reasons from `tier`,
-`placement`, `status`, `wave`, `priority`, `pin`, `window-recalibrated`, `band-resized`, `dependency`.
+`placement`, `status`, `wave`, `priority`, `pin`, `window-recalibrated`, `band-resized`, `dependency`,
+and, for a bar, `sub-issues` (a sub-issue moved, changed status, or joined or left it).
 A move with no reason is `unexplained`, which means something broke. "A new item never moves an
 existing one left" no longer holds: windows recalibrate and bands resize, and every move is explained
 instead.
@@ -379,11 +381,11 @@ generated `roadmap-data.json` carries the data hashes too.
 | File | sha256 |
 | --- | --- |
 | `assets/roadmap-template.html` | `bf88e0bbf1a396870c43bf413e7824fff481b73862045aa9b53ac38d5f5d2fca` |
-| `data/tiers.json` | `d76a96111211353ad0323cdc8fe12fa24d88786bd346abc63b9108aac0560c38` |
-| `data/programs.json` | `cadcba5b54b999bf1dcb2043a3c005da7b3be8a2ab114a1df0419e480ecfe5a9` |
+| `data/tiers.json` | `05651171c31ca96a5275fad6575c2acd5b05b4952333fe09699e132456dc7900` |
+| `data/programs.json` | `47acd1c5d06c661787bf405896ad8fffd1fc639ef8695c8d069101d56df90ed3` |
 | `data/taxonomy.json` | `db2030184e9749f5e772be4a32ee644d9523c6c35df0e148b411664539364614` |
-| `data/overlay.json` | `847171afb97652ad60b0b6a3a61db8b76abaa33e497fb8b18d1e2a6d741b0a4d` |
+| `data/overlay.json` | `aae06781ea482c3fb02c1e1a838acd81c0ec6ca6216e1f5e61370543c716d330` |
 | `data/bug-policy.json` | `bbf6bbfdc1995efb5ba4b453ae163074b6c2c0c8a81b6d5d93e06a4349b98651` |
-| `data/realign-plan.json` | `268d0a6c0a28ef44f3c5303bd7b5fe007384009726bbc6fd3273e7ada7d8c301` |
+| `data/realign-plan.json` | `a9bf697179e4ef839535aec8a76865ebfc0448d59decbb9e0ee8b0ab8341764e` |
 
 Recorded 2026-10-16. Update this table in the same change as any edit to those files.

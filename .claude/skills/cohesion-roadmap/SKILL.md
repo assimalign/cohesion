@@ -47,9 +47,9 @@ changes go through `cohesion-work-items`, and only with the owner's explicit ins
   9. bars (features)
   10. Unplaced
 - **Prerequisite pull.** An untiered item that open tiered work waits on, and that its own window would draw
-  no earlier than that work, joins the band of the earliest such work, ahead of it. This is how a board link
-  like "#190 blocked by #1579" puts the execution-seam story ahead of the T1 work it gates without anyone
-  giving it a tier.
+  no earlier than that work, joins the band of the earliest such work, ahead of it. A board link onto an
+  untiered item puts it ahead of the work it gates before anyone gives it a tier. The execution seam
+  (#1576–#1580) was placed this way until the owner gave it Tier Prerequisite on 2026-10-16.
 - **What a window is.** A wave's window is the span of stages occupied by that wave's open tiered
   items. It is recomputed on every run, and the basis is printed on the page. **Wave places an item and
   Priority orders it.** Priority places an item only when it has no Wave.
@@ -123,7 +123,7 @@ charset and viewport skeleton. To publish it, hand the file to the Artifact tool
 
 | File | Holds | Edit it when | Never used for |
 |---|---|---|---|
-| `tiers.json` | **The plan.** Families in listing order, with body slugs; tier per family; plan decisions (D1–D6, D4a, D5a) and the plan's own ordering edges (D5, tier order, owner decisions); conflicts; open calls; Tier option names; the T2 order mode | The plan changes | Placing an item that has a Tier field |
+| `tiers.json` | **The plan.** Families in listing order, with body slugs; tier per family; plan decisions (D1–D6 and the 2026-10-16 rulings D2a, D2b, D4a, D5a) and the plan's own ordering edges (D5, tier order, owner decisions); conflicts; open calls; Tier option names; the T2 order mode | The plan changes | Placing an item that has a Tier field |
 | `programs.json` | **Program definitions.** Name, Program option, shape (`tree` or `gate`), tracking or gate issue, gate label, untracked phases | A program starts or ends | Membership once the Program field is set |
 | `taxonomy.json` | **Category definitions.** Rules, boundaries, precedence, retired codes, plus a transition-only per-item mapping of Category, Area and Program (the approved 386 rows plus later additions, each recorded under `postApproval`) | The owner changes the taxonomy, or an item filed before the field pass needs a carried row | An item's category or program once its field is set |
 | `overlay.json` | Lanes (keyed by epic WBS and category code), stage names, prose-only program-gate edges, pins, wave-window pins, the extra open calls | A new epic needs a lane, or a decision contradicts the data | — |
