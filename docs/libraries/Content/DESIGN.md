@@ -201,6 +201,169 @@ Every retained format carries three complementary corpora:
    the retained subset, and list unsupported cases explicitly. A passing selected corpus is not a
    claim of full specification compliance.
 
+## Stabilization gates
+
+A format package must pass every applicable gate before a service takes a new dependency on it.
+Classification alone is not approval. Apply the same checks to the shared layers it relies on,
+with non-format requirements marked inapplicable only for an explicit reason.
+
+1. **Build and release coverage.** The package builds in the Content CI matrix, its tests run
+   there, and it is in the release inventory. Check `.github/workflows/library-content.yml`, run
+   the package build/test commands and `Assert-CohesionReleaseInventory` from
+   `installer/scripts/modules/CohesionPackaging.psm1`. An inventory exclusion is not a pass.
+2. **Implemented, controlled failure paths.** No public member throws `NotImplementedException`,
+   and no reader leaks a raw BCL exception for malformed input. Search source with `rg`, review
+   reachable parsing paths and run malformed-input tests. An empty implementation or an empty
+   test does not establish this gate; argument misuse and transport I/O failures are distinct.
+3. **Named specification and mapped compliance.** Package documentation pins the governing
+   edition and retained scope. Passing compliance tests map to specification sections/examples
+   or versioned official-suite cases; exclusions are recorded. Check the docs, case metadata and
+   test results together, not just the existence of a specification URL.
+4. **Golden round trips through the writer.** Golden cases run through the package's own writer
+   and back through its reader. Assert stable output and semantic equivalence, plus preservation
+   of unknown structure and untouched payload bytes where the format promises it. Run the
+   round-trip suite; a primitive VInt test alone does not qualify an EBML document writer.
+5. **Malformed-input corpus and limits.** Tests cover truncation at every header byte, oversized
+   declared lengths and depth limits, asserting `ContentFormatErrorCode` and absolute positions.
+   Run the corpus with the default limits and boundary cases. For text without binary headers,
+   test the corresponding encoding/token boundaries and resource limits. Markdown's total
+   grammar requires fallback tests rather than syntax-error tests; actual limit failures still
+   need the shared error vocabulary.
+6. **Streaming and lazy save (container formats).** A test stream that rejects seeking proves
+   the forward-only reader can descend, skip and consume elements. Instrumented source and
+   output streams prove the document saves through the writer without loading untouched
+   payloads into memory. Verify bounded buffering and unchanged payload bytes, not merely a
+   successful parse over `MemoryStream`.
+7. **Current documentation and complete public API docs.** Review `docs/OVERVIEW.md` and
+   `docs/DESIGN.md` against the delivered behavior, and review every public member's XML
+   documentation, including parameters, returns and exceptions. File existence and a build
+   without documentation warnings are insufficient checks.
+8. **NativeAOT analyzer cleanliness.** Build with `IsAotCompatible=true` and enabled AOT/trim
+   analyzers; no `IL2xxx` or `IL3xxx` warnings may remain or be suppressed to pass. Check evaluated
+   MSBuild properties and build diagnostics. This is the analyzer gate, not a claim that a
+   native executable has been published for every platform.
+9. **Recorded performance baseline, pending G2.** Once program gap G2 lands, record the benchmark
+   commit, runtime/machine, corpus, throughput and allocation results for the package's retained
+   operations in `cohesion-benchmarks`, against the budgets G2 defines. Review that reproducible
+   record before marking this gate passed. Until G2 exists this gate is pending, shown as `n/a`
+   below; it does not silently become a pass or impose an invented budget.
+
+### Base snapshot
+
+This table is a snapshot of base commit `f7197e97f` (2026-10-16); the program's close-out re-verifies
+every gate against the integrated implementation.
+
+`pass` means the named check has evidence for the retained scope; `fail` means a known gap or
+missing required implementation/evidence, not necessarily a failing unit test. `n/a` means an
+inapplicable surface, except gate 9 where it means pending G2. Gate 1 includes the repository
+inventory guard, so its current failure prevents a complete pass even for the five listed packages.
+
+| Package | 1 CI/release | 2 Failures | 3 Spec tests | 4 Round trip | 5 Malformed | 6 Streaming | 7 Docs | 8 AOT | 9 Perf |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `Content` | fail | pass | n/a | n/a | n/a | n/a | fail | pass | n/a |
+| `Content.Binary` | fail | fail | n/a | n/a | n/a | n/a | fail | pass | n/a |
+| `Content.Text` | fail | fail | fail | n/a | fail | n/a | fail | pass | n/a |
+| `Content.Yaml` | fail | fail | pass | pass | fail | n/a | fail | pass | n/a |
+| `Content.Markdown` | fail | fail | pass | pass | fail | n/a | fail | pass | n/a |
+| `Content.Media` | fail | fail | n/a | n/a | n/a | n/a | fail | pass | n/a |
+| `Content.Bmff` | fail | fail | fail | fail | fail | fail | fail | pass | n/a |
+| `Content.Ebml` | fail | fail | fail | fail | fail | fail | fail | pass | n/a |
+| `Content.Mkv` | fail | fail | fail | fail | fail | fail | fail | pass | n/a |
+| `Content.Mpeg` | fail | fail | fail | fail | fail | fail | fail | pass | n/a |
+| `Content.Pdf` | fail | fail | fail | fail | fail | fail | fail | pass | n/a |
+| `Content.Exe` | fail | fail | fail | fail | fail | n/a | fail | pass | n/a |
+
+Content, Binary and Media have no independent file-format grammar, so gates 3-6 do not apply as
+format corpora; their primitives still require implementation and failure-path evidence under
+gate 2. Text has no format writer or lazy container model (gates 4 and 6). YAML and Markdown have
+documented in-memory text models, outside D1's container gate 6. Exe's applicability to gate 6
+awaits O-C1's scope decision; that is not clearance to ship it.
+
+### Executed checks and evidence
+
+The following commands were run from the repository root. In the first three commands, `P` is
+`Assimalign.Cohesion.` plus each package name in the results table; each invocation passed the
+explicit csproj path. `dotnet test` ran for every existing test project, without filters or added
+skips. Builds used the default Debug configuration.
+
+```powershell
+dotnet build libraries/Content/<P>/src/<P>.csproj
+dotnet test libraries/Content/<P>/tests/<P>.Tests.csproj
+dotnet msbuild libraries/Content/<P>/src/<P>.csproj -getProperty:IsAotCompatible,EnableAotAnalyzer,EnableTrimAnalyzer
+pwsh -NoProfile -Command "Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force; Assert-CohesionReleaseInventory"
+rg -n 'NotImplementedException' libraries/Content -g '*.cs' -g '!**/obj/**' -g '!**/bin/**'
+rg -n 'ContentFormatErrorCode|MaxDepth|DepthLimit|LimitExceeded' libraries/Content -g '*.cs' -g '!**/obj/**' -g '!**/bin/**'
+```
+
+| Package | Build result (warnings / errors) | Tests passed / failed / skipped | CI matrix and release entry |
+| --- | --- | --- | --- |
+| `Content` | pass (0 / 0) | 20 / 0 / 0 | Both present |
+| `Content.Binary` | pass (0 / 0) | 1 / 0 / 0 | Excluded |
+| `Content.Text` | pass (0 / 0) | 46 / 0 / 0 | Both present |
+| `Content.Yaml` | pass (0 / 0) | 413 / 0 / 0 | Both present |
+| `Content.Markdown` | pass (0 / 0) | 142 / 0 / 0 | Both present |
+| `Content.Media` | pass (0 / 0) | 1 / 0 / 0 | Excluded |
+| `Content.Bmff` | pass (26 / 0) | 0 / 0 / 1 | Excluded |
+| `Content.Ebml` | pass (2 / 0) | 60 / 0 / 0 | Both present |
+| `Content.Mkv` | pass (0 / 0) | 0 / 0 / 1 | Excluded |
+| `Content.Mpeg` | pass (0 / 0) | n/a: no test project | Absent; stale exclusion |
+| `Content.Pdf` | pass (0 / 0) | n/a: no test project | Absent; no source |
+| `Content.Exe` | pass (0 / 0) | 1 / 0 / 0 | Excluded |
+
+All builds exit 0, and every test command exits 0: 684 passed, 0 failed, 2 skipped in total.
+Binary, Media and Exe each pass one empty `UnitTest1`, and their test projects do not reference
+their libraries. BMFF and MKV each have only a pre-existing skipped developer-fixture test;
+MKV's download helper was not executed. These results establish buildability, not format coverage.
+
+The inventory command exits 1: `Content.Mpeg`'s CI matrix exclusion is stale because the project
+has no source. This was reproduced in a clean detached checkout of `f7197e97f` under `%TEMP%`,
+after successfully running `dotnet build build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj` there;
+the checkout was then removed. PDF is also source-less but has no exclusion entry. This refines
+the plan survey's shorthand that all seven unlisted packages are excluded. CI and release
+inventory repairs belong to the implementation work, not this snapshot.
+
+The source search finds 216 matching lines: 206 in BMFF and 10 in EBML; it finds none in the other
+packages. These are line counts, not counts of public members. Public boxes/visitors and
+`EbmlStream` still throw `NotImplementedException`. Inspection also finds BMFF's generic unknown-box
+exception, Media's unchecked partial reads, and EBML's raw `ReadExactly` truncation exception.
+`EbmlVIntReadTests` currently **asserts `EndOfStreamException`**, so its 60 passing tests are not
+evidence for the target error contract. The shared error-code/limit-name search has no matches.
+
+Text's `DecodedTextContent.OpenText` directly returns a `StreamReader` using the caller's supplied
+`Encoding`; a strict decoder can therefore expose `DecoderFallbackException` on malformed bytes.
+YAML and Markdown's `Parse(ITextContent)` read from that text reader without translating decoding
+failures. This source inspection is the gate 2 gap for those three packages, distinct from their
+successful string-parsing tests. Binary has no implemented primitives, and MKV, MPEG, PDF and Exe
+have no implemented format readers that could establish the gate.
+
+The corpus evidence is specific to its scope:
+
+- YAML's `YamlTestSuiteTests` executes the versioned official-suite subset documented in
+  [its provenance record](../../../libraries/Content/Assimalign.Cohesion.Content.Yaml/tests/TestData/yaml-test-suite/README.md).
+  `YamlEmitterTests` supplies golden output and stable writer/reader round trips. Those support
+  gates 3 and 4 for the documented subset, not complete YAML conformance. Error cases assert the
+  exception type, with no shared error code or bounded-depth corpus, so gate 5 fails.
+- Markdown's `MarkdownSpecCorpusTests` names CommonMark sections; `MarkdownRoundTripTests` checks
+  canonical output and rendered equivalence through its writer. Gates 3 and 4 pass for that
+  subset. Existing fallback/depth tests do not establish a bounded-input corpus or shared limit
+  error codes; whole-input buffering remains, so gate 5 fails.
+- Text has encoding/line/token tests but no specification-mapped Unicode/UTF-8 compliance corpus.
+  EBML's coverage is VInt only. None of the binary container packages has the complete document
+  round-trip, malformed-header/depth or lazy-save corpus required by gates 3-6.
+
+Gate 7 fails for concrete documentation gaps. Binary, EBML, Media, MPEG and PDF lack both required
+documents; BMFF, MKV and Exe lack `docs/OVERVIEW.md`. The four packages with both files still have
+public API documentation gaps: `ContentFactory.FromStream` and `TextContentFactory.FromString`
+omit their null-argument exceptions, `YamlText.Parse(string)` does likewise, and
+`MarkdownDocument.this[int]` omits its out-of-range exception. These are source-review findings;
+ordinary build success does not check the complete XML contract.
+
+All twelve evaluated projects report `IsAotCompatible`, `EnableAotAnalyzer` and `EnableTrimAnalyzer`
+as `true`; the build logs contain no `IL2xxx`/`IL3xxx` diagnostics. BMFF's 26 warnings and EBML's two
+warnings are C# diagnostics. Gate 8 therefore passes as defined, including for placeholders;
+it gives no parser-readiness or native-publication assurance. No performance baseline is claimed
+while G2 remains open.
+
 ## Non-goals
 
 - Codec decoding, transcoding and playback; the family describes and moves encoded content.
