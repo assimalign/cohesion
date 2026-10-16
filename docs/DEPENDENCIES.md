@@ -29,7 +29,7 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 690 |
+| Projects indexed | 691 |
 | Shipped library/resource projects | 255 |
 | Library areas | 21 |
 | Resource areas | 18 |
@@ -1127,7 +1127,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-324 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+325 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
