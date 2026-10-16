@@ -23,7 +23,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (column.DefaultLiteral is not null)
             {
-                BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, declaring: true);
+                BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
             }
         }
 
@@ -62,7 +62,7 @@ internal sealed partial class SqlPlanExecutor
 
         // Bind the persisted definitions of the version about to be published, from their
         // stored text, so no write to the new table ever parses them.
-        _definitions.Get(table);
+        _definitions.Get(table, cancellationToken);
         await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false, publication).ConfigureAwait(false);
     }
 
@@ -214,7 +214,7 @@ internal sealed partial class SqlPlanExecutor
             primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
             plan.Table.DroppedColumnOrdinals);
         var rows = Scan(plan.Table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
-        _definitions.Get(replacement);
+        _definitions.Get(replacement, cancellationToken);
         long processed = 0;
         statement.ProvisioningProgress?.Invoke(0, rows.Count);
         foreach (var row in rows)
@@ -251,7 +251,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 throw SqlDefinitionBinder.Refuse("ADD COLUMN requires a literal DEFAULT; expression defaults require row materialization, which this metadata-only addition does not perform.");
             }
-            BindDefaultExpression(plan.Column, $"DEFAULT of column '{plan.Column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, declaring: true);
+            BindDefaultExpression(plan.Column, $"DEFAULT of column '{plan.Column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
         }
 
         var columns = table.Columns.Append(plan.Column).ToArray();
@@ -276,7 +276,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // Existing columns and constraints are unchanged. A nullable field's missing
             // value is one immutable literal, so validate it once instead of scanning rows.
-            var definition = _definitions.Get(replacement);
+            var definition = _definitions.Get(replacement, cancellationToken);
             var row = new object?[columns.Length];
             row[^1] = definition.DefaultValues[^1] is { } literal ? DefaultValue(literal, cancellationToken) : null;
             try
@@ -293,14 +293,14 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             _definitions.Adopt(await SelfCommitAsync(statement,
-                (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement);
+                (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement, cancellationToken);
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
         // Backfill is logical: missing trailing fields resolve from the immutable
         // replacement metadata. Existing row bytes and MVCC stamps never change;
         // one durable catalog publication makes the complete addition visible.
         var rows = Scan(replacement, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
-        var bound = rows.Count == 0 || plan.Column.DomainName is null ? null : _definitions.Get(replacement);
+        var bound = rows.Count == 0 || plan.Column.DomainName is null ? null : _definitions.Get(replacement, cancellationToken);
         var evaluator = bound is null ? null : ExecutionEvaluator(null, cancellationToken);
 
         // Each existing row is assigned the new column's default, or NULL, of its domain (phase E3).
@@ -324,7 +324,7 @@ internal sealed partial class SqlPlanExecutor
             // The catalog publishes its own copy of the replacement definition, built from the
             // same column and constraint instances, so it adopts the replacement's bindings.
             _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false),
-                replacement);
+                replacement, cancellationToken);
         }
         else
         {
@@ -341,7 +341,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The new version no longer carries the constraint, so the dropped predicate is
             // never evaluated again; it keeps the other bindings of the version it came from.
-            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, cancellationToken) : _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), plan.Table);
+            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, cancellationToken) : _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), plan.Table, cancellationToken);
         }
         else if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.ConstraintName, out var index) && index.IsUnique)
         {
@@ -369,7 +369,7 @@ internal sealed partial class SqlPlanExecutor
     /// the catalog's wording. A missing column and a primary-key column are left to the
     /// catalog's own refusals, which name them as such.
     /// </summary>
-    private void EnsureCanDropColumn(SqlCatalogTable table, string columnName)
+    private void EnsureCanDropColumn(SqlCatalogTable table, string columnName, CancellationToken cancellationToken)
     {
         int ordinal = -1;
         for (int index = 0; index < table.Columns.Count; index++)
@@ -408,7 +408,7 @@ internal sealed partial class SqlPlanExecutor
         // drop) backs that up, and either way the refusal names the CHECK, not the binder's
         // unknown column.
         var columns = table.Columns.Where((_, index) => index != ordinal).ToArray();
-        foreach (var check in _definitions.Get(table).Checks)
+        foreach (var check in _definitions.Get(table, cancellationToken).Checks)
         {
             if (check.ColumnOrdinals.Contains(ordinal))
             {
@@ -425,7 +425,7 @@ internal sealed partial class SqlPlanExecutor
             try
             {
                 _ = BindPersistedCheck(check.Predicate, new SqlCatalogTable(0, table.Schema, table.Name, columns),
-                    _catalog.DefaultCollation, _definitions.Functions, check.Constraint.CheckFunctionCalls);
+                    _catalog.DefaultCollation, _definitions.Functions, check.Constraint.CheckFunctionCalls, cancellationToken);
             }
             catch (DatabaseException exception)
             {

@@ -32,7 +32,7 @@ internal sealed partial class SqlPlanExecutor
         }
         if (column.DefaultLiteral is not null)
         {
-            BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'", _definitions.Functions, _catalog.DefaultCollation, declaring: true);
+            BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
         }
 
         bool tightens = previous.IsNullable && !column.IsNullable ||
@@ -61,7 +61,7 @@ internal sealed partial class SqlPlanExecutor
         columns[ordinal] = column;
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             plan.Table.PrimaryKeyColumns, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints, plan.Table.DroppedColumnOrdinals);
-        _definitions.Get(replacement);
+        _definitions.Get(replacement, cancellationToken);
         await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.PublishTableAsync(replacement, [], PublishedRegistrations([]),
             replaceExisting: true, cancellationToken) : _catalog.PublishTableAsync(replacement, [], PublishedRegistrations([]),
             replaceExisting: true, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);

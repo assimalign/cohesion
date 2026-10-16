@@ -366,7 +366,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var replacements = new List<(PageId PageId, int SlotIndex, object?[] OldValues, object?[] NewValues, byte[] NewVersion)>(targets.Count);
-        var bound = _definitions.Get(plan.Table);
+        var bound = _definitions.Get(plan.Table, cancellationToken);
 
         // Only the columns the statement sets are assigned their domain (phase E3): listed once, not per row.
         int[]? assigned = bound.Domains.Count > 0 ? plan.Assignments.Select(static assignment => assignment.Ordinal).ToArray() : null;
@@ -893,13 +893,13 @@ internal sealed partial class SqlPlanExecutor
         SqlCatalogTable current = ReadCurrentTable(before);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
         EnsureSameIdentity(before, current);
-        EnsureCanDropColumn(current, plan.ColumnName);
+        EnsureCanDropColumn(current, plan.ColumnName, cancellationToken);
 
         // The authoritative step: the catalog checks the drop again under its own lock
         // and commits it. Bind the published version before the statement completes, as
         // every DDL does, so no later write parses its definitions.
         var updated = await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken) : _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
-        _definitions.Get(updated);
+        _definitions.Get(updated, cancellationToken);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 
@@ -1238,7 +1238,7 @@ internal sealed partial class SqlPlanExecutor
     {
         var range = BuildSeekRange(table, seek);
         var snapshot = snapshotOverride ?? statement.Snapshot;
-        var defaults = _definitions.Get(table).DefaultValues;
+        var defaults = _definitions.Get(table, cancellationToken).DefaultValues;
 
         // The cursor materializes under the tree's read latch; synchronous
         // drain is the in-process fast path.
@@ -1432,7 +1432,7 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken,
         SqlStatementMetrics? metrics = null)
     {
-        var defaults = _definitions.Get(table).DefaultValues;
+        var defaults = _definitions.Get(table, cancellationToken).DefaultValues;
         using var iterator = _storage.GetUnitIterator(table.ObjectId);
 
         while (iterator.MoveNext())

@@ -473,10 +473,10 @@ internal sealed partial class SqlExpressionEvaluator
 
     /// <summary>
     /// Whether binding defers an exception to evaluation rather than raising it: every exception but
-    /// an exhausted stack or memory, which fail the statement wherever they happen.
+    /// cancellation or an exhausted stack or memory, which fail the statement wherever they happen.
     /// </summary>
     private static bool IsDeferrable(Exception exception)
-        => exception is not (InsufficientExecutionStackException or OutOfMemoryException);
+        => exception is not (OperationCanceledException or InsufficientExecutionStackException or OutOfMemoryException);
 
     /// <summary>An alias replaces the base relation name within the join scope.</summary>
     private static bool MatchesQualifier(SqlTableBinding binding, SqlColumnReferenceExpression column)

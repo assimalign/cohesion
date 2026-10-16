@@ -22,13 +22,15 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <b>The call (NVI).</b> <see cref="Invoke"/> checks the argument count, returns NULL without a call
 /// when the function is strict and an argument is NULL (PostgreSQL's <c>EEOP_FUNCEXPR_STRICT</c>), and
 /// calls <see cref="InvokeCore"/> once. Anything the core throws other than
-/// <see cref="OperationCanceledException"/>, <see cref="InsufficientExecutionStackException"/>,
+/// <see cref="InsufficientExecutionStackException"/>,
 /// <see cref="OutOfMemoryException"/> or a <see cref="DatabaseException"/> fails the statement as
 /// <c>COHSQLE007</c>, naming the function, with the original as the inner exception; a
 /// <see cref="DatabaseException"/> the core throws reaches the statement and the client unchanged,
 /// which is how a function raises an error of its own: a message that leads with its own code
 /// (<c>APP001: ...</c>) keeps it. The result is checked against <see cref="SqlFunction.ReturnType"/>
-/// (<see cref="InvokeCore"/>).
+/// (<see cref="InvokeCore"/>). An <see cref="OperationCanceledException"/> passes through only when
+/// the call context's statement token is canceled; otherwise it is a function failure, regardless
+/// of the token carried by the exception.
 /// </para>
 /// <para>
 /// <b>Thread safety.</b> One instance serves every session at once: the core must be stateless or
@@ -60,12 +62,19 @@ public abstract class SqlScalarFunction : SqlFunction
     }
 
     /// <summary>Calls the function.</summary>
+    /// <remarks>
+    /// The token in <see cref="SqlArguments.Context"/> identifies cancellation of this call. Direct
+    /// calls with the default context have no statement to cancel: an
+    /// <see cref="OperationCanceledException"/> becomes <c>COHSQLE007</c>. Supplying a context opts
+    /// into its token's cancellation semantics; no separate token parameter is needed.
+    /// </remarks>
     /// <param name="arguments">The arguments, already of the declared types.</param>
     /// <returns>The result; NULL without a call when the function is strict and an argument is NULL.</returns>
     /// <exception cref="ArgumentException">The number of arguments does not match the parameters.</exception>
     /// <exception cref="DatabaseException">
     /// The function failed: <c>COHSQLE007</c> wrapping what it threw, or the database exception it threw.
     /// </exception>
+    /// <exception cref="OperationCanceledException">The core threw cancellation and the call context's token is canceled.</exception>
     public SqlValue Invoke(scoped in SqlArguments arguments)
     {
         ThrowIfArgumentCountInvalid(arguments.Count);
@@ -79,7 +88,7 @@ public abstract class SqlScalarFunction : SqlFunction
         {
             result = InvokeCore(in arguments);
         }
-        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, arguments.Context.CancellationToken))
         {
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }
@@ -109,7 +118,7 @@ public abstract class SqlScalarFunction : SqlFunction
         {
             result = InvokeCore(in arguments);
         }
-        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, arguments.Context.CancellationToken))
         {
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }
@@ -155,7 +164,7 @@ public abstract class SqlScalarFunction : SqlFunction
         {
             result = InvokeCore(in arguments);
         }
-        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, arguments.Context.CancellationToken))
         {
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }

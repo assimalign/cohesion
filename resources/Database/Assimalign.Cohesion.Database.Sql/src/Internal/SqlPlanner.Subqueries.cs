@@ -190,7 +190,7 @@ internal sealed partial class SqlPlanner
         };
         var bindings = plan switch { SqlJoinPlan join => join.Bindings, SqlGroupPlan group => group.Bindings, _ => null };
         var projection = SubqueryProjections(plan)[0];
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         return projection.ColumnOrdinal is int ordinal ? evaluator.ResolveColumnCollation(ordinal)
             : evaluator.ResolveCollation(projection.Expression);
     }

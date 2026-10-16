@@ -19,11 +19,15 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>NVI.</b> <see cref="Add"/> skips a row with a NULL argument when its function is strict, so
-/// <see cref="AddCore"/> never sees one; <see cref="Finish"/> runs <see cref="FinishCore"/> exactly
+/// <see cref="AddCore"/> never sees one; <see cref="Finish()"/> runs <see cref="FinishCore"/> exactly
 /// once, for an empty group too. Anything a core throws other than
-/// <see cref="OperationCanceledException"/>, <see cref="InsufficientExecutionStackException"/>,
+/// <see cref="InsufficientExecutionStackException"/>,
 /// <see cref="OutOfMemoryException"/> or a <see cref="DatabaseException"/> fails the statement as
-/// <c>COHSQLE007</c>, naming the function.
+/// <c>COHSQLE007</c>, naming the function. An <see cref="OperationCanceledException"/> passes
+/// through only when the statement's token is canceled. Addition reads it from the row's context;
+/// the engine supplies it internally when finishing, including an empty group. Direct public
+/// <see cref="Finish()"/> calls have no statement to cancel and code application cancellation as
+/// a function failure.
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
@@ -44,6 +48,7 @@ public abstract class SqlAggregateAccumulator
     /// </exception>
     /// <exception cref="ArgumentException">The number of arguments does not match the function's parameters.</exception>
     /// <exception cref="DatabaseException">The function failed: <c>COHSQLE007</c>, or the database exception it threw.</exception>
+    /// <exception cref="OperationCanceledException">The core threw cancellation and the row context's token is canceled.</exception>
     public void Add(scoped in SqlArguments arguments)
     {
         var function = _function
@@ -112,7 +117,7 @@ public abstract class SqlAggregateAccumulator
         {
             AddCore(in arguments);
         }
-        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, cancellationToken))
         {
             throw SqlEvaluationException.FunctionFailed(_function!.Name, exception);
         }
@@ -134,7 +139,7 @@ public abstract class SqlAggregateAccumulator
         {
             AddCore(in arguments);
         }
-        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, cancellationToken))
         {
             throw SqlEvaluationException.FunctionFailed(_function!.Name, exception);
         }
@@ -163,19 +168,29 @@ public abstract class SqlAggregateAccumulator
         {
             AddCore(in arguments);
         }
-        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, arguments.Context.CancellationToken))
         {
             throw SqlEvaluationException.FunctionFailed(_function!.Name, exception);
         }
     }
 
     /// <summary>Computes the group's result; called once per group, after its last row.</summary>
+    /// <remarks>
+    /// A direct call has no statement to cancel, so an <see cref="OperationCanceledException"/>
+    /// from the core is a function failure (<c>COHSQLE007</c>). The engine supplies its statement
+    /// token through an internal route, without retaining extra state in each accumulator.
+    /// </remarks>
     /// <returns>The result.</returns>
     /// <exception cref="InvalidOperationException">
     /// The accumulator was not created by <see cref="SqlAggregateFunction.CreateAccumulator"/>, or it is already finished.
     /// </exception>
     /// <exception cref="DatabaseException">The function failed: <c>COHSQLE007</c>, or the database exception it threw.</exception>
-    public SqlValue Finish()
+    public SqlValue Finish() => Finish(default);
+
+    /// <summary>Finishes a group inside the statement that owns it, with that statement's token.</summary>
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <returns>The group's result.</returns>
+    internal SqlValue Finish(CancellationToken cancellationToken)
     {
         var function = _function
             ?? throw new InvalidOperationException("The accumulator was not created by SqlAggregateFunction.CreateAccumulator.");
@@ -190,7 +205,7 @@ public abstract class SqlAggregateAccumulator
         {
             result = FinishCore();
         }
-        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, cancellationToken))
         {
             throw SqlEvaluationException.FunctionFailed(function.Name, exception);
         }
@@ -202,7 +217,7 @@ public abstract class SqlAggregateAccumulator
     /// <param name="arguments">The row's arguments: of the declared types, and none NULL when the function is strict.</param>
     protected abstract void AddCore(scoped in SqlArguments arguments);
 
-    /// <summary>Computes the result; the engine calls it through <see cref="Finish"/>, once.</summary>
+    /// <summary>Computes the result; the engine calls it once per group.</summary>
     /// <returns>
     /// The result, of the function's declared type, or <see cref="SqlValue.Null"/>. A value of a type
     /// that widens to the declared one implicitly is converted; any other type fails the statement as

@@ -64,11 +64,11 @@ internal sealed partial class SqlPlanner
         // then aggregate results, then the projected outputs that ordering may name). Both scopes
         // resolve columns through the join bindings alone, as grouped execution always has.
         var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
         // A call over a key or an aggregate result resolves by the slot's type over the input row,
         // as the same call does outside a grouping: describe(COUNT(*)) is describe(BIGINT).
         var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, slotScope: sourceScope);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, slotScope: sourceScope);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.Bind(select.Where);

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -28,6 +29,7 @@ internal sealed partial class SqlPlanner
 
     private readonly SqlCatalog _catalog;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
+    private readonly CancellationToken _cancellationToken;
 
     /// <summary>The engine's function catalog and the database, which every call of the statement resolves against.</summary>
     private readonly SqlFunctionEnvironment _functions;
@@ -39,10 +41,13 @@ internal sealed partial class SqlPlanner
     /// <param name="catalog">The database's catalog.</param>
     /// <param name="parameters">The statement's parameter values.</param>
     /// <param name="functions">The engine's function catalog and the database; the standard library alone when null.</param>
-    internal SqlPlanner(SqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters, SqlFunctionEnvironment? functions = null)
+    /// <param name="cancellationToken">The statement's token, including calls made while binding or evaluating counts and seek bounds.</param>
+    internal SqlPlanner(SqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters, SqlFunctionEnvironment? functions = null,
+        CancellationToken cancellationToken = default)
     {
         _catalog = catalog;
         _parameters = parameters;
+        _cancellationToken = cancellationToken;
         _functions = functions ?? SqlFunctionEnvironment.Standard;
     }
 
@@ -87,7 +92,7 @@ internal sealed partial class SqlPlanner
         var evaluatorBindings = bindings ?? (_subqueryDepth > 0 && table is not null
             ? new[] { new SqlTableBinding(table, select.From, 0) } : null);
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
 
         if (bindings is not null)
         {
@@ -463,7 +468,7 @@ internal sealed partial class SqlPlanner
         }
 
         var column = (SqlColumnReferenceExpression)UnwrapCollation(columnExpression);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         int ordinal;
         try
         {
@@ -487,7 +492,7 @@ internal sealed partial class SqlPlanner
         object? value;
         try
         {
-            value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions)
+            value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken)
                 .Evaluate(comparand, Array.Empty<object?>());
             object? storageValue = SqlPlanExecutor.CoerceForColumn(value, table.Columns[ordinal]);
             // A rounded bound can exclude qualifying rows before residual evaluation
@@ -676,7 +681,7 @@ internal sealed partial class SqlPlanner
     /// created on first use and shared by the statement.
     /// </summary>
     private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
-        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
 
     /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
     /// <param name="expression">The expression to search.</param>
@@ -747,7 +752,7 @@ internal sealed partial class SqlPlanner
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
     {
         var table = ResolveTable(update.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
@@ -783,7 +788,7 @@ internal sealed partial class SqlPlanner
         if (delete.Where is not null)
         {
             RejectAggregateInDmlWhere(delete.Where);
-            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
             ValidateExpression(delete.Where, evaluator);
             where = evaluator.Bind(delete.Where);
         }
@@ -875,7 +880,7 @@ internal sealed partial class SqlPlanner
             {
                 throw new DatabaseException($"Column '{definition.ColumnName}': only literal DEFAULT values are supported.");
             }
-            var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+            var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
             SqlPersistedExpression.Bind(expression, scope);
             ValidateExpression(expression, scope);
         }
@@ -886,7 +891,7 @@ internal sealed partial class SqlPlanner
     {
         if (text is null) { return []; }
         var expression = SqlPersistedExpression.Load(text, "DEFAULT");
-        var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+        var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         return SqlDefinitionBinder.FunctionCalls(expression, scope);
     }
 

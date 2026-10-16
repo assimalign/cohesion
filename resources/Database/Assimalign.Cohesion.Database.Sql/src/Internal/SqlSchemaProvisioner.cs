@@ -91,6 +91,7 @@ internal sealed partial class SqlSchemaProvisioner
         ArgumentNullException.ThrowIfNull(schema);
         cancellationToken.ThrowIfCancellationRequested();
         ValidateRecordedFormats();
+        _database.Definitions.EnsureDefinitions(cancellationToken);
         if (deferDataScalingSteps && TryGetDeferredResult(schema) is { } deferredResult)
         {
             return deferredResult;
@@ -299,6 +300,7 @@ internal sealed partial class SqlSchemaProvisioner
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(schema);
+        _database.Definitions.EnsureDefinitions(cancellationToken);
         if (!await _applyGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
         {
             throw new DatabaseObjectLockedException(schema.Name, schema.Name, "VERIFY SCHEMA");

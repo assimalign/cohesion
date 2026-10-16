@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
@@ -151,7 +152,7 @@ internal static class SqlDefinitionBinder
             dependencies.Order(StringComparer.Ordinal).ToArray(), schema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema, schema, calls, []);
     }
 
-    internal static SqlFunctionEnvironment Load(SqlCatalog catalog, SqlFunctionEnvironment native)
+    internal static SqlFunctionEnvironment Load(SqlCatalog catalog, SqlFunctionEnvironment native, CancellationToken cancellationToken)
     {
         var functions = catalog.Functions.ToDictionary(function => "F:" + function.Signature, StringComparer.OrdinalIgnoreCase);
         var domains = catalog.Domains.ToDictionary(domain => DomainKey(domain.Name), StringComparer.OrdinalIgnoreCase);
@@ -166,6 +167,7 @@ internal static class SqlDefinitionBinder
 
         void Visit(string key)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             RuntimeHelpers.EnsureSufficientExecutionStack();
             if (done.Contains(key) || !functions.ContainsKey(key) && !domains.ContainsKey(key))
             {
@@ -182,7 +184,7 @@ internal static class SqlDefinitionBinder
             }
             if (function is not null)
             {
-                var bound = Bind(function, environment, catalog.DefaultCollation);
+                var bound = Bind(function, environment, catalog.DefaultCollation, cancellationToken);
                 environment = new SqlFunctionEnvironment(MergeFunctions(environment.Catalog, bound), native.Database, environment.Types);
             }
             else
@@ -192,7 +194,7 @@ internal static class SqlDefinitionBinder
                 {
                     throw Refuse($"SQL domain '{domain.Name}' conflicts with an engine-registered type.");
                 }
-                var type = Bind(domain, environment, catalog.DefaultCollation);
+                var type = Bind(domain, environment, catalog.DefaultCollation, cancellationToken);
                 environment = new SqlFunctionEnvironment(environment.Catalog, native.Database,
                     new SqlTypeCatalog(environment.Types.Append(type), environment.Types.Casts));
             }
@@ -202,7 +204,7 @@ internal static class SqlDefinitionBinder
     }
 
     internal static SqlExpressionFunction Bind(SqlCatalogFunction function, SqlFunctionEnvironment environment, Collation collation,
-        bool notNullCheck = false)
+        CancellationToken cancellationToken, bool notNullCheck = false)
     {
         var types = function.ParameterTypes.Select(type => ResolveType(type, environment)).ToArray();
         var result = ResolveType(function.ReturnType, environment);
@@ -213,41 +215,45 @@ internal static class SqlDefinitionBinder
         var expression = SqlPersistedExpression.Load(function.Body, $"Function '{function.Name}'");
         string? unavailableDomain = types.Append(result).Select(UnresolvedDomainReason).FirstOrDefault(reason => reason is not null);
         string? unresolved = null;
-        SqlBoundExpression body = BindBody(collation);
+        SqlBoundExpression? body = null;
+        // Resolve metadata and dependencies without folding. The complete environment can then
+        // be published before any body preparation calls application code; unrelated statements
+        // need only this metadata. Each body/collation owns its own retryable binding entry.
+        var scope = CreateScope(collation, cancellationToken);
+        try
+        {
+            if (unavailableDomain is not null) { throw Refuse(unavailableDomain); }
+            SqlPersistedExpression.Bind(expression, scope);
+            SqlPlanner.ValidateExpression(expression, scope);
+            _ = Dependencies(expression, scope, Volatility(function.Volatility));
+        }
+        catch (DatabaseException failure) when (unavailableDomain is not null || failure is SqlFunctionResultMismatchException ||
+            HasUnavailableCall(expression, scope, Volatility(function.Volatility)))
+        {
+            unresolved = $"Function '{function.Name}': {failure.Message}";
+            string reason = unresolved;
+            body = new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
+        }
         return new SqlExpressionFunction(function.Name, types, result, Volatility(function.Volatility), function.IsStrict,
-            body, unresolved, notNullCheck, bodyCollation: collation, bindBody: BindBody);
+            body, unresolved, notNullCheck, bodyCollation: collation, bindBody: body is null ? BindBody : null);
 
-        SqlBoundExpression BindBody(Collation inputCollation)
+        SqlBoundExpression BindBody(Collation inputCollation, CancellationToken bindingToken)
+            => CreateScope(inputCollation, bindingToken).Bind(expression);
+
+        SqlExpressionEvaluator CreateScope(Collation inputCollation, CancellationToken bindingToken)
         {
             // A parameter inherits the invocation's collation; literals retain the database default.
             // PostgreSQL: src/backend/executor/functions.c:496-505.
             var columns = function.ParameterNames.Select((name, index) => new SqlCatalogColumn(name, types[index].Storage,
                 collation: types[index].Storage.Type == DatabaseType.String ? inputCollation : null,
                 domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
-            var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment);
-            PinCalls(expression, scope, function.BodyFunctionCalls);
-            try
-            {
-                if (unavailableDomain is not null)
-                {
-                    throw Refuse(unavailableDomain);
-                }
-                SqlPersistedExpression.Bind(expression, scope);
-                SqlPlanner.ValidateExpression(expression, scope);
-                _ = Dependencies(expression, scope, Volatility(function.Volatility));
-                return scope.Bind(expression);
-            }
-            catch (DatabaseException failure) when (unavailableDomain is not null || failure is SqlFunctionResultMismatchException ||
-                HasUnavailableCall(expression, scope, Volatility(function.Volatility)))
-            {
-                unresolved = $"Function '{function.Name}': {failure.Message}";
-                string reason = unresolved;
-                return new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
-            }
+            var bodyScope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment, cancellationToken: bindingToken);
+            PinCalls(expression, bodyScope, function.BodyFunctionCalls);
+            return bodyScope;
         }
     }
 
-    internal static SqlType Bind(SqlCatalogDomain domain, SqlFunctionEnvironment environment, Collation collation)
+    internal static SqlType Bind(SqlCatalogDomain domain, SqlFunctionEnvironment environment, Collation collation, CancellationToken cancellationToken)
     {
         var type = ResolveType(domain.BaseType, environment);
         SqlExpressionFunction? check = null;
@@ -256,7 +262,7 @@ internal static class SqlDefinitionBinder
             var function = new SqlCatalogFunction(domain.Name + "_check", Signature(domain.Name + "_check", [type]), ["VALUE"], [type.Name],
                 "BOOLEAN", "IMMUTABLE", false, domain.CheckExpression ?? "TRUE", domain.Dependencies, domain.Owner, domain.OwningSchema,
                 domain.CheckFunctionCalls);
-            check = Bind(function, environment, collation, domain.IsNotNull);
+            check = Bind(function, environment, collation, cancellationToken, domain.IsNotNull);
         }
         return SqlType.CreateSqlDomain(domain.Name, type, check, domain.DefaultLiteral, domain.IsNotNull);
     }

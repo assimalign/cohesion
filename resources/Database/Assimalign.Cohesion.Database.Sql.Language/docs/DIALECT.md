@@ -1610,7 +1610,9 @@ its type, not a string literal. Inside a grouping, a grouping key or an aggregat
 has its type for that choice (`describe(COUNT(*))` calls `describe(BIGINT)`). A strict
 function (the default) returns NULL over a NULL argument without being called, and a strict
 aggregate skips the row. An `IMMUTABLE` call whose arguments are constants or parameters is
-computed once, while the statement is planned. A `CHECK` admits only `IMMUTABLE` functions,
+computed once, while the statement is planned. Immutable constant calls in shared SQL function/domain
+bodies, table CHECKs and DEFAULT expressions can also fold when the definition is bound, using that
+operation's cancellation token. Remaining calls use the evaluating statement's token. A `CHECK` admits only `IMMUTABLE` functions,
 so a function registered with the default `VOLATILE` volatility is refused there, naming its
 volatility; one returning BOOLEAN is a predicate by itself, and DDL refuses a CHECK that
 compares an application function's result with a value of a type it does not compare with,
@@ -1618,7 +1620,19 @@ or uses one that is not a number in arithmetic. What a function throws fails the
 as `COHSQLE007`, which names it, and so does a result of another type than the function
 declares (a type that widens to the declared one is converted); the statement writes
 nothing and an explicit transaction stays usable, as for every coded failure. A sign over a
-constant is itself a constant, so `ABS(-5)` is computed once too.
+constant is itself a constant, so `ABS(-5)` is computed once too. An application function's
+`OperationCanceledException` is also `COHSQLE007` unless the statement's own token is
+canceled, regardless of the exception's token. This applies to every aggregate phase and
+to engine/SQL domain checks and application calls inside SQL functions, including LIMIT/OFFSET,
+seek-bound evaluation and constant folding during planning. Actual cancellation stops folding
+immediately; it is never deferred and retried as a function failure. The coded error
+leaves the wire connection usable; actual statement cancellation retains its cancellation behavior.
+
+A statement waiting for another statement to bind the same shared function body, collation variant
+or table definition can cancel its own wait. It does not cancel the computing statement. Different
+entries and unrelated metadata queries proceed independently. Canceled or failed binding attempts
+are not cached; a subsequent caller retries using its own token. Definition DDL remains committed
+if its following body preparation fails, and later statements prepare only the entries they need.
 
 **A stored CHECK whose function is gone.** A CHECK stores canonical SQL and each call's
 resolved function identity. A later engine build may omit that exact signature, change
@@ -1671,7 +1685,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
 | `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
-| `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, a cancellation or an exhausted stack or memory, which is the inner exception; or a `CAST`'s registered cast threw anything but those and a value's fault (`FormatException`, `OverflowException`, `InvalidCastException`), a cancellation the statement did not ask for included (`Cast TEXT AS cents failed: ...`, E3); or a function returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
+| `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, cancellation of the statement itself or an exhausted stack or memory, which is the inner exception; or a `CAST`'s registered cast threw anything but those and a value's fault (`FormatException`, `OverflowException`, `InvalidCastException`), a cancellation the statement did not ask for included (`Cast TEXT AS cents failed: ...`, E3); or a function returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
 | `COHSQLE008` | Error | A function call that more than one overload accepts equally well, such as an overloaded function over a NULL literal. Raised while planning; a `CAST` on an argument chooses (ISO SQLSTATE 42725, ambiguous function; E2) |
 | `COHSQLE009` | Error | A write would evaluate a stored CHECK that calls a function the engine does not register, registers as an aggregate, registers with no overload, or more than one, that accepts the stored call, or registers with a result that no longer fits where the CHECK uses it. The database opens and its reads proceed; the message names the constraint, the table and the call. An engine build that declares the database fails with it (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises at use for a missing implementation; E2, owner decision 65) |
 | `COHSQLE010` | Error | A type name that is neither a built-in type nor a domain in the merged engine/SQL type environment: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the opening engine cannot resolve, or resolves over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`COHSQLE006`, `COHSQLE009`); whether to split it is an open owner question |

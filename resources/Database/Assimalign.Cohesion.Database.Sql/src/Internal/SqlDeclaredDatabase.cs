@@ -175,6 +175,7 @@ internal sealed partial class SqlDeclaredDatabase
         cancellationToken.ThrowIfCancellationRequested();
         SqlDatabase database = await OpenOrCreateAsync(engine, cancellationToken).ConfigureAwait(false);
 
+        database.Definitions.EnsureDefinitions(cancellationToken);
         Collation existing = database.Catalog.DefaultCollation;
         if (existing.Id != Collation.Id)
         {
@@ -198,7 +199,7 @@ internal sealed partial class SqlDeclaredDatabase
         // CHECK that calls a function this engine does not register opens, and fails each write;
         // for a database the engine declares, the application that declares it removed the
         // function, so its build fails before it accepts work.
-        if (database.Definitions.FindUnresolved() is { } unresolved)
+        if (database.Definitions.FindUnresolved(cancellationToken) is { } unresolved)
         {
             throw new SqlSchemaMigrationException(
                 $"{SqlEvaluationException.UnregisteredFunctionCode}: SQL engine '{engine.Name}', database '{Name}': {unresolved.Describe()}. " +
@@ -210,7 +211,7 @@ internal sealed partial class SqlDeclaredDatabase
 
         // The same rule for a column of a domain (phase E3): the database opens and writes to the
         // column fail, but the application that declares the database removed the domain.
-        if (database.Definitions.FindUnresolvedDomain() is { } domain)
+        if (database.Definitions.FindUnresolvedDomain(cancellationToken) is { } domain)
         {
             throw new SqlSchemaMigrationException(
                 $"{SqlEvaluationException.UnregisteredTypeCode}: SQL engine '{engine.Name}', database '{Name}': {domain.Describe()}. " +

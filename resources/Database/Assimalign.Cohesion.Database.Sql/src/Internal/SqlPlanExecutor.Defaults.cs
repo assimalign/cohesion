@@ -155,7 +155,7 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="defaultValue">The value text of the column's DEFAULT literal (<see cref="SqlPersistedExpression.LoadDefaultValue"/>).</param>
     /// <returns>The bound DEFAULT.</returns>
     internal static SqlBoundExpression BindDefaultExpression(SqlCatalogColumn column, string subject,
-        SqlFunctionEnvironment functions, Collation collation, bool declaring = false)
+        SqlFunctionEnvironment functions, Collation collation, CancellationToken cancellationToken, bool declaring = false)
     {
         var expression = SqlPersistedExpression.Load(column.DefaultLiteral!, subject);
         if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
@@ -171,7 +171,7 @@ internal sealed partial class SqlPlanExecutor
             }
             return BindDefault(column, value);
         }
-        var scope = new SqlExpressionEvaluator([], null, defaultCollation: collation, functions: functions);
+        var scope = new SqlExpressionEvaluator([], null, defaultCollation: collation, functions: functions, cancellationToken: cancellationToken);
         SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
         try
         {

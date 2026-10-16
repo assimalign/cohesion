@@ -1,3 +1,5 @@
+using System.Threading;
+
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -23,8 +25,9 @@ internal sealed class SqlBoundCall : SqlBoundExpression
     /// <param name="targets">The storage type each argument converts to, or null when none converts.</param>
     /// <param name="collation">The collation the call's input compares under.</param>
     /// <param name="database">The database whose statement makes the call.</param>
+    /// <param name="cancellationToken">The operation binding this call; not retained by the node.</param>
     internal SqlBoundCall(SqlScalarFunction function, SqlBoundExpression[] arguments, DatabaseType[]? targets,
-        SqlBoundCollation collation, DatabaseName database)
+        SqlBoundCollation collation, DatabaseName database, CancellationToken cancellationToken)
         : base(SqlBoundExpressionKind.Call)
     {
         Function = function;
@@ -35,7 +38,7 @@ internal sealed class SqlBoundCall : SqlBoundExpression
         Database = database;
         if (function is SqlExpressionFunction expression && collation.IsFixed)
         {
-            expression.PrepareBody(collation.Resolve(null));
+            expression.PrepareBody(collation.Resolve(null), cancellationToken);
         }
     }
 

@@ -42,12 +42,17 @@ public abstract class SqlAggregateFunction : SqlFunction
     }
 
     /// <summary>Creates the accumulator of one group.</summary>
+    /// <remarks>
+    /// The context's token governs cancellation during creation. With the
+    /// default context, cancellation thrown by application code is a function failure (<c>COHSQLE007</c>).
+    /// </remarks>
     /// <param name="context">The context of the statement and the aggregate call.</param>
     /// <returns>A new accumulator, owned by the caller and used by one thread at a time.</returns>
     /// <exception cref="DatabaseException">
     /// The function failed (<c>COHSQLE007</c>): it threw, returned no accumulator, or returned one
     /// that was already in use.
     /// </exception>
+    /// <exception cref="OperationCanceledException">The core threw cancellation and the context's token is canceled.</exception>
     public SqlAggregateAccumulator CreateAccumulator(scoped in SqlFunctionContext context)
     {
         SqlAggregateAccumulator? accumulator;
@@ -55,7 +60,7 @@ public abstract class SqlAggregateFunction : SqlFunction
         {
             accumulator = CreateAccumulatorCore(in context);
         }
-        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, context.CancellationToken))
         {
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }

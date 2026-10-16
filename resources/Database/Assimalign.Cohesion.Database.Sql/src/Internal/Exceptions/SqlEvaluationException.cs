@@ -64,7 +64,7 @@ internal sealed class SqlEvaluationException : DatabaseException
 
     /// <summary>
     /// A function or a cast threw while the statement ran: anything a <see cref="SqlFunction"/>'s
-    /// core throws other than <see cref="OperationCanceledException"/>,
+    /// core throws other than cancellation of the statement itself,
     /// <see cref="InsufficientExecutionStackException"/>, <see cref="OutOfMemoryException"/> or a
     /// <see cref="DatabaseException"/>, which is the inner exception (ISO SQLSTATE 38000, external
     /// routine exception); and anything a <see cref="SqlCast"/>'s conversion throws other than those
@@ -144,13 +144,15 @@ internal sealed class SqlEvaluationException : DatabaseException
 
     /// <summary>
     /// Whether an exception a function's core threw becomes <c>COHSQLE007</c>: anything but a
-    /// cancellation, an exhausted stack or memory, or a database exception, which keep their own
+    /// cancellation of the statement itself, an exhausted stack or memory, or a database exception, which keep their own
     /// meaning.
     /// </summary>
     /// <param name="exception">What the function threw.</param>
+    /// <param name="cancellationToken">The statement's token; default outside a statement.</param>
     /// <returns><see langword="true"/> when the engine codes it as <c>COHSQLE007</c>.</returns>
-    internal static bool IsFunctionFailure(Exception exception)
-        => exception is not (OperationCanceledException or InsufficientExecutionStackException or OutOfMemoryException or DatabaseException);
+    internal static bool IsFunctionFailure(Exception exception, CancellationToken cancellationToken)
+        => exception is not (InsufficientExecutionStackException or OutOfMemoryException or DatabaseException)
+            && !(exception is OperationCanceledException && cancellationToken.IsCancellationRequested);
 
     /// <summary>
     /// Whether an exception a cast's conversion threw, past a value's fault, becomes <c>COHSQLE007</c>:
@@ -163,8 +165,7 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <param name="cancellationToken">The statement's cancellation token.</param>
     /// <returns><see langword="true"/> when the engine codes it as <c>COHSQLE007</c>.</returns>
     internal static bool IsCastFailure(Exception exception, CancellationToken cancellationToken)
-        => exception is not (InsufficientExecutionStackException or OutOfMemoryException or DatabaseException)
-            && !(exception is OperationCanceledException && cancellationToken.IsCancellationRequested);
+        => IsFunctionFailure(exception, cancellationToken);
 
     /// <summary>Creates the failure of a function that threw.</summary>
     /// <param name="functionName">The function's registered name.</param>

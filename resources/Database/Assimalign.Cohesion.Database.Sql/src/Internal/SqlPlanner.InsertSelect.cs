@@ -54,7 +54,7 @@ internal sealed partial class SqlPlanner
         {
             return projections;
         }
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         return projections.Select(projection => projection.Type == DatabaseType.Null && projection.Expression is not null
             ? projection with { Type = GroupExpressionType(projection.Expression, columns, evaluator) }
             : projection).ToArray();

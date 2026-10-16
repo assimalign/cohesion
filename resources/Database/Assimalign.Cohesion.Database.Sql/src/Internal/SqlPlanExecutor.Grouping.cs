@@ -78,7 +78,7 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 0; i < states.Length; i++)
             {
                 // Once per group, the implicit empty group included.
-                row[key.Length + i] = states[i].Finish().ToObject();
+                row[key.Length + i] = states[i].Finish(cancellationToken).ToObject();
             }
             if (!evaluator.Matches(plan.Having, row))
             {
