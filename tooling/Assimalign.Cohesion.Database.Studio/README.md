@@ -31,9 +31,8 @@ exe, and exits non-zero when a step fails. It covers, per model, the declared `s
 over loopback TCP, transactions, the catalog, and every Samples script; for SQL also the declared
 database's provisioned schema and its CHECK, and the registered functions embedded and over the
 wire; and, on a scratch root of its own, that a declaration failing its build stops only its own
-model. A run over a fresh temporary root gives 99 passed, 0 failed, 1 skipped (Documents has no
-wire); a second run over the same `dataRoot` takes the engines' open path and gives the same. UI
-crashes are logged to `studio-crash.log` next to the exe; the UI marks them handled and keeps
+model. A run over a fresh temporary root gives 100 passed, 0 failed, 0 skipped, including Documents TCP OQL, whole documents, versioned CRUD, collection/catalog reads and reusable coded failures.
+Unhandled MAUI crashes are logged to `studio-crash.log` next to the exe; the UI marks them handled and keeps
 running.
 
 ## Engines
@@ -72,7 +71,7 @@ One engine per model runs in-process under `<data root>\<model>` (default
 | Wire (loopback) | The Studio starts that model's server on `127.0.0.1:<port>` (0 = OS-assigned) over the same engine and uses the real client (`Sql/Graph/KeyValuePair/Blob.Client`). Database list/create/drop, KEYSPACES and blob containers still go through the engine: the wire has no management verbs. |
 | Wire (external) | The real client against an already-running server (for example the SampleHost fixture). Type the database name; nothing can be listed or created. |
 
-Documents is **embedded only**: there is no Documents server, and `Documents.Client/src` is empty.
+The Documents editor remains **embedded only**. Its smoke run separately exercises the shipped Documents server/client over TCP; editor connection-mode integration is a later UI task.
 
 ## Pages
 
