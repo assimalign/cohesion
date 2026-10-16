@@ -102,6 +102,11 @@ literal tokens, and the runs of text between them, every value a zero-copy slice
 
 ## Error model
 
+Line-buffer limit failures use `ContentFormatException` with `LimitExceeded` and decoded
+character offsets as described above. Exact-limit tests cover EOF and each terminator, original
+UTF-16 positions across CRLF and surrogate pairs, raised caps, repeated failures and disposal.
+An endless generated line proves that reads and allocation stop at the configured budget.
+
 The tokenizer accepts every input and reports positions for format parsers. Invalid tokenizer options
 and creation arguments use BCL argument exceptions; detecting single-use content throws ContentException.
 Strict caller-supplied decoders report malformed byte sequences as ContentFormatException with InvalidValue,

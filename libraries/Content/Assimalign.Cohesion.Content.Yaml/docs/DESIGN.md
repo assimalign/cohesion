@@ -150,6 +150,14 @@ callers use the value objects' `TryCreate`. Invalid writer indentation throws
 
 ## Compatibility with 10.0.0-preview.1
 
+- Parse facades keep their original signatures and add overloads accepting `YamlParserOptions`.
+  Existing calls now enforce the default budgets. Both document and event parsing validate alias
+  references and expansion cost; event consumers can no longer bypass those checks.
+- `YamlException.ErrorCode` is populated for parser failures and the compatibility constructor.
+  Parser failures gain original decoded-character offsets; strict decoding still uses byte offsets.
+  Signed overflow in eight-digit Unicode escapes is eliminated; invalid Unicode scalars fail as
+  `InvalidValue`, and trailing text after a block-context flow node fails as `InvalidStructure`.
+
 - `YamlNode.Anchor`/`Tag` and `YamlEvent.Anchor`/`Tag` change from `string?` to
   `YamlAnchorName?`/`YamlTag?`. These are source and binary breaks. Nullable string conversions
   preserve ordinary string assignments and extraction, but callers using string members directly
@@ -175,6 +183,16 @@ callers use the value objects' `TryCreate`. Invalid writer indentation throws
 
 `<IsAotCompatible>true</IsAotCompatible>` (inherited). Hand-written recursive descent, no
 reflection, no regular expressions, no dynamic code.
+
+## Resource-limit regression coverage
+
+Authored depth fixtures cover flow sequences/mappings and compact block sequences/explicit
+mapping keys at 1,000, 10,000 and 100,000 levels, plus indented block forms at 1,000. Compact
+forms keep the 100,000-level source linear in size instead of allocating quadratic indentation.
+Child `dotnet` probes contain stack-overflow regressions; passing probes then repeat in-process.
+Additional tests cover the exact 512-level boundary, inserted mapping keys, raised depth settings,
+property-only recursion, alias identity/cycles/rebinding/document reset, the nine-by-nine bomb,
+allocation/time bounds, and overflow-safe expansion accounting at `long.MaxValue`.
 
 ## Non-goals
 

@@ -168,6 +168,19 @@ can produce.
 `<IsAotCompatible>true</IsAotCompatible>` (inherited). Hand-written scanning over spans and the
 `TextTokenizer`; no regular expressions, no reflection, no dynamic code.
 
+## Resource-limit regression coverage
+
+Authored child-process probes exercise 1,000, 10,000 and 100,000 nested quotes, lists, emphasis,
+link labels, images and destination parentheses. Passing probes repeat in-process and render.
+Boundary tests lower and raise the options, ensure list/item pairs stay within the cap, preserve
+sibling items after a full-depth item, and verify destination degradation and long delimiter runs.
+The full CommonMark corpus and canonical round trips remain the conformance floor.
+
+The old block guard counted the document's stack entry and could add a two-entry list/item pair
+across the threshold. The explicit option now consistently excludes the document and checks the
+whole pair. At the default this permits 128 quotes (previously 127), while still limiting lists
+to 128 combined list/item levels.
+
 ## Non-goals
 
 - Raw-HTML passthrough or an HTML sanitizer — a service-layer concern to design with the static
