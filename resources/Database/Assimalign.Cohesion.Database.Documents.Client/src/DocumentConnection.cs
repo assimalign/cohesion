@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Documents.Client;
 public sealed class DocumentConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
+    private readonly object _operationLock = new();
+    private Task? _disposeTask;
     private int _disposed;
 
     internal DocumentConnection(DatabaseConnection connection) => _connection = connection;
@@ -145,16 +147,28 @@ public sealed class DocumentConnection : IAsyncDisposable
 
     /// <summary>Closes this rental and discards its session.</summary>
     /// <returns>The noncancellable teardown.</returns>
-    public async ValueTask AbortAsync()
+    public ValueTask AbortAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0) { await _connection.AbortAsync().ConfigureAwait(false); }
+        lock (_operationLock)
+        {
+            if (_disposeTask is not null) { return new(_disposeTask); }
+            Volatile.Write(ref _disposed, 1);
+            _disposeTask = _connection.AbortAsync().AsTask();
+            return new(_disposeTask);
+        }
     }
 
     /// <summary>Returns a healthy session to the pool, once only.</summary>
     /// <returns>The completion of the return.</returns>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0) { await _connection.DisposeAsync().ConfigureAwait(false); }
+        lock (_operationLock)
+        {
+            if (_disposeTask is not null) { return new(_disposeTask); }
+            Volatile.Write(ref _disposed, 1);
+            _disposeTask = _connection.DisposeAsync().AsTask();
+            return new(_disposeTask);
+        }
     }
 
     private ValueTask<DocumentExchangeResult> CommandAsync(DocumentProtocolOperation operation, string collection, string id,
@@ -178,7 +192,18 @@ public sealed class DocumentConnection : IAsyncDisposable
         DocumentExchangeResult? result = null;
         try
         {
-            try { return result = await _connection.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false); }
+            try
+            {
+                ValueTask<DocumentExchangeResult> execution;
+                lock (_operationLock)
+                {
+                    // Register with the shared rental under the same lock as its return. In
+                    // particular, QueryStart listeners can pause or dispose this wrapper.
+                    ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+                    execution = _connection.ExecuteAsync(exchange, cancellationToken);
+                }
+                return result = await execution.ConfigureAwait(false);
+            }
             catch (DatabaseClientException exception) when (exception is not DocumentClientException)
             {
                 throw new DocumentClientException(exception.Code, exception.Message, exception);

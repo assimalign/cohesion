@@ -101,7 +101,10 @@ EOF, transport failure or cancellation during an unfinished exchange also discar
 
 The rental's disposal guard prevents a second Dispose or a stale wrapper from returning a later
 rental of the same underlying connection. Abort discards instead of returning it. Client disposal
-drains idle pooled connections; the shared core owns concurrent lease disposal semantics.
+drains idle pooled connections. Operation registration and Dispose/Abort share a wrapper lock: after
+QueryStart, the wrapper rechecks disposal while registering the exchange with the shared core.
+Disposal either prevents registration or cancels and joins the registered exchange before returning
+the rental. Repeated disposal joins the same teardown task and never touches a subsequent rental.
 
 ## Diagnostics
 
