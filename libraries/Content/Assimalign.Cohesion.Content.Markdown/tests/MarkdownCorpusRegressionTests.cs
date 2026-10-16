@@ -83,4 +83,22 @@ public class MarkdownCorpusRegressionTests
         // Assert
         actual.ShouldBe(expected);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Writer: literal whitespace and hashes retain model values")]
+    [InlineData("foo&#10;&#10;bar")]
+    [InlineData("&#9;foo")]
+    [InlineData("## trailing \\#")]
+    [InlineData("&#32;foo&#32;")]
+    public void Write_StructuralLiteralCharacters_PreservesModel(string source)
+    {
+        // Arrange. Authored reductions of CommonMark 39, 40 and 76, plus entity-derived edge spaces.
+        var expected = MarkdownText.Parse(source);
+
+        // Act
+        var written = MarkdownText.Write(expected);
+        var actual = MarkdownText.Parse(written);
+
+        // Assert
+        MarkdownModelComparison.ShouldEqual(expected, actual, source);
+        MarkdownText.Write(actual).ShouldBe(written);
+    }
 }

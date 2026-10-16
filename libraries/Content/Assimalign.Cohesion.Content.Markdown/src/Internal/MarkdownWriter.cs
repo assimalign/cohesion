@@ -69,7 +69,7 @@ internal sealed class MarkdownWriter
                     break;
 
                 case OpKind.Literal:
-                    WriteLiteral(op.Text!, op.NextStartsBracket);
+                    WriteLiteral(op.Text!, op.NextStartsBracket, op.PreserveLeadingSpace, op.PreserveTrailingSpace);
                     break;
 
                 case OpKind.Inlines:
@@ -197,7 +197,7 @@ internal sealed class MarkdownWriter
             switch (inline)
             {
                 case MarkdownLiteral literal:
-                    _ops.Push(Op.ForLiteral(literal.Text, NextStartsBracket(inlines, index)));
+                    _ops.Push(Op.ForLiteral(literal.Text, NextStartsBracket(inlines, index), index == 0 || inlines[index - 1] is MarkdownLineBreak, index == inlines.Count - 1 || inlines[index + 1] is MarkdownLineBreak));
                     break;
 
                 case MarkdownEmphasis emphasis:
@@ -290,16 +290,29 @@ internal sealed class MarkdownWriter
     /// every structural inline character escapes, plus the line-start block markers and
     /// <c>!</c> when a bracket follows.
     /// </summary>
-    private void WriteLiteral(string text, bool nextStartsBracket)
+    private void WriteLiteral(string text, bool nextStartsBracket, bool preserveLeadingSpace, bool preserveTrailingSpace)
     {
         var startedAtLineStart = _atLineStart;
+        var leadingSpaces = 0;
+        while (leadingSpaces < text.Length && text[leadingSpaces] == ' ') { leadingSpaces++; }
+        var trailingSpaces = text.Length;
+        while (trailingSpaces > 0 && text[trailingSpaces - 1] == ' ') { trailingSpaces--; }
         for (var index = 0; index < text.Length; index++)
         {
             var character = text[index];
+            if (character is '\n' or '\r' or '\t'
+                || (character == ' ' && ((preserveLeadingSpace && index < leadingSpaces)
+                    || (preserveTrailingSpace && index >= trailingSpaces))))
+            {
+                WriteContent("&#" + ((int)character).ToString(System.Globalization.CultureInfo.InvariantCulture) + ";");
+                continue;
+            }
+
             var escape = character switch
             {
                 '\\' or '`' or '*' or '_' or '[' or ']' or '<' or '&' => true,
-                '#' or '-' or '+' or '>' or '~' => startedAtLineStart && index == 0,
+                '#' => true,
+                '-' or '+' or '>' or '~' => startedAtLineStart && index == 0,
                 '!' => index + 1 < text.Length ? text[index + 1] == '[' : nextStartsBracket,
                 '.' or ')' => startedAtLineStart && IsOrderedMarkerPosition(text, index),
                 _ => false,
@@ -463,6 +476,8 @@ internal sealed class MarkdownWriter
         public int EmphasisDepth { get; private init; }
 
         public bool NextStartsBracket { get; private init; }
+        public bool PreserveLeadingSpace { get; private init; }
+        public bool PreserveTrailingSpace { get; private init; }
 
         public bool EmitIfMidLine { get; private init; }
 
@@ -476,8 +491,9 @@ internal sealed class MarkdownWriter
 
         public static Op Raw(string text) => new() { Kind = OpKind.Raw, Text = text };
 
-        public static Op ForLiteral(string text, bool nextStartsBracket)
-            => new() { Kind = OpKind.Literal, Text = text, NextStartsBracket = nextStartsBracket };
+        public static Op ForLiteral(string text, bool nextStartsBracket, bool preserveLeadingSpace, bool preserveTrailingSpace)
+            => new() { Kind = OpKind.Literal, Text = text, NextStartsBracket = nextStartsBracket,
+                PreserveLeadingSpace = preserveLeadingSpace, PreserveTrailingSpace = preserveTrailingSpace };
 
         public static Op ForInlines(IList<MarkdownInline> inlines, int emphasisDepth)
             => new() { Kind = OpKind.Inlines, InlineList = inlines, EmphasisDepth = emphasisDepth };

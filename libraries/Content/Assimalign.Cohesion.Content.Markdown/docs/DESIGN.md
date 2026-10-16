@@ -124,6 +124,8 @@ emphasis delimiters alternating `*`/`_` by nesting depth (so nested emphasis nev
 `!` only before a bracket), and prefix-stack container writing where a quote opening mid-line
 (first block of a list item) emits its marker inline. The invariant tests enforce:
 **write → parse → write is a fixed point, and parse → write → parse preserves the rendered HTML.**
+Literal CR/LF/tab and edge spaces use numeric references when raw whitespace would change the
+model; literal hashes are escaped so heading text cannot become a closing ATX sequence.
 The guarantee covers parser-produced trees; hand-built trees can express forms with no Markdown
 spelling (emphasis around whitespace) and round-trip only when they stay inside what the parser
 can produce.
