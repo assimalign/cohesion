@@ -477,6 +477,10 @@
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Media/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Media/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Media/docs/">
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Media/docs/DESIGN.md" />
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Media/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Media/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Media/src/Assimalign.Cohesion.Content.Media.csproj" />
 	</Folder>

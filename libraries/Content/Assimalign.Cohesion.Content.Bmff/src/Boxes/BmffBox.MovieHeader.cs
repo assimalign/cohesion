@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Diagnostics;
-using static System.Buffers.Binary.BinaryPrimitives;
 
-using Assimalign.Cohesion.Content.Media;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
@@ -49,7 +49,7 @@ public sealed class MovieHeaderBox : BmffBox
         {
             if (value < _seed)
             {
-                throw new InvalidOperationException("");
+                throw new InvalidOperationException(ErrorMessages.InvalidHeaderTime);
             }
 
             _headerCreationTime = value;
@@ -66,7 +66,7 @@ public sealed class MovieHeaderBox : BmffBox
         {
             if (value < _seed)
             {
-                throw new InvalidOperationException("");
+                throw new InvalidOperationException(ErrorMessages.InvalidHeaderTime);
             }
 
             _headerModificationTime = value;
@@ -152,36 +152,41 @@ public sealed class MovieHeaderBox : BmffBox
 
     public override void Read(BmffStream stream)
     {
-        var version = (BmffVersion)ReadInt32BigEndian(stream.ReadBytes(4));
+        Span<byte> buffer = stackalloc byte[8];
+        var version = (BmffVersion)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian();
 
         if (version == BmffVersion.Version1)
         {
             _headerVersion = version;
-            _headerCreationTime = _seed + TimeSpan.FromSeconds(unchecked((double)ReadInt64BigEndian(stream.ReadBytes(8))));
-            _headerModificationTime = _seed + TimeSpan.FromSeconds(unchecked((double)ReadInt64BigEndian(stream.ReadBytes(8))));
-            _headerTimeScale = ReadUInt32BigEndian(stream.ReadBytes(4));
-            _headerDuration = ReadUInt64BigEndian(stream.ReadBytes(8));
+            _headerCreationTime = _seed + TimeSpan.FromSeconds(unchecked((double)BmffBinary.ReadField(stream, buffer[..8]).ReadInt64BigEndian()));
+            _headerModificationTime = _seed + TimeSpan.FromSeconds(unchecked((double)BmffBinary.ReadField(stream, buffer[..8]).ReadInt64BigEndian()));
+            _headerTimeScale = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
+            _headerDuration = BmffBinary.ReadField(stream, buffer[..8]).ReadUInt64BigEndian();
         }
         else
         {
             _headerVersion = version;
-            _headerCreationTime = _seed + TimeSpan.FromSeconds(unchecked((double)ReadInt32BigEndian(stream.ReadBytes(4))));
-            _headerModificationTime = _seed + TimeSpan.FromSeconds(unchecked((double)ReadInt32BigEndian(stream.ReadBytes(4))));
-            _headerTimeScale = ReadUInt32BigEndian(stream.ReadBytes(4));
-            _headerDuration = ReadUInt32BigEndian(stream.ReadBytes(4));
+            _headerCreationTime = _seed + TimeSpan.FromSeconds(unchecked((double)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian()));
+            _headerModificationTime = _seed + TimeSpan.FromSeconds(unchecked((double)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian()));
+            _headerTimeScale = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
+            _headerDuration = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
         }
 
-        _headerRate = ReadInt32BigEndian(stream.ReadBytes(4));
-        _headerVolume = ReadInt16BigEndian(stream.ReadBytes(2));
-        _headerReserved = stream.ReadBytes(2 + (2 * 4));
+        // Preserve the legacy public raw-value behavior; field semantics are a Stage 2 repair.
+        _headerRate = BmffBinary.ReadField(stream, buffer[..4]).ReadFixedPoint16x16().RawValue;
+        _headerVolume = BmffBinary.ReadField(stream, buffer[..2]).ReadFixedPoint8x8().RawValue;
+        _headerReserved = new byte[2 + (2 * 4)];
+        stream.ReadContentExactly(_headerReserved);
 
         for (int i = 0; i < 9; i++)
         {
-            Matrix[i] = ReadInt32BigEndian(stream.ReadBytes(4));
+            var field = BmffBinary.ReadField(stream, buffer[..4]);
+            Matrix[i] = i % 3 == 2 ? field.ReadFixedPoint2x30().RawValue : field.ReadFixedPoint16x16().RawValue;
         }
 
-        _headerPreDefined = stream.ReadBytes(6 * 4);
-        _headerNextTrackId = ReadUInt32BigEndian(stream.ReadBytes(4));
+        _headerPreDefined = new byte[6 * 4];
+        stream.ReadContentExactly(_headerPreDefined);
+        _headerNextTrackId = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
     }
 
     public override void Write(BmffStream stream)
