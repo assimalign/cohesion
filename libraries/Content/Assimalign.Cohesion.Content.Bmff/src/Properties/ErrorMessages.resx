@@ -5,4 +5,14 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="InvalidHeaderTime" xml:space="preserve"><value>The timestamp precedes the BMFF epoch.</value></data>
+  <data name="ExtendedTypeRequired" xml:space="preserve"><value>An extended type is required exactly for uuid boxes.</value></data>
+  <data name="TruncatedHeader" xml:space="preserve"><value>The box header or payload is truncated.</value></data>
+  <data name="NestedZeroSize" xml:space="preserve"><value>A zero size is only legal for the last top-level box.</value></data>
+  <data name="SizeLimit" xml:space="preserve"><value>The box size exceeds the supported stream range.</value></data>
+  <data name="InvalidBoxSize" xml:space="preserve"><value>The box size is smaller than its header or exceeds its container.</value></data>
+  <data name="StreamNotSeekable" xml:space="preserve"><value>The stream does not support seeking.</value></data>
+  <data name="InvalidSeekOrigin" xml:space="preserve"><value>The seek origin is invalid.</value></data>
+  <data name="InvalidSeek" xml:space="preserve"><value>The seek position is outside the supported range.</value></data>
+  <data name="FixedWindow" xml:space="preserve"><value>A box window has a fixed length.</value></data>
+  <data name="WindowExceeded" xml:space="preserve"><value>The write exceeds the box window.</value></data>
 </root>

@@ -40,3 +40,11 @@ The project inherits `IsAotCompatible=true`. Box construction uses explicit fact
 this documentation pass does not establish NativeAOT publication or full format conformance.
 Codec decoding, playback, transcoding, complete writing support, and robust handling of
 every ISO-BMFF box are not delivered contracts.
+
+## Stage 2 header and window contract
+
+BmffBoxHeader validates ordinary, large-size and UUID headers before payload allocation.
+Zero size is legal only at top level and consumes the rest of the input. BmffStream now uses
+ContentSliceStream for reads, returns short counts at its boundary, and uses window-relative
+Position/Length with an absolute Offset. Writes cannot exceed the window. Borrowed parents remain open.
+BmffFullBox centralizes the byte version and 24-bit flags; the composite hierarchy is retained by owner request.
