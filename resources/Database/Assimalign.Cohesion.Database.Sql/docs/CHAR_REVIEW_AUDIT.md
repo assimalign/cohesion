@@ -359,3 +359,55 @@ do not weaken the storage checkpoint invariant.
 The SQL NativeAOT harness published for Release/win-arm64 and passed **23/0/0** smoke checks,
 in process and over the wire, with **zero IL2xxx/IL3xxx diagnostics**. No installer,
 Database.Testing suite or benchmarks were run.
+
+## Round-2 final validation
+
+The round-2 behavior, regression tests and source-cited documentation are committed as `295e3a8ec`,
+following `4d45d8dd5`. Validation completed on 2026-10-16. Build tasks succeeded in Debug and
+Release. Builds used `MSBUILDDISABLENODEREUSE=1`; all Release SQL tests used
+`DOTNET_TieredCompilation=0`. Every test invocation named its test csproj.
+
+The final baseline and fixed regression runs used the **same** expanded Release test DLL:
+
+`A702C2F4F797C06F1EE75D9335920ACF62BC8D5A07006A3141D7D0DD16D3961E` (SHA-256).
+
+All 79 original DLLs still match `baseline-original/SHA256.json`; all 78 non-test DLLs in
+`baseline-run/net10.0`, including 57 Cohesion production DLLs, also match that inventory. Only
+the test DLL was replaced. The final TRX files are `results/baseline-final.trx` (**18/17/0**) and
+`results/fixed-final.trx` (**35/0/0**) under `_out/char-review-r2`. Their method-level counts match
+the round-2 baseline matrix above. The filter is
+`FullyQualifiedName~SqlCharacterBoundaryTests.In_|FullyQualifiedName~SqlCharacterBoundaryTests.Between_|FullyQualifiedName~SqlCharacterBoundaryTests.PredicateControl_|FullyQualifiedName~SqlCharacterBoundaryTests.AlterColumn_CharacterRewrite_`.
+`final-baseline-evidence.json` records the hash and verification counts; the corresponding
+`baseline-final-cases.json` and `fixed-final-cases.json` retain individual results.
+
+Full gates, Passed/Failed/Skipped:
+
+| Suite | Debug | Release |
+| --- | --- | --- |
+| Database.Sql | 2807/0/0 | 2807/0/0 |
+| Database.Sql.Language | 1722/0/0 | 1722/0/0 |
+| Database.Sql.Schema | 362/0/0 | 362/0/0 |
+| Database.Sql.Catalog | 120/0/0 | 120/0/0 |
+| Database.Sql.Storage | 14/0/0 | 14/0/0 |
+| Database.Indexing | 90/0/0 | 90/0/0 |
+| Database.Sql.Client | 1120/0/0 | 1120/0/0 |
+| Database.Client | 69/0/0 | 69/0/0 |
+| Database.Hosting | 130/0/0 | 130/0/0 |
+| Database (root) | 186/0/0 | 186/0/0 |
+| Database.Types | 93/0/0 | 93/0/0 |
+| Sdk.Database | 342/0/0 | 342/0/0 |
+| **Total** | **7055/0/0** | **7055/0/0** |
+
+The final source adjustment prepares constant/parameter CHAR comparands once during binding.
+After it, Database.Sql was rerun in both configurations, plus Database.Sql.Client, Database.Client,
+Database.Hosting, Database and Sdk.Database in Debug; all counts were unchanged. The Release
+consumer gates already used the final SQL implementation: each of their SQL DLL hashes matches
+the final Release SQL test output (`release-consumer-hashes.json`). `verified-gates.json` merges
+the full run (`gates.json`) and those final rechecks (`final-gates.json`); all logs and TRX files
+remain under `_out/char-review-r2`.
+
+The final SQL NativeAOT harness published for Release/win-arm64 and passed **23/0/0** smoke
+checks, in process and over the wire, with **zero IL2xxx/IL3xxx diagnostics**. See
+`aot-publish.log`, `aot-smoke.log` and `aot-result.json`. No installer, Database.Testing suite or
+benchmarks were run. All test, publish and smoke processes exited; no worktree test/build process
+was left running. The already-resolved integration checkpoint race was not changed.
