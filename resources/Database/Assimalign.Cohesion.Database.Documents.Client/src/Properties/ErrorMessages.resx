@@ -14,7 +14,6 @@
   <data name="DocumentIdentityMismatch" xml:space="preserve"><value>The document identity does not match the request.</value></data>
   <data name="CollectionUnexpected" xml:space="preserve"><value>Unexpected collection result.</value></data>
   <data name="CollectionOrderInvalid" xml:space="preserve"><value>Unexpected collection name or ordering.</value></data>
-  <data name="PartialResponseFailed" xml:space="preserve"><value>A statement failure followed partial document results.</value></data>
   <data name="ResponseFrameUnexpected" xml:space="preserve"><value>Unexpected frame in the document exchange.</value></data>
   <data name="CompletionCountMismatch" xml:space="preserve"><value>The document completion count does not match its results.</value></data>
   <data name="CompletionUnexpected" xml:space="preserve"><value>Invalid completion for the document operation.</value></data>

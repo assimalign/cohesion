@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
@@ -11,13 +10,13 @@ internal static class DocumentJsonValues
 {
     internal static byte[] Result(IReadOnlyList<object?> values, bool wholeDocument)
     {
-        var buffer = new ArrayBufferWriter<byte>();
+        var buffer = new DocumentJsonBuffer();
         using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 256 });
         if (!wholeDocument) { writer.WriteStartArray(); }
         foreach (object? value in values) { Write(writer, value); }
         if (!wholeDocument) { writer.WriteEndArray(); }
         writer.Flush();
-        return buffer.WrittenSpan.ToArray();
+        return buffer.ToArray();
     }
 
     private static void Write(Utf8JsonWriter writer, object? value)

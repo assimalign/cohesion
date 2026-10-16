@@ -32,8 +32,9 @@ flowchart LR
 Every rental supports one active exchange. Requests capture parameter and content bytes before
 their first await. The server enters `DocumentDatabaseSession.ExecuteStatementAsync` internally;
 its typed execution traces through the root exactly once. Queries materialize both in the engine
-and in the client. Each response frame is bounded by the shared 16 MiB limit; total result memory
-depends on query size. There is no unbounded streaming promise or implicit fragmentation.
+and in the client. The server writes a header, then one bounded row or document at a time,
+then Complete, without retaining a serialized copy of the whole result. Each value must fit
+the shared 16 MiB frame limit; engine and client materialization still depend on query size.
 
 The following exchange shows the common lifecycle and both OQL result shapes. Commands share
 the same ready loop and terminal completion/error rules.
@@ -83,8 +84,10 @@ Catalog queries use `COHESION_SCHEMA.INDEXES` and `COHESION_SCHEMA.OBJECT_OWNERS
 
 ## Failures and pooling
 
-The server pre-encodes a successful response before emitting any frames. A statement failure is
-one terminal model `Failure` (72), with no `Complete` after it. It carries the shared classification
+A statement or serialization failure ends the response with one terminal model `Failure` (72),
+including after partial rows or documents, with no `Complete` after it. The client discards all
+accumulated results and throws the typed error; the authenticated session remains reusable. Failure
+carries the shared classification
 and the server's structured `Diagnostic` values, including codes and nullable locations. Parser
 diagnostics and offline `COHDBD002` survive intact. An engine failure without structured diagnostics
 has an empty list; the client never extracts codes from message text. The server bounds failure

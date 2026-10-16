@@ -21,7 +21,6 @@ public sealed class DocumentClientProtocolTests
     [InlineData("count")]
     [InlineData("query-affected-count")]
     [InlineData("duplicate-header")]
-    [InlineData("partial-failure")]
     [InlineData("invalid-json")]
     public async Task QueryAsync_MalformedResponse_ShouldDiscardConnection(string scenario)
     {
@@ -65,7 +64,6 @@ public sealed class DocumentClientProtocolTests
                 case "count": await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(1, -1).Encode(), token); break;
                 case "query-affected-count": await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(0, 1).Encode(), token); break;
                 case "duplicate-header": await WriteAsync(channel, 67, header, token); break;
-                case "partial-failure": await WriteAsync(channel, 72, new DocumentProtocolFailureMessage(ProtocolErrorCode.ExecutionFailure, "failed", []).Encode(), token); break;
                 case "invalid-json": await WriteAsync(channel, 68, "{"u8.ToArray(), token); break;
             }
             // Keep the peer alive until the client has discarded it.

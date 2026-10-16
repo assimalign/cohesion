@@ -745,15 +745,25 @@ frame. The client never infers codes from error-message prose.
 
 After Ready, Execute returns ResultHeader followed by matching ResultRow or Document frames,
 then Complete. Index DDL returns only Complete. Commands return their table's result frames and
-Complete. A rejected statement returns only Failure; it is a complete reusable response.
+Complete. A statement failure terminates the response with Failure, including after partial
+rows or documents. The client discards accumulated results, throws the typed error and may reuse
+the session. Failure has no following Complete.
 Shared Error terminates the session. The client rejects wrong ordering, row width, identity,
 collection ordering, count or affected-count semantics before accepting completion.
 
-The server encodes and bounds the whole successful response before writing its first frame,
-so serialization/size failure cannot leave a partial result followed by a reusable Failure.
-Put also preflights its response size before mutation. Results and JSON documents are
-materialized; total heap usage still depends on query size. Every individual value must fit
-one frame. A transport failure or cancellation after mutation may leave its outcome unknown.
+The server streams the header and each row/document frame directly, then Complete. It retains
+one encoded frame at a time; its serialization buffer accepts at most 16 MiB of committed JSON
+and bounds scratch capacity to six frame lengths plus 4096 bytes (the JSON writer may request
+six bytes per UTF-16 character before escaping). Thus response buffering is independent of row
+count, beyond the engine's materialized result. Collection listings also stream per name.
+Put preflights its complete response size before mutation, preserving refusal before commit.
+Every individual value must fit one frame. Transport failure or cancellation after mutation
+may leave its outcome unknown.
+
+SQL writes header/rows directly (`SqlDatabaseServerSession.cs:431-449`); its serialization
+failures currently reach the fatal pump catch. Graph writes header/rows directly and catches
+streaming statement failures (`GraphDatabaseServerSession.cs:417-446,518-532`). Documents follows
+Graph's terminal statement-error rule with its model Failure and explicit client reuse evidence.
 
 JSON supports any root kind and nested values. Stored numbers must be exactly representable as
 System.Decimal, as in embedded operations; a numeric-domain refusal is a reusable statement failure.

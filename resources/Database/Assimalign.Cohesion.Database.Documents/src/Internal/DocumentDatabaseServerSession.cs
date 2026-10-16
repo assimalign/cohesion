@@ -369,7 +369,6 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             ? DocumentProtocolExecuteMessage.Decode(frame.Payload.Span) : null;
         DocumentProtocolCommandMessage? command = execute is null ? DocumentProtocolCommandMessage.Decode(frame.Payload.Span) : null;
         IReadOnlyList<Diagnostic> diagnostics = [];
-        List<ProtocolFrame> response;
         try
         {
             if (execute is not null)
@@ -400,11 +399,11 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);
                 if (result.Status != DatabaseResultStatus.Success) { diagnostics = result.Diagnostics ?? []; }
-                response = await EncodeResultAsync(result, wholeDocuments, cancellationToken).ConfigureAwait(false);
+                await WriteResultAsync(result, wholeDocuments, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                response = await RunCommandAsync(command!, cancellationToken).ConfigureAwait(false);
+                await RunCommandAsync(command!, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException or DocumentCatalogException or StorageException or JsonException)
@@ -422,13 +421,6 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             await WriteFrameAsync((ProtocolMessageType)DocumentProtocolMessageType.Failure,
                 CreateFailure(code, exception.Message, diagnostics).Encode(), cancellationToken).ConfigureAwait(false);
             return;
-        }
-
-        // Fully encode and check frame sizes before sending any result, so a statement failure
-        // is always a terminal Failure with no partial header or rows left in the exchange.
-        foreach (var resultFrame in response)
-        {
-            await WriteFrameAsync(resultFrame.Type, resultFrame.Payload, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -458,22 +450,21 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         return value[..limit] + ErrorMessages.DiagnosticTruncated;
     }
 
-    private static async Task<List<ProtocolFrame>> EncodeResultAsync(DatabaseResult result, bool wholeDocuments, CancellationToken cancellationToken)
+    private async Task WriteResultAsync(DatabaseResult result, bool wholeDocuments, CancellationToken cancellationToken)
     {
-        var frames = new List<ProtocolFrame>();
         long count = 0;
         if (result is DatabaseResultSet set)
         {
             await using (set.ConfigureAwait(false))
             {
-                frames.Add(ResultFrame(DocumentProtocolMessageType.ResultHeader,
-                    new DocumentProtocolResultHeaderMessage(set.Columns.Select(column => (column.Name, (byte)column.Type)).ToArray(), wholeDocuments).Encode()));
+                await WriteResultFrameAsync(DocumentProtocolMessageType.ResultHeader,
+                    new DocumentProtocolResultHeaderMessage(set.Columns.Select(column => (column.Name, (byte)column.Type)).ToArray(), wholeDocuments).Encode(), cancellationToken).ConfigureAwait(false);
                 await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     var values = new object?[row.FieldCount];
                     for (int index = 0; index < values.Length; index++) { values[index] = row.GetValue(index); }
-                    frames.Add(ResultFrame(wholeDocuments ? DocumentProtocolMessageType.Document : DocumentProtocolMessageType.ResultRow,
-                        DocumentJsonValues.Result(values, wholeDocuments)));
+                    await WriteResultFrameAsync(wholeDocuments ? DocumentProtocolMessageType.Document : DocumentProtocolMessageType.ResultRow,
+                        DocumentJsonValues.Result(values, wholeDocuments), cancellationToken).ConfigureAwait(false);
                     count++;
                 }
             }
@@ -482,14 +473,13 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         {
             throw new DatabaseException(ErrorMessages.StatementFailed);
         }
-        frames.Add(ResultFrame(DocumentProtocolMessageType.Complete, new DocumentProtocolCompleteMessage(count, result.AffectedCount).Encode()));
-        return frames;
+        await WriteResultFrameAsync(DocumentProtocolMessageType.Complete, new DocumentProtocolCompleteMessage(count, result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<List<ProtocolFrame>> RunCommandAsync(DocumentProtocolCommandMessage command, CancellationToken cancellationToken)
+    private async Task RunCommandAsync(DocumentProtocolCommandMessage command, CancellationToken cancellationToken)
     {
         var session = _databaseSession!;
-        var frames = new List<ProtocolFrame>();
+        long count = 0;
         long affected = -1;
         switch (command.Operation)
         {
@@ -520,17 +510,20 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                 }
                 if (document is { } stored)
                 {
-                    frames.Add(ResultFrame(DocumentProtocolMessageType.StoredDocument, new DocumentProtocolStoredDocumentMessage(stored).Encode()));
+                    await WriteResultFrameAsync(DocumentProtocolMessageType.StoredDocument, new DocumentProtocolStoredDocumentMessage(stored).Encode(), cancellationToken).ConfigureAwait(false);
+                    count++;
                 }
                 break;
             case DocumentProtocolOperation.CreateCollection:
                 var created = await session.CreateCollectionAsync(command.Collection, cancellationToken).ConfigureAwait(false);
-                frames.Add(ResultFrame(DocumentProtocolMessageType.Collection, new DocumentProtocolCollectionMessage(created.Name).Encode()));
+                await WriteResultFrameAsync(DocumentProtocolMessageType.Collection, new DocumentProtocolCollectionMessage(created.Name).Encode(), cancellationToken).ConfigureAwait(false);
+                count++;
                 affected = 0;
                 break;
             case DocumentProtocolOperation.GetCollection:
                 var found = await session.GetCollectionAsync(command.Collection, cancellationToken).ConfigureAwait(false);
-                frames.Add(ResultFrame(DocumentProtocolMessageType.Collection, new DocumentProtocolCollectionMessage(found.Name).Encode()));
+                await WriteResultFrameAsync(DocumentProtocolMessageType.Collection, new DocumentProtocolCollectionMessage(found.Name).Encode(), cancellationToken).ConfigureAwait(false);
+                count++;
                 break;
             case DocumentProtocolOperation.DropCollection:
                 await session.DropCollectionAsync(command.Collection, cancellationToken).ConfigureAwait(false);
@@ -539,12 +532,18 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             case DocumentProtocolOperation.ListCollections:
                 await foreach (var item in session.GetCollectionsAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    frames.Add(ResultFrame(DocumentProtocolMessageType.Collection, new DocumentProtocolCollectionMessage(item.Name).Encode()));
+                    await WriteResultFrameAsync(DocumentProtocolMessageType.Collection, new DocumentProtocolCollectionMessage(item.Name).Encode(), cancellationToken).ConfigureAwait(false);
+                    count++;
                 }
                 break;
         }
-        frames.Add(ResultFrame(DocumentProtocolMessageType.Complete, new DocumentProtocolCompleteMessage(frames.Count, affected).Encode()));
-        return frames;
+        await WriteResultFrameAsync(DocumentProtocolMessageType.Complete, new DocumentProtocolCompleteMessage(count, affected).Encode(), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask WriteResultFrameAsync(DocumentProtocolMessageType type, byte[] payload, CancellationToken cancellationToken)
+    {
+        var frame = ResultFrame(type, payload);
+        await WriteFrameAsync(frame.Type, frame.Payload, cancellationToken).ConfigureAwait(false);
     }
 
     private static ProtocolFrame ResultFrame(DocumentProtocolMessageType type, byte[] payload)

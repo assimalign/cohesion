@@ -112,8 +112,11 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
                     return new(new DocumentResultSet(columns.AsReadOnly(), rows, complete.AffectedCount,
                         header?.WholeDocuments ?? false, documents.AsReadOnly()), stored, collections.AsReadOnly());
                 case (byte)DocumentProtocolMessageType.Failure:
-                    if (header is not null || count != 0) { throw new ProtocolException(ErrorMessages.PartialResponseFailed); }
                     var failure = DocumentProtocolFailureMessage.Decode(frame.Payload.Span);
+                    rows.Clear();
+                    documents.Clear();
+                    collections.Clear();
+                    stored = null;
                     MarkResponseComplete();
                     throw new DocumentClientException(failure.Code, failure.Message, diagnostics: failure.Diagnostics);
                 case (byte)ProtocolMessageType.Error:
