@@ -1,0 +1,48 @@
+{
+  "schema": "cohesion.database.bug-policy/1",
+  "version": "2026-10-16",
+  "status": "B1-B6 approved with the design (design-proposal 3.1) and confirmed with the not-planned/duplicate guard on 2026-10-16 (realignment decision 10). Mechanics enforced by New-CohesionWorkItem.ps1 (tooling E5, E7, E10). Extensions X1/X2 await sign-off and are not rules.",
+  "rules": [
+    { "id": "B1", "text": "A defect in behaviour a closed item delivered is filed as a native sub-issue of that closed item - not of its epic, not of its category." },
+    {
+      "id": "B2",
+      "text": "Closed means GitHub state CLOSED with reason COMPLETED. Board Status 'In review' is open: a defect found there is in-scope rework on the open item (Origin DiscoveredTask), not a bug child.",
+      "mechanics": "A parent closed as NOT_PLANNED or DUPLICATE delivered nothing, so nothing regressed against it: file under the owning category."
+    },
+    {
+      "id": "B3",
+      "text": "Attach to the most specific delivered item whose acceptance criteria the behaviour violates - the leaf, never the feature above it, never an epic or a category.",
+      "mechanics": "When that item cannot take a child (eight-level nesting or 100 sub-issues), attach to the nearest ancestor that can and name the leaf in the body."
+    },
+    { "id": "B4", "text": "If no delivered item's criteria are violated, it is not a bug child: it is an ordinary item under the owning category. Shipping it adds criteria; it does not restore them." },
+    { "id": "B5", "text": "Never reopen a delivered item to carry a defect: the board's 'Item reopened -> In progress' workflow would take it off the delivered record." },
+    { "id": "B6", "text": "A bug child of a bug is legitimate: a regression in a fix attaches to the item that shipped the fix." }
+  ],
+  "pendingExtensions": [
+    {
+      "id": "X1",
+      "openCall": "C2",
+      "from": "bug-policy.md B6 (broad)",
+      "text": "Any regression with an identifiable breaking change attaches to the item that shipped that change, taking precedence over B3; the violated item is named 'Relates to #N'.",
+      "wouldChange": "where a regression lands",
+      "decideAt": "the post-#1168 backfill, against real cases (realignment decision 10)"
+    },
+    {
+      "id": "X2",
+      "openCall": "C3",
+      "from": "bug-policy.md B7",
+      "text": "When two closed items' criteria are both violated, the parent is the one that owns the code being changed (taxonomy R2); the other is named 'Relates to #N'.",
+      "wouldChange": "where a two-owner defect lands",
+      "decideAt": "the post-#1168 backfill, against real cases (realignment decision 10)"
+    }
+  ],
+  "filing": {
+    "issueType": "Bug",
+    "label": "bug",
+    "kind": "Bug",
+    "origin": "Defect",
+    "stamp": "> Defect in [<wbs>] (#N), closed <yyyy-mm-dd>.",
+    "wbs": "<parentWbs>.NN where NN = highest existing direct child (open and closed) + 1; no reserved range"
+  },
+  "roadmap": "A bug is placed like any item (inherited tier, else Wave/Priority window); a delivered parent gets hasOpenDefect; tier milestones count open defect descendants; no Rework lane, no notch. Source: roadmap-model.md 7.3."
+}
