@@ -60,7 +60,7 @@ public sealed class DatabaseActivityNestingTests
             });
             var database = await engine.CreateDatabaseAsync(name, CancellationToken.None);
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
-            (await session.ExecuteAsync("CREATE TABLE items (id INT NOT NULL)")).Status.ShouldBe(QueryResultStatus.Success);
+            (await session.ExecuteAsync("CREATE TABLE items (id INT NOT NULL)")).Status.ShouldBe(DatabaseResultStatus.Success);
             using var recorder = new ActivityRecorder();
             bool missedWindow = false;
 
@@ -72,7 +72,7 @@ public sealed class DatabaseActivityNestingTests
                 var inserted = await session.ExecuteAsync($"INSERT INTO items (id) VALUES ({attempt})");
 
                 // Assert
-                inserted.Status.ShouldBe(QueryResultStatus.Success);
+                inserted.Status.ShouldBe(DatabaseResultStatus.Success);
                 EventWrittenEventArgs[] events = recorder.Events.Skip(before).Where(e => IsFor(e, name)).ToArray();
                 foreach (var written in events)
                 {

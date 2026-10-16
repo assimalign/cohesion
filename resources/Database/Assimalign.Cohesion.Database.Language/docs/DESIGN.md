@@ -1,8 +1,12 @@
 # Assimalign.Cohesion.Database.Language — Design
 
 The shared query-language substrate for database models. It owns model-neutral lexical tokens,
-syntax-tree primitives, diagnostics, and parser orchestration; SQL, OQL, GQL, and future model
+syntax-tree primitives, diagnostic production, and parser orchestration; SQL, OQL, GQL, and future model
 languages own their vocabulary and grammar.
+
+`Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` live in `Database.Types`
+(owner, 2026-10-16; #1577), with their names and members unchanged. Language references
+Types; model-neutral execution results can expose diagnostics without depending on Language.
 
 ## Design intent
 

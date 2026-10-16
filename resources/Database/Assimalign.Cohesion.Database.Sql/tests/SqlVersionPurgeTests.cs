@@ -33,7 +33,7 @@ public sealed class SqlVersionPurgeTests
     private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
 
         var rows = new List<object?[]>();
         await foreach (var row in resultSet!.GetRowsAsync())

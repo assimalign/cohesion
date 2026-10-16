@@ -33,6 +33,10 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
 
     public override GraphDatabaseSession? Session => _session;
 
+    // The typed embedded session: GQL text and path requests execute on the graph session's
+    // members, which the lifecycle-only ModelWorkspace.RequireSession() does not reach.
+    private GraphDatabaseSession GraphSession => _session ?? throw new InvalidOperationException("Select a database first.");
+
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {
         GraphDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
@@ -111,12 +115,12 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
 
         if (Mode == ConnectionMode.Embedded)
         {
-            DatabaseSession session = RequireSession();
+            GraphDatabaseSession session = GraphSession;
             if (paths)
             {
-                QueryResult result = await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(outcome.Statement), cancellationToken).ConfigureAwait(false);
+                DatabaseResult result = await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(outcome.Statement), cancellationToken).ConfigureAwait(false);
                 outcome.Status = result.Status.ToString();
-                outcome.Failed = result.Status != QueryResultStatus.Success;
+                outcome.Failed = result.Status != DatabaseResultStatus.Success;
                 outcome.AffectedCount = result.AffectedCount;
                 if (result is GraphPathsQueryResult pathsResult)
                 {
@@ -124,15 +128,15 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
                 }
                 else
                 {
-                    await FillFromQueryResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
+                    await FillFromDatabaseResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
                 }
 
-                outcome.Note = "DatabaseSession.ExecuteAsync(GraphPathsQueryRequest)";
+                outcome.Note = "GraphDatabaseSession.ExecuteAsync(GraphPathsQueryRequest)";
                 return;
             }
 
-            QueryResult rows = await session.ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
-            await FillFromQueryResultAsync(outcome, rows, cancellationToken).ConfigureAwait(false);
+            DatabaseResult rows = await session.ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
+            await FillFromDatabaseResultAsync(outcome, rows, cancellationToken).ConfigureAwait(false);
             return;
         }
 

@@ -59,7 +59,7 @@ public sealed class GqlParseStrictnessExecutionTests
 
     private static async Task<List<string?>> NamesAsync(GraphDatabaseSession session, string gql)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var names = new List<string?>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

@@ -55,7 +55,7 @@ else if (args[0] == "verify")
     {
         throw new InvalidOperationException("An uncommitted document survived process termination.");
     }
-    await using var result = (QueryResultSet)await session.ExecuteAsync("SELECT COUNT(*) AS total FROM items i WHERE i.rank = @rank", new Dictionary<string, object?> { ["rank"] = 1 });
+    await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) AS total FROM items i WHERE i.rank = @rank", new Dictionary<string, object?> { ["rank"] = 1 });
     await using var cursor = result.GetRowsAsync().GetAsyncEnumerator();
     if (!await cursor.MoveNextAsync() || cursor.Current.GetValue(0) is not decimal count || count != 1)
     {

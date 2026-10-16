@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    private async Task<QueryResult> ExecuteAlterColumnAsync(SqlAlterColumnPlan plan, SqlStatementContext statement,
+    private async Task<DatabaseResult> ExecuteAlterColumnAsync(SqlAlterColumnPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
         await AcquireObjectLockAsync(statement, plan.Table.Schema, plan.Table.Name, "ALTER TABLE ALTER COLUMN", cancellationToken).ConfigureAwait(false);
@@ -69,6 +69,6 @@ internal sealed partial class SqlPlanExecutor
         await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.PublishTableAsync(replacement, [], PublishedRegistrations([]),
             replaceExisting: true, cancellationToken) : _catalog.PublishTableAsync(replacement, [], PublishedRegistrations([]),
             replaceExisting: true, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 }

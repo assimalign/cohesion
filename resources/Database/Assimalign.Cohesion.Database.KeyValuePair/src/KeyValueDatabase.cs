@@ -492,11 +492,11 @@ public sealed class KeyValueDatabase : DatabaseInstance
     public async ValueTask<KeyValueEntry?> GetAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueGetRequest(key), cancellationToken).ConfigureAwait(false);
-        var set = (QueryResultSet)result;
+        var set = (DatabaseResultSet)result;
 
         await using (set.ConfigureAwait(false))
         {
-            await foreach (QueryRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 return DecodeEntry(row);
             }
@@ -524,11 +524,11 @@ public sealed class KeyValueDatabase : DatabaseInstance
     public async ValueTask<KeyValuePutResult> PutAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, KeyValuePutOptions? options = null, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValuePutRequest(key, value, options), cancellationToken).ConfigureAwait(false);
-        var set = (QueryResultSet)result;
+        var set = (DatabaseResultSet)result;
 
         await using (set.ConfigureAwait(false))
         {
-            await foreach (QueryRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 return new KeyValuePutResult(row.GetBoolean(0), row.IsNull(1) ? null : row.GetInt64(1));
             }
@@ -572,11 +572,11 @@ public sealed class KeyValueDatabase : DatabaseInstance
     public async ValueTask<bool> ExistsAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueExistsRequest(key), cancellationToken).ConfigureAwait(false);
-        var set = (QueryResultSet)result;
+        var set = (DatabaseResultSet)result;
 
         await using (set.ConfigureAwait(false))
         {
-            await foreach (QueryRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 return row.GetBoolean(0);
             }
@@ -599,18 +599,18 @@ public sealed class KeyValueDatabase : DatabaseInstance
     public async IAsyncEnumerable<KeyValueEntry> ScanAsync(KeyValueDatabaseSession session, KeyValueScanOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueScanRequest(options), cancellationToken).ConfigureAwait(false);
-        var set = (QueryResultSet)result;
+        var set = (DatabaseResultSet)result;
 
         await using (set.ConfigureAwait(false))
         {
-            await foreach (QueryRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 yield return DecodeEntry(row);
             }
         }
     }
 
-    private static KeyValueEntry DecodeEntry(QueryRow row)
+    private static KeyValueEntry DecodeEntry(DatabaseRow row)
         => new(row.GetBytes(0), row.GetBytes(1), row.GetInt64(2));
 
     private KeyValueDatabaseSession RequireOwnSession(KeyValueDatabaseSession session)

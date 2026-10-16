@@ -210,7 +210,7 @@ internal static class SqlReadCommittedProbe
     private static async Task<List<long>> IdsAsync(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
-        await using var set = (QueryResultSet)result;
+        await using var set = (DatabaseResultSet)result;
         var ids = new List<long>();
         await foreach (var row in set.GetRowsAsync())
         {

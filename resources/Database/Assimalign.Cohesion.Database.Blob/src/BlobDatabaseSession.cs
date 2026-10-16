@@ -4,7 +4,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Blob.Internal;
-using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob;
@@ -12,19 +11,25 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <summary>
 /// A blob session: runs its own container operations, and the blob operations and streams of the
 /// containers it returns, one at a time, in autocommit or in its explicit transaction. A blob
-/// session has no query language.
+/// session has no query language and no typed requests, so it has no execute member.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>No execute capability.</b> The session derives the root <see cref="DatabaseSession"/>
+/// directly, not <see cref="DatabaseExecutionSession{TRequest}"/>: the blob model declares its
+/// operations on the session and its containers, and inherits no execute member it would have to
+/// refuse.
+/// </para>
 /// <para>
 /// <b>The session's state, its explicit transaction and the "already active" check are the root
 /// base's</b> (<see cref="DatabaseSession"/>, §6.4 of the concrete-types plan): BEGIN is refused
 /// with "A transaction or operation is already active on this session." while the session's
 /// transaction is usable, while another BEGIN runs, or while an operation (an open blob stream
-/// included) holds the session; a closed session refuses BEGIN and both execute seams with "The
-/// session is closed.", while its container operations and the operations of a container bound to
-/// it check the database first (disposed, then offline) and then report the closed session with
-/// the same message; and disposal ends the running operation, then rolls the open transaction back
-/// as the session's teardown. This type supplies the model's work: the isolation-level and offline
+/// included) holds the session; a closed session refuses BEGIN with "The session is closed.",
+/// while its container operations and the operations of a container bound to it check the
+/// database first (disposed, then offline) and then report the closed session with the same
+/// message; and disposal ends the running operation, then rolls the open transaction back as the
+/// session's teardown. This type supplies the model's work: the isolation-level and offline
 /// refusals of BEGIN, the container operations, and the translation of the kernel's exceptions at
 /// the model boundary.
 /// </para>
@@ -335,31 +340,6 @@ public sealed class BlobDatabaseSession : DatabaseSession
         }
 
         return new BlobDatabaseTransaction(_database.Coordinator, context, _database);
-    }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// A blob session has no query language: every request is refused, after the database's
-    /// disposal and offline checks, with a <see cref="DatabaseException"/> that names the
-    /// session's container operations.
-    /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
-    {
-        _database.EnsureNotDisposed();
-        _database.ThrowIfOffline();
-        throw new DatabaseException("Blob sessions have no query language. Use the session's container operations.");
-    }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// A blob session has no statement language: every statement is refused, after the database's
-    /// disposal and offline checks, with a <see cref="DatabaseException"/>.
-    /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
-    {
-        _database.EnsureNotDisposed();
-        _database.ThrowIfOffline();
-        throw new DatabaseException("Blob sessions have no statement language or server-scoped commands.");
     }
 
     /// <inheritdoc />

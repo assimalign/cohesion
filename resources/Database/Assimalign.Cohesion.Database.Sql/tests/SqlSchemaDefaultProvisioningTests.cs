@@ -413,7 +413,7 @@ public sealed class SqlSchemaDefaultProvisioningTests : IDisposable
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql, CancellationToken cancellationToken = default)
     {
-        await using var result = (await session.ExecuteAsync(sql, cancellationToken: cancellationToken)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(sql, cancellationToken: cancellationToken)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(cancellationToken))
         {

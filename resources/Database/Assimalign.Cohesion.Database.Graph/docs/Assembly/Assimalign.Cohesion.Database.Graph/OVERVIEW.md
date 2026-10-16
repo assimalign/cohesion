@@ -16,7 +16,7 @@
 - `GraphTraversal` selects a start, direction, optional type and maximum depth. `TraverseAsync`
   yields distinct visited nodes, excluding the start.
 - `GraphQueryRequest.FromGql(text)` parses a request and throws `DatabaseParseException` for an
-  error diagnostic. `DatabaseSession.ExecuteAsync(string)` uses the same parser.
+  error diagnostic. `GraphDatabaseSession.ExecuteAsync(string)` uses the same parser.
 - A read that names a label or relationship type the database does not have succeeds: the name
   matches nothing, and the result's `Diagnostics` carries a `COHDBG010` (label) or `COHDBG011`
   (relationship type) warning. The read does not abort an explicit transaction.

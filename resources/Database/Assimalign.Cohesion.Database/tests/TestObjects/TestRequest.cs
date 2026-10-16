@@ -1,24 +1,13 @@
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
-/// A typed request the base suite executes.
+/// A typed request the base suite executes: the request root of <see cref="TestSession"/>.
 /// </summary>
-internal sealed class TestRequest : QueryRequest
+internal sealed class TestRequest : DatabaseRequest
 {
     public TestRequest()
-        : base(new TestStatement())
     {
-    }
-
-    private sealed class TestStatement : QueryStatement
-    {
-        public override QueryExpression Expression { get; } = new TestExpression();
-
-        private sealed class TestExpression : QueryExpression
-        {
-        }
     }
 }

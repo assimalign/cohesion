@@ -15,7 +15,7 @@ internal static class GraphPlanExecutor
 {
     // Finite syntax guarantees termination; this cap also bounds materialization.
     private const int MaximumMatches = 100_000;
-    internal static async ValueTask<QueryResult> ExecuteAsync(GraphDatabase database, GraphOperation operation,
+    internal static async ValueTask<DatabaseResult> ExecuteAsync(GraphDatabase database, GraphOperation operation,
         GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool paths = false)
     {
         operation.EnsureActive();
@@ -99,7 +99,7 @@ internal static class GraphPlanExecutor
             await database.Store.DeleteNodeAsync(id.Value, plan.Query.DetachDelete, operation.Context, token).ConfigureAwait(false);
         }
         if (plan.Query.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
-        var columns = plan.Query.Projections.Select((projection, i) => new QueryColumn
+        var columns = plan.Query.Projections.Select((projection, i) => new DatabaseColumn
         { Name = projection.Alias ?? projection.Variable + (projection.Property is null ? "" : "." + projection.Property), Ordinal = i, Type = DatabaseType.Null }).ToArray();
         var rows = bindings.Select(binding => plan.Query.Projections.Select(projection => projection.Property is { } property
             ? GraphExpressionEvaluator.Property(binding[projection.Variable], property) : binding[projection.Variable]).ToArray()).ToArray();
@@ -250,7 +250,7 @@ internal static class GraphPlanExecutor
     }
 }
 
-internal sealed class GraphMutationResult : QueryResult
+internal sealed class GraphMutationResult : DatabaseResult
 {
     private readonly long _count;
     private readonly IReadOnlyList<Diagnostic> _warnings;
@@ -264,7 +264,7 @@ internal sealed class GraphMutationResult : QueryResult
         _warnings = warnings;
     }
 
-    public override QueryResultStatus Status => QueryResultStatus.Success;
+    public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => _count;
     public override IReadOnlyList<Diagnostic>? Diagnostics => _warnings.Count == 0 ? null : _warnings;
 }

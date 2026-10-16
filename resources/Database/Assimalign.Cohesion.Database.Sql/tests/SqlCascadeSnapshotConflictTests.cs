@@ -400,7 +400,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         const string ownGrandchild = "INSERT INTO g (id, cid) VALUES (102, 12)";
 
         // Act
-        QueryResult deleted;
+        DatabaseResult deleted;
         List<string> childrenInside;
         List<string> grandchildrenInside;
         if (isolationLevel == IsolationLevel.Serializable)
@@ -459,7 +459,7 @@ public sealed class SqlCascadeSnapshotConflictTests
     /// Runs one statement through the executor under a context the coordinator began, the path a
     /// session takes for an explicit transaction.
     /// </summary>
-    private static Task<QueryResult> ExecuteAsync(SqlDatabase database, TransactionContext transaction, string sql)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabase database, TransactionContext transaction, string sql)
         => new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions)
             .ExecuteAsync(SqlQueryRequest.FromSql(sql), new SqlStatementContext(transaction, database.Coordinator), TestTimeout.Token());
 
@@ -467,9 +467,9 @@ public sealed class SqlCascadeSnapshotConflictTests
         => await ReadRowsAsync(await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token()));
 
     /// <summary>Reads each row as its values joined with commas.</summary>
-    private static async Task<List<string>> ReadRowsAsync(QueryResult result)
+    private static async Task<List<string>> ReadRowsAsync(DatabaseResult result)
     {
-        await using var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        await using var set = result.ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         var rows = new List<string>();
         await foreach (var row in set.GetRowsAsync(TestTimeout.Token()))
         {

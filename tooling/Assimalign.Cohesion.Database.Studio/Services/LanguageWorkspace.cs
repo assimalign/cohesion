@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Studio;
 
@@ -126,11 +127,11 @@ internal abstract class LanguageWorkspace : ModelWorkspace
         return outcome.Table;
     }
 
-    protected static Task FillFromQueryResultAsync(StatementOutcome outcome, QueryResult result, CancellationToken cancellationToken)
-        => QueryResultReader.FillAsync(outcome, result, cancellationToken);
+    protected static Task FillFromDatabaseResultAsync(StatementOutcome outcome, DatabaseResult result, CancellationToken cancellationToken)
+        => DatabaseResultReader.FillAsync(outcome, result, cancellationToken);
 
     protected static TabularResult ToTable(IEnumerable<(string Name, string Type)> columns, IEnumerable<IReadOnlyList<object?>> rows)
-        => QueryResultReader.ToTable(columns, rows);
+        => DatabaseResultReader.ToTable(columns, rows);
 
     private void AddParserDiagnostics(StatementOutcome outcome, string editorText)
     {
@@ -148,7 +149,7 @@ internal abstract class LanguageWorkspace : ModelWorkspace
 
         foreach (Diagnostic diagnostic in parsed.Diagnostics)
         {
-            DiagnosticInfo info = QueryResultReader.ToInfo("parser", diagnostic, outcome.StatementOffset, editorText);
+            DiagnosticInfo info = DatabaseResultReader.ToInfo("parser", diagnostic, outcome.StatementOffset, editorText);
             bool duplicate = outcome.Diagnostics.Any(existing =>
                 existing.Code == info.Code && existing.AbsoluteStart == info.AbsoluteStart && existing.Message == info.Message);
             if (!duplicate)
@@ -163,7 +164,7 @@ internal abstract class LanguageWorkspace : ModelWorkspace
             DiagnosticInfo existing = outcome.Diagnostics[i];
             if (existing.AbsoluteStart is { } absolute && existing.Position.Length == 0)
             {
-                outcome.Diagnostics[i] = existing with { Position = QueryResultReader.LineColumn(editorText, absolute) };
+                outcome.Diagnostics[i] = existing with { Position = DatabaseResultReader.LineColumn(editorText, absolute) };
             }
         }
     }

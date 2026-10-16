@@ -20,7 +20,7 @@ public sealed class KeyValuePutRequest : KeyValueRequest
     /// <param name="options">Write conditions, or null for an unconditional upsert.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="key"/> is empty, or when <paramref name="options"/> combines <see cref="KeyValuePutOptions.OnlyIfAbsent"/> with <see cref="KeyValuePutOptions.ExpectedETag"/>.</exception>
     public KeyValuePutRequest(ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, KeyValuePutOptions? options = null)
-        : base(new KeyValueStatement(KeyValueOperation.Put))
+        : base(KeyValueOperation.Put)
     {
         if (key.IsEmpty)
         {

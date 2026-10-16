@@ -27,10 +27,10 @@ public sealed class GraphQueryTests
         alice.Properties["age"].ShouldBe(42L);
         (await database.GetNodeAsync(session, alice.Id)).ShouldNotBeNull();
         await session.ExecuteAsync("INSERT (:Person {name: 'Bob', age: 17, active: FALSE})");
-        await using var result = (QueryResultSet)await session.ExecuteAsync(
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(
             "MATCH (a:Person) WHERE a.age >= 18 AND a.age <= 42 AND a.age > 17 AND a.age < 43 AND a.name <> 'Bob' AND a.active = TRUE RETURN a.name AS person, a.age, a.optional");
         result.Columns.Select(column => column.Name).ShouldBe(["person", "a.age", "a.optional"]);
-        var rows = new List<QueryRow>();
+        var rows = new List<DatabaseRow>();
         await foreach (var row in result.GetRowsAsync()) { rows.Add(row); }
         rows.Count.ShouldBe(1);
         rows[0].GetString(0).ShouldBe("Alice");
@@ -376,17 +376,17 @@ public sealed class GraphQueryTests
         foreach (var pattern in new[] { legacy, paired })
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([pattern], [])], null, [], [], false, [new GqlProjection("a", "k")]));
-            await using var result = (QueryResultSet)await session.ExecuteAsync(new GraphQueryRequest(statement));
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync(new GraphQueryRequest(statement));
             var values = new List<object?>();
             await foreach (var row in result.GetRowsAsync()) { values.Add(row.GetValue(0)); }
             values.ShouldBe([1L]);
         }
     }
 
-    private static async Task<List<QueryRow>> Rows(GraphDatabaseSession session, string query)
+    private static async Task<List<DatabaseRow>> Rows(GraphDatabaseSession session, string query)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(query);
-        List<QueryRow> rows = [];
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(query);
+        List<DatabaseRow> rows = [];
         await foreach (var row in result.GetRowsAsync()) { rows.Add(row); }
         return rows;
     }

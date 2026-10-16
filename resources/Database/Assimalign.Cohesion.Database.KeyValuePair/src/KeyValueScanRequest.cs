@@ -17,7 +17,7 @@ public sealed class KeyValueScanRequest : KeyValueRequest
     /// <param name="options">Scan bounds and limits, or null to scan the whole key space.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="options"/> combines a prefix with explicit bounds, or carries a negative limit.</exception>
     public KeyValueScanRequest(KeyValueScanOptions? options = null)
-        : base(new KeyValueStatement(KeyValueOperation.Scan))
+        : base(KeyValueOperation.Scan)
     {
         if (options is not null)
         {

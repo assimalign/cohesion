@@ -3,9 +3,9 @@ using System;
 namespace Assimalign.Cohesion.Database.Execution;
 
 /// <summary>
-/// Represents a single row within a query result set.
+/// Represents a single row within a database result set.
 /// </summary>
-public abstract class QueryRow
+public abstract class DatabaseRow
 {
     /// <summary>
     /// Gets the number of fields in this row.

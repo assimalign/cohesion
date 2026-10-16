@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 public sealed partial class SqlQueryParser
 {

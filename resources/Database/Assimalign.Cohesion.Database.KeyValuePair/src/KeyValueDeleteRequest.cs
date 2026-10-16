@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>
 /// A delete, optionally conditional. The result is a plain
-/// <see cref="Assimalign.Cohesion.Database.Execution.QueryResult"/> whose
+/// <see cref="Assimalign.Cohesion.Database.Execution.DatabaseResult"/> whose
 /// <c>AffectedCount</c> is 1 when an entry was deleted and 0 otherwise (no
 /// visible entry, or the compare-and-swap condition did not hold — a first-class
 /// outcome, never an exception).
@@ -18,7 +18,7 @@ public sealed class KeyValueDeleteRequest : KeyValueRequest
     /// <param name="expectedETag">The etag the key's current entry must carry for the delete to apply, or null for an unconditional delete.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="key"/> is empty.</exception>
     public KeyValueDeleteRequest(ReadOnlyMemory<byte> key, long? expectedETag = null)
-        : base(new KeyValueStatement(KeyValueOperation.Delete))
+        : base(KeyValueOperation.Delete)
     {
         if (key.IsEmpty)
         {

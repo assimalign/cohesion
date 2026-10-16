@@ -37,7 +37,7 @@ public sealed class SqlUnaryPlusExecutionTests
         // Act
         await using var result = (await session.ExecuteAsync(
             "SELECT +tiny, +small, +whole, +big, +single, +approximate, +exact, +missing, +(whole + 1), +@p, + +whole, - +whole, +1 FROM v",
-            parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+            parameters, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = await ReadRowsAsync(result);
 
         // Assert
@@ -197,11 +197,11 @@ public sealed class SqlUnaryPlusExecutionTests
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))

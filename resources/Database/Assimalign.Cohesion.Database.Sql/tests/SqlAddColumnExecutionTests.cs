@@ -143,12 +143,12 @@ public sealed class SqlAddColumnExecutionTests
         rows[1].ShouldBe(new object?[] { 2, null });
     }
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql)
         => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask();
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

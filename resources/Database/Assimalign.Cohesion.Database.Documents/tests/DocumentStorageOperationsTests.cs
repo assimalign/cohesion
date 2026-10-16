@@ -110,7 +110,7 @@ public sealed class DocumentStorageOperationsTests
 
         // The execute seams' argument checks are the base's too, ahead of the offline refusal the
         // model made first.
-        var nullRequest = await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((QueryRequest)null!));
+        var nullRequest = await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((DocumentQueryRequest)null!));
         var blankStatement = await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" "));
 
         // Every worker runs a pass, with a checkpoint due by size; then the sessions close.
@@ -348,7 +348,7 @@ public sealed class DocumentStorageOperationsTests
     {
         var ids = new List<string>();
         var result = await session.ExecuteAsync("SELECT id FROM items");
-        if (result is not QueryResultSet set) { return ids; }
+        if (result is not DatabaseResultSet set) { return ids; }
         await using (set)
         {
             await foreach (var row in set.GetRowsAsync()) { ids.Add(row.GetString(0) ?? "<null>"); }

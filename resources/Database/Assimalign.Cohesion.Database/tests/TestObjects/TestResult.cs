@@ -1,18 +1,18 @@
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
 /// The result the base-suite session's execute cores return.
 /// </summary>
-internal sealed class TestResult : QueryResult
+internal sealed class TestResult : DatabaseResult
 {
     public static TestResult Instance { get; } = new();
 
-    public override QueryResultStatus Status => QueryResultStatus.Success;
+    public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
 
     public override long AffectedCount => 0;
 

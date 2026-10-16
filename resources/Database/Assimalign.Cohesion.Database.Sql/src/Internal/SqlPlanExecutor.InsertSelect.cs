@@ -18,10 +18,10 @@ internal sealed partial class SqlPlanExecutor
     /// before writing. Reading the destination is supported without feeding newly
     /// inserted rows back into the query.
     /// </summary>
-    private async Task<QueryResult> ExecuteInsertSelectAsync(SqlInsertSelectPlan plan, SqlStatementContext statement,
+    private async Task<DatabaseResult> ExecuteInsertSelectAsync(SqlInsertSelectPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        await using var source = (QueryResultSet)await ExecuteAsync(plan.Source, statement, cancellationToken).ConfigureAwait(false);
+        await using var source = (DatabaseResultSet)await ExecuteAsync(plan.Source, statement, cancellationToken).ConfigureAwait(false);
         if (source.Columns.Count != plan.TargetOrdinals.Count)
         {
             throw new DatabaseException(
@@ -46,7 +46,7 @@ internal sealed partial class SqlPlanExecutor
     /// defaults, validate all row constraints, acquire reference and unique locks,
     /// then publish the complete write set within one transactional statement.
     /// </summary>
-    private async Task<QueryResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
+    private async Task<DatabaseResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
         IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
@@ -115,7 +115,7 @@ internal sealed partial class SqlPlanExecutor
                     await InsertIndexEntriesAsync(statement, indexes, table, values,
                         SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
                 }
-                return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, rows.Count);
+                return (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, rows.Count);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)

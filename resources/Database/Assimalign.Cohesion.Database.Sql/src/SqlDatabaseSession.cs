@@ -6,11 +6,11 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -49,12 +49,15 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// a <c>COMMIT</c> of a transaction the kernel ended rolls it back and throws <c>COHSQLT005</c>.
 /// </para>
 /// <para>
-/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root base with
-/// an internal constructor; <see cref="SqlDatabase.CreateSessionAsync"/> creates it. The database
-/// and the transaction are re-exposed typed with <c>new</c> members over the base's public members.
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root's language
+/// base, <see cref="DatabaseLanguageSession{TRequest}"/> over <see cref="SqlQueryRequest"/>, with an
+/// internal constructor; <see cref="SqlDatabase.CreateSessionAsync"/> creates it. The session
+/// inherits both execute members: SQL text, and the typed <see cref="SqlQueryRequest"/>, which is
+/// the only request type it takes. The database and the transaction are re-exposed typed with
+/// <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
-public sealed class SqlDatabaseSession : DatabaseSession
+public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
 {
     private readonly SqlDatabase _database;
     private readonly TransactionCoordinator _coordinator;
@@ -184,25 +187,25 @@ public sealed class SqlDatabaseSession : DatabaseSession
     }
 
     /// <inheritdoc />
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken)
         => ExecuteRequestAsync(request, cancellationToken);
 
     /// <inheritdoc />
     /// <remarks>
-    /// The model-agnostic text-execute seam: SQL sessions parse the statement with
-    /// the SQL dialect, under the engine's expression nesting limit — this is what lets
-    /// the wire-protocol server execute statement text without knowing any model
-    /// language. A parse that runs out of stack fails with <c>COHSQLE004</c>, as any
-    /// other walk over the statement does.
+    /// The SQL session's text seam: the statement is parsed with the SQL dialect, under the
+    /// engine's expression nesting limit, into the <see cref="SqlQueryRequest"/> the typed member
+    /// takes. The SQL wire server executes the statement text it receives through this member of
+    /// its typed session. A parse that runs out of stack fails with <c>COHSQLE004</c>, as any other
+    /// walk over the statement does.
     /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
         => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken);
 
     /// <summary>Executes one request with a receipt that cannot attach to any later session request.</summary>
-    internal ValueTask<QueryResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
+    internal ValueTask<DatabaseResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
         => ExecuteRequestAsync(request, cancellationToken, receipt);
 
-    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
+    private async ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
         _database.ThrowIfOffline();
         // The statement's own metrics are the ones set after this point; a statement that fails
@@ -254,7 +257,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         {
             try
             {
-                if (request is SqlQueryRequest { Statement.SqlExpression: SqlDropTableExpression })
+                if (request.Statement.SqlExpression is SqlDropTableExpression)
                 {
                     _database.TableReclamation.Request();
                 }
@@ -264,7 +267,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         }
     }
 
-    private void TraceStatementCompletion(QueryRequest request, SqlStatementMetrics? previousMetrics)
+    private void TraceStatementCompletion(SqlQueryRequest request, SqlStatementMetrics? previousMetrics)
     {
         // Metrics are already owned by execution. Keep reporting locals out of the async
         // state machine: Debug hoists them, increasing the allocation even while tracing is off.
@@ -274,9 +277,9 @@ public sealed class SqlDatabaseSession : DatabaseSession
             {
                 SqlDatabaseEventSource.Log.StatementPlanned(_database.Name, metrics);
             }
-            if (metrics.SelfCommits > 0 && request is SqlQueryRequest sql)
+            if (metrics.SelfCommits > 0)
             {
-                SqlDatabaseEventSource.Log.DdlSelfCommitted(_database.Name, sql.Statement.SqlExpression.CommandType);
+                SqlDatabaseEventSource.Log.DdlSelfCommitted(_database.Name, request.Statement.SqlExpression.CommandType);
             }
         }
     }
@@ -288,9 +291,9 @@ public sealed class SqlDatabaseSession : DatabaseSession
     /// </summary>
     /// <param name="request">The request.</param>
     /// <returns>True for a <c>CREATE</c>, <c>ALTER</c> or <c>DROP</c> statement.</returns>
-    private static bool IsSelfCommitting(QueryRequest request)
-        => request is SqlQueryRequest { Statement.SqlExpression.CommandType:
-            SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop };
+    private static bool IsSelfCommitting(SqlQueryRequest request)
+        => request.Statement.SqlExpression.CommandType is
+            SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop;
 
     /// <summary>
     /// Reports whether a failed request is a self-committing statement that had committed at
@@ -306,59 +309,56 @@ public sealed class SqlDatabaseSession : DatabaseSession
     /// <param name="request">The failed request.</param>
     /// <param name="previousMetrics">The session's last metrics before the request ran.</param>
     /// <returns>True when the statement committed a visible catalog change before it failed.</returns>
-    private bool SelfCommitted(QueryRequest request, SqlStatementMetrics? previousMetrics)
+    private bool SelfCommitted(SqlQueryRequest request, SqlStatementMetrics? previousMetrics)
         => IsSelfCommitting(request)
             && _lastStatementMetrics is { SelfCommits: > 0 } metrics
             && !ReferenceEquals(metrics, previousMetrics);
 
-    private ValueTask<QueryResult> ExecuteStatementAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
+    private ValueTask<DatabaseResult> ExecuteStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
         => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt) : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
 
-    private async ValueTask<QueryResult> ExecuteMetadataStatementAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
+    private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
-        using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), request is SqlQueryRequest
-            { Statement.SqlExpression: SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression });
+        using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), request.Statement.SqlExpression
+            is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression);
         return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
     }
 
-    private async ValueTask<QueryResult> ExecuteStatementCoreAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
+    private async ValueTask<DatabaseResult> ExecuteStatementCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
         // must not become a full ROLLBACK while savepoints remain unsupported).
-        if (request is SqlQueryRequest parsed)
+        foreach (var diagnostic in request.Statement.Diagnostics)
         {
-            foreach (var diagnostic in parsed.Statement.Diagnostics)
+            if (diagnostic.Severity == DiagnosticSeverity.Error)
             {
-                if (diagnostic.Severity == DiagnosticSeverity.Error)
+                if (diagnostic.Code is "SQL0006" or "SQL0007")
                 {
-                    if (diagnostic.Code is "SQL0006" or "SQL0007")
-                    {
-                        SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, parsed.Statement.ExpressionNestingDepth);
-                    }
-                    return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
-                        [.. parsed.Statement.Diagnostics]);
+                    SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, request.Statement.ExpressionNestingDepth);
                 }
+                return new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
+                    [.. request.Statement.Diagnostics]);
             }
-
-            // A typed request was parsed by its caller, possibly with a higher nesting limit than
-            // this engine's. The parser recorded how deep the statement nests, so the engine's
-            // limit holds on this seam too, exactly as if the engine had parsed the text (#1151).
-            // A statement over a subquery taken out of a parsed statement has no parser's measure
-            // and is held to the depth of its own tree, which is what the walks below recurse over.
-            if (parsed.Statement.ExpressionNestingDepth > _parserOptions.ExpressionNestingLimit)
-            {
-                SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, parsed.Statement.ExpressionNestingDepth);
-                return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
-                    [NestingLimitDiagnostic(parsed.Statement.ExpressionNestingDepth)]);
-            }
-
-            SqlSystemViews.EnsureReadOnly(parsed.Statement.SqlExpression);
         }
+
+        // A typed request was parsed by its caller, possibly with a higher nesting limit than
+        // this engine's. The parser recorded how deep the statement nests, so the engine's
+        // limit holds on this seam too, exactly as if the engine had parsed the text (#1151).
+        // A statement over a subquery taken out of a parsed statement has no parser's measure
+        // and is held to the depth of its own tree, which is what the walks below recurse over.
+        if (request.Statement.ExpressionNestingDepth > _parserOptions.ExpressionNestingLimit)
+        {
+            SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, request.Statement.ExpressionNestingDepth);
+            return new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
+                [NestingLimitDiagnostic(request.Statement.ExpressionNestingDepth)]);
+        }
+
+        SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
 
         // Control commands bind to the session before an auto-commit context is
         // opened. Their result follows the ordinary query/wire diagnostic path.
-        if (request is SqlQueryRequest { Statement.SqlExpression: SqlTransactionExpression control })
+        if (request.Statement.SqlExpression is SqlTransactionExpression control)
         {
             _lastStatementMetrics = null;
             return await ExecuteTransactionControlAsync(control, cancellationToken).ConfigureAwait(false);
@@ -444,7 +444,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
                 _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress, scriptReceipt);
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
-            if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == QueryResultStatus.Success)
+            if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
             {
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
             }
@@ -473,9 +473,9 @@ public sealed class SqlDatabaseSession : DatabaseSession
         }
     }
 
-    private async ValueTask CompleteScriptStatementAsync(QueryResult result, TransactionContext transaction, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
+    private async ValueTask CompleteScriptStatementAsync(DatabaseResult result, TransactionContext transaction, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
     {
-        if (result is QueryResultSet rows)
+        if (result is DatabaseResultSet rows)
         {
             await foreach (var row in rows.GetRowsAsync(cancellationToken).ConfigureAwait(false)) { _ = row; }
         }
@@ -557,7 +557,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         Location = DiagnosticLocation.Absolute,
     };
 
-    private async ValueTask<QueryResult> ExecuteTransactionControlAsync(
+    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
@@ -592,18 +592,18 @@ public sealed class SqlDatabaseSession : DatabaseSession
             }
         }
 
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private static QueryResult TransactionDiagnostic(string code, string message)
-        => new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+    private static DatabaseResult TransactionDiagnostic(string code, string message)
+        => new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
             [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
 
     // Ordinary DML does not enumerate the catalog just to construct a context.
     // Explicit Snapshot transactions capture at BEGIN even if their first metadata
     // SELECT comes later; read committed and auto-commit capture at statement start.
-    private SqlCatalogSnapshot? CaptureSystemViewSnapshot(QueryRequest request)
-        => request is SqlQueryRequest sql && UsesSystemView(sql.Statement.SqlExpression)
+    private SqlCatalogSnapshot? CaptureSystemViewSnapshot(SqlQueryRequest request)
+        => UsesSystemView(request.Statement.SqlExpression)
             ? _executor.CaptureCatalogSnapshot() : null;
 
     /// <summary>Captures metadata once for nested SELECTs and INSERT sources as well as the outer relation.</summary>

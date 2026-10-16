@@ -95,7 +95,7 @@ public sealed class SqlStorageSemanticsParityTests
             ? "SELECT id, parent_id, qty, email FROM child WHERE qty >= 3 ORDER BY id"
             : "SELECT id, parent_id, qty, email FROM child ORDER BY id";
         var result = (await session.ExecuteAsync(query))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<ChildRow>();
         await foreach (var row in result.GetRowsAsync())
         {

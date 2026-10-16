@@ -12,7 +12,6 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
-using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -36,9 +35,8 @@ public sealed class BlobStorageOperationsTests
     /// is refused with COHDBB002, and nothing reaches the file set, through the workers' passes
     /// and the sessions' close included. The root bases' checks come first (concrete-types plan
     /// §6.4): BEGIN on the session holding the open transaction is refused as already active, a
-    /// canceled token is refused before the offline refusal of a new session, both execute seams
-    /// and BEGIN, the execute seams' argument checks come before it too, and the transaction whose
-    /// session closed reports Faulted. Reopening the database runs recovery, which keeps the
+    /// canceled token is refused before the offline refusal of a new session and BEGIN, and the
+    /// transaction whose session closed reports Faulted. A blob session has no execute member. Reopening the database runs recovery, which keeps the
     /// upload when its commit record's bytes survived and drops it when they were lost with the
     /// failed fsync.
     /// </summary>
@@ -95,7 +93,6 @@ public sealed class BlobStorageOperationsTests
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateSessionAsync(token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await AutocommitContainer.CreateAsync(database, "late", token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.CreateContainerAsync("late", token)),
-            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.ExecuteAsync("LIST files", null, token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.OpenReadAsync("kept", token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.OpenWriteAsync("late", cancellationToken: token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.GetPropertiesAsync("kept", token)),
@@ -108,17 +105,15 @@ public sealed class BlobStorageOperationsTests
 
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
-        // token is refused before the offline refusal of a new session, both execute seams and
-        // BEGIN. Before the bases, each of these was refused with COHDBB002. The container and blob
-        // operations do not pass the session's execute seams, so their order holds.
+        // token is refused before the offline refusal of a new session and BEGIN. Before the bases,
+        // each of these was refused with COHDBB002. A blob session has no execute member; the
+        // container and blob operations check the database first, so their order holds.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync(token));
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
         var canceledCalls = new List<OperationCanceledException>
         {
             await Should.ThrowAsync<OperationCanceledException>(async () => await database.CreateSessionAsync(canceled.Token)),
-            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(new BlobRequest(), canceled.Token)),
-            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("LIST files", null, canceled.Token)),
             await Should.ThrowAsync<OperationCanceledException>(async () => await session.BeginTransactionAsync(canceled.Token)),
         };
         var containerRefusals = new List<DatabaseOfflineException>
@@ -126,11 +121,6 @@ public sealed class BlobStorageOperationsTests
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.GetPropertiesAsync("kept", canceled.Token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.GetContainerAsync("files", canceled.Token)),
         };
-
-        // The execute seams' argument checks are the base's too, ahead of the offline refusal the
-        // model made first.
-        var nullRequest = await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((QueryRequest)null!));
-        var blankStatement = await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" "));
 
         // Over the wire: an operation on a session opened before the failure, and a new session.
         await WriteAsync(wire, (ProtocolMessageType)BlobProtocolMessageType.Read, new BlobReadMessage("files", "kept").Encode(), token);
@@ -167,8 +157,6 @@ public sealed class BlobStorageOperationsTests
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
         containerRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002");
-        nullRequest.ParamName.ShouldBe("request");
-        blankStatement.ParamName.ShouldBe("statement");
         closedState.ShouldBe(TransactionState.Faulted);
         operationError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         operationError.Message.ShouldStartWith("COHDBB002", Case.Sensitive);

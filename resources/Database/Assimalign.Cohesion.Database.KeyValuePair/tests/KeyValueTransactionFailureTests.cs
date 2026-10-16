@@ -215,7 +215,7 @@ public sealed class KeyValueTransactionFailureTests
         // Act
         var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable, TestTimeout.Token()));
         var typed = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new KeyValueGetRequest(Bytes("k")), TestTimeout.Token()));
-        var text = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("GET @k", new Dictionary<string, object?> { ["k"] = Bytes("k") }, TestTimeout.Token()));
+        var text = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteCommandTextAsync("GET @k", new Dictionary<string, object?> { ["k"] = Bytes("k") }, TestTimeout.Token()));
 
         // Assert
         begin.Message.ShouldBe("The session is closed.");
@@ -246,10 +246,10 @@ public sealed class KeyValueTransactionFailureTests
 
         // Act
         var state = transaction.State;
-        var canceledText = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("SCAN", null, canceled.Token));
+        var canceledText = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteCommandTextAsync("SCAN", null, canceled.Token));
         var canceledTyped = await Should.ThrowAsync<OperationCanceledException>(async () => await database.GetAsync(session, Bytes("pending"), canceled.Token));
         var canceledBegin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(canceled.Token));
-        var text = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SCAN", null, TestTimeout.Token()));
+        var text = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteCommandTextAsync("SCAN", null, TestTimeout.Token()));
         var typed = await Should.ThrowAsync<DatabaseException>(async () => await database.GetAsync(session, Bytes("pending"), TestTimeout.Token()));
         await transaction.RollbackAsync(TestTimeout.Token());
 
@@ -478,7 +478,7 @@ public sealed class KeyValueTransactionFailureTests
                 await database.PutAsync(session, Bytes("keep"), Bytes("mine"), cancellationToken: TestTimeout.Token());
                 break;
             case "parse":
-                await session.ExecuteAsync("PUT @k", new Dictionary<string, object?> { ["k"] = Bytes("keep") }, TestTimeout.Token());
+                await session.ExecuteCommandTextAsync("PUT @k", new Dictionary<string, object?> { ["k"] = Bytes("keep") }, TestTimeout.Token());
                 break;
             case "canceled":
             {

@@ -101,15 +101,15 @@ public sealed class SqlTransactionControlTests
         foreach (string command in new[] { "COMMIT", "ROLLBACK TRANSACTION" })
         {
             var result = await session.ExecuteAsync(command);
-            result.Status.ShouldBe(QueryResultStatus.Error);
+            result.Status.ShouldBe(DatabaseResultStatus.Error);
             result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT002");
         }
 
-        (await session.ExecuteAsync("BEGIN")).Status.ShouldBe(QueryResultStatus.Success);
+        (await session.ExecuteAsync("BEGIN")).Status.ShouldBe(DatabaseResultStatus.Success);
         var transaction = session.CurrentTransaction.ShouldNotBeNull();
         transaction.IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
         var nested = await session.ExecuteAsync("BEGIN TRANSACTION");
-        nested.Status.ShouldBe(QueryResultStatus.Error);
+        nested.Status.ShouldBe(DatabaseResultStatus.Error);
         nested.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT001");
         session.CurrentTransaction.ShouldBeSameAs(transaction);
         await session.ExecuteAsync("ROLLBACK");
@@ -131,7 +131,7 @@ public sealed class SqlTransactionControlTests
         var invalid = (SqlQueryStatement)new SqlQueryParser().Parse("ROLLBACK TO marker");
 
         var result = await session.ExecuteAsync(new SqlQueryRequest(invalid));
-        result.Status.ShouldBe(QueryResultStatus.Error);
+        result.Status.ShouldBe(DatabaseResultStatus.Error);
         result.Diagnostics.ShouldNotBeNull().ShouldNotBeEmpty();
         transaction.State.ShouldBe(TransactionState.Active);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
@@ -147,7 +147,7 @@ public sealed class SqlTransactionControlTests
         await session.ExecuteAsync("CREATE TABLE t (id INT)");
         await session.ExecuteAsync("BEGIN");
         var result = await session.ExecuteAsync("DROP TABLE t");
-        result.Status.ShouldBe(QueryResultStatus.Error);
+        result.Status.ShouldBe(DatabaseResultStatus.Error);
         result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT003");
         (await session.ExecuteAsync("INSERT INTO t VALUES (1)")).AffectedCount.ShouldBe(1);
         await session.ExecuteAsync("ROLLBACK");

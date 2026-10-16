@@ -116,7 +116,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
         // Assert
         text.Message.ShouldStartWith("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 256 levels.", Case.Sensitive);
-        typed.Status.ShouldBe(QueryResultStatus.Error);
+        typed.Status.ShouldBe(DatabaseResultStatus.Error);
         typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "SQL0006");
         (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
     }
@@ -328,7 +328,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         typedAtLimit.ShouldBe(32L);
         foreach (var (result, depth) in new[] { (typedPastLimit, 40), (typedParentheses, 33) })
         {
-            result.Status.ShouldBe(QueryResultStatus.Error);
+            result.Status.ShouldBe(DatabaseResultStatus.Error);
             var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
             diagnostic.Code.ShouldBe("SQL0006");
             diagnostic.Message.ShouldBe($"Expression nesting of {Number(depth)} levels exceeds this engine's limit of 32 levels.");
@@ -361,7 +361,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         // Assert: the IN node is a level over its subquery.
         foreach (var (result, depth) in new[] { (whole, 42), (extracted, 41) })
         {
-            result.Status.ShouldBe(QueryResultStatus.Error);
+            result.Status.ShouldBe(DatabaseResultStatus.Error);
             var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
             diagnostic.Code.ShouldBe("SQL0006");
             diagnostic.Message.ShouldBe($"Expression nesting of {Number(depth)} levels exceeds this engine's limit of 32 levels.");
@@ -558,7 +558,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         builder.Options.ExpressionNestingLimit.ShouldBe(40);
         atLimit.ShouldBe(40L);
         pastLimit.Message.ShouldBe("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 40 levels.");
-        typedPastLimit.Status.ShouldBe(QueryResultStatus.Error);
+        typedPastLimit.Status.ShouldBe(DatabaseResultStatus.Error);
         var diagnostic = typedPastLimit.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe("SQL0006");
         diagnostic.Message.ShouldBe($"Expression nesting of {Number(41)} levels exceeds this engine's limit of 40 levels.");
@@ -592,7 +592,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         AssertStatementTooComplex(failure);
         (await ScalarAsync(session, "SELECT name FROM t")).ShouldBe("a");
         var result = await session.ExecuteAsync(request);
-        if (result is QueryResultSet)
+        if (result is DatabaseResultSet)
         {
             (await ReadScalarAsync(result)).ShouldBe(1L);
         }
@@ -968,7 +968,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         OnLargeStack(async () => await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Predicate(depth)}))"))
-            .Status.ShouldBe(QueryResultStatus.Success);
+            .Status.ShouldBe(DatabaseResultStatus.Success);
         string? canonical = Table(database, "c").Constraints.Single(constraint => constraint.Name == "ck").CheckExpression;
 
         // Act
@@ -1252,7 +1252,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var rows = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>()!;
+        await using var rows = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>()!;
         var result = new List<object?[]>();
         await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
         {
@@ -1266,9 +1266,9 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         return result;
     }
 
-    private static async Task<object?> ReadScalarAsync(QueryResult result)
+    private static async Task<object?> ReadScalarAsync(DatabaseResult result)
     {
-        await using var rows = result.ShouldBeAssignableTo<QueryResultSet>();
+        await using var rows = result.ShouldBeAssignableTo<DatabaseResultSet>();
         object? value = null;
         int count = 0;
         await foreach (var row in rows.GetRowsAsync(CancellationToken.None))

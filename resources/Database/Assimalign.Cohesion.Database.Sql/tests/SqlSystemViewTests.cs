@@ -56,7 +56,7 @@ public sealed class SqlSystemViewTests
         indexes[1].ShouldBe(new object?[] { "ix_managed_label", "Schema", "app" });
 
         await using var iso = (await session.ExecuteAsync("SELECT * FROM INFORMATION_SCHEMA.TABLES"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         iso.Columns.Select(column => column.Name).ShouldNotContain("OWNER");
         iso.Columns.Select(column => column.Name).ShouldNotContain("OWNING_SCHEMA");
         var catalog = database.ShouldBeOfType<SqlDatabase>().Catalog;
@@ -90,7 +90,7 @@ public sealed class SqlSystemViewTests
         sizes[1].ShouldBe(new object?[] { "label", 40L, null, null, null });
         sizes[2].ShouldBe(new object?[] { "amount", null, 12L, 10L, 3L });
 
-        await using var result = (await session.ExecuteAsync(query)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(query)).ShouldBeAssignableTo<DatabaseResultSet>();
         result.Columns.Select(column => column.Name).ShouldBe(new[]
             { "COLUMN_NAME", "ORDINAL_POSITION", "DATA_TYPE", "IS_NULLABLE", "COLUMN_DEFAULT" });
         result.Columns[0].Type.ShouldBe(DatabaseType.String);
@@ -360,7 +360,7 @@ public sealed class SqlSystemViewTests
         // Act
         await using var result = (await reader.ExecuteAsync(
             "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'orders' ORDER BY ORDINAL_POSITION"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         await writer.ExecuteAsync("DROP TABLE orders");
         await writer.ExecuteAsync("CREATE TABLE orders (replacement INT)");
 
@@ -447,11 +447,11 @@ public sealed class SqlSystemViewTests
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql,
         IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))

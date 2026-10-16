@@ -63,3 +63,11 @@ remain outside this composition change.
 standalone composition or the concrete hosting builder's build-aware engine
 factory. This lets the consumer pass already resolved values and register nested
 components while keeping the model package dependency-free.
+
+## Session execution (#1576, 2026-10-16)
+
+`DocumentDatabaseSession` derives from `DatabaseLanguageSession<DocumentQueryRequest>`. It offers typed
+and text execution; a foreign-model request fails compilation. `DocumentQueryRequest` owns its typed
+`Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
+use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
+on `DatabaseSession`.

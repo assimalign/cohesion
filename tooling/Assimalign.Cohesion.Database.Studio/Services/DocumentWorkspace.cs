@@ -63,8 +63,8 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
 
     protected override async Task ExecuteStatementAsync(StatementOutcome outcome, ExecuteOptions options, CancellationToken cancellationToken)
     {
-        QueryResult result = await RequireSession().ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
-        await FillFromQueryResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
+        DatabaseResult result = await DocumentSession.ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
+        await FillFromDatabaseResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task<List<CatalogLine>> BuildCatalogAsync(CancellationToken cancellationToken)

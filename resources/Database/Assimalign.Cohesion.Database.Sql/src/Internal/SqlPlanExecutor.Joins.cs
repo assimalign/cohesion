@@ -17,7 +17,7 @@ internal sealed partial class SqlPlanExecutor
     /// use the same captured statement snapshot, including every index cursor.
     /// Table intent locks protect definitions; MVCC readers need no FK row locks.
     /// </summary>
-    private async Task<QueryResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         foreach (var binding in plan.Bindings.OrderBy(binding => binding.Table.ObjectId))
         {

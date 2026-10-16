@@ -320,7 +320,7 @@ public sealed class SqlArithmeticFaultTests
         rows[2].ShouldBe(new object?[] { 3, 30 });
         (await ScalarAsync(observer, "SELECT COUNT(*) FROM numbers")).ShouldBe(2L);
 
-        (await ExecuteAsync(session, commit ? "COMMIT" : "ROLLBACK")).Status.ShouldBe(QueryResultStatus.Success);
+        (await ExecuteAsync(session, commit ? "COMMIT" : "ROLLBACK")).Status.ShouldBe(DatabaseResultStatus.Success);
         transaction.State.ShouldBe(commit ? TransactionState.Committed : TransactionState.RolledBack);
         (await ScalarAsync(observer, "SELECT COUNT(*) FROM numbers")).ShouldBe(commit ? 3L : 2L);
         (await ScalarAsync(observer, "SELECT int_value FROM numbers WHERE id = 1")).ShouldBe(-70000);
@@ -434,7 +434,7 @@ public sealed class SqlArithmeticFaultTests
         // Act
         await using var result = (await ExecuteAsync(session,
             "SELECT ABS(tiny_value), ABS(small_value), ABS(int_value), ABS(big_value), ABS(real_value), " +
-            "ABS(double_value), ABS(decimal_value) FROM numbers WHERE id = 1")).ShouldBeAssignableTo<QueryResultSet>();
+            "ABS(double_value), ABS(decimal_value) FROM numbers WHERE id = 1")).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = await ReadRowsAsync(result);
 
         // Assert: REAL stays Float32 rather than throwing, and the metadata matches the values.
@@ -589,12 +589,12 @@ public sealed class SqlArithmeticFaultTests
     {
         var database = await engine.CreateDatabaseAsync("arithmetic");
         var session = await database.CreateSessionAsync(CancellationToken.None);
-        (await ExecuteAsync(session, CreateNumbers)).Status.ShouldBe(QueryResultStatus.Success);
+        (await ExecuteAsync(session, CreateNumbers)).Status.ShouldBe(DatabaseResultStatus.Success);
         (await ExecuteAsync(session, InsertNumbers)).AffectedCount.ShouldBe(2);
         return session;
     }
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(statement, parameters, CancellationToken.None).AsTask();
 
     private static async Task<object?> ScalarAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
@@ -605,13 +605,13 @@ public sealed class SqlArithmeticFaultTests
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await ExecuteAsync(session, statement, parameters)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, statement, parameters)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

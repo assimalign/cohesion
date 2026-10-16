@@ -1,8 +1,11 @@
-﻿namespace Assimalign.Cohesion.Database.Language;
+﻿namespace Assimalign.Cohesion.Database.Types;
 
+/// <summary>
+/// How a <see cref="Diagnostic"/>'s position relates to the source text.
+/// </summary>
 public enum DiagnosticLocation
 {
-    // <summary>
+    /// <summary>
     /// The diagnostic location is known with absolute start and length values.
     /// </summary>
     Absolute,

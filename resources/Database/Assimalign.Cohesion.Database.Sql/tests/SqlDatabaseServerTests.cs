@@ -381,7 +381,7 @@ public class SqlDatabaseServerTests
     {
         await using var reader = await database.CreateSessionAsync(TestTimeout.Token());
         var result = await reader.ExecuteAsync("SELECT COUNT(*) FROM t", cancellationToken: TestTimeout.Token());
-        var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        var set = result.ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         await using (set)
         {
             await foreach (var row in set.GetRowsAsync())

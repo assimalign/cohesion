@@ -7,9 +7,9 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -86,7 +86,7 @@ public sealed class SqlStatementCompletenessExecutionTests
 
         // Assert
         textError.Message.ShouldContain("SQL0003", Case.Sensitive);
-        typed.Status.ShouldBe(QueryResultStatus.Error);
+        typed.Status.ShouldBe(DatabaseResultStatus.Error);
         typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "SQL0003" && diagnostic.Severity == DiagnosticSeverity.Error);
         session.CurrentTransaction.ShouldBeNull();
         (await SnapshotAsync(session)).ShouldBe(before);
@@ -273,7 +273,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     {
         foreach (string statement in withRows ? [.. _schema, .. _rows] : _schema)
         {
-            (await ExecuteAsync(session, statement)).Status.ShouldBe(QueryResultStatus.Success, statement);
+            (await ExecuteAsync(session, statement)).Status.ShouldBe(DatabaseResultStatus.Success, statement);
         }
     }
 
@@ -294,12 +294,12 @@ public sealed class SqlStatementCompletenessExecutionTests
         return [.. t.Select(row => "t:" + string.Join(",", row)), .. u.Select(row => "u:" + string.Join(",", row))];
     }
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement)
     {
-        await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

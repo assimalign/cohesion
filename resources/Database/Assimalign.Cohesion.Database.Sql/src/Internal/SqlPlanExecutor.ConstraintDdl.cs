@@ -190,7 +190,7 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private async Task<QueryResult> ExecuteAddConstraintAsync(SqlAddConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteAddConstraintAsync(SqlAddConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // The backfill below validates every existing row against latest state, so
         // it needs table-grain exclusivity, not the row-grain referential locks
@@ -230,10 +230,10 @@ internal sealed partial class SqlPlanExecutor
 
         // The backfill binds the replacement version, which is the instance published below.
         await PublishConstrainedTableAsync(replacement, [plan.Constraint], statement, cancellationToken, replaceExisting: true).ConfigureAwait(false);
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private async Task<QueryResult> ExecuteAddColumnAsync(SqlAddColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteAddColumnAsync(SqlAddColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireObjectLockAsync(statement, plan.Schema, plan.Name, "ALTER TABLE ADD COLUMN", cancellationToken).ConfigureAwait(false);
         _catalog.TryGetTable(plan.Schema, plan.Name, out var table);
@@ -294,7 +294,7 @@ internal sealed partial class SqlPlanExecutor
             }
             _definitions.Adopt(await SelfCommitAsync(statement,
                 (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement, cancellationToken);
-            return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
         // Backfill is logical: missing trailing fields resolve from the immutable
         // replacement metadata. Existing row bytes and MVCC stamps never change;
@@ -330,10 +330,10 @@ internal sealed partial class SqlPlanExecutor
         {
             await PublishConstrainedTableAsync(replacement, plan.Constraints, statement, cancellationToken, replaceExisting: true).ConfigureAwait(false);
         }
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private async Task<QueryResult> ExecuteDropConstraintAsync(SqlDropConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteDropConstraintAsync(SqlDropConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireObjectLockAsync(statement, plan.Table.Schema, plan.Table.Name, "ALTER TABLE DROP CONSTRAINT", cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
@@ -352,7 +352,7 @@ internal sealed partial class SqlPlanExecutor
             throw new DatabaseException($"Constraint '{plan.ConstraintName}' does not exist on '{plan.Table.Name}'.");
         }
 
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
     private void EnsureCanDropIndex(SqlCatalogTable table, SqlCatalogIndex index)

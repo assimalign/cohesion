@@ -8,6 +8,10 @@ this project so ordering is consistent across every database model.
 
 ## Scope
 
+- **Diagnostics** — `Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` are shared
+  by language parsers and model-neutral execution results. Their names and members are unchanged
+  after the move from Language (#1577, 2026-10-16).
+
 - **Type identity** — the `DatabaseType` scalar set (boolean, integers, floats,
   decimal, fixed-length character, string, binary, date/time family, GUID, JSON) and
   `DatabaseTypeInfo` constraints (length/precision/scale). Character retains a distinct
@@ -32,7 +36,8 @@ this project so ordering is consistent across every database model.
 ## Dependencies
 
 None — a leaf kernel project. Consumers: `Database.Indexing` (key composition),
-`Database.Execution` (value typing), per-model catalogs and planners.
+`Database.Execution` (value typing and diagnostics), `Database.Language` (diagnostic production),
+per-model catalogs and planners.
 
 ## Usage
 

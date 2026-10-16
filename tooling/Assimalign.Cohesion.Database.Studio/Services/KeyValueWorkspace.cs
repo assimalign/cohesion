@@ -62,6 +62,10 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
 
     public override KeyValueDatabaseSession? Session => _session;
 
+    // The typed embedded session: key-value requests execute on the session's typed member, which
+    // the lifecycle-only ModelWorkspace.RequireSession() does not reach.
+    private KeyValueDatabaseSession KeyValueSession => _session ?? throw new InvalidOperationException("Select a database first.");
+
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {
         KeyValueDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
@@ -153,13 +157,13 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
                     _ => null,
                 };
 
-                QueryResult result = await RequireSession().ExecuteAsync(new KeyValuePutRequest(key, value, options), token).ConfigureAwait(false);
+                DatabaseResult result = await KeyValueSession.ExecuteAsync(new KeyValuePutRequest(key, value, options), token).ConfigureAwait(false);
                 ThrowIfError(result);
-                if (result is QueryResultSet set)
+                if (result is DatabaseResultSet set)
                 {
                     await using (set.ConfigureAwait(false))
                     {
-                        await foreach (QueryRow row in set.GetRowsAsync(token).ConfigureAwait(false))
+                        await foreach (DatabaseRow row in set.GetRowsAsync(token).ConfigureAwait(false))
                         {
                             return (row.GetBoolean(0), row.IsNull(1) ? null : row.GetInt64(1));
                         }
@@ -188,9 +192,9 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
         {
             if (Mode == ConnectionMode.Embedded)
             {
-                QueryResult result = await RequireSession().ExecuteAsync(new KeyValueDeleteRequest(key, expectedETag), token).ConfigureAwait(false);
+                DatabaseResult result = await KeyValueSession.ExecuteAsync(new KeyValueDeleteRequest(key, expectedETag), token).ConfigureAwait(false);
                 ThrowIfError(result);
-                if (result is QueryResultSet set)
+                if (result is DatabaseResultSet set)
                 {
                     await set.DisposeAsync().ConfigureAwait(false);
                 }
@@ -209,13 +213,13 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
         {
             if (Mode == ConnectionMode.Embedded)
             {
-                QueryResult result = await RequireSession().ExecuteAsync(new KeyValueExistsRequest(key), token).ConfigureAwait(false);
+                DatabaseResult result = await KeyValueSession.ExecuteAsync(new KeyValueExistsRequest(key), token).ConfigureAwait(false);
                 ThrowIfError(result);
-                if (result is QueryResultSet set)
+                if (result is DatabaseResultSet set)
                 {
                     await using (set.ConfigureAwait(false))
                     {
-                        await foreach (QueryRow row in set.GetRowsAsync(token).ConfigureAwait(false))
+                        await foreach (DatabaseRow row in set.GetRowsAsync(token).ConfigureAwait(false))
                         {
                             return row.GetBoolean(0);
                         }
@@ -261,12 +265,12 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
             KeyValueDatabaseSession? admin = null;
             try
             {
-                DatabaseSession session = Mode == ConnectionMode.Embedded
-                    ? RequireSession()
+                KeyValueDatabaseSession session = Mode == ConnectionMode.Embedded
+                    ? KeyValueSession
                     : admin = await OpenAdminSessionAsync(token).ConfigureAwait(false);
-                QueryResult result = await session.ExecuteAsync(new KeyValueKeySpacesRequest(), token).ConfigureAwait(false);
+                DatabaseResult result = await session.ExecuteAsync(new KeyValueKeySpacesRequest(), token).ConfigureAwait(false);
                 var outcome = new StatementOutcome { Statement = "KEYSPACES" };
-                await QueryResultReader.FillAsync(outcome, result, token).ConfigureAwait(false);
+                await DatabaseResultReader.FillAsync(outcome, result, token).ConfigureAwait(false);
                 return outcome.Table ?? new TabularResult { Columns = [], ColumnTypes = [] };
             }
             finally
@@ -280,14 +284,14 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
 
     private async Task<List<KeyValueItem>> ReadEntriesAsync(KeyValueRequest request, CancellationToken cancellationToken)
     {
-        QueryResult result = await RequireSession().ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+        DatabaseResult result = await KeyValueSession.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
         ThrowIfError(result);
         var items = new List<KeyValueItem>();
-        if (result is QueryResultSet set)
+        if (result is DatabaseResultSet set)
         {
             await using (set.ConfigureAwait(false))
             {
-                await foreach (QueryRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+                await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     items.Add(new KeyValueItem(row.GetBytes(0).ToArray(), row.GetBytes(1).ToArray(), row.GetInt64(2)));
                 }
@@ -304,9 +308,9 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
     private static ReadOnlyMemory<byte>? Optional(byte[]? bytes)
         => bytes is null ? (ReadOnlyMemory<byte>?)null : new ReadOnlyMemory<byte>(bytes);
 
-    private static void ThrowIfError(QueryResult result)
+    private static void ThrowIfError(DatabaseResult result)
     {
-        if (result.Status != QueryResultStatus.Success)
+        if (result.Status != DatabaseResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics
                 ? string.Join("; ", diagnostics.Select(d => $"{d.Code}: {d.Message}"))

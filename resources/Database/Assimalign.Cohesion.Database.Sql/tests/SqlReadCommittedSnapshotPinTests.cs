@@ -283,9 +283,9 @@ public sealed class SqlReadCommittedSnapshotPinTests
         => await ReadRowsAsync(await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token()));
 
     /// <summary>Reads each row as its values joined with commas.</summary>
-    private static async Task<List<string>> ReadRowsAsync(QueryResult result)
+    private static async Task<List<string>> ReadRowsAsync(DatabaseResult result)
     {
-        await using var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        await using var set = result.ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         var rows = new List<string>();
         await foreach (var row in set.GetRowsAsync(TestTimeout.Token()))
         {

@@ -158,10 +158,10 @@ public sealed class DocumentIntrospectionTests
         await Should.ThrowAsync<DatabaseParseException>(async () => await ownSession.ExecuteAsync("SELECT * FROM other.COHESION_SCHEMA.INDEXES"));
     }
 
-    private static async Task<List<QueryRow>> RowsAsync(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<DatabaseRow>> RowsAsync(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(query, parameters);
-        var rows = new List<QueryRow>();
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(query, parameters);
+        var rows = new List<DatabaseRow>();
         await foreach (var row in result.GetRowsAsync()) { rows.Add(row); }
         return rows;
     }

@@ -163,9 +163,9 @@ public sealed class MigrationDefaultParityTests
     private static async Task<List<int>> QuantitiesAsync(SqlDatabaseSession session, CancellationToken cancellationToken = default)
     {
         await using var result = (await session.ExecuteAsync("SELECT Quantity FROM Orders ORDER BY Id", cancellationToken: cancellationToken))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         var values = new List<int>();
-        await foreach (QueryRow row in result.GetRowsAsync(cancellationToken))
+        await foreach (DatabaseRow row in result.GetRowsAsync(cancellationToken))
         {
             values.Add(row.GetValue(0).ShouldBeOfType<int>());
         }

@@ -1082,3 +1082,9 @@ returning `ValueTask<IDuplexConnection>`; the base handles shared accept dispatc
 connection tracking. Custom byte-pipe connections derive from `DuplexConnection` or implement
 `IDuplexConnection`. Built-in duplex listeners already satisfy the new contract. Database wire
 framing, handshake and model messages are unchanged.
+
+## Session capability (#1576, 2026-10-16)
+
+`BlobDatabaseSession` derives directly from `DatabaseSession` for lifecycle, state and
+explicit transactions. Blob operations use its container API. It has no execute member
+and inherits no unsupported query-language operation.

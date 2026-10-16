@@ -1191,7 +1191,7 @@ public sealed class SqlWorkerResilienceTests
     {
         await using var session = await database.CreateSessionAsync();
         var result = await session.ExecuteAsync("SELECT COUNT(*) FROM t");
-        var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        var set = result.ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         await using (set)
         {
             await foreach (var row in set.GetRowsAsync())

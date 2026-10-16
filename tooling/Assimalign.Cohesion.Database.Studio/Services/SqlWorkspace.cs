@@ -35,6 +35,10 @@ internal sealed class SqlWorkspace : LanguageWorkspace
 
     public override SqlDatabaseSession? Session => _session;
 
+    // The typed embedded session: SQL text executes on the SQL session's language member, which the
+    // lifecycle-only ModelWorkspace.RequireSession() does not reach.
+    private SqlDatabaseSession SqlSession => _session ?? throw new InvalidOperationException("Select a database first.");
+
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {
         SqlDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
@@ -111,8 +115,8 @@ internal sealed class SqlWorkspace : LanguageWorkspace
     {
         if (Mode == ConnectionMode.Embedded)
         {
-            QueryResult result = await RequireSession().ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
-            await FillFromQueryResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
+            DatabaseResult result = await SqlSession.ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
+            await FillFromDatabaseResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
             return;
         }
 

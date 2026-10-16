@@ -149,7 +149,7 @@ public sealed class SqlFunctionCancellationTests
         // Act
         var failure = await Should.ThrowAsync<Exception>(async () =>
         {
-            await using var result = (QueryResultSet)await session.ExecuteAsync("SELECT CAST(id AS checked_int) FROM t", null, statement.Token);
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT CAST(id AS checked_int) FROM t", null, statement.Token);
             await foreach (var row in result.GetRowsAsync(statement.Token))
             {
                 _ = row.FieldCount;

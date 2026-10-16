@@ -24,7 +24,7 @@ internal sealed class GraphPathsExchange
     public GraphPathsExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
         : base(GraphProtocol.Family)
     {
-        _request = GraphRequest.Create(statement, parameters);
+        _request = GraphRequestEncoder.Create(statement, parameters);
     }
 
     protected override async ValueTask OpenCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,

@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Database.KeyValuePair.Tests</RootNamespace>
 		<OutputType>Exe</OutputType>

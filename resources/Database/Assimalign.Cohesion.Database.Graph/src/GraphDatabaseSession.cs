@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
-using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph;
@@ -35,13 +34,16 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// meanwhile, and so is a BEGIN.
 /// </para>
 /// <para>
-/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root base with
-/// an internal constructor; <see cref="GraphDatabase.CreateSessionAsync"/> creates it. The
-/// database and the transaction are re-exposed typed with <c>new</c> members over the base's
-/// public members.
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root's language
+/// base, <see cref="DatabaseLanguageSession{TRequest}"/> over <see cref="GraphRequest"/>, with an
+/// internal constructor; <see cref="GraphDatabase.CreateSessionAsync"/> creates it. The session
+/// inherits both execute members: GQL text, and the typed <see cref="GraphRequest"/>, whose two
+/// leaves (<see cref="GraphQueryRequest"/> for rows, <see cref="GraphPathsQueryRequest"/> for
+/// paths) are the only request types it takes. The database and the transaction are re-exposed
+/// typed with <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
-public sealed class GraphDatabaseSession : DatabaseSession
+public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
 {
     private readonly GraphDatabase _database;
     private readonly object _sync = new();
@@ -122,12 +124,12 @@ public sealed class GraphDatabaseSession : DatabaseSession
     /// <param name="parse">Parses and validates the statement text into its request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The statement's result.</returns>
-    internal async ValueTask<QueryResult> ExecuteStatementAsync(Func<QueryRequest> parse, CancellationToken cancellationToken)
+    internal async ValueTask<DatabaseResult> ExecuteStatementAsync(Func<GraphRequest> parse, CancellationToken cancellationToken)
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();
         ThrowIfTransactionRefuses();
-        QueryRequest request;
+        GraphRequest request;
         try
         {
             request = parse();
@@ -284,26 +286,27 @@ public sealed class GraphDatabaseSession : DatabaseSession
     }
 
     /// <inheritdoc />
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    /// <remarks>
+    /// The leaf chooses the result shape, never whether the request runs:
+    /// <see cref="GraphPathsQueryRequest"/> returns paths and <see cref="GraphQueryRequest"/> rows.
+    /// </remarks>
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(GraphRequest request, CancellationToken cancellationToken)
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
-        if (request.Statement is not GqlQueryStatement statement)
-        {
-            throw new DatabaseException("A Graph session accepts only GQL statements.");
-        }
-
-        return _database.RunAsync(this, operation => GraphPlanExecutor.ExecuteAsync(_database, operation, statement,
-            request.Parameters, cancellationToken, paths: request is GraphPathsQueryRequest), cancellationToken);
+        return _database.RunAsync(this, operation => GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
+            request.Parameters, cancellationToken, paths: request.Paths), cancellationToken);
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// The model-agnostic text seam the wire server and Studio use: the statement is parsed as GQL
-    /// (<see cref="GraphQueryRequest.FromGql"/>), and a statement that fails to parse aborts an
-    /// explicit transaction as an execution failure does.
+    /// The graph session's text seam: the statement is parsed as GQL
+    /// (<see cref="GraphQueryRequest.FromGql"/>) into the request the typed member takes, and a
+    /// statement that fails to parse aborts an explicit transaction as an execution failure does.
+    /// The wire server parses its statements itself and runs them through
+    /// <see cref="ExecuteStatementAsync"/>.
     /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
         => ExecuteStatementAsync(() => GraphQueryRequest.FromGql(statement, parameters), cancellationToken);
 
     /// <inheritdoc />

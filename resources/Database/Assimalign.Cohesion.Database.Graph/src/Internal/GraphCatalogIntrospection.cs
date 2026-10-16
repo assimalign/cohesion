@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphCatalogIntrospection
 {
-    internal static QueryResult Execute(GraphDatabase database, GraphOperation operation,
+    internal static DatabaseResult Execute(GraphDatabase database, GraphOperation operation,
         GqlQueryExpression query, GqlCatalogSurface surface, CancellationToken token)
     {
         // A hand-built AST must obey the same read-only rule as a parsed SHOW statement.
@@ -78,7 +78,7 @@ internal static class GraphCatalogIntrospection
                 owner == DatabaseObjectOwner.Schema ? "Schema" : "Adhoc", schema]);
     }
 
-    private static QueryColumn[] Columns(GqlCatalogSurface surface)
+    private static DatabaseColumn[] Columns(GqlCatalogSurface surface)
     {
         (string Name, DatabaseType Type)[] definitions = surface switch
         {
@@ -98,10 +98,10 @@ internal static class GraphCatalogIntrospection
                  ("OWNER", DatabaseType.String), ("OWNING_SCHEMA", DatabaseType.String)],
             _ => throw new DatabaseException("COHDBG001: Unknown graph catalog introspection subject."),
         };
-        var columns = new QueryColumn[definitions.Length];
+        var columns = new DatabaseColumn[definitions.Length];
         for (int ordinal = 0; ordinal < definitions.Length; ordinal++)
         {
-            columns[ordinal] = new QueryColumn
+            columns[ordinal] = new DatabaseColumn
             {
                 Name = definitions[ordinal].Name,
                 Type = definitions[ordinal].Type,

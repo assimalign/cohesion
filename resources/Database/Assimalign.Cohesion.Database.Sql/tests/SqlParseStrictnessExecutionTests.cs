@@ -7,8 +7,8 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -100,8 +100,8 @@ public sealed class SqlParseStrictnessExecutionTests
             textError.Message.ShouldStartWith($"SQL parse error {code}: ", Case.Sensitive, context);
             parsed.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
                 .ShouldHaveSingleItem(context).Code.ShouldBe(code, context);
-            typed.Status.ShouldBe(QueryResultStatus.Error, context);
-            typed.ShouldNotBeAssignableTo<QueryResultSet>(context);
+            typed.Status.ShouldBe(DatabaseResultStatus.Error, context);
+            typed.ShouldNotBeAssignableTo<DatabaseResultSet>(context);
             session.CurrentTransaction.ShouldBeNull(context);
             (await SnapshotAsync(session)).ShouldBe(before, context);
         }
@@ -109,7 +109,7 @@ public sealed class SqlParseStrictnessExecutionTests
 
     private static async Task<string[]> SnapshotAsync(SqlDatabaseSession session)
     {
-        await using var result = (await ExecuteAsync(session, "SELECT id, a, b FROM t ORDER BY id;")).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, "SELECT id, a, b FROM t ORDER BY id;")).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<string>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {
@@ -118,6 +118,6 @@ public sealed class SqlParseStrictnessExecutionTests
         return [.. rows];
     }
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 }

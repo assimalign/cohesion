@@ -75,7 +75,7 @@ public sealed class SqlCharacterBoundaryTests
 
         // Act
         (await session.ExecuteAsync($"CREATE TABLE t (c CHAR(3), CONSTRAINT ck_char CHECK ({check}))"))
-            .Status.ShouldBe(QueryResultStatus.Success);
+            .Status.ShouldBe(DatabaseResultStatus.Success);
         await session.ExecuteAsync("INSERT INTO t VALUES ('a')");
 
         // Assert
@@ -351,7 +351,7 @@ public sealed class SqlCharacterBoundaryTests
         await session.ExecuteAsync("INSERT INTO t VALUES ('a')");
 
         // Act
-        (await session.ExecuteAsync("ALTER TABLE t ALTER COLUMN c CHAR(2) NOT NULL")).Status.ShouldBe(QueryResultStatus.Success);
+        (await session.ExecuteAsync("ALTER TABLE t ALTER COLUMN c CHAR(2) NOT NULL")).Status.ShouldBe(DatabaseResultStatus.Success);
 
         // Assert
         (await RowsAsync(session, "SELECT c, c LIKE 'a ' FROM t")).ShouldBe([["a ", true]]);
@@ -483,7 +483,7 @@ public sealed class SqlCharacterBoundaryTests
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql,
         IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

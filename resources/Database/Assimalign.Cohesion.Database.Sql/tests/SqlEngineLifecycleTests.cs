@@ -130,7 +130,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
         await using var verify = await reopened.CreateSessionAsync();
 
         var result = await verify.ExecuteAsync("SELECT id FROM t");
-        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.QueryResultSet>();
+        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.DatabaseResultSet>();
 
         int count = 0;
         await foreach (var _ in rows!.GetRowsAsync())
@@ -162,7 +162,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
         reopenedEngine.State.ShouldBe(EngineState.Running);
         await using var verify = await reopened.CreateSessionAsync();
         var result = await verify.ExecuteAsync("SELECT id FROM t");
-        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.QueryResultSet>();
+        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.DatabaseResultSet>();
 
         int count = 0;
         await foreach (var _ in rows!.GetRowsAsync())

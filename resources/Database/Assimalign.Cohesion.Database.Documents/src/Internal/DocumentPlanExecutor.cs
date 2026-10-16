@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static class DocumentPlanExecutor
 {
-    internal static async ValueTask<QueryResult> ExecuteAsync(DocumentDatabase database, DocumentOperation operation,
+    internal static async ValueTask<DatabaseResult> ExecuteAsync(DocumentDatabase database, DocumentOperation operation,
         OqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         operation.EnsureActive();
@@ -33,7 +33,7 @@ internal static class DocumentPlanExecutor
         };
     }
 
-    private static async ValueTask<QueryResult> ExecuteSelectAsync(DocumentDatabase database, DocumentOperation operation,
+    private static async ValueTask<DatabaseResult> ExecuteSelectAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         var query = plan.Logical.Query;
@@ -59,7 +59,7 @@ internal static class DocumentPlanExecutor
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
 
-    private static QueryResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
+    private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters);
@@ -72,7 +72,7 @@ internal static class DocumentPlanExecutor
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
 
-    private static QueryResult ExecuteRows(DocumentLogicalPlan logical, List<JsonElement> matches,
+    private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<JsonElement> matches,
         DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
         var query = logical.Query;
@@ -114,11 +114,11 @@ internal static class DocumentPlanExecutor
                 return left.Ordinal.CompareTo(right.Ordinal);
             });
         }
-        var columns = new QueryColumn[logical.Projections.Count];
+        var columns = new DatabaseColumn[logical.Projections.Count];
         for (int i = 0; i < columns.Length; i++)
         {
             var types = output.Select(row => GetType(row.Values[i])).Where(type => type != DatabaseType.Null).Distinct().ToArray();
-            columns[i] = new QueryColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = types.Length == 1 ? types[0] : DatabaseType.Null };
+            columns[i] = new DatabaseColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = types.Length == 1 ? types[0] : DatabaseType.Null };
         }
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList());
 
@@ -130,7 +130,7 @@ internal static class DocumentPlanExecutor
         }
     }
 
-    private static async ValueTask<QueryResult> ExecuteCreateIndexAsync(DocumentDatabase database, DocumentOperation operation,
+    private static async ValueTask<DatabaseResult> ExecuteCreateIndexAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentCreateIndexPlan plan, CancellationToken cancellationToken)
     {
         await PrepareIndexChangeAsync(database, operation, plan.Collection, "CREATE INDEX", cancellationToken).ConfigureAwait(false);
@@ -139,7 +139,7 @@ internal static class DocumentPlanExecutor
         return DocumentCommandResult.Success;
     }
 
-    private static async ValueTask<QueryResult> ExecuteDropIndexAsync(DocumentDatabase database, DocumentOperation operation,
+    private static async ValueTask<DatabaseResult> ExecuteDropIndexAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentDropIndexPlan plan, CancellationToken cancellationToken)
     {
         await PrepareIndexChangeAsync(database, operation, plan.Collection, "DROP INDEX", cancellationToken).ConfigureAwait(false);

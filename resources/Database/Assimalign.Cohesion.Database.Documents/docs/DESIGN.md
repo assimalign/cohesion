@@ -348,7 +348,7 @@ in its transaction; queries never lazily build trees. Dropping an index removes 
 definition in the same transaction, so subsequent physical plans stop selecting it while older
 snapshots retain their defined visibility.
 
-Successful index DDL returns a command `QueryResult` with `Success` status and an affected count
+Successful index DDL returns a command `DatabaseResult` with `Success` status and an affected count
 of zero; index definition changes are not document-row mutations.
 
 The physical planner uses applicable equality/range predicates on indexed paths,
@@ -799,7 +799,7 @@ session leaf.
 |---|---|---|
 | `DocumentDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
 | `DocumentDatabase` | `DatabaseInstance` | `IDocumentDatabase`, the internal `DocumentDatabaseInstance`, and the session-bound view `DocumentSessionDatabase` a session returned as its database |
-| `DocumentDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
+| `DocumentDatabaseSession` | `DatabaseLanguageSession<DocumentQueryRequest>` | an internal `IDatabaseSession` |
 | `DocumentDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
 | `DocumentCollection` | none | `IDocumentCollection` and its internal implementation |
 | `DocumentDatabaseEngineBuilder` | none | `IDocumentDatabaseEngineBuilder` and its internal implementation |
@@ -917,3 +917,11 @@ the stop alone. No counters. The start reads its timestamp only while it is writ
 writer, a create, and that neither write allocates while nobody listens; a recovery that throws
 is not driven by a test yet (no fault-injection seam reaches `RecoverIndexesAsync`), so its
 `Error` stop is checked by a direct write.
+
+## Session execution (#1576, 2026-10-16)
+
+`DocumentDatabaseSession` derives from `DatabaseLanguageSession<DocumentQueryRequest>`. It offers typed
+and text execution; a foreign-model request fails compilation. `DocumentQueryRequest` owns its typed
+`Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
+use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
+on `DatabaseSession`.

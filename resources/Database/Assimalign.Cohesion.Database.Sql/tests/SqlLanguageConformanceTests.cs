@@ -58,11 +58,11 @@ public sealed class SqlLanguageConformanceTests
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
             foreach (string setup in executionCase.Setup)
             {
-                (await ExecuteAsync(session, setup)).Status.ShouldBe(QueryResultStatus.Success, $"{clause}: {setup}");
+                (await ExecuteAsync(session, setup)).Status.ShouldBe(DatabaseResultStatus.Success, $"{clause}: {setup}");
             }
 
             var result = await ExecuteAsync(session, executionCase.Statement);
-            result.Status.ShouldBe(QueryResultStatus.Success, clause);
+            result.Status.ShouldBe(DatabaseResultStatus.Success, clause);
             await executionCase.Verify(session, result);
         }
     }
@@ -90,7 +90,7 @@ public sealed class SqlLanguageConformanceTests
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, _seed[0]);
         await ExecuteAsync(session, _seed[1]);
-        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         result.Columns[0].Type.ShouldBe(type);
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
@@ -278,7 +278,7 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCastExpression),
             async (_, result) =>
             {
-                var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+                var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
                 resultSet.Columns[0].Type.ShouldBe(DatabaseType.Int32);
                 resultSet.Columns[1].Type.ShouldBe(DatabaseType.String);
                 CheckRows(await ReadRowsAsync(resultSet), [[42, "36"], [42, "45"], [42, "41"]]);
@@ -328,7 +328,7 @@ public sealed class SqlLanguageConformanceTests
                 dropped.ShouldBeNull();
                 (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT * FROM t;")))
                     .Message.ShouldContain("does not exist", Case.Sensitive);
-                (await ExecuteAsync(session, "DROP TABLE IF EXISTS t;")).Status.ShouldBe(QueryResultStatus.Success);
+                (await ExecuteAsync(session, "DROP TABLE IF EXISTS t;")).Status.ShouldBe(DatabaseResultStatus.Success);
             }),
         [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
             expression => expression is SqlCreateIndexExpression { IsUnique: true },
@@ -348,7 +348,7 @@ public sealed class SqlLanguageConformanceTests
                 catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
                 catalog.GetIndexes(table!.ObjectId).ShouldNotContain(index => index.Name == "ix_age");
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE age = 36;", [[1]]);
-                (await ExecuteAsync(session, "DROP INDEX IF EXISTS ix_age ON t;")).Status.ShouldBe(QueryResultStatus.Success);
+                (await ExecuteAsync(session, "DROP INDEX IF EXISTS ix_age ON t;")).Status.ShouldBe(DatabaseResultStatus.Success);
             }),
         [SqlClauses.Constraint] = new("CREATE TABLE c (code INT, CONSTRAINT uq_code UNIQUE(code));", [],
             expression => expression is SqlCreateTableExpression create && create.Constraints.Any(constraint => constraint.Name == "uq_code"), VerifyUniqueAsync),
@@ -419,16 +419,16 @@ public sealed class SqlLanguageConformanceTests
     private static ExecutionCase Query(string statement, Func<SqlQueryExpression, bool> containsClause, object?[][] expected)
         => new(statement, _seed, containsClause, async (_, result) => CheckRows(await ReadRowsAsync(result), expected));
 
-    private static ExecutionCase ForeignKeyCase(string statement, SqlReferentialAction action, Func<SqlDatabaseSession, QueryResult, Task> verify)
+    private static ExecutionCase ForeignKeyCase(string statement, SqlReferentialAction action, Func<SqlDatabaseSession, DatabaseResult, Task> verify)
         => new(statement, _seed, expression => expression is SqlCreateTableExpression create &&
             create.Constraints.Any(constraint => constraint.Kind == SqlConstraintKind.ForeignKey && constraint.ReferencedTable is not null && constraint.OnDelete == action), verify);
 
     private static bool HasConstraint(SqlQueryExpression expression, SqlConstraintKind kind)
         => expression is SqlCreateTableExpression create && create.Constraints.Any(constraint => constraint.Kind == kind);
 
-    private static async Task VerifyAlterAsync(SqlDatabaseSession session, QueryResult result)
+    private static async Task VerifyAlterAsync(SqlDatabaseSession session, DatabaseResult result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         await ExpectRowsAsync(session, "SELECT id, name, age, extra FROM t ORDER BY id;",
             [[1, "Ada", 36, 7], [2, "Grace", 45, 7], [3, "Alan", 41, 7]]);
         await ExecuteAsync(session, "ALTER TABLE t ADD COLUMN nullable_extra INT;");
@@ -446,9 +446,9 @@ public sealed class SqlLanguageConformanceTests
         await ExpectRowsAsync(session, "SELECT * FROM t WHERE id = 1;", [[1, "Ada", 36]]);
     }
 
-    private static async Task VerifyUniqueAsync(SqlDatabaseSession session, QueryResult result)
+    private static async Task VerifyUniqueAsync(SqlDatabaseSession session, DatabaseResult result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         await ExecuteAsync(session, "INSERT INTO c VALUES (1), (NULL);");
         (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO c VALUES (1);")))
             .ConstraintKind.ShouldBe("UNIQUE");
@@ -458,9 +458,9 @@ public sealed class SqlLanguageConformanceTests
         await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
     }
 
-    private static async Task VerifyReferenceAsync(SqlDatabaseSession session, QueryResult result)
+    private static async Task VerifyReferenceAsync(SqlDatabaseSession session, DatabaseResult result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         await ExecuteAsync(session, "INSERT INTO c VALUES (1), (NULL);");
         (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO c VALUES (99);")))
             .ConstraintKind.ShouldBe("FOREIGN KEY");
@@ -469,9 +469,9 @@ public sealed class SqlLanguageConformanceTests
         await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
     }
 
-    private static async Task VerifyBeginAsync(SqlDatabaseSession session, QueryResult result)
+    private static async Task VerifyBeginAsync(SqlDatabaseSession session, DatabaseResult result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         session.CurrentTransaction.ShouldNotBeNull().State.ShouldBe(TransactionState.Active);
         await ExecuteAsync(session, "INSERT INTO t VALUES (4, 'new', 1);");
         await using var observer = await session.Database.CreateSessionAsync();
@@ -481,7 +481,7 @@ public sealed class SqlLanguageConformanceTests
         await ExpectRowsAsync(observer, "SELECT COUNT(*) FROM t;", [[3L]]);
     }
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 
     private static async Task ExpectRowsAsync(SqlDatabaseSession session, string statement, object?[][] expected)
@@ -506,10 +506,10 @@ public sealed class SqlLanguageConformanceTests
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement)
         => await ReadRowsAsync(await ExecuteAsync(session, statement));
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResult queryResult)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResult databaseResult)
     {
-        await using var result = queryResult.ShouldBeAssignableTo<QueryResultSet>();
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        await using var result = databaseResult.ShouldBeAssignableTo<DatabaseResultSet>();
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {
@@ -527,5 +527,5 @@ public sealed class SqlLanguageConformanceTests
         string Statement,
         string[] Setup,
         Func<SqlQueryExpression, bool> ContainsClause,
-        Func<SqlDatabaseSession, QueryResult, Task> Verify);
+        Func<SqlDatabaseSession, DatabaseResult, Task> Verify);
 }

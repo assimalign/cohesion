@@ -755,7 +755,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
                 DatabaseEventSource.Log.EngineDisposeFailed(this, failures.Count, failures[0]);
             }
 
-            DatabaseEventSource.Log.EngineDisposeStop(this, failures is null ? QueryResultStatus.Success : QueryResultStatus.Error, failures?.Count ?? 0, disposeStarted);
+            DatabaseEventSource.Log.EngineDisposeStop(this, failures is null ? DatabaseResultStatus.Success : DatabaseResultStatus.Error, failures?.Count ?? 0, disposeStarted);
             stopped = true;
         }
         finally
@@ -764,7 +764,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             // disposal here; its stop still closes the activity the start opened.
             if (!stopped)
             {
-                DatabaseEventSource.Log.EngineDisposeStop(this, QueryResultStatus.Error, failures?.Count ?? 0, disposeStarted);
+                DatabaseEventSource.Log.EngineDisposeStop(this, DatabaseResultStatus.Error, failures?.Count ?? 0, disposeStarted);
             }
         }
 

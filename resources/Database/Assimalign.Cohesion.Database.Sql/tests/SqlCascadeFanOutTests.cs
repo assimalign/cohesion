@@ -197,7 +197,7 @@ public sealed class SqlCascadeFanOutTests
 
     private static async Task<object?> ScalarAsync(SqlDatabaseSession session, string sql)
     {
-        await using var rows = (await session.ExecuteAsync(sql, cancellationToken: Timeout())).ShouldBeAssignableTo<QueryResultSet>();
+        await using var rows = (await session.ExecuteAsync(sql, cancellationToken: Timeout())).ShouldBeAssignableTo<DatabaseResultSet>();
         await foreach (var row in rows!.GetRowsAsync())
         {
             return row.GetValue(0);

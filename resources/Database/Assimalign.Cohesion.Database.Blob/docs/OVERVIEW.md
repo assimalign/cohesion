@@ -115,3 +115,9 @@ explicit-transaction state machine and their checks, so the typed members need n
 (concrete-types plan, phase 4; DESIGN.md, "Concrete types").
 
 `BlobDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.
+
+## Session capability (#1576, 2026-10-16)
+
+`BlobDatabaseSession` derives directly from `DatabaseSession` for lifecycle, state and
+explicit transactions. Blob operations use its container API. It has no execute member
+and inherits no unsupported query-language operation.

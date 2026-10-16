@@ -304,7 +304,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         await ExecuteAsync(session, "CREATE TABLE t (n BIGINT)");
 
         // Act
-        await using var result = (await ExecuteAsync(session, "SELECT count_positive(n) AS c FROM t")).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, "SELECT count_positive(n) AS c FROM t")).ShouldBeAssignableTo<DatabaseResultSet>();
         var column = result.Columns.ShouldHaveSingleItem();
         var described = InvokeWithContext(new ContextFunction(), Collation.CaseInsensitive);
 

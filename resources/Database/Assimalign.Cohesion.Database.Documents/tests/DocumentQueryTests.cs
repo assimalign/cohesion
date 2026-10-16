@@ -349,12 +349,12 @@ public sealed class DocumentQueryTests
     private static ValueTask<Document> PutAsync(DocumentCollection collection, DocumentDatabaseSession session, string id, string json)
         => collection.PutAsync(session, id, Encoding.UTF8.GetBytes(json));
 
-    private static async Task<List<QueryRow>> RowsAsync(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<DatabaseRow>> RowsAsync(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        var result = (QueryResultSet)await session.ExecuteAsync(DocumentQueryRequest.FromOql(query, parameters));
+        var result = (DatabaseResultSet)await session.ExecuteAsync(DocumentQueryRequest.FromOql(query, parameters));
         await using (result)
         {
-            var rows = new List<QueryRow>();
+            var rows = new List<DatabaseRow>();
             await foreach (var row in result.GetRowsAsync()) { rows.Add(row); }
             return rows;
         }

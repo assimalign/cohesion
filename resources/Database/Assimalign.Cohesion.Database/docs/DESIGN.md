@@ -18,11 +18,10 @@ observe `CancellationToken.None`. There is no added interface, model-shaped root
 default interface implementation.
 
 The area root (architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
-Everything here must be true for *all five* data models — anything model-specific
-belongs in a model package. The root's job is to make engines substitutable at the
-seams the platform builds on: the server serves any engine, the hosting layer
-composes any engine, a client result looks the same regardless of the engine that
-produced it.
+The lifecycle and composition bases serve all five data models. Execution capability
+bases serve their real variant sets: four typed models and three language models.
+Model requests, parsers and servers belong in their model packages. Hosting composes
+any engine through the common root; execution callers use the concrete model session.
 
 The root is also the area's **rollup**: it references every child root — the
 independently consumable base components a database is made of (`Database.Types`,
@@ -71,7 +70,9 @@ the root keeps only `IDatabaseApplication`, `IDatabaseApplicationBuilder` and
 |---|---|---|---|
 | `DatabaseEngine` | `IDatabaseEngine` | the database cores (create, open, drop, list, try-get), forgetting a database a holder closed (`ForgetClosedDatabaseCore`), `OfflineDatabases`, an offline database's storage error (`GetOfflineErrorCore`), taking a database offline it gave up on (`TakeDatabaseOfflineCore`, owner decision 25), and closing its databases (`DisposeAsyncCore`) | name and model, the worker failure window, its minimum of passes and the clock that measures it (owner decision 42), the worker and server inventories, attach and its freeze, the worker pump, the state fold and its per-database part (`HasFailingWorker`, `HasEngineWideFailure`, owner decision 42), the disposal order, the open's wait for a holder's close, giving up on a database for its workers |
 | `DatabaseInstance` | `IDatabase`, `IDatabaseSchemaProvisioner` | the session core and disposal cores | name, engine, the disposed flag, the close's completion and the engine notice it sends (no capability member since owner decision 50 of 2026-10-09) |
-| `DatabaseSession` | `IDatabaseSession` | the begin and execute cores, and ending its running operations | state, the session's transaction, the one "already active" check, the operation hold, the teardown order |
+| `DatabaseSession` | `IDatabaseSession` | the begin core and ending its running operations | lifecycle, state, the session's transaction, the one "already active" check, the operation hold, the teardown order; no execute member |
+| `DatabaseExecutionSession<TRequest>` | Added 2026-10-16 (#1578) | the typed execute core; Sql, Documents, Graph and KeyValuePair variants | typed execution validation and tracing |
+| `DatabaseLanguageSession<TRequest>` | Added 2026-10-16 (#1578) | the text execute core; Sql, Documents and Graph variants | text execution validation and tracing, plus a typed forwarder through the public NVI |
 | `DatabaseTransaction` | `IDatabaseTransaction` | the kernel state, commit and rollback cores with their own exception translation, the offline refusal, the coded aborted error | identity and isolation level, the end gate and the whole end state machine |
 | `DatabaseServer` | `IDatabaseServer`, `IDatabaseServerContext` | start and stop cores, and `Sessions` | the engine (the context's `Engine`), the lifecycle state machine |
 | `DatabaseServerSession` | `IDatabaseServerSession` | the engine session and disposal | the identity, the negotiated version, the authenticated principal |
@@ -645,16 +646,18 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   keeps the callback signature stable as the context grows. An earlier cut of
   this contract (same day, superseded before merge) exposed a single nullable
   `Server`; per-model servers made plurality structural, not optional.
-- **Two execute seams on `DatabaseSession`.** The typed seam
-  (`ExecuteAsync(QueryRequest)`) is for in-process consumers that already speak a
-  model's language objects (`SqlQueryRequest`). The **text seam**
-  (`ExecuteAsync(string, parameters)`) exists for the wire protocol: the server
-  receives statement *text* plus decoded parameter values and must stay
-  model-agnostic — so the session, which knows its model, owns parsing. The
-  alternative — the server referencing model language packages to build typed
-  requests — would couple the one shared network front-end to every model and
-  violate the area's composition rules. Each model implements the text seam with
-  its own parser (`SqlDatabaseSession` → `SqlQueryRequest.FromSql`).
+- **Execution belongs to session capabilities (owner reversal, 2026-10-16; #1576).**
+  The earlier decision put two execute members on every `DatabaseSession` to serve one
+  shared network front-end. Per-model servers replaced that front-end, removing its reason:
+  Blob has no execution language, and KeyValuePair's command grammar is an internal wire
+  encoding. The root session now owns lifecycle, state and explicit transactions only.
+  `DatabaseExecutionSession<TRequest>` adds typed execution; Sql, Documents and Graph
+  derive `DatabaseLanguageSession<TRequest>` for typed and text execution. KeyValuePair
+  derives only the typed base, and Blob directly derives `DatabaseSession`.
+  Both bases constrain requests to `DatabaseRequest`, validate in public non-virtual
+  members, and call protected abstract cores. A foreign-model request fails compilation.
+  The language base's typed forwarder is declared before its text member and calls the
+  public typed NVI, so the compiler names the model's request type in its diagnostic.
 - **The isolation-level seam consumes the Transactions child's enum directly**
   (2026-07-13, with the MVCC-integration design — area DESIGN.md §3.8).
   `DatabaseSession.BeginTransactionAsync(IsolationLevel, …)` and
@@ -676,10 +679,10 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   the data). A subtype of `DatabaseException` keeps existing `catch` blocks
   working while giving the server an exact mapping — better than string-matching
   messages or per-model exception knowledge in the server.
-- **`QueryRequest`/`QueryResult` live in `Database.Execution`, not here.** The
+- **`DatabaseRequest`/`DatabaseResult` live in `Database.Execution`, not here.** The
   root aggregates the execution family rather than owning it: execution is its
-  own child root with pipeline/context machinery the contract root has no
-  business carrying. The same holds for the other child-root vocabularies the
+  own child root for model-neutral request/result contracts. It references only
+  `Database.Types`; the unused shared pipeline was removed in #1257. The same holds for the other child-root vocabularies the
   root's contracts speak: `TransactionId`/`TransactionState` live in
   `Database.Transactions` (`DatabaseTransaction` consumes them), and
   `ProtocolVersion` lives in `Database.Protocol` (`DatabaseServerSession`
@@ -926,10 +929,10 @@ forwards, so keywords scope out-of-process tools only.
 | 22 | `ServerSessionAuthenticated` | Informational | — | `sessionId`, `principal` (cut to 256 characters and marked `...`: it is what the peer sent, which an accepting authenticator need not bound, and the servers cut it the same way) | `DatabaseServerSession.SetAuthenticatedPrincipal` |
 | 23 | `SessionOpened` | Verbose | `Sessions` | `engineName`, `database`, `sessionNumber` | the `DatabaseSession` constructor |
 | 24 | `SessionClosed` | Verbose | `Sessions` | `database`, `sessionNumber`, `failed` | `DatabaseSession.DisposeAsync`, its first call |
-| 25 | `StatementStart` | Verbose | `Statements` | `database`, `sessionNumber`, `requestKind` (the request type's name, or `Text`) | `DatabaseSession.ExecuteAsync`, both overloads, outermost call only |
-| 26 | `StatementStop` | Verbose | `Statements` | `database`, `sessionNumber`, `status` (`QueryResultStatus` name; `Error` or `Cancelled` for a core that threw), `affectedCount` (`-1` for a core that threw), `durationMilliseconds` | the same, only for a statement whose `StatementStart` was written (`System.Net.Http`'s `RequestStop` shape); events 27 and 28 are written either way |
+| 25 | `StatementStart` | Verbose | `Statements` | `database`, `sessionNumber`, `requestKind` (the request type's name, or `Text`) | `DatabaseExecutionSession<TRequest>.ExecuteAsync` and `DatabaseLanguageSession<TRequest>.ExecuteAsync`, outermost call only; KeyValuePair wire requests use the parsed verb request type |
+| 26 | `StatementStop` | Verbose | `Statements` | `database`, `sessionNumber`, `status` (`DatabaseResultStatus` name; `Error` or `Cancelled` for a core that threw), `affectedCount` (`-1` for a core that threw), `durationMilliseconds` | the same, only for a statement whose `StatementStart` was written (`System.Net.Http`'s `RequestStop` shape); events 27 and 28 are written either way |
 | 27 | `SlowStatement` | Warning | — | `engineName`, `model`, `database`, `sessionNumber`, `requestKind`, `status`, `durationMilliseconds`, `thresholdMilliseconds` | the same, when the statement ran at least `SlowStatementThresholdMs` |
-| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `code`, `exceptionType`, `durationMilliseconds` | the same: for a failed result, `code` is its first error diagnostic's code (its first diagnostic's when it holds no error; empty when it holds none) and `exceptionType` is empty; for a core that threw, `exceptionType` is the exception's full type name and `code` is an offline refusal's model code (`DatabaseOfflineException.Code`), empty otherwise; never the message, which can quote the statement; never for a cancellation |
+| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `code`, `exceptionType`, `durationMilliseconds` | the same: for an `Error` result, `code` is its first error diagnostic's code (its first diagnostic's when it holds no error; empty when it holds none) and `exceptionType` is empty; for a core that threw, `exceptionType` is the exception's full type name and `code` is an offline refusal's model code (`DatabaseOfflineException.Code`), empty otherwise; never the message, which can quote the statement; never for a cancellation |
 | 29 | `TransactionBegun` | Verbose | `Transactions` | `database`, `sessionNumber`, `transactionId`, `isolationLevel` | `DatabaseSession.BeginTransactionAsync`, once the transaction is the session's |
 | 30 | `TransactionCommitted` | Verbose | `Transactions` | `transactionId`, `durationMilliseconds` (the commit's own) | `DatabaseTransaction.CommitAsync` |
 | 31 | `TransactionRolledBack` | Verbose | `Transactions` | `transactionId`, `cause` (`Rollback`, `Dispose`, `SessionClosed`) | `RollbackAsync`, `DisposeAsync` and the session's teardown, when a kernel rollback ran |
@@ -960,21 +963,25 @@ message. So `StatementFailed` writes a diagnostic code and an exception type, `T
 and `TransactionCommitFailed` their exception's type. Lifecycle and infrastructure failures (events
 1, 3, 8, 13, 17, 19 and 34) keep the type and the `Message`.
 
-**Endings.** Every `Stop` here carries `status`, a `QueryResultStatus` name, and is written on every
-path that leaves its work: `StatementStop` (`Success`, `Error` after `StatementFailed`, or
-`Cancelled`), `WorkerPassStop` (`Success`, `Error`, or `Cancelled` for a pass the engine's stop
+**Endings.** Every `Stop` here carries `status`, a `DatabaseResultStatus` name, and is written on every
+path that leaves its work: `StatementStop` (the returned `DatabaseResultStatus`, including `Timeout`; an exception
+becomes `Error` after `StatementFailed` or `Cancelled`), `WorkerPassStop` (`Success`, `Error`, or `Cancelled` for a pass the engine's stop
 cancelled) and `EngineDisposeStop` (`Success`, or `Error` after `EngineDisposeFailed`), the last two
 from a `finally`.
 
-**Statements and re-entry.** A statement is reported by the root session, once, whatever the model:
-Sql, KeyValuePair, Graph and Documents statements all enter through `DatabaseSession.ExecuteAsync`.
-Graph and Documents parse a text statement and run the typed request through the root's typed
-overload again on the same session, so events 25-28 are written for the outermost call on a
-session only, through a private flag the traced call sets; a session runs one operation at a time,
-so the flag needs no synchronization. Graph's wire path enters at the typed overload after its
-server parsed the statement, so a parse failure there is reported by the Graph model's source.
-Blob has no statements: its container operations are reported by the kernel's transaction events
-and, on the wire, by its server and client.
+**Statements and re-entry.** The capability bases share the root session's
+`private protected` tracing tail. Typed calls use their request type name; language text
+calls use `Text`. Graph and Documents can re-enter typed execution after parsing text;
+events 25–28 are written only for the outermost call. The session remains single-threaded.
+Graph's server calls its internal `ExecuteStatementAsync` entry and reports wire parse
+failures through Graph event 12. KeyValuePair's server calls internal
+`ExecuteCommandTextAsync`: closed, blank, canceled, offline and refusing-transaction
+checks precede parsing, then the parsed request enters the public typed NVI. A successful
+wire call therefore reports the verb request type, not `Text`. Parse failure writes
+KeyValuePair event 10 before the `ParseFailure` frame. Offline and transaction refusals
+before parsing write no root statement event. Event 10 is throttled to one per second,
+with `suppressedCount`; its occurrence counter includes suppressed and disabled reports.
+Blob has no execute member; its operations use kernel, server and client events.
 
 **Cost while nobody listens** (rule 9; the plan's D5). Every write is behind
 `IsEnabled(level, keywords)`, and every string a payload needs is computed inside that check. The

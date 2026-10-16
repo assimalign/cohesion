@@ -16,6 +16,7 @@ using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
@@ -33,7 +34,8 @@ public class KeyValueDatabaseEventSourceCollection
 /// events it writes for real sessions over the in-memory driver: each event once, with its
 /// declared payload, and the server-session gauge back where it started (database event-sources
 /// plan, section 4.9). The SQL, Graph and Blob suites check the same ids, names and payloads
-/// against their own sources.
+/// against their own sources. The model's own event follows: the wire command that fails to parse
+/// before the session's typed member sees it (event 10, the graph server's event 12).
 /// </summary>
 [Collection(nameof(KeyValueDatabaseEventSourceCollection))]
 public sealed class KeyValueDatabaseEventSourceTests
@@ -403,11 +405,59 @@ public sealed class KeyValueDatabaseEventSourceTests
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should report a wire command that fails to parse once, before the root sees it")]
+    public async Task StatementParseFailed_WireSyntaxError_ShouldBeReportedOnce()
+    {
+        // Arrange
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var harness = await KeyValueServerHarness.StartAsync(engineName: engineName);
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+
+        using var root = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database"), EventLevel.Verbose);
+
+        // Act: drive invalid commands until the process-wide throttle reports this session.
+        // A previous test may have used the current interval; every attempt still gets its frame.
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        ProtocolErrorMessage error;
+        do
+        {
+            cancellation.Token.ThrowIfCancellationRequested();
+            await client.SendAsync(ProtocolMessageType.Execute, new ProtocolExecuteMessage("FROB @k", new Dictionary<string, byte[]>()).Encode());
+            error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+            error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+            if (!recorder.Events.Any(e => e.EventId == 10 && Equals(e.Payload![0], sessionId)))
+            {
+                await Task.Delay(10, cancellation.Token);
+            }
+        } while (!recorder.Events.Any(e => e.EventId == 10 && Equals(e.Payload![0], sessionId)));
+        await client.SendAsync(ProtocolMessageType.Ping);
+        await client.ExpectAsync(ProtocolMessageType.Pong);
+
+        // Assert: one parse failure, carrying what the client was told, and the session ready.
+        error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+        var failed = recorder.Events.Where(e => e.EventId == 10 && Equals(e.Payload![0], sessionId)).ShouldHaveSingleItem();
+        failed.EventName.ShouldBe("StatementParseFailed");
+        failed.Level.ShouldBe(EventLevel.Error);
+        failed.PayloadNames.ShouldBe(["sessionId", "database", "code", "exceptionType", "suppressedCount"]);
+        failed.Payload!.Take(4).ShouldBe([sessionId, KeyValueServerHarness.DatabaseName, string.Empty, typeof(DatabaseParseException).FullName]);
+        failed.Payload![4].ShouldBeOfType<int>().ShouldBeGreaterThanOrEqualTo(0);
+        failed.Payload!.OfType<string>().ShouldNotContain(error.Message, "A parse error quotes the command; the event writes its type only.");
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+
+        // The root's StatementStart (event 25) and StatementFailed (event 28) are not written for it:
+        // the command failed before the session's typed member saw it. This collection isolates
+        // the recorder, which starts after the handshake, from other statement writes.
+        root.Events.ShouldNotContain(e => e.EventId == 25 || e.EventId == 28);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should publish its server-session counters")]
     public async Task Counters_EnabledWithInterval_ShouldPublishServerSessionCounters()
     {
         // Arrange
-        string[] counters = ["current-server-sessions", "total-server-sessions", "total-rejected-sessions"];
+        string[] counters = ["current-server-sessions", "total-server-sessions", "total-rejected-sessions", "total-statement-parse-failures"];
 
         // Act
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.LogAlways, counterInterval: TimeSpan.FromMilliseconds(100));
@@ -448,9 +498,66 @@ public sealed class KeyValueDatabaseEventSourceTests
         timestamp.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Parse failures: Should throttle events while counting every occurrence")]
+    public async Task StatementParseFailed_RepeatedFailures_ShouldCarrySuppressionAndKeepAnExactCounter()
+    {
+        // Arrange — wait for observed reports, never for a fixed sleep window. The source is
+        // process-wide, so another test may have used the beginning of its current interval.
+        var source = KeyValueDatabaseEventSource.Log;
+        var session = new StubServerSession();
+        var failure = new DatabaseParseException("test syntax");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var recorder = new EventSourceRecorder(source, EventLevel.Error, TimeSpan.FromMilliseconds(100));
+        long before = source.TotalStatementParseFailures;
+        int attempts = 0;
+        while (!recorder.Events.Any(e => e.EventId == 10))
+        {
+            cancellation.Token.ThrowIfCancellationRequested();
+            source.StatementParseFailed(session, new DatabaseName("kv"), failure);
+            attempts++;
+            if (!recorder.Events.Any(e => e.EventId == 10))
+            {
+                await Task.Delay(10, cancellation.Token);
+            }
+        }
+        int atFirst = attempts;
+
+        // Act — keep driving until the next interval actually reports. This exercises both
+        // suppression and its publication; the timestamp-only unit test pins the exact boundary.
+        while (recorder.Events.Count(e => e.EventId == 10) < 2)
+        {
+            cancellation.Token.ThrowIfCancellationRequested();
+            source.StatementParseFailed(session, new DatabaseName("kv"), failure);
+            attempts++;
+            if (recorder.Events.Count(e => e.EventId == 10) < 2)
+            {
+                await Task.Delay(10, cancellation.Token);
+            }
+        }
+
+        // Assert
+        var reports = recorder.Events.Where(e => e.EventId == 10).ToArray();
+        reports.Length.ShouldBe(2);
+        reports[1].PayloadNames.ShouldBe(["sessionId", "database", "code", "exceptionType", "suppressedCount"]);
+        reports[1].Payload![4].ShouldBe(attempts - atFirst - 1);
+        (attempts - atFirst - 1).ShouldBeGreaterThan(0);
+        source.TotalStatementParseFailures.ShouldBe(before + attempts);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+
+        long sequence = recorder.CounterSequence;
+        var sample = await recorder.WaitForCounterAsync("total-statement-parse-failures", sequence, cancellation.Token);
+        sample.Value.ShouldBe((double)(before + attempts));
+        recorder.DisableEvents(source);
+        source.StatementParseFailed(session, new DatabaseName("kv"), failure);
+        source.TotalStatementParseFailures.ShouldBe(before + attempts + 1);
+        recorder.Events.Count(e => e.EventId == 10).ShouldBe(2);
+    }
+
+
     private static long WriteEveryEvent(DatabaseEngine engine, DatabaseServerSession session, Exception failure)
     {
         var log = KeyValueDatabaseEventSource.Log;
+        log.StatementParseFailed(session, new DatabaseName("kv"), failure);
         long timestamp = log.SessionTimestamp();
         log.SessionAccepted(engine, session, 1);
         log.SessionRejected(engine, KeyValueDatabaseEventSource.RejectReason.SessionLimit, 1, 1);

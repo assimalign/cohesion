@@ -14,7 +14,7 @@ public sealed class KeyValueExistsRequest : KeyValueRequest
     /// <param name="key">The key to probe.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="key"/> is empty.</exception>
     public KeyValueExistsRequest(ReadOnlyMemory<byte> key)
-        : base(new KeyValueStatement(KeyValueOperation.Exists))
+        : base(KeyValueOperation.Exists)
     {
         if (key.IsEmpty)
         {

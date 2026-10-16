@@ -5,7 +5,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
-internal static class GraphRequest
+internal static class GraphRequestEncoder
 {
     internal static GraphProtocolExecuteMessage Create(string statement, IReadOnlyDictionary<string, object?>? parameters)
     {

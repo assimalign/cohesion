@@ -1,7 +1,7 @@
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 

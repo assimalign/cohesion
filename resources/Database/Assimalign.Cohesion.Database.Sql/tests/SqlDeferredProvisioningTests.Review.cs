@@ -166,7 +166,7 @@ public sealed partial class SqlDeferredProvisioningTests
         await database.SchemaProvisioner.ApplyAsync(desired, timeout.Token, deferDataScalingSteps: true);
         await entered.Task.WaitAsync(timeout.Token);
         await using var ddl = await database.CreateSessionAsync(timeout.Token);
-        Task<QueryResult> waiting = ddl.ExecuteAsync(command, cancellationToken: timeout.Token).AsTask();
+        Task<DatabaseResult> waiting = ddl.ExecuteAsync(command, cancellationToken: timeout.Token).AsTask();
         int observations = 0;
         var elapsed = Stopwatch.StartNew();
         try

@@ -58,7 +58,7 @@ public sealed class SqlAddColumnDefaultTypeTests
         error.Message.ShouldContain("DEFAULT", Case.Sensitive);
         error.Message.ShouldContain("extra", Case.Sensitive);
         await using var result = (await session.ExecuteAsync("SELECT * FROM t;", cancellationToken: CancellationToken.None))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         result.Columns.ShouldHaveSingleItem().Name.ShouldBe("id");
         await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
         (await RowsAsync(session, "SELECT * FROM t;")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1 });
@@ -129,14 +129,14 @@ public sealed class SqlAddColumnDefaultTypeTests
     private static async Task ExecuteAsync(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
     }
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None))
-            .ShouldBeAssignableTo<QueryResultSet>();
-        result.Status.ShouldBe(QueryResultStatus.Success);
+            .ShouldBeAssignableTo<DatabaseResultSet>();
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

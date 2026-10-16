@@ -76,7 +76,7 @@ public sealed class SqlProvisioningIsolationTests
         await database.ApplySchemaAsync(desired, TestTimeout.Token());
         database.Catalog.TryGetIndex(preserved.ObjectId, "ix_preserved", out var index).ShouldBeTrue();
         index.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
-        await using var result = (Execution.QueryResultSet)await holder.ExecuteAsync("SELECT id FROM z_existing", cancellationToken: TestTimeout.Token());
+        await using var result = (Execution.DatabaseResultSet)await holder.ExecuteAsync("SELECT id FROM z_existing", cancellationToken: TestTimeout.Token());
         int rows = 0;
         await foreach (var row in result.GetRowsAsync(TestTimeout.Token()))
         {
@@ -120,7 +120,7 @@ public sealed class SqlProvisioningIsolationTests
             }
         };
         Task<SqlSchemaMigrationResult> applying = Task.Run(async () => await database.ApplySchemaAsync(schema, timeout.Token));
-        Task<Execution.QueryResult>? writing = null;
+        Task<Execution.DatabaseResult>? writing = null;
         int reads = 0;
         int writes = 0;
 
@@ -134,7 +134,7 @@ public sealed class SqlProvisioningIsolationTests
             {
                 await unrelated.ExecuteAsync("INSERT INTO other (id) VALUES (1)", cancellationToken: timeout.Token);
                 writes++;
-                await using var result = (Execution.QueryResultSet)await unrelated.ExecuteAsync("SELECT id FROM other", cancellationToken: timeout.Token);
+                await using var result = (Execution.DatabaseResultSet)await unrelated.ExecuteAsync("SELECT id FROM other", cancellationToken: timeout.Token);
                 await foreach (var row in result.GetRowsAsync(timeout.Token))
                 {
                     row.GetValue(0).ShouldBe(1);
@@ -186,7 +186,7 @@ public sealed class SqlProvisioningIsolationTests
             database.Catalog.TryGetIndex(preserved.ObjectId, "ix_orders_id", out var index).ShouldBeTrue();
             index.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
         }
-        await using var rows = (Execution.QueryResultSet)await writer.ExecuteAsync("SELECT id FROM orders", cancellationToken: timeout.Token);
+        await using var rows = (Execution.DatabaseResultSet)await writer.ExecuteAsync("SELECT id FROM orders", cancellationToken: timeout.Token);
         int count = 0;
         await foreach (var row in rows.GetRowsAsync(timeout.Token))
         {
@@ -255,7 +255,7 @@ public sealed class SqlProvisioningIsolationTests
         database.Catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         if (committed)
         {
-            await using var rows = (Execution.QueryResultSet)await adhoc.ExecuteAsync("SELECT id FROM orders", cancellationToken: TestTimeout.Token());
+            await using var rows = (Execution.DatabaseResultSet)await adhoc.ExecuteAsync("SELECT id FROM orders", cancellationToken: TestTimeout.Token());
             int count = 0;
             await foreach (var row in rows.GetRowsAsync(TestTimeout.Token()))
             {

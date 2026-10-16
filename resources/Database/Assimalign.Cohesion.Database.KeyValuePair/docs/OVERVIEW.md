@@ -8,7 +8,7 @@ kernel, and deliberately the kernel-generality proof (area DESIGN §3.10).
 ## Purpose
 
 Derives sealed leaves from the area root's `DatabaseEngine`/`DatabaseInstance`/
-`DatabaseSession`/`DatabaseTransaction`/`DatabaseServer` bases for the key-value
+`DatabaseExecutionSession<KeyValueRequest>`/`DatabaseTransaction`/`DatabaseServer` bases for the key-value
 model (the concrete-first rule, `.claude/rules/database-area.md`) by composing the
 shared kernel — storage
 (pages/WAL/recovery), transactions (MVCC snapshots, lock manager), indexing
@@ -47,7 +47,7 @@ keys order by unsigned lexicographic byte comparison.
   `KeyValueDeleteRequest`, `KeyValueExistsRequest`, `KeyValueScanRequest`) —
   the model's members of the shared `Database.Execution` request family.
 - The text command grammar (`GET`/`PUT`/`DELETE`/`EXISTS`/`SCAN`) — the contract
-  in [COMMANDS.md](COMMANDS.md), parsed by the session's text-execute seam so the
+  in [COMMANDS.md](COMMANDS.md), parsed by the internal `ExecuteCommandTextAsync` wire entry so the
   wire protocol's Execute message serves the model with zero protocol changes.
 - `KeyValueDatabaseServer` (+ `KeyValueDatabaseServerOptions`) — the model's
   wire-protocol server, carrying its own full copy of the server machinery
@@ -96,3 +96,8 @@ var swap = await database.PutAsync(session, key, updated,
 See [DESIGN.md](DESIGN.md) for the architecture and the decisions behind it.
 
 `KeyValueDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.
+
+The public session accepts typed `KeyValueRequest` commands only. Its command grammar is an
+internal wire entry (`ExecuteCommandTextAsync`), with validation and refusals before parsing,
+then execution through the public typed NVI. Results use `DatabaseResult` and
+`DatabaseResultSet`; [COMMANDS.md](COMMANDS.md) defines the wire order and reporting.

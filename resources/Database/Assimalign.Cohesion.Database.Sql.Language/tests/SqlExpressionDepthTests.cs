@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
 using Xunit;

@@ -5,6 +5,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// Parses SQL statements into a rich AST with full clause-level structure.

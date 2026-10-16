@@ -152,8 +152,8 @@ internal sealed partial class SqlDeclaredDatabase
                         throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}' cannot adopt existing index '{index.IndexName}'.");
                     }
                     var result = await session.ExecuteScriptAsync(script.Statements[position], receipt, cancellationToken).ConfigureAwait(false);
-                    if (result is QueryResultSet rows) { await rows.DisposeAsync().ConfigureAwait(false); }
-                    if (result.Status != QueryResultStatus.Success)
+                    if (result is DatabaseResultSet rows) { await rows.DisposeAsync().ConfigureAwait(false); }
+                    if (result.Status != DatabaseResultStatus.Success)
                     {
                         throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}', statement {position + 1} failed.");
                     }

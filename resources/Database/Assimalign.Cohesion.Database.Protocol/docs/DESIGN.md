@@ -4,8 +4,8 @@
 
 This child root owns the frame envelope, shared payload primitives, startup and
 authentication exchange, session lifecycle, error taxonomy, and version negotiation.
-It has no model dependencies. As with Database.Language's TokenLexer, Diagnostic,
-QueryLanguageProfile and QueryParser, mechanism is shared while each model supplies
+It has no model dependencies. As with Database.Language's TokenLexer,
+QueryLanguageProfile and QueryParser, and Database.Types' Diagnostic, mechanism is shared while each model supplies
 its own grammar: here that grammar is its message family and payload codecs.
 
 The dependencies point from model policy toward the shared mechanism.

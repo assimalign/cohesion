@@ -93,7 +93,7 @@ public sealed class KeyValueStorageOperationsTests
         {
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateSessionAsync()),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.GetAsync(session, Bytes("kept"))),
-            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.ExecuteAsync("SCAN")),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.ExecuteCommandTextAsync("SCAN")),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.BeginTransactionAsync()),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.PutAsync(other, Bytes("late"), Bytes("4"))),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.CommitAsync()),
@@ -111,7 +111,7 @@ public sealed class KeyValueStorageOperationsTests
         {
             await Should.ThrowAsync<OperationCanceledException>(async () => await database.CreateSessionAsync(canceled.Token)),
             await Should.ThrowAsync<OperationCanceledException>(async () => await database.GetAsync(session, Bytes("kept"), canceled.Token)),
-            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("SCAN", null, canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteCommandTextAsync("SCAN", null, canceled.Token)),
             await Should.ThrowAsync<OperationCanceledException>(async () => await session.BeginTransactionAsync(canceled.Token)),
         };
 

@@ -40,7 +40,7 @@ public sealed class KeyValueDatabaseScopeTests
             {
             }
         });
-        await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(
+        await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteCommandTextAsync(
             "GET @key FROM second", new Dictionary<string, object?> { ["key"] = key }));
 
         session.Database.ShouldBeSameAs(first);
@@ -50,7 +50,7 @@ public sealed class KeyValueDatabaseScopeTests
 
         // Typed requests have no database selector: execution remains bound to
         // the receiving session even when another database has the same key.
-        var result = (await session.ExecuteAsync(new KeyValueGetRequest(key))).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await session.ExecuteAsync(new KeyValueGetRequest(key))).ShouldBeAssignableTo<DatabaseResultSet>();
         int count = 0;
         await foreach (var row in result.GetRowsAsync())
         {
@@ -79,7 +79,7 @@ public sealed class KeyValueDatabaseScopeTests
         var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();
 
-        await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(statement));
+        await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteCommandTextAsync(statement));
 
         session.Database.ShouldBeSameAs(first);
         engine.State.ShouldBe(EngineState.Running);

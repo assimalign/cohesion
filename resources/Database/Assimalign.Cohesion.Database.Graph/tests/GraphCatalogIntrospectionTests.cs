@@ -40,7 +40,7 @@ public sealed class GraphCatalogIntrospectionTests
         (await Rows(session, "SHOW INDEXES")).Single().ShouldBe(new object?[] { "catalog", label, "Person", "by_name", "name", false });
         (await Rows(session, "MATCH (n) RETURN n")).ShouldBeEmpty();
 
-        await using var result = (QueryResultSet)await session.ExecuteAsync("SHOW PROPERTY KEYS");
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync("SHOW PROPERTY KEYS");
         result.Columns.Select(column => column.Name).ShouldBe([
             "DATABASE_NAME", "DEFINITION_TYPE", "DEFINITION_ID", "DEFINITION_NAME", "PROPERTY_KEY", "DATA_TYPE", "IS_REQUIRED"]);
         result.Columns.Select(column => column.Type).ShouldBe([
@@ -68,7 +68,7 @@ public sealed class GraphCatalogIntrospectionTests
         var adhoc = rows.Single(row => Equals(row[5], "Adhoc"));
         adhoc[6].ShouldBe("Adhoc");
         adhoc[7].ShouldBeNull();
-        await using var ownership = (QueryResultSet)await session.ExecuteAsync("SHOW OBJECT OWNERSHIP");
+        await using var ownership = (DatabaseResultSet)await session.ExecuteAsync("SHOW OBJECT OWNERSHIP");
         ownership.Columns[7].IsNullable.ShouldBeTrue();
         var managedRows = rows.Where(row => Equals(row[3], "Managed")).ToArray();
         managedRows.Select(row => row[4]).ShouldBe(["LABEL", "PROPERTY KEY", "INDEX"]);
@@ -152,7 +152,7 @@ public sealed class GraphCatalogIntrospectionTests
 
     internal static async Task<List<object?[]>> Rows(GraphDatabaseSession session, string command)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(command);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(command);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync())
         {

@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// One server-side session pump: drives the protocol state machine
 /// (connected → startup → authenticating → ready ⇄ executing → terminated)
 /// over a single connection and delegates statement execution to the bound
-/// engine session's text-execute seam.
+/// engine session's internal ExecuteStatementAsync entry.
 /// </summary>
 /// <remarks>
 /// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,
@@ -487,7 +487,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         }
     }
 
-    private async Task WritePathsAsync(QueryResult result, CancellationToken cancellationToken)
+    private async Task WritePathsAsync(DatabaseResult result, CancellationToken cancellationToken)
     {
         if (result is not GraphPathsQueryResult paths)
         {
@@ -502,22 +502,22 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task WriteResultAsync(QueryResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
+    private async Task WriteResultAsync(DatabaseResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
     {
-        if (result is QueryResultSet resultSet)
+        if (result is DatabaseResultSet resultSet)
         {
             await using (resultSet.ConfigureAwait(false))
             {
                 var columns = new List<(string Name, byte Type)>(resultSet.Columns.Count);
 
-                foreach (QueryColumn column in resultSet.Columns)
+                foreach (DatabaseColumn column in resultSet.Columns)
                 {
                     columns.Add((column.Name, (byte)column.Type));
                 }
 
                 await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultHeader, new GraphProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
 
-                await foreach (QueryRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+                await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     rowWriter.Reset();
 
@@ -535,7 +535,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             return;
         }
 
-        if (result.Status != QueryResultStatus.Success)
+        if (result.Status != DatabaseResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
                 ? $"{diagnostics[0].Code}: {diagnosticMessage}"

@@ -204,12 +204,12 @@ public sealed class SqlJoinIndexSemanticsTests
     private static SqlStatementMetrics MetricsOf(SqlDatabaseSession session)
         => session.LastStatementMetrics.ShouldNotBeNull();
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, cancellationToken: CancellationToken.None).AsTask();
 
     private static async Task<(int Left, int Right)[]> ReadPairsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         var pairs = new List<(int Left, int Right)>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

@@ -458,7 +458,7 @@ public sealed class SqlColumnBoundsTests
         // Act
         await ExecuteAsync(session, $"INSERT INTO bounded_values VALUES (1, {literal}, {literal})");
         (await session.ExecuteAsync("INSERT INTO bounded_values VALUES (2, @value, @value)",
-            new Dictionary<string, object?> { ["value"] = text }, CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success);
+            new Dictionary<string, object?> { ["value"] = text }, CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
         await ExecuteAsync(session, "INSERT INTO bounded_values SELECT 3, v, v FROM source_values");
         await ExecuteAsync(session, "INSERT INTO bounded_values VALUES (4, NULL, NULL)");
         await ExecuteAsync(session, $"UPDATE bounded_values SET v = {literal}, n = {literal} WHERE id = 4");
@@ -758,14 +758,14 @@ public sealed class SqlColumnBoundsTests
     }
 
     private static async Task ExecuteAsync(SqlDatabaseSession session, string sql)
-        => (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success);
+        => (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
 
     private static async Task ExecuteAsync(SqlConnection connection, string sql)
         => await connection.ExecuteAsync(sql, cancellationToken: TestTimeout.Token());
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

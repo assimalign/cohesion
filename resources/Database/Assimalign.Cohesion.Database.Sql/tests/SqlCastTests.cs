@@ -102,7 +102,7 @@ public sealed class SqlCastTests
         await SeedAsync(session);
 
         await using var result = (await ExecuteAsync(session, $"SELECT CAST(@value AS {target}) AS converted FROM t;",
-            new Dictionary<string, object?> { ["value"] = source })).ShouldBeAssignableTo<QueryResultSet>();
+            new Dictionary<string, object?> { ["value"] = source })).ShouldBeAssignableTo<DatabaseResultSet>();
 
         object? value = (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0];
         result.Columns[0].Type.ShouldBe(type);
@@ -176,7 +176,7 @@ public sealed class SqlCastTests
         var underflow = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST(@value AS REAL) FROM t;",
             new Dictionary<string, object?> { ["value"] = 1e-300 }));
         await using var infinite = (await ExecuteAsync(session, "SELECT CAST(@value AS REAL) FROM t;",
-            new Dictionary<string, object?> { ["value"] = double.PositiveInfinity })).ShouldBeAssignableTo<QueryResultSet>();
+            new Dictionary<string, object?> { ["value"] = double.PositiveInfinity })).ShouldBeAssignableTo<DatabaseResultSet>();
 
         missing.Message.ShouldBe("COHSQLE011: Cannot CAST type INTEGER to DATE: no cast from INTEGER to DATE is registered. " +
             "Register one on the engine's builder (SqlDatabaseEngineBuilder.Types.AddCast) before Build.");
@@ -255,7 +255,7 @@ public sealed class SqlCastTests
         var parameters = new Dictionary<string, object?> { ["value"] = 5 };
 
         await using var empty = (await ExecuteAsync(session, "SELECT CAST(@value AS DATE) FROM t WHERE id < 0;", parameters))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(empty)).ShouldBeEmpty();
         var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST(@value AS DATE) FROM t;", parameters));
 
@@ -399,7 +399,7 @@ public sealed class SqlCastTests
         await SeedAsync(session);
 
         await using var nullResult = (await ExecuteAsync(session, "SELECT CAST(NULL AS INT), CAST(NULL AS DECIMAL(5, 2)), CAST(NULL AS BOOLEAN), CAST('42' AS INT) FROM t;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         object?[] row = (await ReadRowsAsync(nullResult)).ShouldHaveSingleItem();
         (nullResult.Columns[0].Type, row[0]).ShouldBe((DatabaseType.Int32, (object?)null));
         (nullResult.Columns[1].Type, row[1]).ShouldBe((DatabaseType.Decimal, (object?)null));
@@ -407,7 +407,7 @@ public sealed class SqlCastTests
         row[3].ShouldBeOfType<int>().ShouldBe(42);
 
         await using var emptyResult = (await ExecuteAsync(session, "SELECT CAST('42' AS BIGINT) FROM t WHERE id < 0;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (emptyResult.Columns[0].Type, (await ReadRowsAsync(emptyResult)).Count).ShouldBe((DatabaseType.Int64, 0));
     }
 
@@ -421,10 +421,10 @@ public sealed class SqlCastTests
         await SeedAsync(session);
 
         await using var numeric = (await ExecuteAsync(session, "SELECT id FROM t WHERE CAST('10' AS INT) > 9;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(numeric)).ShouldHaveSingleItem()[0].ShouldBe(1);
         await using var boolean = (await ExecuteAsync(session, "SELECT id FROM t WHERE CAST('TRUE' AS BOOLEAN);"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(boolean)).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
 
@@ -446,7 +446,7 @@ public sealed class SqlCastTests
         await ExecuteAsync(session, "CREATE INDEX ix_id ON t(id);");
 
         await using var result = (await ExecuteAsync(session, $"SELECT id FROM t WHERE {predicate} ORDER BY id;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         var rows = await ReadRowsAsync(result);
         rows.Count.ShouldBe(expected.Length);
@@ -467,7 +467,7 @@ public sealed class SqlCastTests
         await SeedAsync(session);
 
         await using var result = (await ExecuteAsync(session, $"SELECT CAST({literal} AS TEXT) FROM t;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBeOfType<string>().ShouldBe(expected);
         result.Columns[0].Type.ShouldBe(DatabaseType.String);
@@ -487,7 +487,7 @@ public sealed class SqlCastTests
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
-        await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<DatabaseResultSet>();
 
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBeOfType<long>().ShouldBe(expected);
     }
@@ -505,7 +505,7 @@ public sealed class SqlCastTests
         await ExecuteAsync(session, "UPDATE t SET id = CAST('41' AS INT) + 2 WHERE id = 42;");
 
         await using var result = (await ExecuteAsync(session, "SELECT CAST(id AS TEXT) FROM t WHERE id > 1;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBe("43");
     }
 
@@ -515,16 +515,16 @@ public sealed class SqlCastTests
         await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
     }
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, cancellationToken: CancellationToken.None).AsTask();
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))

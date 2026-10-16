@@ -1070,11 +1070,11 @@ public sealed class GraphTransactionFailureTests
         DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
-    private static async Task<List<QueryRow>> Rows(GraphDatabaseSession session, string gql)
+    private static async Task<List<DatabaseRow>> Rows(GraphDatabaseSession session, string gql)
     {
         var result = await session.ExecuteAsync(gql);
-        var rows = new List<QueryRow>();
-        if (result is not QueryResultSet set) { return rows; }
+        var rows = new List<DatabaseRow>();
+        if (result is not DatabaseResultSet set) { return rows; }
         await using (set)
         {
             await foreach (var row in set.GetRowsAsync()) { rows.Add(row); }

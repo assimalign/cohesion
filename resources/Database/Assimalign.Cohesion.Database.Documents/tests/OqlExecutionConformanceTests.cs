@@ -98,7 +98,7 @@ public sealed class OqlExecutionConformanceTests
                 await SeedAsync(collection, session, cancellationToken);
                 foreach (string setup in execution.Setup ?? [])
                 {
-                    (await session.ExecuteAsync(setup, cancellationToken: cancellationToken)).Status.ShouldBe(QueryResultStatus.Success, context);
+                    (await session.ExecuteAsync(setup, cancellationToken: cancellationToken)).Status.ShouldBe(DatabaseResultStatus.Success, context);
                 }
 
                 // Act: text takes the production parse, planner, transaction and executor path.
@@ -106,7 +106,7 @@ public sealed class OqlExecutionConformanceTests
                 var result = await session.ExecuteAsync(execution.Statement, parameters, cancellationToken);
 
                 // Assert: DDL must change catalog state; queries must return the exact values and order.
-                result.Status.ShouldBe(QueryResultStatus.Success, context);
+                result.Status.ShouldBe(DatabaseResultStatus.Success, context);
                 if (execution.VerificationStatement is string verification)
                 {
                     result.AffectedCount.ShouldBe(0L, context);
@@ -191,9 +191,9 @@ public sealed class OqlExecutionConformanceTests
         }
     }
 
-    private static async Task VerifyRowsAsync(QueryResult result, object?[][] expected, string context, CancellationToken cancellationToken)
+    private static async Task VerifyRowsAsync(DatabaseResult result, object?[][] expected, string context, CancellationToken cancellationToken)
     {
-        await using var rows = result.ShouldBeAssignableTo<QueryResultSet>(context);
+        await using var rows = result.ShouldBeAssignableTo<DatabaseResultSet>(context);
         var actual = new List<object?[]>();
         await foreach (var row in rows.GetRowsAsync(cancellationToken))
         {

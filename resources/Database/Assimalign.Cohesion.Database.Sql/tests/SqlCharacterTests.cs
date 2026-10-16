@@ -29,7 +29,7 @@ public sealed class SqlCharacterTests
         await session.ExecuteAsync("CREATE TABLE codes (c CHAR(5))");
         await session.ExecuteAsync("INSERT INTO codes VALUES ('12')");
         // Act
-        await using var result = (await session.ExecuteAsync("SELECT c FROM codes")).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync("SELECT c FROM codes")).ShouldBeAssignableTo<DatabaseResultSet>();
         // Assert
         int count = 0;
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
@@ -69,7 +69,7 @@ public sealed class SqlCharacterTests
                 async Task Execute(string sql, IReadOnlyDictionary<string, object?>? parameters = null)
                 {
                     if (connection is not null) { await connection.ExecuteAsync(sql, parameters, TestTimeout.Token()); }
-                    else { (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success); }
+                    else { (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success); }
                 }
 
                 async Task<(List<(DatabaseType Type, int? Length)> Columns, List<object?[]> Rows)> Query(string sql)
@@ -80,7 +80,7 @@ public sealed class SqlCharacterTests
                         return (result.Columns.Select(column => (column.Type, column.MaxLength)).ToList(),
                             result.Select(row => Enumerable.Range(0, result.Columns.Count).Select(row.GetValue).ToArray()).ToList());
                     }
-                    await using var local = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
+                    await using var local = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<DatabaseResultSet>();
                     var rows = new List<object?[]>();
                     await foreach (var row in local.GetRowsAsync(CancellationToken.None))
                     {

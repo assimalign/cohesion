@@ -79,7 +79,7 @@ public sealed class SqlDatabaseScopeTests
 
     private static async Task<List<int>> ReadValuesAsync(SqlDatabaseSession session)
     {
-        var result = (await session.ExecuteAsync("SELECT value FROM marker")).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await session.ExecuteAsync("SELECT value FROM marker")).ShouldBeAssignableTo<DatabaseResultSet>();
         var values = new List<int>();
         await foreach (var row in result.GetRowsAsync())
         {

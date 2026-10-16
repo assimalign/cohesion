@@ -7,13 +7,13 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentQueryResult : QueryResultSet
+internal sealed class DocumentQueryResult : DatabaseResultSet
 {
-    private readonly IReadOnlyList<QueryColumn> _columns;
+    private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly IReadOnlyList<object?[]> _rows;
 
     /// <summary>
@@ -21,17 +21,17 @@ internal sealed class DocumentQueryResult : QueryResultSet
     /// </summary>
     /// <param name="columns">The column descriptors of the result set.</param>
     /// <param name="rows">The materialized row values, one array per row in column order.</param>
-    public DocumentQueryResult(IReadOnlyList<QueryColumn> columns, IReadOnlyList<object?[]> rows)
+    public DocumentQueryResult(IReadOnlyList<DatabaseColumn> columns, IReadOnlyList<object?[]> rows)
     {
         _columns = columns;
         _rows = rows;
     }
 
-    public override QueryResultStatus Status => QueryResultStatus.Success;
+    public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => -1;
     public override IReadOnlyList<Diagnostic>? Diagnostics => null;
-    public override IReadOnlyList<QueryColumn> Columns => _columns;
-    public override async IAsyncEnumerable<QueryRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public override IReadOnlyList<DatabaseColumn> Columns => _columns;
+    public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         foreach (var row in _rows)
         {
@@ -42,7 +42,7 @@ internal sealed class DocumentQueryResult : QueryResultSet
     }
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private sealed class DocumentQueryRow : QueryRow
+    private sealed class DocumentQueryRow : DatabaseRow
     {
         private readonly object?[] _values;
 

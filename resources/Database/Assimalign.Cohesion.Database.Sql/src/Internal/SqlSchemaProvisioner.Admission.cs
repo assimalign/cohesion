@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -12,14 +11,14 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlSchemaProvisioner
 {
-    internal async ValueTask WaitForTablesAsync(QueryRequest request, CancellationToken cancellationToken)
+    internal async ValueTask WaitForTablesAsync(SqlQueryRequest request, CancellationToken cancellationToken)
     {
-        if (Deferred is not { } migration || request is not SqlQueryRequest sql)
+        if (Deferred is not { } migration)
         {
             return;
         }
         var tables = new SortedSet<ulong>();
-        foreach (var reference in References(sql.Statement.SqlExpression))
+        foreach (var reference in References(request.Statement.SqlExpression))
         {
             if (_catalog.TryGetTable(reference.SchemaName ?? SqlPlanner.DefaultSchema, reference.TableName, out var table)
                 && migration.Tables.Contains(table.ObjectId))

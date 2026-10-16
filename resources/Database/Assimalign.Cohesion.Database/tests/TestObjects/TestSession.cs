@@ -10,9 +10,12 @@ namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
 /// A session whose cores begin <see cref="TestTransaction"/>s and record the requests they
-/// execute; it exposes the base's protected operation hold and refusal check.
+/// execute; it exposes the base's protected operation hold and refusal check. It derives the
+/// language base, so the suite covers both capability levels: the typed member declared on
+/// <see cref="DatabaseExecutionSession{TRequest}"/> and the text member declared on
+/// <see cref="DatabaseLanguageSession{TRequest}"/>.
 /// </summary>
-internal sealed class TestSession : DatabaseSession
+internal sealed class TestSession : DatabaseLanguageSession<TestRequest>
 {
     private readonly List<TestTransaction> _begun = [];
     private int _executions;
@@ -44,7 +47,7 @@ internal sealed class TestSession : DatabaseSession
 
     public IsolationLevel? LastIsolationLevel { get; private set; }
 
-    public QueryRequest? LastRequest { get; private set; }
+    public TestRequest? LastRequest { get; private set; }
 
     public string? LastStatement { get; private set; }
 
@@ -88,14 +91,21 @@ internal sealed class TestSession : DatabaseSession
     /// <summary>
     /// Gets or sets the result the execute cores return.
     /// </summary>
-    public QueryResult Result { get; set; } = TestResult.Instance;
+    public DatabaseResult Result { get; set; } = TestResult.Instance;
 
     /// <summary>
     /// Calls the typed execute core directly, past the base's public member: the baseline the
     /// event source's allocation check compares the public member with.
     /// </summary>
-    public ValueTask<QueryResult> ExecuteCoreDirectly(QueryRequest request, CancellationToken cancellationToken = default)
+    public ValueTask<DatabaseResult> ExecuteCoreDirectly(TestRequest request, CancellationToken cancellationToken = default)
         => ExecuteCoreAsync(request, cancellationToken);
+
+    /// <summary>
+    /// Calls the text execute core directly, past the language base's public member: the baseline
+    /// the event source's allocation check compares the text member with.
+    /// </summary>
+    public ValueTask<DatabaseResult> ExecuteTextCoreDirectly(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
+        => ExecuteCoreAsync(statement, parameters, cancellationToken);
 
     public bool EnterOperation() => TryEnterOperation();
 
@@ -124,14 +134,14 @@ internal sealed class TestSession : DatabaseSession
         return transaction;
     }
 
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(TestRequest request, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _executions);
         LastRequest = request;
         return Complete();
     }
 
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _executions);
         LastStatement = statement;
@@ -154,7 +164,7 @@ internal sealed class TestSession : DatabaseSession
 
     // The execute cores' outcome: Result, or ExecuteFailure thrown under ExecuteGate's lock or
     // returned faulted; after ExecuteBarrier when one is set.
-    private ValueTask<QueryResult> Complete()
+    private ValueTask<DatabaseResult> Complete()
     {
         if (ExecuteBarrier is { } barrier)
         {
@@ -165,7 +175,7 @@ internal sealed class TestSession : DatabaseSession
         {
             if (ExecuteFailureAsynchronously)
             {
-                return ValueTask.FromException<QueryResult>(failure);
+                return ValueTask.FromException<DatabaseResult>(failure);
             }
 
             lock (ExecuteGate)
@@ -174,10 +184,10 @@ internal sealed class TestSession : DatabaseSession
             }
         }
 
-        return new ValueTask<QueryResult>(Result);
+        return new ValueTask<DatabaseResult>(Result);
     }
 
-    private async ValueTask<QueryResult> CompleteAfterAsync(Task barrier, Exception? failure)
+    private async ValueTask<DatabaseResult> CompleteAfterAsync(Task barrier, Exception? failure)
     {
         await barrier.ConfigureAwait(false);
         if (failure is not null)

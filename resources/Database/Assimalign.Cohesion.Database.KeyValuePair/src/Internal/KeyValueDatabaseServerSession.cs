@@ -16,10 +16,13 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// <summary>
 /// One server-side session pump: drives the protocol state machine
 /// (connected → startup → authenticating → ready ⇄ executing → terminated)
-/// over a single connection and delegates statement execution to the bound
-/// engine session's text-execute seam — for this model, the five-verb command
-/// grammar (<c>docs/COMMANDS.md</c>) riding the protocol's existing Execute
-/// message.
+/// over a single connection and delegates command execution to the bound
+/// engine session's internal command entry
+/// (<see cref="KeyValueDatabaseSession.ExecuteCommandTextAsync"/>): the
+/// command grammar (<c>docs/COMMANDS.md</c>), the wire encoding of the typed
+/// requests, riding the protocol's existing Execute message. A command that fails
+/// to parse never reaches the session's typed member, so the server writes
+/// <c>StatementParseFailed</c> for it.
 /// </summary>
 /// <remarks>
 /// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,
@@ -380,14 +383,18 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             }
         }
 
-        QueryResult result;
+        DatabaseResult result;
 
         try
         {
-            result = await _databaseSession!.ExecuteAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
+            result = await _databaseSession!.ExecuteCommandTextAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseParseException exception)
         {
+            // Parsing failed before the typed NVI could trace a request. Report code and type only,
+            // before the ParseFailure frame, then keep the connection ready for its next frame.
+            KeyValueDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, exception);
+
             // Statement-level failures keep the session in the ready state.
             await WriteErrorAsync(ProtocolErrorCode.ParseFailure, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
@@ -405,20 +412,20 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             return;
         }
 
-        if (result is QueryResultSet resultSet)
+        if (result is DatabaseResultSet resultSet)
         {
             await using (resultSet.ConfigureAwait(false))
             {
                 var columns = new List<(string Name, byte Type)>(resultSet.Columns.Count);
 
-                foreach (QueryColumn column in resultSet.Columns)
+                foreach (DatabaseColumn column in resultSet.Columns)
                 {
                     columns.Add((column.Name, (byte)column.Type));
                 }
 
                 await WriteFrameAsync((ProtocolMessageType)KeyValueProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
 
-                await foreach (QueryRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+                await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     rowWriter.Reset();
 
@@ -439,7 +446,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             return;
         }
 
-        if (result.Status != QueryResultStatus.Success)
+        if (result.Status != DatabaseResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
                 ? diagnosticMessage

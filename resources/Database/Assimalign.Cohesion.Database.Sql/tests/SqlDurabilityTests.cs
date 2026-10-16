@@ -49,7 +49,7 @@ public sealed class SqlDurabilityTests : IDisposable
     private static async Task<int> CountRowsAsync(SqlDatabaseSession session)
     {
         var result = await session.ExecuteAsync(SelectRequest());
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
 
         int count = 0;
         await foreach (var _ in resultSet!.GetRowsAsync())

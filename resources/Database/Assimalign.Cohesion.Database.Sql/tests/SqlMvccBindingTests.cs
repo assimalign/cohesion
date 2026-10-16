@@ -89,7 +89,7 @@ public sealed class SqlMvccBindingTests
         // Assert: the write is gone (physical bracket revert), the pairing is
         // released, and the session is immediately usable.
         var result = await session.ExecuteAsync("SELECT COUNT(*) AS n FROM t");
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
         await foreach (var row in resultSet!.GetRowsAsync())
         {
             row.GetValue(0).ShouldBe(0L);

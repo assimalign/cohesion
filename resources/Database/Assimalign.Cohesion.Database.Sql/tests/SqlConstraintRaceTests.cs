@@ -237,7 +237,7 @@ public sealed class SqlConstraintRaceTests
 
     private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
-        var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync())
         {

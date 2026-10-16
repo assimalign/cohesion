@@ -930,12 +930,12 @@ public sealed class SqlDropColumnTests : IDisposable
     private static async Task ExecuteAsync(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-        result.Status.ShouldBe(QueryResultStatus.Success, sql.Length > 120 ? sql[..120] : sql);
+        result.Status.ShouldBe(DatabaseResultStatus.Success, sql.Length > 120 ? sql[..120] : sql);
     }
 
     private static async Task<(IReadOnlyList<string> Columns, List<object?[]> Rows)> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>()!;
+        await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>()!;
         var columns = result.Columns.Select(column => column.Name).ToArray();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))

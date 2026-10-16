@@ -376,8 +376,8 @@ public sealed class SqlBindingConcurrencyTests
     private static async Task QueryAsync(SqlDatabaseSession session, string sql, CancellationToken cancellationToken = default)
     {
         var result = await session.ExecuteAsync(sql, null, cancellationToken);
-        result.Status.ShouldBe(QueryResultStatus.Success);
-        if (result is QueryResultSet rows)
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
+        if (result is DatabaseResultSet rows)
         {
             await using (rows)
             {

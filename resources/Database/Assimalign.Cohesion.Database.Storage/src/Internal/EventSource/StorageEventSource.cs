@@ -550,7 +550,7 @@ internal sealed class StorageEventSource : EventSource
     }
 
     // The status a stop writes: the area's Success or Error (Storage has no cancellable start/stop
-    // pair, and as a child root it does not take the root's QueryResultStatus, so it spells the
+    // pair, and as a child root it does not take the root's DatabaseResultStatus, so it spells the
     // same names).
     private static string Status(bool succeeded) => succeeded ? "Success" : "Error";
 }

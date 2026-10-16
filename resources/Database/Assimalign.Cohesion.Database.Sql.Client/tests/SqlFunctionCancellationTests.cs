@@ -399,7 +399,7 @@ public sealed class SqlFunctionCancellationTests
     private static async Task ExecuteAsync(SqlDatabaseSession session, string sql, CancellationToken cancellationToken)
     {
         var result = await session.ExecuteAsync(sql, CancellationFunctions.Parameters, cancellationToken);
-        if (result is QueryResultSet rows)
+        if (result is DatabaseResultSet rows)
         {
             await using (rows)
             {

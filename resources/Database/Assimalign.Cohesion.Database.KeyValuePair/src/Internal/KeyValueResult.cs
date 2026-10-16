@@ -3,15 +3,15 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// The result of a non-row-returning key-value command (DELETE): a status and
 /// the number of entries affected.
 /// </summary>
-internal sealed class KeyValueQueryResult : QueryResult
+internal sealed class KeyValueResult : DatabaseResult
 {
-    internal KeyValueQueryResult(QueryResultStatus status, long affectedCount, IReadOnlyList<Diagnostic>? diagnostics = null)
+    internal KeyValueResult(DatabaseResultStatus status, long affectedCount, IReadOnlyList<Diagnostic>? diagnostics = null)
     {
         Status = status;
         AffectedCount = affectedCount;
@@ -19,7 +19,7 @@ internal sealed class KeyValueQueryResult : QueryResult
     }
 
     /// <inheritdoc />
-    public override QueryResultStatus Status { get; }
+    public override DatabaseResultStatus Status { get; }
 
     /// <inheritdoc />
     public override long AffectedCount { get; }

@@ -1345,7 +1345,7 @@ public sealed class GraphWorkerResilienceTests
     {
         await using var session = await database.CreateSessionAsync();
         var result = await session.ExecuteAsync("MATCH (n:Item) RETURN n.name");
-        var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        var set = result.ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         int count = 0;
         await using (set)
         {

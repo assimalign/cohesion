@@ -179,3 +179,11 @@ SQL. `SqlDatabaseEngine.Create(name, options)` also remains available for standa
 See [DESIGN.md](DESIGN.md) for the execution model and its decisions.
 
 `SqlDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.
+
+## Session execution (#1576, 2026-10-16)
+
+`SqlDatabaseSession` derives from `DatabaseLanguageSession<SqlQueryRequest>`. It offers typed
+and text execution; a foreign-model request fails compilation. `SqlQueryRequest` owns its typed
+`Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
+use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
+on `DatabaseSession`.

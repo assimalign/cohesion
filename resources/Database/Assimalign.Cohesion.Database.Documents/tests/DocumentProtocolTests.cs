@@ -66,7 +66,7 @@ public sealed class DocumentProtocolTests
             request.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Execute);
             var message = DocumentProtocolExecuteMessage.Decode(request.Payload.Span);
             Encoding.UTF8.GetString(message.Parameters.Span).ShouldBe("{}");
-            await using var results = (QueryResultSet)await session.ExecuteAsync(DocumentQueryRequest.FromOql(message.Statement), token);
+            await using var results = (DatabaseResultSet)await session.ExecuteAsync(DocumentQueryRequest.FromOql(message.Statement), token);
             long count = 0;
             await foreach (var item in results.GetRowsAsync(token))
             {
