@@ -55,14 +55,29 @@ table-copy migration, identifying #1447 as the in-place rewrite work.
 
 BETWEEN binds independent comparands for its lower and upper comparisons, matching PostgreSQL
 `src/backend/parser/parse_expr.c:1325-1341`; round 2 leaves that implementation unchanged. IN separates
-candidates containing column references, including references nested inside expressions. They bind
+candidates containing table-column references, including references nested inside expressions. They bind
 as independent equality comparisons (inequalities joined by AND for NOT IN), matching
 `parse_expr.c:1163-1176,1253-1295`. Only a group with more than one non-column candidate uses a common
 character type, considering the left operand first (`:1182-1190`). Among CHAR, TEXT and VARCHAR the
 first non-unknown type wins: `parse_coerce.c:1397-1440` replaces it only for a one-way implicit cast,
 and `src/include/catalog/pg_cast.dat:313-325` makes these string casts implicit in both directions.
 All-unknown inputs select TEXT (`parse_coerce.c:1444-1456`). VARCHAR shares String identity with TEXT
-here. Untyped string literals and parameters do not set the running type.
+here. Untyped string literals and statement parameters do not set the running type.
+
+The binding site supplies `SqlBindingContext`: Table for statement/table-CHECK scopes, Function
+for SQL parameter frames, and Domain for domain VALUE (including the synthetic check function on
+reload). `ReferencesTableColumn` is an instance query on that scope; the former syntax-only
+`SqlPlanner.ReferencesAnyColumn` is removed. Function parameters and domain VALUE retain their
+declared types and participate in the common-type group even though their named slots use
+`SqlCatalogColumn` metadata. PostgreSQL represents them as `Param` (`executor/functions.c:491-505`)
+and `CoerceToDomainValue` (`commands/typecmds.c:3603-3618`), not the Vars separated by
+`parse_expr.c:1163`. Thus `'a ' IN (text_b(), p)` is FALSE for a CHAR parameter containing `'a'`,
+and the same predicate over domain VALUE rejects `'a'`; the common TEXT comparison trims CHAR.
+Table columns, including a real column named VALUE, still compare independently. The context
+survives ordering-scope copies. This changes neither slot evaluation nor constant folding: SQL
+parameters and VALUE remain invocation-dependent reads, while supplied statement parameters
+remain fixed values. The consumer audit and baseline evidence are in
+[CHAR_BINDING_REVIEW.md](CHAR_BINDING_REVIEW.md).
 
 The bound IN group carries that comparison identity, so CHAR-selected groups convert even typed
 TEXT/VARCHAR values to CHAR comparands without padding or truncating to any operand's declared width

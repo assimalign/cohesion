@@ -461,14 +461,14 @@ internal sealed partial class SqlPlanner
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates,
         bool columnOnLeft = true)
     {
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         // A comparand that calls a volatile function can change between the plan and a row.
-        if (ReferencesAnyColumn(comparand) || ContainsVolatileCall(comparand))
+        if (evaluator.ReferencesTableColumn(comparand) || ContainsVolatileCall(comparand))
         {
             return;
         }
 
         var column = (SqlColumnReferenceExpression)UnwrapCollation(columnExpression);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         int ordinal;
         try
         {
@@ -558,17 +558,6 @@ internal sealed partial class SqlPlanner
             or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan => true,
         _ => false,
     };
-
-    internal static bool ReferencesAnyColumn(SqlExpression expression)
-    {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlColumnReferenceExpression)
-        {
-            return true;
-        }
-
-        return Children(expression).Any(ReferencesAnyColumn);
-    }
 
     private SqlPlan PlanInsert(SqlInsertExpression insert)
     {

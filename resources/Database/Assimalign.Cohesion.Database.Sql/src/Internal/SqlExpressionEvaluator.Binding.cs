@@ -449,7 +449,7 @@ internal sealed partial class SqlExpressionEvaluator
         {
             candidates[index] = Bind(values[index], out collations[index + 1]);
             comparisons[index] = SqlBoundCollation.Of(operandCollation, collations[index + 1], _defaultCollation);
-            referencesColumn[index] = SqlPlanner.ReferencesAnyColumn(values[index]);
+            referencesColumn[index] = ReferencesTableColumn(values[index]);
             if (!referencesColumn[index])
             {
                 nonColumnCount++;

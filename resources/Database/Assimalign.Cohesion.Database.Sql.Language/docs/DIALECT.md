@@ -1425,15 +1425,23 @@ lengths can compare equal under the index's collation.
   Mixed CHAR and TEXT/VARCHAR CASE or COALESCE results use TEXT and strip CHAR branches.
   BETWEEN resolves each comparison independently (`src/backend/parser/parse_expr.c:1325-1341`),
   so `'a ' BETWEEN CAST('a' AS CHAR(3)) AND CAST('a' AS TEXT)` returns FALSE.
-  IN binds candidates containing column references as independent comparisons, including references
+  IN binds candidates containing table-column references as independent comparisons, including references
   inside calls, casts and other expressions (`parse_expr.c:1163-1176,1253-1295`). For a table column
   `c CHAR(3)` containing `'a'`, `'a ' IN (c, CAST('b' AS TEXT))` therefore returns TRUE, like its
-  `= OR =` expansion. Only when more than one remaining candidate has no column reference does IN
+  `= OR =` expansion. Only when more than one remaining candidate has no table-column reference does IN
   choose a common character type, considering the left operand first (`:1182-1190`). The first
   non-unknown CHAR/TEXT/VARCHAR type wins: the one-way implicit-cast replacement rule in
   `parse_coerce.c:1397-1440` cannot replace any of these with another, because
   `src/include/catalog/pg_cast.dat:313-325` permits implicit casts in both directions. Untyped string
-  literals/parameters do not set the type; all-unknown inputs use TEXT (`parse_coerce.c:1444-1456`).
+  literals/statement parameters do not set the type; all-unknown inputs use TEXT (`parse_coerce.c:1444-1456`).
+  SQL function parameters and domain VALUE are typed values in that common group, including when
+  nested inside calls or other expressions. PostgreSQL binds them as `Param`
+  (`src/backend/executor/functions.c:491-505`) and `CoerceToDomainValue`
+  (`src/backend/commands/typecmds.c:3603-3618`), neither a table Var. Consequently
+  `'a ' IN (CAST('b' AS TEXT), p)` returns FALSE for a CHAR parameter `p` containing `'a'`.
+  A domain `CHECK ('a ' IN (text_b(), VALUE))`, where `text_b()` returns TEXT `'b'`, rejects
+  `'a'` for the same reason: the common TEXT comparison sees trimmed CHAR `'a'`.
+  Domain CHECK rejects FALSE and accepts UNKNOWN (`execExprInterp.c:4498-4508`).
   Thus `'a ' IN (CAST('b' AS CHAR(3)), CAST('a' AS TEXT))` returns TRUE; reversing those candidates
   returns FALSE. VARCHAR first preserves significant text spaces too. A CHAR left operand wins
   before either: `CAST('a' AS CHAR(3)) IN ('a ', CAST('b' AS TEXT))` returns TRUE. Common coercion

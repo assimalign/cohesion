@@ -890,12 +890,14 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="table">The table version the predicate constrains.</param>
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
+    /// <param name="bindingContext">Whether the named slots are table columns or domain VALUE.</param>
     /// <returns>The resolved identities of its function calls, in expression preorder.</returns>
     /// <exception cref="DatabaseException">The predicate does not bind or is not a valid CHECK.</exception>
     internal static IReadOnlyList<string> ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions)
+        SqlFunctionEnvironment functions, SqlBindingContext bindingContext = SqlBindingContext.Table)
     {
-        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions);
+        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions,
+            bindingContext: bindingContext);
         SqlPlanner.ValidateExpression(expression, scope);
         new SqlCheckSyntax(table, scope, declaring: true).Validate(expression, requireBoolean: true);
         return SqlDefinitionBinder.FunctionCalls(expression, scope);

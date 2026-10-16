@@ -46,6 +46,7 @@ internal sealed partial class SqlExpressionEvaluator
     private static readonly SqlExpressionEvaluator RowEvaluator = new(Array.Empty<SqlCatalogColumn>(), null);
 
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
+    private readonly SqlBindingContext _bindingContext;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly IReadOnlyList<SqlTableBinding>? _bindings;
     private readonly IReadOnlyDictionary<SqlExpression, int>? _valueOrdinals;
@@ -87,9 +88,11 @@ internal sealed partial class SqlExpressionEvaluator
         SqlSubqueryValues? subqueryValues = null,
         SqlFunctionEnvironment? functions = null,
         CancellationToken cancellationToken = default,
-        SqlExpressionEvaluator? slotScope = null)
+        SqlExpressionEvaluator? slotScope = null,
+        SqlBindingContext bindingContext = SqlBindingContext.Table)
     {
         _columns = columns;
+        _bindingContext = bindingContext;
         _parameters = parameters;
         _bindings = bindings;
         _valueOrdinals = valueOrdinals;
@@ -150,7 +153,7 @@ internal sealed partial class SqlExpressionEvaluator
             sources[expression] = projections[index];
         }
         return new SqlExpressionEvaluator(_columns, _parameters, _bindings, ordinals,
-            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope);
+            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext);
     }
 
     /// <summary>
@@ -260,6 +263,19 @@ internal sealed partial class SqlExpressionEvaluator
     [MethodImpl(MethodImplOptions.NoInlining)]
     private object? EvaluateDomainArgument(SqlBoundDomainArgument argument, object?[] row)
         => argument.Coerce(EvaluateCore(argument.Operand, row), _subqueryValues, _cancellationToken);
+
+    /// <summary>
+    /// Whether an expression reads a table column in this binding context. SQL function parameters
+    /// and domain VALUE share the named-slot representation, but are not table references.
+    /// </summary>
+    internal bool ReferencesTableColumn(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        // PostgreSQL functions.c:491 and typecmds.c:3609 use Param and CoerceToDomainValue,
+        // neither of which is a Var for parse_expr.c:1163. The binding site supplies that distinction.
+        if (_bindingContext != SqlBindingContext.Table) { return false; }
+        return expression is SqlColumnReferenceExpression || SqlPlanner.Children(expression).Any(ReferencesTableColumn);
+    }
 
     internal int ResolveColumn(SqlColumnReferenceExpression column)
     {
