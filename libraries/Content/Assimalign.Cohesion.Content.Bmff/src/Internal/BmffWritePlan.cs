@@ -99,6 +99,31 @@ internal sealed class BmffWritePlan
         }
     }
 
+    internal void AddLayout(BmffLayout layout, long offset)
+    {
+        if (!layout.Entries.TryAdd(_box, new BmffLayoutEntry(offset, Header.HeaderSize, PayloadSize)))
+        {
+            throw new ContentFormatException(ErrorMessages.InvalidTree, ContentFormatErrorCode.InvalidStructure, offset);
+        }
+        // Profile composites can add a prefix through GetPayloadSize + Write without
+        // overriding the package-internal PrefixSize seam. Their extra bytes precede children.
+        var prefixSize = PayloadSize - (_box is BmffBoxComposite composite ? composite.TrailingData.Length : 0);
+        foreach (var child in _children)
+        {
+            prefixSize -= child.Size;
+        }
+        if (prefixSize < 0)
+        {
+            throw new ContentFormatException(ErrorMessages.InvalidTree, ContentFormatErrorCode.InvalidStructure, offset);
+        }
+        var childOffset = offset + Header.HeaderSize + prefixSize;
+        foreach (var child in _children)
+        {
+            child.AddLayout(layout, childOffset);
+            childOffset += child.Size;
+        }
+    }
+
     internal void Write(BmffStream output)
     {
         Header.Write(output);
@@ -126,13 +151,14 @@ internal sealed class BmffWritePlan
         await output.WriteAsync(header.GetBuffer().AsMemory(0, (int)header.Length), cancellationToken).ConfigureAwait(false);
         using var payload = new BmffStream(output, output.Position, PayloadSize) { WritePlan = this };
         payload.CancellationToken = cancellationToken;
-        if (_box is BmffBoxComposite { SupportsAsyncPlan: true })
+        if (_box is BmffBoxComposite { SupportsAsyncPlan: true } composite)
         {
             await payload.WriteAsync(_prefix, cancellationToken).ConfigureAwait(false);
             foreach (var child in _children)
             {
                 await child.WriteAsync(payload, bufferLimit, cancellationToken).ConfigureAwait(false);
             }
+            await payload.WriteAsync(composite.TrailingData, cancellationToken).ConfigureAwait(false);
         }
         else if (_box is BmffBoxComposite)
         {

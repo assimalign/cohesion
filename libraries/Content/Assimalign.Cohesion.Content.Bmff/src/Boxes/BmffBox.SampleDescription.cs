@@ -1,54 +1,49 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System;
+﻿using System;
 
-
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
-[DebuggerDisplay("Bmff Box: Sample Description (stsd)")]
-/// <summary>The SampleDescriptionBox model; field-level support is documented in DESIGN.md.</summary>
-public sealed class SampleDescriptionBox : BmffFullBox
+/// <summary>The counted SampleDescription full-box container; ISO/IEC 14496-12 8.5.2.</summary>
+public sealed class SampleDescriptionBox : BmffBoxComposite
 {
-    /// <summary>Creates a SampleDescriptionBox at its original location.</summary>
-    /// <param name="offset">The absolute original header offset.</param>
-    /// <param name="limit">The original total byte size.</param>
-    public SampleDescriptionBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
-
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
+    private uint _flags;
+    internal override bool SupportsAsyncPlan => true;
+    /// <summary>Creates an empty container at its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public SampleDescriptionBox(long offset, long limit) { Offset = offset; Limit = limit; }
     /// <inheritdoc/>
     public override long Limit { get; }
     /// <inheritdoc/>
     public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.SampleDescription;
-
-    /// <inheritdoc/>
-    public override void Read(BmffStream stream)
+    /// <summary>Gets or sets the encoded full-box version.</summary>
+    public byte Version { get; set; }
+    /// <summary>Gets or sets the 24-bit full-box flags.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value exceeds 24 bits.</exception>
+    public uint Flags { get => _flags; set { ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 0xffffffu); _flags = value; } }
+    /// <summary>Gets the entry count from the editable Children collection.</summary>
+    public int EntryCount => Children.Count;
+    internal override int PrefixSize => 8;
+    internal override int? ReadPrefix(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
+        var prefix = BmffFields.U32(stream);
+        Version = (byte)(prefix >> 24);
+        Flags = prefix & 0xffffff;
+        BmffFields.Version(Version, Flags, 0, 0, stream.Offset);
+        return BmffFields.Count(stream, BmffFields.U32(stream), 8, 0);
     }
-
-    /// <inheritdoc/>
-    public override void Write(BmffStream stream)
+    internal override void WritePrefix(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
+        BmffFields.Version(Version, Flags, 0, 0, Offset);
+        BmffFields.Width((ulong)Children.Count, 4, Offset);
+        BmffFields.U32(stream, ((uint)Version << 24) | Flags);
+        BmffFields.Sized(stream, (ulong)Children.Count, 4);
     }
     /// <inheritdoc/>
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
-    {
-        return visitor.Visit(this);
-    }
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

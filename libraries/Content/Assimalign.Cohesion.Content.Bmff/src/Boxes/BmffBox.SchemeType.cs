@@ -1,57 +1,80 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
+﻿using System;
 using System.Text;
-using System.Threading.Tasks;
-using System;
 
-
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
-[DebuggerDisplay("Bmff Box: Scheme Type (schm)")]
-/// <summary>The SchemeTypeBox model; field-level support is documented in DESIGN.md.</summary>
+/// <summary>The SchemeType box; ISO/IEC 14496-12 8.12.4.</summary>
 public sealed class SchemeTypeBox : BmffFullBox
 {
+    private byte[] _trailing = Array.Empty<byte>();
     /// <summary>Creates a SchemeTypeBox at its original location.</summary>
-    /// <param name="offset">The absolute original header offset.</param>
-    /// <param name="limit">The original total byte size.</param>
-    public SchemeTypeBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public SchemeTypeBox(long offset, long limit) { Offset = offset; Limit = limit;  }
+
     /// <inheritdoc/>
     public override bool IsLeaf => true;
-
     /// <inheritdoc/>
     public override bool IsComposite => false;
-
     /// <inheritdoc/>
-    public override long Limit { get;}
-
+    public override long Limit { get; }
     /// <inheritdoc/>
     public override long Offset { get; }
-
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.SchemeType;
+
+    /// <summary>Gets or sets the protection scheme FourCC.</summary>
+    public FourCC SchemeType { get; set; }
+    /// <summary>Gets or sets the scheme version.</summary>
+    public uint SchemeVersion { get; set; }
+    private byte[] _schemeUri = Array.Empty<byte>();
+    /// <summary>Gets or sets the URI when flag 1 is present. Original UTF-8 bytes are preserved until assigned.</summary>
+    public string SchemeUri { get => Encoding.UTF8.GetString(_schemeUri); set => _schemeUri = Encoding.UTF8.GetBytes(value); }
 
     /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
-    }
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 0, 1, stream.Offset);
+        SchemeType = FourCC.FromUInt32(BmffFields.U32(stream));
+        SchemeVersion = BmffFields.U32(stream);
+        if ((Flags & 1) != 0)
+        {
+            _schemeUri = BmffFields.Text(stream);
+        }
 
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
+    }
     /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
+        Validate();
+        WriteFullBoxHeader(stream);
+        BmffFields.U32(stream, SchemeType.Value);
+        BmffFields.U32(stream, SchemeVersion);
+        if ((Flags & 1) != 0)
+        {
+            BmffFields.Text(stream, _schemeUri);
+        }
+
+        stream.Write(_trailing);
     }
     /// <inheritdoc/>
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 12L + ((Flags & 1) != 0 ? BmffFields.TextSize(_schemeUri, Offset) : 0) + _trailing.Length;
     }
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 0, 1, Offset);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

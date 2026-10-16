@@ -13,6 +13,7 @@ public abstract class BmffBoxComposite : BmffBox
     {
     }
 
+    internal byte[] TrailingData { get; set; } = Array.Empty<byte>();
     private long? _plannedChildrenSize;
     internal virtual bool SupportsAsyncPlan => false;
 
@@ -52,12 +53,16 @@ public abstract class BmffBoxComposite : BmffBox
     {
         Children.Clear();
         var count = ReadPrefix(stream);
-        using var reader = stream.ReadChildren();
+        using var reader = stream.ReadChildrenCore(count);
         while (reader.Read())
         {
             Children.Add(reader.Current);
         }
         ValidateChildren(count);
+        if (count.HasValue)
+        {
+            TrailingData = BmffFields.Bytes(stream, stream.Remaining);
+        }
     }
 
     /// <inheritdoc/>
@@ -67,6 +72,7 @@ public abstract class BmffBoxComposite : BmffBox
         if (stream.WritePlan is not null)
         {
             stream.WritePlan.WriteChildren(stream);
+            stream.Write(TrailingData);
             return;
         }
         using var writer = BmffWriter.Create(stream);
@@ -74,6 +80,7 @@ public abstract class BmffBoxComposite : BmffBox
         {
             writer.Write(child);
         }
+        stream.Write(TrailingData);
     }
 
     /// <inheritdoc/>
@@ -81,13 +88,13 @@ public abstract class BmffBoxComposite : BmffBox
     {
         if (_plannedChildrenSize.HasValue)
         {
-            if (_plannedChildrenSize.Value > long.MaxValue - PrefixSize)
+            if (_plannedChildrenSize.Value > long.MaxValue - PrefixSize - TrailingData.Length)
             {
                 throw new ContentFormatException(ErrorMessages.SizeLimit, ContentFormatErrorCode.LimitExceeded, Offset);
             }
-            return PrefixSize + _plannedChildrenSize.Value;
+            return PrefixSize + _plannedChildrenSize.Value + TrailingData.Length;
         }
-        long size = PrefixSize;
+        long size = PrefixSize + TrailingData.Length;
         foreach (var child in Children)
         {
             var childSize = BmffWritePlan.Create(child, 0, 64, false).Size;

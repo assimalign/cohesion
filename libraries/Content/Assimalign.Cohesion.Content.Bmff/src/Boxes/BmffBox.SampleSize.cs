@@ -1,58 +1,85 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
+﻿using System;
 using System.Text;
-using System.Threading.Tasks;
-using System;
 
-
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
-
-[DebuggerDisplay("Bmff Box: Sample Size [Framing] (stsz)")]
-/// <summary>The SampleSizeBox model; field-level support is documented in DESIGN.md.</summary>
+/// <summary>The SampleSize box; ISO/IEC 14496-12 8.7.3.2.</summary>
 public sealed class SampleSizeBox : BmffFullBox
 {
+    private byte[] _trailing = Array.Empty<byte>();
     /// <summary>Creates a SampleSizeBox at its original location.</summary>
-    /// <param name="offset">The absolute original header offset.</param>
-    /// <param name="limit">The original total byte size.</param>
-    public SampleSizeBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public SampleSizeBox(long offset, long limit) { Offset = offset; Limit = limit;  }
+
     /// <inheritdoc/>
     public override bool IsLeaf => true;
-
     /// <inheritdoc/>
     public override bool IsComposite => false;
-
     /// <inheritdoc/>
-    public override long Limit { get;}
-
+    public override long Limit { get; }
     /// <inheritdoc/>
     public override long Offset { get; }
-
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.SampleSize;
+
+    /// <summary>Gets or sets the common sample size, or zero for individual sizes.</summary>
+    public uint SampleSize { get; set; }
+    /// <summary>Gets or sets the count when SampleSize is nonzero; otherwise the entries length is written.</summary>
+    public uint SampleCount { get; set; }
+    /// <summary>Gets or sets the individual sizes when SampleSize is zero.</summary>
+    public uint[] Entries { get; set; } = Array.Empty<uint>();
 
     /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
-    }
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 0, 0, stream.Offset);
+        SampleSize = BmffFields.U32(stream);
+        SampleCount = BmffFields.U32(stream);
+        var count = BmffFields.Count(stream, SampleCount, SampleSize == 0 ? 4 : 0, SampleSize == 0 ? 4 : 0);
+        Entries = SampleSize == 0 ? new uint[count] : Array.Empty<uint>();
+        for (var i = 0; i < Entries.Length; i++)
+        {
+            Entries[i] = BmffFields.U32(stream);
+        }
 
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
+    }
     /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
+        Validate();
+        WriteFullBoxHeader(stream);
+        BmffFields.U32(stream, SampleSize);
+        BmffFields.U32(stream, SampleSize == 0 ? (uint)Entries.Length : SampleCount);
+        if (SampleSize == 0)
+        {
+            foreach (var value in Entries)
+            {
+                BmffFields.U32(stream, value);
+            }
+        }
+
+        stream.Write(_trailing);
     }
     /// <inheritdoc/>
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 12L + (SampleSize == 0 ? Entries.LongLength * 4 : 0) + _trailing.Length;
     }
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 0, 0, Offset);
+        ArgumentNullException.ThrowIfNull(Entries);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

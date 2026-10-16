@@ -10,9 +10,10 @@ namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>An editable ordered box tree with borrowed or explicitly owned lazy source bytes.</summary>
 /// <remarks>Keep the source open and unchanged until saving finishes. Access to one source is sequential.
-/// This container layer does not relocate sample offsets; that belongs to the standard box models in #447.</remarks>
+/// Save relocates supported in-file media references from the last loaded or planned layout.</remarks>
 public sealed class BmffDocument : IDisposable
 {
+    private BmffLayout? _layout;
     private bool _ownsSource;
     private bool _disposed;
     /// <summary>Gets the mutable ordered top-level boxes.</summary>
@@ -62,6 +63,7 @@ public sealed class BmffDocument : IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 document.Boxes.Add(reader.Current);
             }
+            document._layout = BmffLayout.Original(document.Boxes);
             return document;
         }
         catch
@@ -80,6 +82,7 @@ public sealed class BmffDocument : IDisposable
     internal void SaveCore(Stream output, int bufferLimit, int maxDepth)
     {
         ValidateOutput(output);
+        RelocateCore(output.CanSeek ? output.Position : 0, maxDepth);
         using var writer = BmffWriter.Create(output, bufferLimit, maxDepth);
         foreach (var box in Boxes)
         {
@@ -100,11 +103,35 @@ public sealed class BmffDocument : IDisposable
     {
         ValidateOutput(output);
         cancellationToken.ThrowIfCancellationRequested();
+        RelocateCore(output.CanSeek ? output.Position : 0, maxDepth);
         using var writer = BmffWriter.Create(output, bufferLimit, maxDepth);
         foreach (var box in Boxes)
         {
             await writer.WriteAsync(box, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Relocates supported media references to the current ordered tree and checkpoints its layout.</summary>
+    /// <remarks>Also called by Save. Updates stco/co64, local file-based iloc, explicit tfhd bases,
+    /// moof-relative trun data offsets, tfra moof offsets and resized mfro. Promotes encodings as needed.
+    /// Repeated calls are idempotent. New documents establish their first layout without shifting references.
+    /// Unknown references and implicit bases after the first traf require a profile; see DESIGN.md.</remarks>
+    /// <param name="outputOffset">The absolute start of the planned output, normally zero.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The output offset is negative.</exception>
+    /// <exception cref="ContentFormatException">The layout or a relocation is invalid or unsupported.</exception>
+    /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
+    public void RelocateMediaOffsets(long outputOffset = 0)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentOutOfRangeException.ThrowIfNegative(outputOffset);
+        RelocateCore(outputOffset, 64);
+    }
+
+    private void RelocateCore(long outputOffset, int maxDepth)
+    {
+        _layout = _layout is null
+            ? BmffLayout.Measure(Boxes, outputOffset, maxDepth)
+            : BmffOffsetRelocator.Relocate(Boxes, _layout, outputOffset, maxDepth);
     }
 
     private void ValidateOutput(Stream output)

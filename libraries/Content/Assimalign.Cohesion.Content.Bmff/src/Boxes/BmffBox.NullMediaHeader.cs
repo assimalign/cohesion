@@ -1,26 +1,19 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
+﻿using System;
 using System.Text;
-using System.Threading.Tasks;
-using System;
 
-
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
-[DebuggerDisplay("Bmff Box: Null Media Header (nmhd)")]
-/// <summary>The NullMediaHeaderBox model; field-level support is documented in DESIGN.md.</summary>
+/// <summary>The NullMediaHeader box; ISO/IEC 14496-12 8.4.5.5.</summary>
 public sealed class NullMediaHeaderBox : BmffFullBox
 {
+    private byte[] _trailing = Array.Empty<byte>();
     /// <summary>Creates a NullMediaHeaderBox at its original location.</summary>
-    /// <param name="offset">The absolute original header offset.</param>
-    /// <param name="limit">The original total byte size.</param>
-    public NullMediaHeaderBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public NullMediaHeaderBox(long offset, long limit) { Offset = offset; Limit = limit;  }
 
     /// <inheritdoc/>
     public override bool IsLeaf => true;
@@ -33,22 +26,36 @@ public sealed class NullMediaHeaderBox : BmffFullBox
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.NullMediaHeader;
 
+
     /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
-    }
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 0, 0, stream.Offset);
 
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
+    }
     /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
+        Validate();
+        WriteFullBoxHeader(stream);
+
+        stream.Write(_trailing);
     }
     /// <inheritdoc/>
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 4L + _trailing.Length;
     }
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 0, 0, Offset);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

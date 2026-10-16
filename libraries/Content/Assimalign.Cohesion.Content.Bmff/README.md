@@ -6,10 +6,12 @@ ISO BMFF container machinery for reading, streaming and editing large files:
 - The retained per-box composite model and visitor interfaces.
 - Immutable delegate registries for MP4/HEIF extensions.
 - Forward-only writing with precomputed sizes or bounded streaming containers.
+- Typed standard movie, track, sample-table, fragment, item and protection-signalling fields.
 - Lazy media and unknown-box payloads, with byte-exact unchanged document saves.
+- Document relocation for fast start, metadata resizing and supported fragment/item references.
 
 See [OVERVIEW](docs/OVERVIEW.md) for usage and [DESIGN](docs/DESIGN.md) for ownership, limits,
-wire rules, registry extension and the field models deferred to #447.
+wire rules, registry extension, strategic field models and the remaining preserved set.
 Content.Media and Content.Binary supply the shared layers beneath BMFF.
 
 From the repository root:

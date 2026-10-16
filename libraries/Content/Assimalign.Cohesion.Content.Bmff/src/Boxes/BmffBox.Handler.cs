@@ -1,61 +1,77 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
+﻿using System;
 using System.Text;
-using System.Threading.Tasks;
-using System;
 
-
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
-
-[DebuggerDisplay("Bmff Box: Handler (hdlr)")]
-/// <summary>The HandlerBox model; field-level support is documented in DESIGN.md.</summary>
+/// <summary>The Handler box; ISO/IEC 14496-12 8.4.3.</summary>
 public sealed class HandlerBox : BmffFullBox
 {
+    private byte[] _trailing = Array.Empty<byte>();
     /// <summary>Creates a HandlerBox at its original location.</summary>
-    /// <param name="offset">The absolute original header offset.</param>
-    /// <param name="limit">The original total byte size.</param>
-    public HandlerBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public HandlerBox(long offset, long limit) { Offset = offset; Limit = limit;  }
 
     /// <inheritdoc/>
     public override bool IsLeaf => true;
-
     /// <inheritdoc/>
     public override bool IsComposite => false;
-
     /// <inheritdoc/>
     public override long Limit { get; }
-
     /// <inheritdoc/>
     public override long Offset { get; }
-
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.Handler;
+
+    /// <summary>Gets or sets the predefined word.</summary>
+    public uint PreDefined { get; set; }
+    /// <summary>Gets or sets the handler FourCC.</summary>
+    public FourCC HandlerType { get; set; }
+    /// <summary>Gets or sets the twelve reserved bytes.</summary>
+    public byte[] Reserved { get; set; } = new byte[12];
+    private byte[] _name = Array.Empty<byte>();
+    /// <summary>Gets or sets the handler name. Original UTF-8 bytes are preserved until assigned.</summary>
+    public string Name { get => Encoding.UTF8.GetString(_name); set => _name = Encoding.UTF8.GetBytes(value); }
 
     /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 0, 0, stream.Offset);
+        PreDefined = BmffFields.U32(stream);
+        HandlerType = FourCC.FromUInt32(BmffFields.U32(stream));
+        Reserved = BmffFields.Bytes(stream, 12);
+        _name = BmffFields.Text(stream);
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
     }
-
     /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
+        Validate();
+        WriteFullBoxHeader(stream);
+        BmffFields.U32(stream, PreDefined);
+        BmffFields.U32(stream, HandlerType.Value);
+        stream.Write(Reserved);
+        BmffFields.Text(stream, _name);
+        stream.Write(_trailing);
     }
     /// <inheritdoc/>
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 24L + BmffFields.TextSize(_name, Offset) + _trailing.Length;
     }
-
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 0, 0, Offset);
+        BmffFields.ArrayLength(Reserved, 12, Offset);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }
