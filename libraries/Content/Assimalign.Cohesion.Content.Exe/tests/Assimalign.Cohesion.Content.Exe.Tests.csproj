@@ -1,14 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Content.Exe.Tests</RootNamespace>
-	</PropertyGroup>
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Content.Exe.Tests</RootNamespace>
+  </PropertyGroup>
   <ItemGroup>
-		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
-		<CohesionPackageReference Include="xunit" />
-		<CohesionPackageReference Include="xunit.runner.visualstudio" />
-		<CohesionPackageReference Include="coverlet.collector" />
-	</ItemGroup>
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" />
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Shouldly" />
+  </ItemGroup>
   <ItemGroup>
-    <Using Include="Xunit" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Content.Exe" />
   </ItemGroup>
 </Project>
