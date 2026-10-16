@@ -94,8 +94,18 @@ decoding: each maximal ill-formed subpart becomes U+FFFD before ordinary Markdow
 
 ## Robustness posture
 
-- **Container depth caps at 128** during parsing; deeper markers degrade to paragraph text. This
-  bounds block nesting from hostile input.
+- **`MarkdownParserOptions.MaxContainerDepth` defaults to 128**. The document does not count;
+  quotes, lists and list items each count one. Excess block starts degrade to paragraph text.
+  A new list/item pair must fit in the remaining budget. A positive caller value can raise or
+  lower the cap; the parser and renderers use explicit stacks.
+- **`MaxLinkDestinationDepth` defaults to 32** nested parentheses inside a bare destination.
+  Zero permits no nested parentheses. A deeper destination fails link recognition and its source
+  follows ordinary inline parsing; angle-bracket destinations are unaffected.
+- Both options are init-only and apply to every parse overload and `CreateReader`. Invalid
+  ranges throw `ArgumentOutOfRangeException` at composition. Neither limit rejects decoded
+  Markdown, so neither produces `LimitExceeded`; strict decoder failures retain `InvalidValue`.
+  There is no delimiter-run cap: emphasis and code-span runs are scanned in memory and long
+  runs remain accepted. The whole source and resulting model remain buffered.
 - **Inline nesting is unbounded by parsing** (emphasis wraps bottom-up), so **both renderers walk
   iteratively** with explicit op stacks — no recursion anywhere in the package, and caller-built
   trees of any depth render without stack overflow.

@@ -44,7 +44,7 @@ internal static class MarkdownInlineParser
     }
 
     /// <summary>Parses raw inline content into <paramref name="target"/>.</summary>
-    public static void Parse(string raw, IList<MarkdownInline> target)
+    public static void Parse(string raw, IList<MarkdownInline> target, MarkdownParserOptions options)
     {
         raw = raw.Replace('\0', '�').TrimEnd();
         if (raw.Length == 0)
@@ -210,7 +210,7 @@ internal static class MarkdownInlineParser
                 case closeBracketId:
                 {
                     Flush(atoms, literal);
-                    consumed = ProcessCloseBracket(raw, atoms, brackets, ref linkGeneration, end, literal);
+                    consumed = ProcessCloseBracket(raw, atoms, brackets, ref linkGeneration, end, literal, options.MaxLinkDestinationDepth);
                     break;
                 }
 
@@ -409,7 +409,7 @@ internal static class MarkdownInlineParser
     /// including reference-style links, which are outside the retained subset.
     /// </summary>
     private static long ProcessCloseBracket(string raw, List<Atom> atoms, Stack<(int Index, int LinkGeneration)> brackets,
-        ref int linkGeneration, int bracketEnd, StringBuilder literal)
+        ref int linkGeneration, int bracketEnd, StringBuilder literal, int maxDestinationDepth)
     {
         if (!brackets.TryPop(out var opener))
         {
@@ -420,7 +420,7 @@ internal static class MarkdownInlineParser
         var bracketIndex = opener.Index;
         var bracket = atoms[bracketIndex].Delimiter!;
         if ((!bracket.IsImage && opener.LinkGeneration != linkGeneration)
-            || !TryReadLinkSuffix(raw, bracketEnd, out var destination, out var title, out var suffixEnd))
+            || !TryReadLinkSuffix(raw, bracketEnd, maxDestinationDepth, out var destination, out var title, out var suffixEnd))
         {
             atoms[bracketIndex] = Atom.ForNode(new MarkdownLiteral(bracket.IsImage ? "![" : "["));
             literal.Append(']');
@@ -453,7 +453,7 @@ internal static class MarkdownInlineParser
         return suffixEnd;
     }
 
-    private static bool TryReadLinkSuffix(string raw, int start, out string destination, out string? title, out int end)
+    private static bool TryReadLinkSuffix(string raw, int start, int maxDepth, out string destination, out string? title, out int end)
     {
         destination = string.Empty;
         title = null;
@@ -520,7 +520,7 @@ internal static class MarkdownInlineParser
 
                 if (character == '(')
                 {
-                    if (++depth > 32)
+                    if (++depth > maxDepth)
                     {
                         return false;
                     }
