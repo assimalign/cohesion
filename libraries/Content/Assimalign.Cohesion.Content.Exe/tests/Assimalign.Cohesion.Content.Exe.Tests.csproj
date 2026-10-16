@@ -11,5 +11,25 @@
   </ItemGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Content.Exe" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Content.Exe.TestHost" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\TruncationCorpus.cs" Link="Shared\Binary\TruncationCorpus.cs" />
+    <Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\ChunkedReadStream.cs" Link="Shared\Binary\ChunkedReadStream.cs" />
+    <Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\NonSeekableStream.cs" Link="Shared\Binary\NonSeekableStream.cs" />
+  </ItemGroup>
+  <Target Name="CopyExecutableTestHost" AfterTargets="Build">
+    <ItemGroup>
+      <_ExecutableHostProject Include="@(ProjectReference)" Condition="'%(Filename)' == 'Assimalign.Cohesion.Content.Exe.TestHost'" />
+    </ItemGroup>
+    <MSBuild Projects="@(_ExecutableHostProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)">
+      <Output TaskParameter="TargetOutputs" ItemName="_ExecutableHostPath" />
+    </MSBuild>
+    <ItemGroup>
+      <_ExecutableHostFiles Include="@(_ExecutableHostPath)" />
+      <_ExecutableHostFiles Include="@(_ExecutableHostPath->'%(RootDir)%(Directory)%(Filename).runtimeconfig.json')" />
+      <_ExecutableHostFiles Include="@(_ExecutableHostPath->'%(RootDir)%(Directory)%(Filename).deps.json')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ExecutableHostFiles)" DestinationFolder="$(OutDir)TestHost" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

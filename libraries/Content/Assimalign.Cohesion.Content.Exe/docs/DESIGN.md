@@ -122,7 +122,7 @@ Inspection uses spans, pooled buffers and explicit integer decoding. Invocation 
 code, runtime serialization or assembly loading. The runtime PE corpus uses the framework assembly
 already loaded by the test process, without loading or invoking the inspected file.
 
-## Verification plan (#478)
+## Verification coverage (#478)
 
 Specification-built headers cover PE widths, ELF widths/byte orders, thin and universal Mach-O.
 The runtime's `typeof(object).Assembly.Location` supplies a real managed PE. The linked Binary
@@ -131,3 +131,20 @@ non-packable console fixture supplies arguments, stdin, concurrent stdout/stderr
 descendant modes. Lifecycle tests cover bounded output, launch failure, timeout/cancellation and a
 grandchild's disappearance; they invoke the current `dotnet` host, need no downloaded binaries,
 and have bounded watchdogs and cleanup.
+
+`ExecutableMetadataTests` covers header fields and kind mapping; `ExecutableCorpusTests` maps PE
+directories/sections, ELF names/interpreters/extended numbering and Mach-O command/architecture
+tables to the specifications above. It applies the shared `TruncationCorpus` to every prefix of seven
+complete fixtures, synchronously and asynchronously. `ExecutableMalformedInputTests` checks
+hostile offset/count/size fields with nested absolute origins, configured limits and exact boundaries,
+1,000 deterministic mutations, non-seekable rejection and a synthetic 40 GiB sparse source.
+`ExecutableInvocationTests` covers argument round-trips, stdin closure, environment/removals,
+directory selection, exact/overflow capture limits, concurrent heavy stdout/stderr with blocked stdin,
+exit codes, failed start, pre-cancellation, timeout and child/grandchild cleanup.
+
+The test host is built by a `ReferenceOutputAssembly=false` project reference and copied using its
+resolved target path. Its atomic PID-file handshake avoids races between Windows file writers and
+readers. It is a non-packable fixture, so it is intentionally absent from the release inventory and
+CI matrix; the Content.Exe test build supplies it on every OS. The required real runtime PE test
+locally suppresses IL3000: VSTest uses a file-backed runtime assembly, and this corpus is not a
+single-file published test harness. The library's NativeAOT settings remain enabled.

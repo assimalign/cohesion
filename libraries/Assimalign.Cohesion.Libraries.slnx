@@ -476,6 +476,13 @@
 		<File Path="Content/Assimalign.Cohesion.Content.Exe/docs/DESIGN.md" />
 		<File Path="Content/Assimalign.Cohesion.Content.Exe/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/">
+		<Project Path="Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/Assimalign.Cohesion.Content.Exe.TestHost.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Exe/src/Assimalign.Cohesion.Content.Exe.csproj" />
 	</Folder>

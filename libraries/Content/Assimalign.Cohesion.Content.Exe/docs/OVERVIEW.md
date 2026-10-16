@@ -30,3 +30,11 @@ before returning. An invocation owns its process and redirected handles until co
 Inspection never authorizes invocation. The invoker accepts a path, never in-memory executable
 content; callers own temporary-file execution policy. See [DESIGN.md](DESIGN.md) for O-C1, the exact
 scope and specifications, lifecycle details, limits and extension seams.
+
+## Tests
+
+Run `dotnet test libraries/Content/Assimalign.Cohesion.Content.Exe/tests/Assimalign.Cohesion.Content.Exe.Tests.csproj`
+from the repository root. It builds the non-packable [test host](../fixtures/Assimalign.Cohesion.Content.Exe.TestHost/docs/OVERVIEW.md)
+from source and copies its resolved output beside the tests. No package feed bootstrap or downloaded
+fixtures are needed. In a fresh worktree, build the repository's `build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj`
+first if shared build tasks have not already been built.
