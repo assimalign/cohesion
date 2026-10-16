@@ -89,6 +89,19 @@ literal tokens, and the runs of text between them, every value a zero-copy slice
 
 The tokenizer accepts every input and reports positions for format parsers. Invalid tokenizer options
 and creation arguments use BCL argument exceptions; detecting single-use content throws ContentException.
+Strict caller-supplied decoders report malformed byte sequences as ContentFormatException with InvalidValue,
+preserving DecoderFallbackException as InnerException. An internal decoder adapter translates at the
+StreamReader decoding boundary, covering all sync/async reads, lines, blocks and reads to EOF.
+Position identifies the first invalid byte, including BOM bytes and sequences split across reads.
+It uses the underlying seekable stream origin, or byte zero for a forward-only source; a decoder
+index that cannot identify a nonnegative byte offset produces a null Position. I/O and cancellation
+exceptions retain their original types. The reader still owns only the underlying content read view.
+
+Detected encodings and the default UTF-8 path remain lenient: each Unicode maximal ill-formed
+subpart becomes U+FFFD, including an incomplete sequence flushed at EOF. Caller replacement
+fallbacks are preserved. No Unicode normalization is performed; NEL (U+0085), LS (U+2028),
+PS (U+2029), VT and FF stay inside lines, rather than extending the CR/LF/CRLF recognition set.
+
 Package-authored messages are build-generated ErrorMessages resources. Format readers above this layer
 use the root ContentFormatException.ErrorCode and Position; legacy exceptions retain Unspecified.
 

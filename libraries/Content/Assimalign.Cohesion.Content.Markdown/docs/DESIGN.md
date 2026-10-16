@@ -7,7 +7,8 @@ and a canonical Markdown writer, built on `Content.Text` (the `TextTokenizer` dr
 phases) for the static content engine and any service that stores, transforms, or serves Markdown.
 The package implements a **deliberately scoped subset of CommonMark 0.31.2** — the baseline is
 named, the subset is enumerated below, and everything outside it degrades predictably to literal
-text. Parsing never throws for input: Markdown has no malformed documents, only text.
+text. Decoded Markdown text always parses: Markdown has no malformed documents, only text.
+Byte decoding can fail under a caller-supplied strict encoding, as described below.
 
 ## The retained subset (baseline: CommonMark 0.31.2)
 
@@ -72,13 +73,19 @@ renderer applies its own encoding.
 `Parse(string | Stream | ITextContent)`, `ToHtml`, `Write`, and the `IContentReader<>`/
 `IContentWriter<>` seams.
 
-## Error model: parsing never throws
+## Error model: total text parsing, explicit decoding failures
 
 Unlike YAML (which has malformed input and a `YamlException`), Markdown assigns meaning to every
 input, so this package defines **no exception root** — the parser cannot fail, and renderer/model
 argument misuse throws BCL argument exceptions. There is deliberately no
 `MarkdownException`; a future need for one should be treated as a design smell (it would mean the
 parser stopped being total).
+
+Parse(ITextContent) propagates Content.Text decoding failures unchanged as ContentFormatException
+with InvalidValue, the first invalid byte position when known (including BOM bytes), and the
+DecoderFallbackException as InnerException. It does not wrap these as Markdown syntax errors.
+The detected-encoding Stream path and lenient ITextContent path retain replacement-character
+decoding: each maximal ill-formed subpart becomes U+FFFD before ordinary Markdown parsing.
 
 ## Robustness posture
 

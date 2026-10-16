@@ -67,6 +67,7 @@ public static class YamlText
     /// <param name="content">The text content carrying the YAML.</param>
     /// <returns>The parsed stream of documents.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
+    /// <exception cref="ContentFormatException">The content's strict decoder rejected malformed bytes; the error code is InvalidValue and the position is a byte offset when known.</exception>
     public static YamlStream Parse(ITextContent content)
     {
         ArgumentNullException.ThrowIfNull(content);
