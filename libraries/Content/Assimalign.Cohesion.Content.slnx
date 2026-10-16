@@ -98,6 +98,9 @@
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Pdf/src/">
 		<Project Path="Assimalign.Cohesion.Content.Pdf/src/Assimalign.Cohesion.Content.Pdf.csproj" />
 	</Folder>
+	<Folder Name="/Content/Assimalign.Cohesion.Content.Pdf/tests/">
+		<Project Path="Assimalign.Cohesion.Content.Pdf/tests/Assimalign.Cohesion.Content.Pdf.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Text/">
 		<File Path="Assimalign.Cohesion.Content.Text/README.md" />
 	</Folder>

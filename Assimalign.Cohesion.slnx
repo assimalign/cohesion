@@ -505,6 +505,9 @@
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Pdf/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Pdf/src/Assimalign.Cohesion.Content.Pdf.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Pdf/tests/">
+		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Pdf/tests/Assimalign.Cohesion.Content.Pdf.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Text/" />
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Text/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Text/src/Assimalign.Cohesion.Content.Text.csproj" />
