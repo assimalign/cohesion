@@ -103,6 +103,9 @@ participate in list looseness. CommonMark examples 239–241, 279–280 and 315 
 List continuation indentation is measured relative to the current parent prefix, not the absolute
 column on the opening line. Quotes may vary their leading spaces without moving list content.
 
+Blank lines loosen their immediate list item. A child quote or an interior blank in a nested list
+does not loosen the outer list; a trailing blank propagates when the nested list closes.
+
 ## Renderers
 
 **HTML** (`MarkdownHtmlRenderer`) emits the shapes the spec's examples use — tight list items

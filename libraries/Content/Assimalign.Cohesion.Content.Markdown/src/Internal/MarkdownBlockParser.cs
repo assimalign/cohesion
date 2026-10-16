@@ -263,15 +263,12 @@ internal sealed class MarkdownBlockParser
 
     private void HandleBlank(int matched)
     {
-        for (var index = matched - 1; index > 0; index--)
+        var container = _open[matched - 1];
+        if (container.Kind == ContainerKind.ListItem)
         {
-            var container = _open[index];
-            if (container.Kind == ContainerKind.ListItem)
-            {
-                // A blank before any content is the single allowed leading blank; one after content
-                // arms looseness.
-                container.BlankPending = true;
-            }
+            // Only the immediate item owns this blank. A blank in a child quote or list does not
+            // loosen its ancestors; trailing list blanks propagate when that child closes.
+            container.BlankPending = true;
         }
     }
 
@@ -587,6 +584,12 @@ internal sealed class MarkdownBlockParser
             {
                 // A blank at the end of an item loosens the list only if another item follows;
                 // arm the list and let the next item start decide.
+                _open[index - 1].BlankPending = true;
+            }
+
+            if (container.Kind == ContainerKind.List && container.BlankPending
+                && _open[index - 1].Kind == ContainerKind.ListItem)
+            {
                 _open[index - 1].BlankPending = true;
             }
 

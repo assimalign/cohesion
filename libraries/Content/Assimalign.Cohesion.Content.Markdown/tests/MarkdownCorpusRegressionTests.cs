@@ -38,4 +38,20 @@ public class MarkdownCorpusRegressionTests
         actual.ShouldBe(expected);
         MarkdownModelComparison.ShouldEqual(document, MarkdownText.Parse(MarkdownText.Write(document)), source);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Lists: nested blank lines loosen only their owning list")]
+    [InlineData("- a\n  - b\n\n    c\n- d\n", true)]
+    [InlineData("* a\n  > b\n  >\n* c\n", true)]
+    [InlineData("- a\n  - b\n\n- c\n", false)]
+    public void Parse_NestedBlankLine_TracksLocalLooseness(string source, bool tight)
+    {
+        // Arrange. Authored focused variants of CommonMark 319/320 and a trailing-blank control.
+        var document = MarkdownText.Parse(source);
+
+        // Act
+        var list = document.Blocks[0].ShouldBeOfType<MarkdownList>();
+
+        // Assert
+        list.IsTight.ShouldBe(tight);
+        MarkdownModelComparison.ShouldEqual(document, MarkdownText.Parse(MarkdownText.Write(document)), source);
+    }
 }
