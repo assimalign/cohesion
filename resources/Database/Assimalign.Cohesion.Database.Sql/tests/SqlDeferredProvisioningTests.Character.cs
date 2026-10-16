@@ -51,6 +51,8 @@ public sealed partial class SqlDeferredProvisioningTests
         try
         {
             target.Catalog.PendingMigration.ShouldNotBeNull().Steps.ShouldHaveSingleItem().Kind.ShouldBe("AlterColumn");
+            target.Catalog.TryGetTable("dbo", "chars", out var table).ShouldBeTrue();
+            table.FindColumn("Value").ShouldNotBeNull().Type.MaxLength.ShouldBe(2);
         }
         finally
         {
@@ -60,9 +62,9 @@ public sealed partial class SqlDeferredProvisioningTests
 
         // Assert
         Volatile.Read(ref validations).ShouldBe(1);
-        target.OfflineError.Message.ShouldContain("would rewrite existing values");
-        target.Catalog.TryGetTable("dbo", "chars", out var table).ShouldBeTrue();
-        table.FindColumn("Value").ShouldNotBeNull().Type.MaxLength.ShouldBe(2);
+        var failure = target.OfflineError.ShouldNotBeNull();
+        failure.InnerException.ShouldBeOfType<SqlSchemaMigrationException>();
+        failure.InnerException.ShouldNotBeNull().InnerException.ShouldNotBeNull().Message.ShouldContain("would rewrite existing values");
     }
 
     private sealed record CharacterRow(string? Value);

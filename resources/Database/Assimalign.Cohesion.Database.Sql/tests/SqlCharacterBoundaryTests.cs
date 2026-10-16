@@ -17,6 +17,73 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// <summary>Regression coverage for CHAR values crossing comparison, assignment and catalog boundaries.</summary>
 public sealed class SqlCharacterBoundaryTests
 {
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Runtime unary operand errors name the CHAR storage type")]
+    [InlineData("+")]
+    [InlineData("-")]
+    public async Task UnarySign_CharacterCaseResult_ShouldNameCharacterType(string sign)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("char-operand", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("chars");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (c CHAR(3))");
+        await session.ExecuteAsync("INSERT INTO t VALUES ('a')");
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await RowsAsync(session, $"SELECT {sign}(CASE WHEN TRUE THEN c ELSE NULL END) FROM t"));
+
+        // Assert
+        failure.Message.ShouldBe($"COHSQLE003: Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is Character.");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Native domain checks apply their own CHAR parameter width")]
+    [InlineData("INSERT INTO t VALUES ('a')", "SELECT c FROM t")]
+    [InlineData("INSERT INTO seed VALUES (1)", "SELECT CAST('a' AS code) FROM seed")]
+    [InlineData("INSERT INTO seed VALUES (1)", "SELECT domain_echo(CAST('a' AS CHAR(3))) FROM seed")]
+    public async Task DomainCheck_CharacterParameter_ShouldApplyDeclaredWidth(string setup, string query)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("char-domain-check");
+        builder.Types.Add(SqlType.CreateDomain("code", SqlType.Char(3), new CharacterWidthCheck()));
+        await using var engine = await builder.BuildAsync();
+        var database = await engine.CreateDatabaseAsync("chars");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (c code)");
+        await session.ExecuteAsync("CREATE TABLE seed (id INT)");
+        await session.ExecuteAsync("CREATE FUNCTION domain_echo(p code) RETURNS code IMMUTABLE RETURN p");
+
+        // Act
+        await session.ExecuteAsync(setup);
+        var rows = await RowsAsync(session, query);
+
+        // Assert
+        rows.ShouldBe([["a  "]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CHECK permits CHAR function results in supported character comparisons")]
+    [InlineData("char_echo(c) = 'a '")]
+    [InlineData("char_echo(c) BETWEEN 'a ' AND 'a'")]
+    [InlineData("char_echo(c) IN ('a ')")]
+    public async Task CreateTable_CharacterFunctionCheck_ShouldAcceptCharacterComparisons(string check)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("char-check", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("chars");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE FUNCTION char_echo(p CHAR(3)) RETURNS CHAR(3) IMMUTABLE RETURN p");
+
+        // Act
+        (await session.ExecuteAsync($"CREATE TABLE t (c CHAR(3), CONSTRAINT ck_char CHECK ({check}))"))
+            .Status.ShouldBe(QueryResultStatus.Success);
+        await session.ExecuteAsync("INSERT INTO t VALUES ('a')");
+
+        // Assert
+        (await RowsAsync(session, "SELECT c FROM t")).ShouldBe([["a  "]]);
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT INTO t VALUES ('b')"));
+        failure.Message.ShouldContain("ck_char");
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - CHAR joins retain collation-equivalent probes longer than the indexed column")]
     public async Task Join_AccentInsensitiveCharacterKeys_ShouldReturnSameRowsAfterIndexing()
     {
