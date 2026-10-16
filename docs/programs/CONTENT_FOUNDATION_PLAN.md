@@ -168,6 +168,7 @@ stage run in parallel, each in its own worktree; the orchestrator integrates, ve
 | O-C2 | Root API changes: `ContentFormatErrorCode` on `ContentFormatException`; `ContentFactory` replaced by public `MemoryContent`/`StreamContent`/`CompositeContent` with `Create` methods | Both follow existing rules (error codes over exception sprawl; decision 59). No consumer outside Content calls `ContentFactory`. | In this PR, flagged for review |
 | O-C3 | Which BMFF-derived formats are retained beyond MP4? | HEIF/AVIF as `Content.Heif`; CMAF as a profile inside `Content.Mpeg`. | **Decided 2026-10-16 (owner):** "retain HEIF/AVIF as Content.Heif (still images: ftyp/meta/iloc/iprp model), and keep CMAF as a profile inside Content.Mpeg." |
 | O-C4 | Gap packages (§5) | File as Backlog features; build none without a decision. | Open |
+| O-C5 | How should BMFF trees be traversed and inspected? | Keep the composite model; make a generic walker and typed queries the primary traversal (the visitor is closed to profile packages), add a tree formatter and a header-driven debugger display, and derive repeated per-box state in the base. | **Decided 2026-10-16 (owner):** "a generic walker and typed queries as the primary traversal (keep Accept/visitors for compatibility), a tree formatter for inspection, a header-driven debugger display on the base, and derive Offset/Limit/IsLeaf/IsComposite in the base class." |
 
 ## 5. Gaps found during the survey
 
