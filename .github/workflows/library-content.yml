@@ -56,6 +56,7 @@ jobs:
             'Assimalign.Cohesion.Content.Heif',
             'Assimalign.Cohesion.Content.Media',
             'Assimalign.Cohesion.Content.Mkv',
+            'Assimalign.Cohesion.Content.Mpeg',
             'Assimalign.Cohesion.Content.Text',
             'Assimalign.Cohesion.Content.Ebml',
             'Assimalign.Cohesion.Content.Exe',

@@ -29,11 +29,11 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 693 |
+| Projects indexed | 694 |
 | Shipped library/resource projects | 256 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 735 |
+| Declared project references | 737 |
 | Declared shared-source links | 23 |
 
 ## Ambiguous project names
@@ -301,7 +301,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Content.Markdown` | `Assimalign.Cohesion.Content`<br>`Assimalign.Cohesion.Content.Text` | — | — | — |
 | `Assimalign.Cohesion.Content.Media` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Mkv` | `Assimalign.Cohesion.Content.Ebml`<br>`Assimalign.Cohesion.Content.Media` | — | — | — |
-| `Assimalign.Cohesion.Content.Mpeg` | — | — | — | — |
+| `Assimalign.Cohesion.Content.Mpeg` | `Assimalign.Cohesion.Content.Bmff`<br>`Assimalign.Cohesion.Content.Media` | — | — | — |
 | `Assimalign.Cohesion.Content.Pdf` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Text` | `Assimalign.Cohesion.Content` | — | — | — |
 | `Assimalign.Cohesion.Content.Yaml` | `Assimalign.Cohesion.Content`<br>`Assimalign.Cohesion.Content.Text` | — | — | — |
@@ -1101,7 +1101,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-326 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+327 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1116,7 +1116,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | `examples/` | 5 |
 | `fixtures/` | 9 |
 | `samples/` | 10 |
-| `tests/` | 302 |
+| `tests/` | 303 |
 
 Samples, which live in the repository-root `samples/` tree:
 
