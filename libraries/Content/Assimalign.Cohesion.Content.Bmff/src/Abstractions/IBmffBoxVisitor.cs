@@ -216,6 +216,21 @@ public interface IBmffBoxVisitor
     /// <summary>Visits a TrackReferenceBox.</summary>
     /// <param name="box">The box to visit.</param>
     void Visit(TrackReferenceBox box);
+    /// <summary>Visits a TrackReferenceTypeBox.</summary>
+    /// <param name="box">The box to visit.</param>
+    void Visit(TrackReferenceTypeBox box);
+    /// <summary>Visits a TrackFragmentDecodeTimeBox.</summary>
+    /// <param name="box">The box to visit.</param>
+    void Visit(TrackFragmentDecodeTimeBox box);
+    /// <summary>Visits a DataEntryUrlBox.</summary>
+    /// <param name="box">The box to visit.</param>
+    void Visit(DataEntryUrlBox box);
+    /// <summary>Visits a DataEntryUrnBox.</summary>
+    /// <param name="box">The box to visit.</param>
+    void Visit(DataEntryUrnBox box);
+    /// <summary>Visits an ItemInfoEntryBox.</summary>
+    /// <param name="box">The box to visit.</param>
+    void Visit(ItemInfoEntryBox box);
     /// <summary>Visits a TrackSelectionBox.</summary>
     /// <param name="box">The box to visit.</param>
     void Visit(TrackSelectionBox box);

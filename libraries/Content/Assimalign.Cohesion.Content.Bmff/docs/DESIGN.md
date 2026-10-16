@@ -199,8 +199,11 @@ dref, stsd and iinf now also derive from BmffBoxComposite; their entry count com
 stsd always preserves its children as opaque sample entries, including in strict mode.
 
 Track-reference lists for hint, cdsc, hind, dpnd, ipir, mpod and sync are interpreted only inside
-tref. Other reference types remain opaque. New box classes dispatch to the existing
-Visit(BmffBox) visitor fallback; neither public visitor interface gained members.
+tref. Other reference types remain opaque. Every box class has its own overload on both visitor
+interfaces and on `BmffBoxVisitor<T>` (one `Visit` per box is part of the composite design), so
+`TrackReferenceTypeBox`, `TrackFragmentDecodeTimeBox`, `DataEntryUrlBox`, `DataEntryUrnBox` and
+`ItemInfoEntryBox` dispatch to typed overloads rather than to `Visit(BmffBox)`. A box class added
+later follows the same rule: add its overload to both interfaces and the base visitor.
 
 All mutable leaf models retain bytes following the defined fields. Counted containers retain the
 suffix after their declared children; uncounted containers must contain complete child boxes.

@@ -164,6 +164,21 @@ public abstract class BmffBoxVisitor<T> : IBmffBoxVisitor<T>
     public virtual T Visit(TrackHeaderBox box) => VisitDefault(box);
     /// <inheritdoc/>
     public virtual T Visit(TrackReferenceBox box) => VisitDefault(box);
+
+    /// <inheritdoc/>
+    public virtual T Visit(TrackReferenceTypeBox box) => VisitDefault(box);
+
+    /// <inheritdoc/>
+    public virtual T Visit(TrackFragmentDecodeTimeBox box) => VisitDefault(box);
+
+    /// <inheritdoc/>
+    public virtual T Visit(DataEntryUrlBox box) => VisitDefault(box);
+
+    /// <inheritdoc/>
+    public virtual T Visit(DataEntryUrnBox box) => VisitDefault(box);
+
+    /// <inheritdoc/>
+    public virtual T Visit(ItemInfoEntryBox box) => VisitDefault(box);
     /// <inheritdoc/>
     public virtual T Visit(TrackSelectionBox box) => VisitDefault(box);
     /// <inheritdoc/>
