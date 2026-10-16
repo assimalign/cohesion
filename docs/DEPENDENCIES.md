@@ -306,6 +306,7 @@ flowchart LR
     N11["Content.Yaml"]
     N1 --> N0
     N2 --> N6
+    N3 --> N1
     N4 --> N1
     N5 --> N0
     N5 --> N10
@@ -322,7 +323,7 @@ flowchart LR
 | `Assimalign.Cohesion.Content` | — | — | — | — |
 | `Assimalign.Cohesion.Content.Binary` | `Assimalign.Cohesion.Content` | — | — | — |
 | `Assimalign.Cohesion.Content.Bmff` | `Assimalign.Cohesion.Content.Media` | — | — | — |
-| `Assimalign.Cohesion.Content.Ebml` | — | — | — | — |
+| `Assimalign.Cohesion.Content.Ebml` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Exe` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Markdown` | `Assimalign.Cohesion.Content`<br>`Assimalign.Cohesion.Content.Text` | — | — | — |
 | `Assimalign.Cohesion.Content.Media` | `Assimalign.Cohesion.Content.Binary` | — | — | — |

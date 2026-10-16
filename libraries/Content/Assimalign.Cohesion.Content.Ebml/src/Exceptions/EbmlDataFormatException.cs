@@ -1,28 +1,27 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System;
 
 namespace Assimalign.Cohesion.Content.Ebml;
 
-/// <summary>
-/// Thrown to indicate the EBML data format violation.
-/// </summary>
-public class EbmlDataFormatException : System.IO.IOException
+/// <summary>Reports malformed EBML with a format-independent code and absolute position.</summary>
+public class EbmlDataFormatException : ContentFormatException
 {
-    public EbmlDataFormatException()
-    {
-    }
+    /// <summary>Initializes a legacy, unclassified failure.</summary>
+    public EbmlDataFormatException() : base(ErrorMessages.InvalidValue) { }
 
-    public EbmlDataFormatException(string message)
-        : base(message)
-    {
-    }
+    /// <summary>Initializes a legacy, unclassified failure.</summary>
+    /// <param name="message">The failure message.</param>
+    public EbmlDataFormatException(string message) : base(message) { }
 
-    public EbmlDataFormatException(string message, Exception cause)
-        : base(message, cause)
-    {
-    }
+    /// <summary>Initializes a legacy failure with a cause.</summary>
+    /// <param name="message">The failure message.</param>
+    /// <param name="cause">The underlying exception.</param>
+    public EbmlDataFormatException(string message, Exception cause) : base(message, cause) { }
+
+    /// <summary>Initializes a classified failure.</summary>
+    /// <param name="message">The failure message.</param>
+    /// <param name="errorCode">The failure classification.</param>
+    /// <param name="position">The absolute byte position.</param>
+    /// <param name="cause">An optional underlying exception.</param>
+    public EbmlDataFormatException(string message, ContentFormatErrorCode errorCode, long position, Exception? cause = null)
+        : base(message, errorCode, position, cause) { }
 }
-        

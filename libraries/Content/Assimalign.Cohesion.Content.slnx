@@ -49,7 +49,13 @@
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Bmff/tests/">
 		<Project Path="Assimalign.Cohesion.Content.Bmff/tests/Assimalign.Cohesion.Content.Bmff.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Content/Assimalign.Cohesion.Content.Ebml/" />
+	<Folder Name="/Content/Assimalign.Cohesion.Content.Ebml/">
+		<File Path="Assimalign.Cohesion.Content.Ebml/README.md" />
+	</Folder>
+	<Folder Name="/Content/Assimalign.Cohesion.Content.Ebml/docs/">
+		<File Path="Assimalign.Cohesion.Content.Ebml/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Content.Ebml/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Ebml/src/">
 		<Project Path="Assimalign.Cohesion.Content.Ebml/src/Assimalign.Cohesion.Content.Ebml.csproj" />
 	</Folder>

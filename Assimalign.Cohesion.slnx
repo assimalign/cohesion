@@ -456,7 +456,13 @@
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Bmff/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Bmff/tests/Assimalign.Cohesion.Content.Bmff.Tests.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Ebml/" />
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Ebml/">
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Ebml/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Ebml/docs/">
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Ebml/docs/DESIGN.md" />
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Ebml/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Ebml/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Ebml/src/Assimalign.Cohesion.Content.Ebml.csproj" />
 	</Folder>

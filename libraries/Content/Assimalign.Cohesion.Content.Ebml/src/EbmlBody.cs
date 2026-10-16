@@ -1,17 +1,13 @@
-﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Content.Ebml;
 
-public class EbmlBody
+/// <summary>The ordered root-level body elements, including preserved unknown elements and Void.</summary>
+public sealed class EbmlBody
 {
+    /// <summary>Creates an empty ordered body.</summary>
+    public EbmlBody() { }
 
-
-
-
-
-    
+    /// <summary>Gets the editable ordered body elements.</summary>
+    public IList<EbmlElement> Elements { get; } = new List<EbmlElement>();
 }
