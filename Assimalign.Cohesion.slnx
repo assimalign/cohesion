@@ -476,6 +476,7 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/Assimalign.Cohesion.Content.Markdown.Tests.csproj" />
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/TestObjects/CommonMark/PROVENANCE.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Media/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Media/README.md" />

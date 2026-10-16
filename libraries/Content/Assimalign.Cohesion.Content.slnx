@@ -69,6 +69,7 @@
 	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Markdown/tests/">
 		<Project Path="Assimalign.Cohesion.Content.Markdown/tests/Assimalign.Cohesion.Content.Markdown.Tests.csproj" />
+		<File Path="Assimalign.Cohesion.Content.Markdown/tests/TestObjects/CommonMark/PROVENANCE.md" />
 	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Media/">
 		<File Path="Assimalign.Cohesion.Content.Media/README.md" />
