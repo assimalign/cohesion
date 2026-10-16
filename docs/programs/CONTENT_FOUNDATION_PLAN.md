@@ -91,7 +91,7 @@ corruption, above).
 ### D3 — One malformed-input vocabulary
 
 `ContentFormatException` (root) gains a `ContentFormatErrorCode` (`Truncated`, `InvalidStructure`,
-`ValueOutOfRange`, `LimitExceeded`, `Unsupported`, …) alongside its `Position`. Every format reader
+`InvalidValue`, `LimitExceeded`, `Unsupported`, and `Unspecified` for the legacy constructors) alongside its `Position`. Every format reader
 throws it or a derived type; EBML's `EbmlDataFormatException` migrates onto it (#459). Tests assert
 the code, not message text.
 
@@ -152,12 +152,13 @@ stage run in parallel, each in its own worktree; the orchestrator integrates, ve
 | 2 | s2-pdf — object/document/xref model, tokenizer and parser, corpora | #471, #472, #473 (feature #470) | Stage 1 |
 | 2 | s2-exe — format scope, PE/ELF/Mach-O inspection, process invocation, corpora | #476, #477, #478 (feature #474) | Stage 1 |
 | 3 | s3-bmff-boxes — standard boxes, unknown-box preservation, round-trip mutation, golden files | #447, #448, #449 (feature #446) | s2-bmff-core |
-| 3 | s3-media — shared track, sample and timeline model | new feature (§5, G3) | Stage 1 |
-| 3 | s3-text-corpus — Unicode, UTF-8 and Markdown corpora | #469 | — |
+| 3 | s3-media — shared track, sample and timeline model | #1550 (§5, G3) | Stage 1 |
+| 3 | s3-text-corpus — Unicode, UTF-8 and Markdown corpora; text decoding errors as `ContentFormatException` | #469, #1556 | Stage 1 |
+| 3 | s3-pdf-writer — PDF full save and incremental update | #1555 | s2-pdf |
 | 4 | s4-mkv — Matroska element model, segment/track/cluster/cue behavior, harness replacement | #463, #464, #465 (feature #462) | s2-ebml-core, s3-media |
 | 4 | s4-mp4 — BMFF profile model, MP4 brands/tracks/samples, golden files | #451, #452, #453 (feature #450) | s3-bmff-boxes, s3-media |
 | 5 | s5-bmff-profiles — retained BMFF-derived formats and their packages | #455, #456, #457 (feature #454) | s4-mp4, O-C3 |
-| 5 | close-out — gates applied to every retained package, CI and inventory complete, #16 closed | #16 | all above |
+| 5 | close-out — gates applied to every retained package, CI and inventory complete, fuzzing harness, #16 closed | #16, #1554 | all above |
 
 ## 4. Owner decisions
 
@@ -170,24 +171,24 @@ stage run in parallel, each in its own worktree; the orchestrator integrates, ve
 
 ## 5. Gaps found during the survey
 
-Filed as features under #14 (numbers in the Progress Log once filed):
+Filed 2026-10-16 as Backlog features under #14 (G7 as a task under #16):
 
-- **G1 — Format detection.** Services need to classify bytes without a file extension; the root
+- **G1 (#1548) — Format detection.** Services need to classify bytes without a file extension; the root
   `DESIGN.md` deferred sniffing to stabilization. A `ContentFormat` detector registry with
   magic-number probes contributed by each format package.
-- **G2 — Performance baseline.** No Content benchmarks exist. Throughput and allocation budgets for
+- **G2 (#1549) — Performance baseline.** No Content benchmarks exist. Throughput and allocation budgets for
   BMFF/EBML parse, skip and copy-through, PDF xref load, YAML/Markdown parse, in
   `cohesion-benchmarks`; plus positional reads (`RandomAccess`) so one source can be parsed
   concurrently, which the root design currently rules out.
-- **G3 — Shared media track, sample and timeline model** in `Content.Media`, consumed by MP4 and
+- **G3 (#1550) — Shared media track, sample and timeline model** in `Content.Media`, consumed by MP4 and
   Matroska: tracks, codecs, rational timestamps, sample/keyframe index, and time-to-byte-range
   mapping for HTTP range serving and seeking. Scheduled as Stage 3 because both profiles need it.
-- **G4 — Adaptive-streaming manifests.** HLS (`.m3u8`, RFC 8216) and DASH (MPD, ISO/IEC 23009-1).
-- **G5 — MPEG-2 Transport Stream** (ISO/IEC 13818-1), the other HLS segment format. Note that
+- **G4 (#1551) — Adaptive-streaming manifests.** HLS (`.m3u8`, RFC 8216) and DASH (MPD, ISO/IEC 23009-1).
+- **G5 (#1552) — MPEG-2 Transport Stream** (ISO/IEC 13818-1), the other HLS segment format. Note that
   `Content.Mpeg` is scoped to MP4 over BMFF; a transport-stream package would be separate.
-- **G6 — Image metadata and RIFF.** EXIF/XMP/ICC and PNG, JPEG, GIF, WebP headers; RIFF is also the
+- **G6 (#1553) — Image metadata and RIFF.** EXIF/XMP/ICC and PNG, JPEG, GIF, WebP headers; RIFF is also the
   container of WebP, WAV and AVI.
-- **G7 — Fuzzing.** A coverage-guided harness over every reader, run outside CI; a task under #16.
+- **G7 (#1554) — Fuzzing.** A coverage-guided harness over every reader, run outside CI; a task under #16.
 
 ## 6. Progress Log
 
@@ -195,3 +196,5 @@ Filed as features under #14 (numbers in the Progress Log once filed):
 |---|---|
 | 2026-10-16 | Survey; namespace correction `5ac7bce98`; plan written. |
 | 2026-10-16 | O-C1 decided by the owner: `Content.Exe` keeps invocation, separated from inspection. Stage 1 sessions s1-binary and s1-docs started. |
+| 2026-10-16 | Gap items filed: #1548–#1553 (G1–G6), #1554 (G7). Discovered tasks: #1555 (PDF writer, under #470), #1556 (Text decoding errors, under #466). |
+| 2026-10-16 | Stage 1 integrated: s1-docs (`7b1b52985`) and s1-binary (`ca5729b0b`) merged; follow-ups `dc315ca81` (stale MPEG inventory exclusion) and `ac9cb6328` (absolute slice error positions). |

@@ -51,8 +51,8 @@ of its retained subset. Those policies must be explicit in their round-trip test
 values (plan D2). Binary formats reuse these so partial reads, absolute positions and source
 ownership have one implementation. Core's `OffsetStream` cannot substitute for a bounded stream
 that returns short reads and supports forward-only input; Media's unchecked partial-read helper
-must be retired. The [Content.Binary design](../../../libraries/Content/Assimalign.Cohesion.Content.Binary/docs/DESIGN.md)
-holds the primitive contracts and trade-offs; it lands with the parallel Stage 1 implementation.
+was retired with Stage 1. The [Content.Binary design](../../../libraries/Content/Assimalign.Cohesion.Content.Binary/docs/DESIGN.md)
+holds the primitive contracts and trade-offs.
 
 ## Family map
 
@@ -98,7 +98,7 @@ All package names below have the `Assimalign.Cohesion.` prefix. "Today" means th
 | `Content.Ebml` | Generic EBML container, VInt and element model | None | Content.Binary | Strategic |
 | `Content.Mkv` | Matroska profile over EBML, with shared media descriptions | Content.Bmff | Content.Ebml, Content.Media | Strategic |
 | `Content.Pdf` | PDF object, document and cross-reference structure | None | Content.Binary | Strategic |
-| `Content.Exe` | Executable-file inspection candidate; invocation scope undecided | Content.Binary | Content.Binary | Experimental |
+| `Content.Exe` | Executable-file inspection (PE/COFF, ELF, Mach-O) and, as a separate type family, process invocation | Content.Binary | Content.Binary | Strategic |
 
 The code does not yet have every target arrow: MKV still references BMFF; EBML, MPEG and PDF
 reference nothing. The program replaces MKV's dependency with EBML and Media and adds Binary to
@@ -111,12 +111,13 @@ back from the root into a format or into another package's internals.
 **Strategic** means retained, built to the stabilization gates and shipped. It describes the
 destination, not readiness at this snapshot. **Experimental** means kept in the tree, not shipped,
 with scope undecided. **Archive** means a candidate for deletion on which nothing builds. No
-package is archive today. These classifications follow the program plan's survey, section 1.
+package is experimental or archive today: `Content.Exe` was experimental until owner decision O-C1
+settled its scope. These classifications follow the program plan's survey, section 1.
 
 | Package | Classification | Reason |
 | --- | --- | --- |
 | `Content` | Strategic | Implemented neutral contracts anchor the family; creation-facade alignment remains program work. |
-| `Content.Binary` | Strategic | Shared exact reads and lazy segments are required by every retained binary format; the base is a placeholder. |
+| `Content.Binary` | Strategic | Shared exact reads and lazy segments are required by every retained binary format; implemented and in CI since Stage 1. |
 | `Content.Text` | Strategic | Implemented encoding, line and token primitives support text formats and the static content engine. |
 | `Content.Yaml` | Strategic | Implemented YAML model/parser/emitter serves OpenApi; the existing corpus records conformance gaps. |
 | `Content.Markdown` | Strategic | Implemented CommonMark subset, canonical writer and HTML renderer serve static content. |
@@ -126,12 +127,14 @@ package is archive today. These classifications follow the program plan's survey
 | `Content.Mkv` | Strategic | Retained Matroska profile, currently a placeholder with the wrong dependency. |
 | `Content.Mpeg` | Strategic | Retained MP4 profile over BMFF, currently an empty project. |
 | `Content.Pdf` | Strategic | Retained document-structure reader and manipulation surface, currently an empty project. |
-| `Content.Exe` | Experimental | Pending O-C1: does process invocation belong in Content? The current placeholder declares `InvokeAsync()`. |
+| `Content.Exe` | Strategic | Owner decision O-C1 keeps both concerns here, separated: format inspection and process invocation. |
 
-O-C1 remains an owner decision. The plan recommends retaining executable **inspection** here and
-moving invocation outside the family, or dropping it until a consumer exists: process launching
-introduces security and lifecycle ownership that format parsing does not have. This record does
-not approve invocation or promote Exe to strategic status.
+O-C1 was decided by the owner on 2026-10-16: "Keep process invocation in Content.Exe, separated
+from inspection, with timeout, cancellation and process-tree cleanup." Inspection types never start
+a process and invocation types never parse a file format. Process launching brings security and
+lifecycle obligations no other Content package has (no shell, argument lists only, bounded output
+capture, process-tree termination on timeout or cancellation), so `Content.Exe` carries
+process-lifecycle tests in addition to its format corpus.
 
 ## Standards
 
@@ -148,7 +151,7 @@ retrieval date; the online references below were reviewed on 2026-10-16.
 | `Content.Ebml` | [RFC 8794 (2020)](https://www.rfc-editor.org/rfc/rfc8794). | VInt encoding/decoding implemented and tested; full elements, schema, reader/writer and document model planned. |
 | `Content.Mkv` | [RFC 9559 (2024)](https://datatracker.ietf.org/doc/html/rfc9559) and the [Matroska element specification, version 4 table](https://www.matroska.org/technical/elements.html). | **Planned:** segment, track, cluster, tag and cue structure over EBML; no codec decoding. |
 | `Content.Pdf` | [ISO 32000-2:2020, edition 2 (PDF 2.0)](https://www.iso.org/standard/75839.html). | **Planned:** objects, document structure, tokenizer/parser and cross-reference handling, including reading PDF 1.x files; no rendering. |
-| `Content.Exe` | [Microsoft PE/COFF specification, online revision 2026-09-10](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format); [System V ABI / ELF gABI, ELF object format 4.3 draft](https://gabi.xinuos.com/). | **Planned, subject to O-C1:** PE/COFF and ELF header inspection; the current invocation interface is scaffolding. |
+| `Content.Exe` | [Microsoft PE/COFF specification, online revision 2026-09-10](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format); [System V ABI / ELF gABI, ELF object format 4.3 draft](https://gabi.xinuos.com/). | **Planned:** PE/COFF, ELF and Mach-O header inspection (Mach-O against Apple's Mach-O file format reference); process invocation is a runtime contract, not a file-format standard. |
 | `Content.Yaml` | [YAML 1.2.2](https://yaml.org/spec/1.2.2/). | Model, parser and emitter with core-schema semantics; supported subset and excluded official-suite cases documented by the package. |
 | `Content.Markdown` | [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/). | Retained subset with canonical Markdown output and HTML rendering; exclusions are explicit in the package design. |
 | `Content.Text` | [Unicode 17.0.0, encoding forms](https://www.unicode.org/versions/Unicode17.0.0/) and [RFC 3629 (2003), UTF-8](https://www.rfc-editor.org/rfc/rfc3629). | UTF-8/16/32 detection and decoding, line endings and literal tokenization; no normalization or legacy code-page policy. |
@@ -157,16 +160,17 @@ retrieval date; the online references below were reviewed on 2026-10-16.
 
 Plan D3 defines one malformed-input vocabulary: `ContentFormatException` (or a format-derived
 type) carries `ContentFormatErrorCode` and the absolute source position, an absolute byte offset
-for binary readers. Codes include `Truncated`, `InvalidStructure`, `ValueOutOfRange`,
-`LimitExceeded` and `Unsupported`. Text formats may add line and column diagnostics. This lets
+for binary readers. The codes are `Truncated`, `InvalidStructure`, `InvalidValue`,
+`LimitExceeded` and `Unsupported`, with `Unspecified` for the legacy constructors. Text formats may add line and column diagnostics. This lets
 consumers handle failures without depending on localized message wording or a proliferation of
 exception classes. Tests assert codes and positions, never message text. Argument misuse and
 underlying I/O failure remain distinct from malformed format bytes.
 
 Readers must not leak `IndexOutOfRangeException`, `ArgumentOutOfRangeException`,
-`OverflowException`, `EndOfStreamException` or `InvalidCastException` for malformed input. At the
-base commit the shared code enum is not yet present and EBML's errors still need migration; this
-is an acceptance contract for the program, not the current behavior of every reader.
+`OverflowException`, `EndOfStreamException` or `InvalidCastException` for malformed input. The
+shared code enum shipped with Stage 1 and `Content.Binary` already reports through it; EBML's errors
+still need migration, and Text can still surface `DecoderFallbackException` (#1556). This is an
+acceptance contract for the program, not the current behavior of every reader.
 
 Declared sizes are untrusted (plan D4). Validate lengths, arithmetic and container boundaries
 before allocating; reader options cap buffered payloads at 16 MiB by default and also cap nesting
@@ -276,8 +280,9 @@ inventory guard, so its current failure prevents a complete pass even for the fi
 Content, Binary and Media have no independent file-format grammar, so gates 3-6 do not apply as
 format corpora; their primitives still require implementation and failure-path evidence under
 gate 2. Text has no format writer or lazy container model (gates 4 and 6). YAML and Markdown have
-documented in-memory text models, outside D1's container gate 6. Exe's applicability to gate 6
-awaits O-C1's scope decision; that is not clearance to ship it.
+documented in-memory text models, outside D1's container gate 6. Exe is not a container format,
+so gate 6 does not apply; its invocation half is held to the process-lifecycle contract in the
+classification section instead.
 
 ### Executed checks and evidence
 

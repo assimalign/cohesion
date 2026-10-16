@@ -40,7 +40,7 @@ The target direction is in the [area architecture record](../../docs/libraries/C
 | Package | Role | Depends on today | Classification | State |
 | --- | --- | --- | --- | --- |
 | [`Assimalign.Cohesion.Content`](./Assimalign.Cohesion.Content/) | Identity, ownership, composition and reader/writer contracts | None | Strategic | Implemented |
-| [`Assimalign.Cohesion.Content.Binary`](./Assimalign.Cohesion.Content.Binary/) | Shared binary primitives | Content | Strategic | Placeholder |
+| [`Assimalign.Cohesion.Content.Binary`](./Assimalign.Cohesion.Content.Binary/) | Shared binary primitives: exact reads, slices, lazy segments, binary reader and writer | Content | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Text`](./Assimalign.Cohesion.Content.Text/) | Encoding detection, lines and tokens | Content | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Yaml`](./Assimalign.Cohesion.Content.Yaml/) | YAML 1.2.2 model, parser and emitter | Content, Content.Text | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Markdown`](./Assimalign.Cohesion.Content.Markdown/) | CommonMark subset, canonical writer and HTML renderer | Content, Content.Text | Strategic | Implemented |
@@ -50,10 +50,10 @@ The target direction is in the [area architecture record](../../docs/libraries/C
 | [`Assimalign.Cohesion.Content.Ebml`](./Assimalign.Cohesion.Content.Ebml/) | Tested VInt; container reader/writer/model incomplete | None | Strategic | In progress |
 | [`Assimalign.Cohesion.Content.Mkv`](./Assimalign.Cohesion.Content.Mkv/) | Planned Matroska profile over EBML | Content.Bmff | Strategic | Placeholder |
 | [`Assimalign.Cohesion.Content.Pdf`](./Assimalign.Cohesion.Content.Pdf/) | Planned PDF document structure and parser | None | Strategic | Placeholder |
-| [`Assimalign.Cohesion.Content.Exe`](./Assimalign.Cohesion.Content.Exe/) | Executable inspection candidate; invocation scope awaits O-C1 | Content.Binary | Experimental | Placeholder |
+| [`Assimalign.Cohesion.Content.Exe`](./Assimalign.Cohesion.Content.Exe/) | Executable inspection and, separately, process invocation (owner decision O-C1) | Content.Binary | Strategic | Placeholder |
 
 BMFF builds but is incomplete; EBML builds with 60 passing VInt tests. State describes the delivered
-surface, not stabilization approval. No package is archive today; classification definitions,
+surface, not stabilization approval. No package is experimental or archive today; classification definitions,
 standards, O-C1 and the gates live in the [area architecture record](../../docs/libraries/Content/DESIGN.md).
 
 ## Dependency rule
