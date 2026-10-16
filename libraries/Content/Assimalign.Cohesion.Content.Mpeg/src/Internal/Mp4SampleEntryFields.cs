@@ -67,6 +67,14 @@ internal sealed class Mp4SampleEntryFields
     }
     internal void Read(BmffStream stream)
     {
+        try { ReadCore(stream); }
+        catch (ContentFormatException error) when (error.ErrorCode == ContentFormatErrorCode.Truncated)
+        {
+            throw new ContentFormatException(ErrorMessages.EntryInvalid, ContentFormatErrorCode.Truncated, stream.Offset + stream.Position, error);
+        }
+    }
+    private void ReadCore(BmffStream stream)
+    {
         if (_length > _limit)
         {
             throw new ContentFormatException(ErrorMessages.BufferLimit, ContentFormatErrorCode.LimitExceeded, stream.Offset);
@@ -106,4 +114,3 @@ internal sealed class Mp4SampleEntryFields
     private ushort Get16(int offset) => BinaryPrimitives.ReadUInt16BigEndian(_prefix.AsSpan(offset));
     private void Set16(int offset, ushort value) => BinaryPrimitives.WriteUInt16BigEndian(_prefix.AsSpan(offset), value);
 }
-

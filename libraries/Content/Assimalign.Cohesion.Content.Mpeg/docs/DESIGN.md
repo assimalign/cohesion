@@ -50,6 +50,51 @@ payloads, or use LoadDocument for a seekable, editable tree. Codec decoding is o
 
 ## Sources and evidence
 
+## Media interpretation
+
+Mp4File implements IMediaFile; internal track views implement IMediaTrack and its audio/video
+specializations. Native metadata stays editable through Document. The media view is valid only
+while its source and tree are unchanged. Save to a separate stream and load a fresh view after
+editing or FastStart. Returned read streams borrow the file lifetime. Finite fragments do not
+imply IsLive. BmffReader/BmffWriter remain the forward-only surfaces.
+
+The index retains native tables and one descriptor per trun. Progressive validation checks count
+agreement and local chunk ranges. Value cursors walk stts/ctts, stsz/stz2, stsc, stco/co64 and stss
+without per-sample allocation. Random ordinal lookup scans native runs; variable-size lookup
+scans only sizes preceding the target in its chunk/run. Time and seek queries use cancellable,
+bounded-memory scans, including reordered PTS and lowest-index tie breaking. Seek covers every
+sample in the decode interval and the moof headers for intervening fragments.
+
+Fragments resolve trun fields over tfhd and trex defaults, signed/unsigned composition offsets,
+tfdt or preceding decode extent, explicit bases, default-base-is-moof, first-traf implicit moof
+bases and previous-traf data ends. Each local run must fit an mdat associated with its moof,
+before the next moof. External resources and unknown sample-entry data references disable index
+queries. Description changes and sample-group dependency programs disable safe seek.
+
+Edit mapping supports empty edits (media_time = -1), one unit-rate media edit, and trailing empty
+edits. DTS stays on the media timeline; PTS includes composition displacement and the exact
+rational edit shift. Enumeration retains decode preroll; time lookup excludes samples outside
+the selected media edit. Repeats, dwell and non-unit rates report Unsupported instead of
+flattening an ambiguous program. Track duration includes empty edits.
+
+FastStart moves moov before the first mdat and calls BmffDocument.RelocateMediaOffsets. It requires
+progressive local data and rolls back the reordering if relocation fails. Offset promotion and
+transactional reference restoration remain BMFF responsibilities. Progressive-to-fragmented
+remuxing is out of scope.
+
+Strict profile mode rejects contradictory brands with InvalidStructure; lenient mode collects
+at most 256 resource-backed diagnostics. This is independent of BMFF's unknown-box strictness.
+CMAF checks retain the single-track, empty initialization tables, mvex/trex, one traf per moof,
+tfdt, moof-relative base, first-run data offset, increasing sequence and adjacent mdat subset.
+They do not certify codec profiles, switching sets, encryption or full CMAF conformance.
+
+Track/run discovery caps are 1024 and 1,000,000 respectively, in addition to the inherited BMFF
+16 MiB prefix/table budget and depth/entry limits. Configuration and media payloads are lazy.
+The native million-sample test compares load allocation against a 64-sample file and checks
+zero allocation for repeated constant-size ordinal queries.
+
+## Standards references
+
 [ISO/IEC 14496-14](https://www.iso.org/standard/79110.html),
 [MP4RA brands](https://mp4ra.org/registered-types/brands),
 [MP4RA codecs](https://mp4ra.org/registered-types/codecs) and

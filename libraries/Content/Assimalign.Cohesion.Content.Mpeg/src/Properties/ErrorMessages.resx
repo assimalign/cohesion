@@ -8,5 +8,22 @@
   <data name="EntryInvalid" xml:space="preserve"><value>The MP4 sample entry is invalid.</value></data>
   <data name="CompressorNameInvalid" xml:space="preserve"><value>The compressor name must contain at most 31 ISO-8859-1 bytes.</value></data>
   <data name="AudioVersionUnsupported" xml:space="preserve"><value>QuickTime audio sample-entry versions are not supported.</value></data>
+  <data name="BrandStructureMismatch" xml:space="preserve"><value>The declared MP4 or CMAF brand contradicts the retained structure constraints.</value></data>
+  <data name="ConfigurationMissing" xml:space="preserve"><value>The retained sample entry requires a decoder configuration box.</value></data>
+  <data name="DataReferenceInvalid" xml:space="preserve"><value>The sample-entry data-reference index is invalid.</value></data>
+  <data name="DiagnosticLimit" xml:space="preserve"><value>The profile diagnostic limit was exceeded.</value></data>
+  <data name="DuplicateBox" xml:space="preserve"><value>The box must occur at most once in this context.</value></data>
+  <data name="DuplicateTrack" xml:space="preserve"><value>Track identifiers must be unique.</value></data>
+  <data name="EditInvalid" xml:space="preserve"><value>The edit-list media time is invalid.</value></data>
+  <data name="EditUnsupported" xml:space="preserve"><value>Repeated, dwell and non-unit edit programs require a richer native timeline.</value></data>
+  <data name="ExternalDataUnsupported" xml:space="preserve"><value>Unknown or external sample data cannot be indexed as a single source.</value></data>
+  <data name="FastStartUnsupported" xml:space="preserve"><value>Fast start requires a progressive file with understood local data references.</value></data>
+  <data name="FragmentInvalid" xml:space="preserve"><value>The movie fragment is inconsistent with its track or defaults.</value></data>
+  <data name="RequiredBoxMissing" xml:space="preserve"><value>A required MP4 box is missing or unsupported.</value></data>
+  <data name="RunLimit" xml:space="preserve"><value>The fragment-run discovery limit was exceeded.</value></data>
+  <data name="SampleCountMismatch" xml:space="preserve"><value>The sample tables disagree about the sample count.</value></data>
+  <data name="SampleRangeInvalid" xml:space="preserve"><value>The sample range is outside its local media data.</value></data>
+  <data name="SampleTablesInvalid" xml:space="preserve"><value>The MP4 sample tables are inconsistent.</value></data>
+  <data name="TimestampRange" xml:space="preserve"><value>The native timestamp or range cannot be represented.</value></data>
+  <data name="TrackLimit" xml:space="preserve"><value>The track discovery limit was exceeded.</value></data>
 </root>
-
