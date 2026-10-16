@@ -49,7 +49,8 @@ public sealed class EbmlSchemaBuilder
         {
             foreach (var parentId in definition.ParentIds)
             {
-                if (!_definitions.TryGetValue(parentId.EncodedValue, out var parent) || parent.Type != EbmlElementType.MasterElement)
+                if (!_definitions.TryGetValue(parentId.EncodedValue, out var parent) || parent.Type != EbmlElementType.MasterElement ||
+                    (definition.UnknownSizeAllowed && !parent.UnknownSizeAllowed))
                 {
                     throw new ArgumentException(ErrorMessages.SchemaConflict);
                 }

@@ -147,6 +147,41 @@ internal static class EbmlValueCodec
         return length;
     }
 
+    internal static int GetWireLength(EbmlElementDefinition? definition, EbmlElementType type, object value, int requested = -1)
+    {
+        var fallback = definition?.DefaultValue;
+        if (fallback is not null && Equals(fallback, value) && requested is -1 or 0 && definition!.MinimumLength == 0)
+        {
+            return 0;
+        }
+
+        var length = GetLength(type, value, requested);
+        if (fallback is not null && length == 0 && !Equals(fallback, value))
+        {
+            if (requested == 0)
+            {
+                throw new ArgumentException(ErrorMessages.InvalidValue, nameof(requested));
+            }
+
+            length = type == EbmlElementType.Date ? 8 : type == EbmlElementType.Float ? 4 : 1;
+        }
+        if (requested == -1 && definition is not null && definition.MinimumLength > length)
+        {
+            if (definition.MinimumLength > Array.MaxLength)
+            {
+                throw new ArgumentException(ErrorMessages.InvalidSize);
+            }
+
+            length = (int)definition.MinimumLength;
+        }
+        if (!ValidLength(type, length))
+        {
+            throw new ArgumentException(ErrorMessages.InvalidSize);
+        }
+
+        return length;
+    }
+
     internal static void Encode(EbmlElementType type, object value, Span<byte> bytes)
     {
         bytes.Clear();

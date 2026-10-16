@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,12 +9,13 @@ namespace Assimalign.Cohesion.Content.Ebml;
 /// <summary>An editable EBML header and body retaining lazy binary payloads over its seekable source.</summary>
 /// <remarks>The source must remain open and unchanged until the document is disposed. Saving to a separate
 /// output copies lazy data through. Concurrent operations over the same source are unsupported.</remarks>
-public sealed class EbmlDocument : IDisposable
+public sealed partial class EbmlDocument : IDisposable
 {
     private Stream? _source;
     private bool _ownsSource;
     private bool _disposed;
     private int _maxDepth = 64;
+    private bool _lenient;
 
     /// <summary>Creates an empty document using the RFC header schema.</summary>
     public EbmlDocument() { }
@@ -24,6 +26,8 @@ public sealed class EbmlDocument : IDisposable
     public EbmlBody Body { get; } = new();
     /// <summary>Gets the immutable schema used to resolve and write the document.</summary>
     public EbmlSchema Schema { get; private set; } = EbmlSchema.Header;
+    /// <summary>Gets diagnostics recorded while loading in lenient mode.</summary>
+    public IReadOnlyList<ContentFormatException> Diagnostics { get; private set; } = Array.Empty<ContentFormatException>();
 
     /// <summary>Creates an empty document for a composed schema.</summary>
     /// <param name="schema">The schema, including the RFC header definitions.</param>
@@ -40,12 +44,14 @@ public sealed class EbmlDocument : IDisposable
     /// <param name="schema">The composed schema, or the built-in header schema.</param>
     /// <param name="options">Parser and tree limits.</param>
     /// <param name="leaveOpen">Whether disposing the document leaves the source open.</param>
+    /// <param name="registry">Optional DocType schemas selected after parsing the header.</param>
     /// <returns>The editable document.</returns>
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentException">The source is not readable and seekable.</exception>
     /// <exception cref="ContentFormatException">The document is malformed or exceeds a limit.</exception>
-    public static EbmlDocument Load(Stream source, EbmlSchema? schema = null, EbmlReaderOptions? options = null, bool leaveOpen = true) =>
-        LoadCore(source, schema, options, leaveOpen, CancellationToken.None);
+    public static EbmlDocument Load(Stream source, EbmlSchema? schema = null, EbmlReaderOptions? options = null, bool leaveOpen = true,
+        EbmlSchemaRegistry? registry = null) =>
+        LoadCore(source, schema, options, leaveOpen, registry, CancellationToken.None);
 
     /// <summary>Saves to a different writable stream, preserving untouched leaf bytes and recomputing master sizes.</summary>
     /// <param name="destination">The writable destination, which remains open.</param>
@@ -61,7 +67,9 @@ public sealed class EbmlDocument : IDisposable
             throw new ArgumentException(ErrorMessages.InPlaceSave, nameof(destination));
         }
 
+        Schema.Validate(this, _lenient, _maxDepth);
         using var writer = EbmlWriter.Create(destination, Schema, maxDepth: _maxDepth);
+        writer.RecalculateCrc = true;
         writer.WriteElement(Header.Element);
         foreach (var element in Body.Elements)
         {
@@ -72,10 +80,11 @@ public sealed class EbmlDocument : IDisposable
     /// <summary>Creates the format-neutral reader adapter. Its returned documents borrow their source.</summary>
     /// <param name="schema">The composed schema.</param>
     /// <param name="options">Limits copied when the adapter is created.</param>
+    /// <param name="registry">Optional DocType registry.</param>
     /// <returns>The document reader contract.</returns>
     /// <exception cref="ArgumentOutOfRangeException">An option is invalid.</exception>
-    public static IContentReader<EbmlDocument> CreateReader(EbmlSchema? schema = null, EbmlReaderOptions? options = null) =>
-        new DocumentReader(schema ?? EbmlSchema.Header, (options ?? new EbmlReaderOptions()).Snapshot());
+    public static IContentReader<EbmlDocument> CreateReader(EbmlSchema? schema = null, EbmlReaderOptions? options = null, EbmlSchemaRegistry? registry = null) =>
+        new DocumentReader(schema ?? EbmlSchema.Header, (options ?? new EbmlReaderOptions()).Snapshot(), registry);
 
     /// <summary>Creates the format-neutral writer adapter.</summary>
     /// <returns>The document writer contract.</returns>
@@ -96,7 +105,8 @@ public sealed class EbmlDocument : IDisposable
         }
     }
 
-    private static EbmlDocument LoadCore(Stream source, EbmlSchema? schema, EbmlReaderOptions? options, bool leaveOpen, CancellationToken cancellationToken)
+    private static EbmlDocument LoadCore(Stream source, EbmlSchema? schema, EbmlReaderOptions? options, bool leaveOpen,
+        EbmlSchemaRegistry? registry, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (!source.CanRead || !source.CanSeek)
@@ -105,7 +115,7 @@ public sealed class EbmlDocument : IDisposable
         }
 
         var effectiveOptions = (options ?? new EbmlReaderOptions()).Snapshot();
-        using var reader = EbmlReader.Create(source, schema, effectiveOptions);
+        using var reader = EbmlReader.Create(source, schema, effectiveOptions, registry: registry);
         cancellationToken.ThrowIfCancellationRequested();
         if (!reader.ReadNext())
         {
@@ -121,8 +131,9 @@ public sealed class EbmlDocument : IDisposable
         var document = new EbmlDocument
         {
             Header = new EbmlHeader(reader.ReadTree(ref count, cancellationToken)),
-            Schema = schema ?? EbmlSchema.Header,
-            _maxDepth = effectiveOptions.MaxDepth
+            Schema = reader.Schema,
+            _maxDepth = effectiveOptions.MaxDepth,
+            _lenient = effectiveOptions.Lenient
         };
         while (reader.ReadNext())
         {
@@ -133,6 +144,8 @@ public sealed class EbmlDocument : IDisposable
 
             document.Body.Elements.Add(reader.ReadTree(ref count, cancellationToken));
         }
+        reader.CompleteDocument(document);
+        document.Diagnostics = reader.Diagnostics;
         document._source = source;
         document._ownsSource = !leaveOpen; // Ownership transfers only after successful loading.
         return document;
@@ -142,10 +155,12 @@ public sealed class EbmlDocument : IDisposable
     {
         private readonly EbmlSchema _schema;
         private readonly EbmlReaderOptions _options;
-        internal DocumentReader(EbmlSchema schema, EbmlReaderOptions options) { _schema = schema; _options = options; }
-        public EbmlDocument Read(Stream stream) => Load(stream, _schema, _options);
+        private readonly EbmlSchemaRegistry? _registry;
+        internal DocumentReader(EbmlSchema schema, EbmlReaderOptions options, EbmlSchemaRegistry? registry)
+        { _schema = schema; _options = options; _registry = registry; }
+        public EbmlDocument Read(Stream stream) => Load(stream, _schema, _options, registry: _registry);
         public ValueTask<EbmlDocument> ReadAsync(Stream stream, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(LoadCore(stream, _schema, _options, true, cancellationToken));
+            LoadCoreAsync(stream, _schema, _options, _registry, cancellationToken);
     }
 
     private sealed class DocumentWriter : IContentWriter<EbmlDocument>
@@ -157,9 +172,8 @@ public sealed class EbmlDocument : IDisposable
         }
         public ValueTask WriteAsync(Stream stream, EbmlDocument document, CancellationToken cancellationToken = default)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            Write(stream, document);
-            return ValueTask.CompletedTask;
+            ArgumentNullException.ThrowIfNull(document);
+            return document.SaveCoreAsync(stream, cancellationToken);
         }
     }
 }

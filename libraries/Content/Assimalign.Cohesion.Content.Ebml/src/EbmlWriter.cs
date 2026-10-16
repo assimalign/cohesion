@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 
@@ -11,7 +12,7 @@ namespace Assimalign.Cohesion.Content.Ebml;
 /// <summary>Writes typed EBML elements with precomputed, streaming, or back-patched master sizes.</summary>
 /// <remarks>Borrowed outputs are never closed by default. Known master sizes work without seeking.
 /// A failed write can leave partial output; use a separate destination when replacing a document.</remarks>
-public sealed class EbmlWriter : IDisposable
+public sealed partial class EbmlWriter : IDisposable
 {
     private readonly Stream _output;
     private readonly EbmlSchema _schema;
@@ -20,6 +21,9 @@ public sealed class EbmlWriter : IDisposable
     private readonly List<MasterFrame> _masters = new();
     private long _position;
     private bool _disposed;
+    private int _baseDepth;
+    internal bool RecalculateCrc { get; set; }
+    private Dictionary<EbmlElement, uint> _crcCache = new();
 
     private EbmlWriter(Stream output, EbmlSchema schema, bool leaveOpen, int maxDepth)
     {
@@ -117,6 +121,7 @@ public sealed class EbmlWriter : IDisposable
     /// <exception cref="ContentFormatException">The lazy source is truncated.</exception>
     public void WriteBinary(VInt identifier, BinarySegment value, int sizeLength = 0)
     {
+        ValidateLeaf(identifier, EbmlElementType.Binary, value, value.Length);
         WriteHeader(identifier, value.Length, sizeLength);
         EnsureCount(value.Length);
         value.CopyTo(_output);
@@ -151,7 +156,7 @@ public sealed class EbmlWriter : IDisposable
     /// <exception cref="InvalidOperationException">The output cannot seek or nesting exceeds its limit.</exception>
     public void BeginMaster(VInt identifier, long? size = null, int sizeLength = 0, bool backPatch = false)
     {
-        if (_masters.Count >= _maxDepth)
+        if (_baseDepth + _masters.Count >= _maxDepth)
         {
             throw new InvalidOperationException(ErrorMessages.DepthLimit);
         }
@@ -219,13 +224,40 @@ public sealed class EbmlWriter : IDisposable
     public void WriteElement(EbmlElement element)
     {
         ArgumentNullException.ThrowIfNull(element);
-        var length = DataLength(element, _masters.Count);
+        if (_baseDepth == 0 && _masters.Count == 0)
+        {
+            _crcCache.Clear();
+        }
+
+        var length = DataLength(element, _baseDepth + _masters.Count);
         if (element.Type == EbmlElementType.MasterElement)
         {
             BeginMaster(element.Identifier, element.IsUnknownSize ? null : length, SizeWidth(element, length));
-            foreach (var child in element.Children)
+            var first = 0;
+            if (RecalculateCrc && HasCrc(element))
             {
-                WriteElement(child);
+                if (!_crcCache.TryGetValue(element, out var crc))
+                {
+                    using var checksum = new EbmlCrcStream();
+                    using var calculator = new EbmlWriter(checksum, _schema, true, _maxDepth)
+                    { RecalculateCrc = true, _baseDepth = _baseDepth + _masters.Count, _crcCache = _crcCache };
+                    for (var i = 1; i < element.Children.Count; i++)
+                    {
+                        calculator.WriteElement(element.Children[i]);
+                    }
+
+                    crc = checksum.Value;
+                    _crcCache.Add(element, crc);
+                }
+
+                var bytes = new byte[4];
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes, crc);
+                WriteBinary(element.Children[0].Identifier, BinarySegment.Create(bytes), element.Children[0].SizeLength);
+                first = 1;
+            }
+            for (var i = first; i < element.Children.Count; i++)
+            {
+                WriteElement(element.Children[i]);
             }
 
             EndMaster();
@@ -265,7 +297,8 @@ public sealed class EbmlWriter : IDisposable
     {
         if (element.Type != EbmlElementType.MasterElement)
         {
-            return element.RawPayload?.Length ?? (element.Value is BinarySegment segment ? segment.Length : EbmlValueCodec.GetLength(element.Type, element.Value!));
+            return element.RawPayload?.Length ?? (element.Value is BinarySegment segment ? segment.Length :
+                EbmlValueCodec.GetWireLength(_schema.Find(element.Identifier), element.Type, element.Value!));
         }
 
         if (depth >= _maxDepth)
@@ -299,9 +332,14 @@ public sealed class EbmlWriter : IDisposable
         return Math.Max(element.SizeLength, VInt.EncodeSize((ulong)size).Length);
     }
 
+    private static bool HasCrc(EbmlElement element) => element.Children.Count > 0 &&
+        element.Children[0].Identifier.EncodedValue == 0xBF &&
+        element.Children[0].Value is BinarySegment segment && segment.Length == 4;
+
     private void WriteValue(VInt identifier, EbmlElementType type, object value, int length, int sizeLength)
     {
-        var count = EbmlValueCodec.GetLength(type, value, length);
+        var count = EbmlValueCodec.GetWireLength(_schema.Find(identifier), type, value, length);
+        ValidateLeaf(identifier, type, value, count);
         WriteHeader(identifier, count, sizeLength);
         var buffer = ArrayPool<byte>.Shared.Rent(Math.Max(1, count));
         try
@@ -331,6 +369,16 @@ public sealed class EbmlWriter : IDisposable
         identifier.Write(_output);
         encodedSize.Write(_output);
         _position += identifier.Length + encodedSize.Length;
+    }
+
+    private void ValidateLeaf(VInt identifier, EbmlElementType type, object value, long length)
+    {
+        var definition = _schema.Find(identifier);
+        if (definition is not null && (definition.Type != type || !definition.Contains(value) ||
+            length < definition.MinimumLength || length > definition.MaximumLength))
+        {
+            throw new EbmlDataFormatException(ErrorMessages.SchemaViolation, ContentFormatErrorCode.InvalidValue, _position);
+        }
     }
 
     private void WriteBytes(ReadOnlySpan<byte> bytes)

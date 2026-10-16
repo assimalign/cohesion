@@ -13,6 +13,71 @@ namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlDocumentTests
 {
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Save: recalculates CRC after metadata edits")]
+    public void Save_EditedCrcParent_RecalculatesChecksum()
+    {
+        // Arrange
+        using var document = EbmlTestData.Document();
+        document.Body.Elements[0].Children.Insert(0, EbmlElement.Create(VInt.FromEncoded(0xBF), EbmlElementType.Binary,
+            BinarySegment.Create(new byte[4])));
+        using var original = new MemoryStream();
+        document.Save(original);
+        original.Position = 0;
+        using var loaded = EbmlDocument.Load(original, document.Schema, new EbmlReaderOptions { VerifyCrc32 = true });
+        loaded.Body.Elements[0].Children[1].Value = 128UL;
+
+        // Act
+        using var saved = new MemoryStream();
+        loaded.Save(saved);
+        saved.Position = 0;
+        using var reloaded = EbmlDocument.Load(saved, document.Schema, new EbmlReaderOptions { VerifyCrc32 = true });
+
+        // Assert
+        reloaded.Body.Elements[0].Children[1].Value.ShouldBe(128UL);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Content contracts: use async I/O including CRC and lazy copy-through")]
+    public async Task ReadAsync_AsyncOnlyStreams_RoundTripsWithoutSyncIo()
+    {
+        // Arrange
+        using var document = EbmlTestData.Document();
+        document.Body.Elements[0].Children.Insert(0, EbmlElement.Create(VInt.FromEncoded(0xBF), EbmlElementType.Binary,
+            BinarySegment.Create(new byte[4])));
+        using var original = new MemoryStream();
+        using var source = new AsyncOnlyStream(original);
+        var writer = EbmlDocument.CreateWriter();
+        var reader = EbmlDocument.CreateReader(document.Schema, new EbmlReaderOptions { VerifyCrc32 = true });
+
+        // Act
+        await writer.WriteAsync(source, document, CancellationToken.None);
+        source.Position = 0;
+        using var loaded = await reader.ReadAsync(source, CancellationToken.None);
+        using var copied = new MemoryStream();
+        using var destination = new AsyncOnlyStream(copied);
+        await writer.WriteAsync(destination, loaded, CancellationToken.None);
+
+        // Assert
+        copied.ToArray().ShouldBe(original.ToArray());
+        ((BinarySegment)loaded.Body.Elements[0].Children[^1].Value!).IsMaterialized.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - ReadAsync: cancellation during short reads leaves source borrowed")]
+    public async Task ReadAsync_CancelledDuringIo_StopsParsing()
+    {
+        // Arrange
+        using var document = EbmlTestData.Document();
+        using var original = new MemoryStream();
+        document.Save(original);
+        original.Position = 0;
+        using var cancellation = new CancellationTokenSource();
+        using var source = new AsyncOnlyStream(original, cancellation, 10);
+
+        // Act / Assert
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            EbmlDocument.CreateReader(document.Schema).ReadAsync(source, cancellation.Token).AsTask());
+        source.CanRead.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Save: constructed document round-trips byte-for-byte")]
     public void Save_ConstructedDocument_PreservesBytesAndLazyUnknowns()
     {
