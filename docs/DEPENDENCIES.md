@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 255 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 732 |
+| Declared project references | 733 |
 | Declared shared-source links | 23 |
 
 ## Ambiguous project names
