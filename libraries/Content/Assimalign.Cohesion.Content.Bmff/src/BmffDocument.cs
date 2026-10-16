@@ -14,6 +14,7 @@ namespace Assimalign.Cohesion.Content.Bmff;
 public sealed class BmffDocument : IDisposable
 {
     private BmffLayout? _layout;
+    private BmffBoxRegistry _registry = BmffBoxRegistry.Default;
     private bool _ownsSource;
     private bool _disposed;
     /// <summary>Gets the mutable ordered top-level boxes.</summary>
@@ -52,7 +53,7 @@ public sealed class BmffDocument : IDisposable
         {
             throw new ArgumentException(ErrorMessages.DocumentSource, nameof(source));
         }
-        var document = new BmffDocument { Source = source, _ownsSource = !leaveOpen };
+        var document = new BmffDocument { Source = source, _ownsSource = !leaveOpen, _registry = registry ?? BmffBoxRegistry.Default };
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -113,7 +114,7 @@ public sealed class BmffDocument : IDisposable
 
     /// <summary>Relocates supported media references to the current ordered tree and checkpoints its layout.</summary>
     /// <remarks>Also called by Save. Updates stco/co64, local file-based iloc, explicit tfhd bases,
-    /// moof-relative trun data offsets, tfra moof offsets and resized mfro. Promotes encodings as needed.
+    /// moof-relative trun data offsets, tfra moof offsets, resized mfro, sidx and saio, and registry rules. Promotes encodings as needed.
     /// Repeated calls are idempotent. New documents establish their first layout without shifting references.
     /// Unknown references and implicit bases after the first traf require a profile; see DESIGN.md.</remarks>
     /// <param name="outputOffset">The absolute start of the planned output, normally zero.</param>
@@ -131,7 +132,7 @@ public sealed class BmffDocument : IDisposable
     {
         _layout = _layout is null
             ? BmffLayout.Measure(Boxes, outputOffset, maxDepth)
-            : BmffOffsetRelocator.Relocate(Boxes, _layout, outputOffset, maxDepth);
+            : BmffOffsetRelocator.Relocate(Boxes, _layout, outputOffset, maxDepth, _registry);
     }
 
     private void ValidateOutput(Stream output)

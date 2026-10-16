@@ -38,8 +38,6 @@ payloads, or use LoadDocument for a seekable, editable tree. Codec decoding is o
 - BMFF's typed visitor rule conflicts with the prohibition on changing its interfaces. New
   profile boxes use inherited Visit(BmffBox) dispatch; no visitor interface is widened.
 - Sealed box classes follow the explicit brief's composite model exception to interface-first.
-- BMFF does not relocate sidx/saio. FastStart refuses files carrying these boxes before moving
-  moov; arbitrary unknown private offsets remain outside the relocation guarantee.
 
 ## Media interpretation
 
@@ -95,7 +93,7 @@ the selected media edit. Repeats, dwell and non-unit rates report Unsupported in
 flattening an ambiguous program. Track duration includes empty edits.
 
 FastStart moves moov before the first mdat and calls BmffDocument.RelocateMediaOffsets. It requires
-progressive local data and rolls back the reordering if relocation fails. Offset promotion and
+progressive local data, supports sidx and saio through BMFF, and rolls back the reordering if relocation fails. Offset promotion and
 transactional reference restoration remain BMFF responsibilities. Progressive-to-fragmented
 remuxing is out of scope.
 

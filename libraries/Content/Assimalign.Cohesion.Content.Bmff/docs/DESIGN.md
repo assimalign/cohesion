@@ -303,6 +303,11 @@ The operation updates:
   base-plus-extent addresses move. A zero base with absolute extent offsets is supported.
   Widths grow from zero to four or eight bytes as necessary. Methods 1/2 and external entries
   stay unchanged.
+- sidx first_offset relative to the end of the index and every 31-bit referenced span, including
+  index-to-index references; version zero promotes when its first offset exceeds UInt32.
+- saio v0/v1 offsets: absolute in sample tables; relative to the tfhd base in fragments. Explicit,
+  default-moof and first-traf implicit bases are supported. Auxiliary bytes may live in mdat or
+  a retained opaque box such as senc. Version zero promotes when an offset exceeds UInt32.
 - Explicit tfhd base_data_offset values inside moved mdat or at retained moof starts.
 - trun data_offset relative to an explicit tfhd base, default-base-is-moof, or the first traf's
   implicit moof base. Moving a moof/mdat pair together leaves the relative offset unchanged;
@@ -319,8 +324,16 @@ structural edits remain in place. Source segments and original Header/Offset/Lim
 Removing or shortening a referenced mdat fails with InvalidStructure. Relative offsets outside
 Int32 fail with InvalidValue. Opaque offset-bearing standard boxes and implicit previous-traf
 bases after the first traf fail with Unsupported if the layout changes. The operation does not
-interpret codec/sample-entry fields, arbitrary unknown references, sidx, saio or profile-specific
-indexes. Such profiles must implement their reference rules before changing those layouts.
+interpret codec/sample-entry fields or arbitrary unknown references. Unregistered profile-specific
+indexes require explicit reference rules before changing those layouts.
+
+RegisterRelocation contributes one capture callback per FourCC. A loaded document retains the
+immutable registry. Capture reads checkpoint fields without mutation and returns apply and restore
+callbacks. Apply receives IBmffRelocationContext for absolute mapping and old/new box positions;
+it may run repeatedly and must always calculate from captured values. Restore undoes every mutation
+if any rule or layout pass fails. Rules also run inside registered sample entries, and an explicit
+rule replaces the built-in rule for that FourCC. The new sidx/saio field implementations are internal
+sealed boxes using generic visitor dispatch; no shipped visitor interface is widened.
 
 Reordering, adding and removing children preserves list order and recomputes every ancestor size.
 The existing writer switches any oversized ancestor to a large-size header without reading media.

@@ -8,12 +8,13 @@ namespace Assimalign.Cohesion.Content.Bmff.Internal;
 internal sealed class BmffOffsetRelocator
 {
     private readonly BmffLayout _original;
+    private readonly BmffBoxRegistry _registry;
     private readonly List<Action<BmffLayout>> _updates = new();
     private readonly List<Action> _undo = new();
 
-    private BmffOffsetRelocator(BmffLayout original) { _original = original; }
+    private BmffOffsetRelocator(BmffLayout original, BmffBoxRegistry registry) { _original = original; _registry = registry; }
 
-    internal static BmffLayout Relocate(IList<BmffBox> boxes, BmffLayout original, long outputOffset, int maxDepth)
+    internal static BmffLayout Relocate(IList<BmffBox> boxes, BmffLayout original, long outputOffset, int maxDepth, BmffBoxRegistry registry)
     {
         var current = BmffLayout.Measure(boxes, outputOffset, maxDepth);
         if (current.SamePositions(original))
@@ -21,10 +22,10 @@ internal sealed class BmffOffsetRelocator
             return current;
         }
 
-        var relocator = new BmffOffsetRelocator(original);
-        relocator.Collect(boxes, null, null, true, null);
+        var relocator = new BmffOffsetRelocator(original, registry);
         try
         {
+            relocator.Collect(boxes, null, null, true, null);
             for (var pass = 0; pass <= relocator._updates.Count * 2 + 8; pass++)
             {
                 foreach (var update in relocator._updates)
@@ -59,30 +60,40 @@ internal sealed class BmffOffsetRelocator
         for (var index = 0; index < boxes.Count; index++)
         {
             var box = boxes[index];
-            switch (box)
+            if (_registry.Relocations.TryGetValue(box.BoxType, out var capture))
             {
-                case ChunkOffsetBox stco: AddChunk32(boxes, index, stco); break;
-                case ChunkOffset64BitBox co64: AddChunk64(co64); break;
-                case ItemLocationBox iloc: AddItems(iloc); break;
-                case TrackFragmentHeaderBox header: AddBase(header); break;
-                case TrackFragmentRunBox run when moof is not null: AddRun(run, moof, tfhd, knownBase); break;
-                case TrackFragmentRandomAccessBox tfra: AddRandomAccess(tfra); break;
-                case MovieFragmentRandomAccessOffsetBox mfro when mfra is not null: AddMfraSize(mfro, mfra); break;
-                case UnknownBox unknown when unknown.BoxType is BmffBoxType.ChunkOffset or BmffBoxType.ChunkOffset6fBit or BmffBoxType.ItemLocation or BmffBoxType.TrackFragmentHeader or BmffBoxType.TrackFragmentRun or BmffBoxType.TrackFragmentRandomAccess:
-                    _updates.Add(layout =>
-                    {
-                        if (!_original.SamePositions(layout))
+                var rule = capture(box);
+                if (rule.Apply is null || rule.Restore is null)
+                {
+                    throw new InvalidOperationException(ErrorMessages.InvalidFactory);
+                }
+                _undo.Add(rule.Restore);
+                _updates.Add(layout => rule.Apply(new BmffRelocationContext(_original, layout)));
+            }
+            else
+            {
+                switch (box)
+                {
+                    case BmffSegmentIndexBox sidx: AddSegmentIndex(sidx); break;
+                    case BmffAuxiliaryOffsetsBox saio: AddAuxiliaryOffsets(saio, moof, tfhd, knownBase); break;
+                    case ChunkOffsetBox stco: AddChunk32(boxes, index, stco); break;
+                    case ChunkOffset64BitBox co64: AddChunk64(co64); break;
+                    case ItemLocationBox iloc: AddItems(iloc); break;
+                    case TrackFragmentHeaderBox header: AddBase(header); break;
+                    case TrackFragmentRunBox run when moof is not null: AddRun(run, moof, tfhd, knownBase); break;
+                    case TrackFragmentRandomAccessBox tfra: AddRandomAccess(tfra); break;
+                    case MovieFragmentRandomAccessOffsetBox mfro when mfra is not null: AddMfraSize(mfro, mfra); break;
+                    case UnknownBox unknown when unknown.BoxType is BmffBoxType.ChunkOffset or BmffBoxType.ChunkOffset6fBit or BmffBoxType.ItemLocation or BmffBoxType.TrackFragmentHeader or BmffBoxType.TrackFragmentRun or BmffBoxType.TrackFragmentRandomAccess || (uint)unknown.BoxType is 0x73696478 or 0x7361696f:
+                        _updates.Add(layout =>
                         {
-                            throw new ContentFormatException(ErrorMessages.RelocationUnsupported, ContentFormatErrorCode.Unsupported, unknown.Offset);
-                        }
-                    });
-                    break;
-            }
-            if (box is SampleDescriptionBox)
-            {
-                continue; // Sample-entry bytes belong to profiles.
-            }
-
+                            if (!_original.SamePositions(layout))
+                            {
+                                throw new ContentFormatException(ErrorMessages.RelocationUnsupported, ContentFormatErrorCode.Unsupported, unknown.Offset);
+                            }
+                        });
+                        break;
+                }
+                }
             if (box is MovieFragmentBox fragment)
             {
                 Collect(fragment.Children, fragment, null, true, null);
@@ -106,6 +117,86 @@ internal sealed class BmffOffsetRelocator
                 Collect(composite.Children, moof, tfhd, knownBase, box as MovieFragmentRandomAccessBox ?? mfra);
             }
         }
+    }
+
+    private void AddSegmentIndex(BmffSegmentIndexBox box)
+    {
+        if (!_original.Entries.TryGetValue(box, out var old)) { return; }
+        var first = box.FirstOffset;
+        var entries = box.Entries;
+        var version = box.Version;
+        var start = Add((ulong)(old.Offset + old.Size), first, box.Offset);
+        _undo.Add(() => { box.FirstOffset = first; box.Entries = entries; box.Version = version; });
+        _updates.Add(layout =>
+        {
+            if (entries.Length == 0) { return; }
+            var target = _original.MapAddress(start, layout);
+            var output = layout.Entries[box];
+            var anchor = (ulong)(output.Offset + output.Size);
+            if (target < anchor)
+            {
+                throw new ContentFormatException(ErrorMessages.RelocationUnsupported, ContentFormatErrorCode.Unsupported, box.Offset);
+            }
+            box.FirstOffset = target - anchor;
+            if (box.FirstOffset > uint.MaxValue) { box.Version = 1; }
+            var values = (BmffSegmentIndexBox.Entry[])entries.Clone();
+            var position = start;
+            var nextTarget = target;
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var size = entries[i].Reference & 0x7fffffffu;
+                var end = Add(position, size, box.Offset);
+                var mappedStart = _original.MapAddress(position, layout);
+                var mappedEnd = _original.MapAddress(end, layout, end: true);
+                if (size == 0 || mappedStart != nextTarget || mappedEnd < mappedStart || mappedEnd - mappedStart > 0x7fffffff)
+                {
+                    throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, box.Offset);
+                }
+                values[i] = entries[i] with { Reference = (entries[i].Reference & 0x80000000u) | (uint)(mappedEnd - mappedStart) };
+                position = end;
+                nextTarget = mappedEnd;
+            }
+            box.Entries = values;
+        });
+    }
+
+    private void AddAuxiliaryOffsets(BmffAuxiliaryOffsetsBox box, MovieFragmentBox? moof, TrackFragmentHeaderBox? header, bool knownBase)
+    {
+        var offsets = box.Offsets;
+        var version = box.Version;
+        var explicitBase = header?.BaseDataOffset;
+        var oldBase = moof is null ? 0UL : explicitBase ?? (ulong)_original.Entries[moof].Offset;
+        _undo.Add(() => { box.Offsets = offsets; box.Version = version; });
+        _updates.Add(layout =>
+        {
+            if (moof is not null && !knownBase && !explicitBase.HasValue && offsets.Length != 0)
+            {
+                throw new ContentFormatException(ErrorMessages.RelocationUnsupported, ContentFormatErrorCode.Unsupported, box.Offset);
+            }
+            var newBase = moof is null ? 0UL : explicitBase.HasValue
+                ? _original.MapBase(oldBase, layout) : (ulong)layout.Entries[moof].Offset;
+            var values = new ulong[offsets.Length];
+            for (var i = 0; i < offsets.Length; i++)
+            {
+                var target = _original.MapAddress(Add(oldBase, offsets[i], box.Offset), layout);
+                if (target < newBase)
+                {
+                    throw new ContentFormatException(ErrorMessages.FieldRange, ContentFormatErrorCode.InvalidValue, box.Offset);
+                }
+                values[i] = target - newBase;
+                if (values[i] > uint.MaxValue) { box.Version = 1; }
+            }
+            box.Offsets = values;
+        });
+    }
+
+    private static ulong Add(ulong left, ulong right, long position)
+    {
+        if (right > ulong.MaxValue - left)
+        {
+            throw new ContentFormatException(ErrorMessages.FieldRange, ContentFormatErrorCode.InvalidValue, position);
+        }
+        return left + right;
     }
 
     private void AddChunk32(IList<BmffBox> parent, int index, ChunkOffsetBox box)

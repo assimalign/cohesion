@@ -97,6 +97,48 @@ internal sealed class BmffLayout
         return address;
     }
 
+    internal ulong MapAddress(ulong address, BmffLayout target, bool end = false)
+    {
+        // Prefer the innermost box: auxiliary data can reside in an opaque senc inside moof.
+        BmffBox? selected = null;
+        BmffLayoutEntry source = default;
+        foreach (var pair in Entries)
+        {
+            var start = (ulong)pair.Value.Offset;
+            var limit = start + (ulong)pair.Value.Size;
+            if ((end ? address > start && address <= limit : address >= start && address < limit) &&
+                (selected is null || pair.Value.Size < source.Size))
+            {
+                selected = pair.Key;
+                source = pair.Value;
+            }
+        }
+        if (selected is null || !target.Entries.TryGetValue(selected, out var destination))
+        {
+            throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure,
+                address <= long.MaxValue ? (long)address : null);
+        }
+        if (end && address == (ulong)(source.Offset + source.Size))
+        {
+            return (ulong)(destination.Offset + destination.Size);
+        }
+        if (address >= (ulong)source.PayloadOffset)
+        {
+            var relative = address - (ulong)source.PayloadOffset;
+            if (relative >= (ulong)destination.PayloadSize)
+            {
+                throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, source.Offset);
+            }
+            return (ulong)destination.PayloadOffset + relative;
+        }
+        var headerRelative = address - (ulong)source.Offset;
+        if (headerRelative >= (ulong)destination.HeaderSize)
+        {
+            throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, source.Offset);
+        }
+        return (ulong)destination.Offset + headerRelative;
+    }
+
     internal ulong MapMoof(ulong address, BmffLayout target)
     {
         foreach (var pair in Entries)

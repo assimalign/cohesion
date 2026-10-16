@@ -9,6 +9,21 @@ public sealed class BmffBoxRegistryBuilder
     internal Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> Factories { get; } = new();
     internal HashSet<BmffBoxType> Unsupported { get; } = new();
     internal Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> SampleEntries { get; } = new();
+    internal Dictionary<BmffBoxType, Func<BmffBox, (Action<IBmffRelocationContext> Apply, Action Restore)>> Relocations { get; } = new();
+
+    /// <summary>Registers or replaces a transactional relocation rule for a profile box.</summary>
+    /// <param name="type">The box FourCC.</param>
+    /// <param name="capture">Captures original fields without mutation and returns apply and restore callbacks.
+    /// Apply may run repeatedly against the same checkpoint; restore must undo all its changes on failure.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException">The capture callback is null.</exception>
+    public BmffBoxRegistryBuilder RegisterRelocation(BmffBoxType type,
+        Func<BmffBox, (Action<IBmffRelocationContext> Apply, Action Restore)> capture)
+    {
+        ArgumentNullException.ThrowIfNull(capture);
+        Relocations[type] = capture;
+        return this;
+    }
 
     /// <summary>Registers a sample-entry factory for stsd and standalone entry reading.</summary>
     /// <param name="type">The sample-entry FourCC.</param>
@@ -37,5 +52,5 @@ public sealed class BmffBoxRegistryBuilder
 
     /// <summary>Freezes a snapshot; later builder mutations cannot alter it.</summary>
     /// <returns>The registry snapshot.</returns>
-    public BmffBoxRegistry Build() => new BmffBoxRegistry(Factories, Unsupported, SampleEntries);
+    public BmffBoxRegistry Build() => new BmffBoxRegistry(Factories, Unsupported, SampleEntries, Relocations);
 }
