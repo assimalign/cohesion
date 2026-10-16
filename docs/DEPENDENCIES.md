@@ -1140,7 +1140,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | Kind | Count |
 | --- | --- |
 | `examples/` | 5 |
-| `fixtures/` | 8 |
+| `fixtures/` | 9 |
 | `samples/` | 10 |
 | `tests/` | 301 |
 

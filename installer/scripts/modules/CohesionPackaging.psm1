@@ -97,6 +97,7 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Content/Assimalign.Cohesion.Content.Binary'
     'libraries/Content/Assimalign.Cohesion.Content.Text'
     'libraries/Content/Assimalign.Cohesion.Content.Ebml'
+    'libraries/Content/Assimalign.Cohesion.Content.Exe'
     'libraries/Content/Assimalign.Cohesion.Content.Markdown'
     'libraries/Content/Assimalign.Cohesion.Content.Pdf'
     'libraries/Content/Assimalign.Cohesion.Content.Yaml'
@@ -462,7 +463,6 @@ $script:CohesionReleaseUnpublishedDependency = @(
 $script:CohesionCiMatrixExclusion = [ordered]@{
     'libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/src/Assimalign.Cohesion.Connections.NamedPipes.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/Content/Assimalign.Cohesion.Content.Bmff/src/Assimalign.Cohesion.Content.Bmff.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'libraries/Content/Assimalign.Cohesion.Content.Exe/src/Assimalign.Cohesion.Content.Exe.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/Content/Assimalign.Cohesion.Content.Media/src/Assimalign.Cohesion.Content.Media.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/Content/Assimalign.Cohesion.Content.Mkv/src/Assimalign.Cohesion.Content.Mkv.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/Assimalign.Cohesion.Http.Connections.Examples.Http1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
