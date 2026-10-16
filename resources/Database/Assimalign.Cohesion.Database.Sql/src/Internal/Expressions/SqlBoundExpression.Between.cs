@@ -7,17 +7,20 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlBoundBetween : SqlBoundExpression
 {
     /// <summary>Initializes a bound range test.</summary>
-    /// <param name="operand">The bound tested value.</param>
+    /// <param name="lowOperand">The tested value coerced for the lower comparison.</param>
+    /// <param name="highOperand">The tested value coerced independently for the upper comparison.</param>
     /// <param name="low">The bound lower end.</param>
     /// <param name="high">The bound upper end.</param>
     /// <param name="isNegated"><see langword="true"/> for <c>NOT BETWEEN</c>.</param>
     /// <param name="lowCollation">The collation of the operand and the lower end.</param>
     /// <param name="highCollation">The collation of the operand and the upper end.</param>
-    internal SqlBoundBetween(SqlBoundExpression operand, SqlBoundExpression low, SqlBoundExpression high, bool isNegated,
+    internal SqlBoundBetween(SqlBoundExpression lowOperand, SqlBoundExpression highOperand,
+        SqlBoundExpression low, SqlBoundExpression high, bool isNegated,
         SqlBoundCollation lowCollation, SqlBoundCollation highCollation)
         : base(SqlBoundExpressionKind.Between)
     {
-        Operand = operand;
+        LowOperand = lowOperand;
+        HighOperand = highOperand;
         Low = low;
         High = high;
         IsNegated = isNegated;
@@ -25,8 +28,11 @@ internal sealed class SqlBoundBetween : SqlBoundExpression
         HighCollation = highCollation;
     }
 
-    /// <summary>Gets the bound tested value.</summary>
-    internal SqlBoundExpression Operand { get; }
+    /// <summary>Gets the tested value for the lower comparison.</summary>
+    internal SqlBoundExpression LowOperand { get; }
+
+    /// <summary>Gets the tested value for the upper comparison.</summary>
+    internal SqlBoundExpression HighOperand { get; }
 
     /// <summary>Gets the bound lower end.</summary>
     internal SqlBoundExpression Low { get; }

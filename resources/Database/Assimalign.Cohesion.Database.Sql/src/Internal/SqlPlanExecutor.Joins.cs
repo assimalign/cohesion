@@ -111,7 +111,7 @@ internal sealed partial class SqlPlanExecutor
             // The planner only joins character keys to character keys with the index's
             // collation. A comparison is not an assignment: a longer string can compare equal
             // under that collation (for example an ignored combining accent), so probe it whole.
-            if (original is string)
+            if (original is string or SqlCharacter)
             {
                 values[i] = original;
                 continue;

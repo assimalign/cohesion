@@ -197,12 +197,14 @@ internal sealed partial class SqlExpressionEvaluator
         var operand = Bind(between.Operand, out SqlCollationCandidate operandCollation);
         var low = Bind(between.Low, out SqlCollationCandidate lowCollation);
         var high = Bind(between.High, out SqlCollationCandidate highCollation);
-        operand = BindCharacterComparand(between.Operand, operand, between.Low);
-        operand = BindCharacterComparand(between.Operand, operand, between.High);
+        // PostgreSQL parse_expr.c:1325-1333 binds the two comparisons separately.
+        // Neither bound may change the value used to compare against the other.
+        var lowOperand = BindCharacterComparand(between.Operand, operand, between.Low);
+        var highOperand = BindCharacterComparand(between.Operand, operand, between.High);
         low = BindCharacterComparand(between.Low, low, between.Operand);
         high = BindCharacterComparand(between.High, high, between.Operand);
         collation = CollationOf(between, [operandCollation, lowCollation, highCollation]);
-        return new SqlBoundBetween(operand, low, high, between.IsNegated,
+        return new SqlBoundBetween(lowOperand, highOperand, low, high, between.IsNegated,
             SqlBoundCollation.Of(operandCollation, lowCollation, _defaultCollation),
             SqlBoundCollation.Of(operandCollation, highCollation, _defaultCollation));
     }
@@ -439,16 +441,35 @@ internal sealed partial class SqlExpressionEvaluator
 
         var candidates = new SqlBoundExpression[values.Count];
         var comparisons = new SqlBoundCollation[values.Count];
+        // PostgreSQL parse_expr.c:1190 selects a common type before coercing the
+        // shared operand. Untyped literals/parameters do not force a CHAR list to TEXT.
+        DatabaseType comparisonType = InComparisonType(membership.Operand);
+        foreach (var value in values)
+        {
+            comparisonType = AlternativeType(comparisonType, InComparisonType(value));
+        }
+        operand = comparisonType == DatabaseType.String
+            ? CharacterToText(membership.Operand, operand)
+            : BindCharacterComparand(membership.Operand, operand, comparisonType);
         for (int index = 0; index < candidates.Length; index++)
         {
             candidates[index] = Bind(values[index], out collations[index + 1]);
-            candidates[index] = BindCharacterComparand(values[index], candidates[index], membership.Operand);
-            operand = BindCharacterComparand(membership.Operand, operand, values[index]);
+            candidates[index] = comparisonType == DatabaseType.String
+                ? CharacterToText(values[index], candidates[index])
+                : BindCharacterComparand(values[index], candidates[index], comparisonType);
             comparisons[index] = SqlBoundCollation.Of(operandCollation, collations[index + 1], _defaultCollation);
         }
 
         collation = CollationOf(membership, collations);
         return new SqlBoundIn(operand, candidates, comparisons, membership.IsNegated);
+    }
+
+    private DatabaseType InComparisonType(SqlExpression expression)
+    {
+        while (expression is SqlCollateExpression collate) { expression = collate.Operand; }
+        var type = StaticTypeOf(expression);
+        return type == DatabaseType.String && expression is SqlLiteralExpression or SqlParameterExpression
+            ? DatabaseType.Null : type;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -555,16 +576,24 @@ internal sealed partial class SqlExpressionEvaluator
         var scalar = (SqlScalarFunction)function!;
         bool fixedArguments = AreFixed(arguments);
         var callCollation = SqlBoundCollation.Of(collation, default, _defaultCollation);
-        for (int index = 0; index < arguments.Length; index++)
-        {
-            if (scalar.ParameterAt(index) is var domain && (domain.IsDomain || domain.Storage.Type == DatabaseType.Character))
-            {
-                arguments[index] = new SqlBoundDomainArgument(arguments[index], domain, scalar.Name, callCollation, _functions.Database, _cancellationToken);
-            }
-        }
+        BindParameterCoercions(scalar, arguments, callCollation);
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
             callCollation, _functions.Database, _cancellationToken);
         return scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
+    }
+
+    /// <summary>Applies declared CHAR bounds and domain checks before scalar or aggregate STRICT dispatch.</summary>
+    internal void BindParameterCoercions(SqlFunction function, SqlBoundExpression[] arguments, SqlBoundCollation collation)
+    {
+        for (int index = 0; index < arguments.Length; index++)
+        {
+            var parameter = function.ParameterAt(index);
+            if (parameter.IsDomain || parameter.Storage.Type == DatabaseType.Character)
+            {
+                arguments[index] = new SqlBoundDomainArgument(arguments[index], parameter, function.Name,
+                    collation, _functions.Database, _cancellationToken);
+            }
+        }
     }
 
     /// <summary>Whether every argument has a value fixed when the statement was bound: a constant or a parameter.</summary>

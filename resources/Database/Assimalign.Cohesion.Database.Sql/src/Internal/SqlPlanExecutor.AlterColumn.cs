@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -35,10 +36,11 @@ internal sealed partial class SqlPlanExecutor
             BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
         }
 
-        bool tightens = previous.IsNullable && !column.IsNullable ||
+        bool validatesValues = previous.IsNullable && !column.IsNullable ||
+            column.Type.Type == DatabaseType.Character && column.Type.MaxLength != previous.Type.MaxLength ||
             column.Type.MaxLength is { } length && (previous.Type.MaxLength is null || length < previous.Type.MaxLength) ||
             column.Type.Precision is { } precision && (previous.Type.Precision is null || precision < previous.Type.Precision);
-        if (tightens)
+        if (validatesValues)
         {
             var snapshot = ConstraintCurrentSnapshot(statement);
             long total = statement.ProvisioningProgress is null ? 0 : Scan(plan.Table, statement, cancellationToken, snapshot).LongCount();
@@ -49,7 +51,9 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 object? value = row.Values[ordinal];
                 object? converted = CoerceForColumn(value, column);
-                if (!Equals(value, converted))
+                // This is physical equality: even SQL-equal CHAR values need a rewrite if
+                // their padding differs. New wrappers around the same padded string do not.
+                if (!Equals(SqlCharacter.Output(value), SqlCharacter.Output(converted)))
                 {
                     throw new DatabaseException($"ALTER COLUMN '{column.Name}' would rewrite existing values; only validation-only changes are supported.");
                 }

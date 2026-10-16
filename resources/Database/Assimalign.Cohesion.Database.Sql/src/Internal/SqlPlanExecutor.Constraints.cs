@@ -1197,11 +1197,12 @@ internal sealed partial class SqlPlanExecutor
             var (call, type, other) = leftCall is not null ? (leftCall, leftType, rightType) : (rightCall!, rightType, leftType);
             throw new SqlFunctionResultMismatchException(call, SqlType.NameOf(type), $"a value that compares with {SqlType.NameOf(other)}");
 
-            // The value order's own rule (SqlValueComparer): the same type, or two numbers. JSON is read as text and JSONB as bytes.
+            // The value order's own rule (SqlValueComparer): the same type, two numbers or two character
+            // types. JSON is read as text and JSONB as bytes.
             static bool Comparable(DatabaseType first, DatabaseType second)
             {
-                first = first switch { DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => first };
-                second = second switch { DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => second };
+                first = first switch { DatabaseType.Character or DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => first };
+                second = second switch { DatabaseType.Character or DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => second };
                 return first == second || IsNumber(first) && IsNumber(second);
             }
         }

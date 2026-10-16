@@ -691,6 +691,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>Names a runtime value's type the way the dialect's types are named.</summary>
     internal static string OperandTypeName(object value) => value switch
     {
+        SqlCharacter => nameof(DatabaseType.Character),
         string => nameof(DatabaseType.String),
         bool => nameof(DatabaseType.Boolean),
         byte[] => nameof(DatabaseType.Binary),
@@ -705,17 +706,21 @@ internal sealed partial class SqlExpressionEvaluator
 
     private object? EvaluateBetween(SqlBoundBetween expression, object?[] row)
     {
-        object? value = EvaluateCore(expression.Operand, row);
+        object? lowValue = EvaluateCore(expression.LowOperand, row);
+        // Only literals/parameters get separate CHAR comparands. Keep evaluating a
+        // shared expression once, including a volatile function call.
+        object? highValue = ReferenceEquals(expression.LowOperand, expression.HighOperand)
+            ? lowValue : EvaluateCore(expression.HighOperand, row);
         object? lower = EvaluateCore(expression.Low, row);
         object? upper = EvaluateCore(expression.High, row);
 
-        if (value is null || lower is null || upper is null)
+        if (lowValue is null || highValue is null || lower is null || upper is null)
         {
             return null;
         }
 
-        bool between = Compare(value, lower, expression.LowCollation.Resolve(_subqueryValues)) >= 0
-            && Compare(value, upper, expression.HighCollation.Resolve(_subqueryValues)) <= 0;
+        bool between = Compare(lowValue, lower, expression.LowCollation.Resolve(_subqueryValues)) >= 0
+            && Compare(highValue, upper, expression.HighCollation.Resolve(_subqueryValues)) <= 0;
         return Box(between != expression.IsNegated);
     }
 
@@ -983,7 +988,8 @@ internal sealed partial class SqlExpressionEvaluator
         {
             ref var argument = ref arguments[index];
             argument = SqlValue.FromObject(values[index]);
-            if (targets is not null && targets[index] != DatabaseType.Null && targets[index] != argument.Type)
+            if (targets is not null && targets[index] != DatabaseType.Null
+                && (targets[index] != argument.Type || targets[index] == DatabaseType.Character))
             {
                 argument = SqlFunctionResolver.Coerce(argument, targets[index], call.Function, index);
             }

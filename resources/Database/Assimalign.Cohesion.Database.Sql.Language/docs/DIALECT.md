@@ -44,7 +44,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `UPDATE` | Supported | multi-column `SET`, `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, without an aggregate |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening checks existing live values and refuses changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
@@ -1414,10 +1414,24 @@ lengths can compare equal under the index's collation.
   collation's LIKE wildcard still advances UTF-16 code units; the three index-backed collations
   advance Unicode scalars. PostgreSQL's bpchar pattern
   ordering operators trim spaces too; they do not define LIKE's input conversion.
-  Domains over CHAR and CHAR function parameters/results retain and enforce their declared
+  Native scalar and aggregate CHAR arguments apply their declared lengths even when an argument
+  is already CHAR, before STRICT skips a NULL row. A native domain check also receives the
+  CHAR width its own parameter declares. CHECK accepts CHAR-returning functions in character
+  comparisons, BETWEEN and IN. Runtime unary-sign errors report Character, as planning errors do.
+  Domains over CHAR and CHAR function
+  parameters/results retain and enforce their declared
   length, including after reopen. This differs from PostgreSQL function signatures, which discard
   typmods when resolving parameter/result type OIDs (functioncmds.c:114, :250, :276).
   Mixed CHAR and TEXT/VARCHAR CASE or COALESCE results use TEXT and strip CHAR branches.
+  BETWEEN resolves each comparison independently. IN chooses its character comparison type across
+  the whole list first: a typed TEXT/VARCHAR operand or candidate selects TEXT; otherwise untyped
+  literals/parameters take a CHAR list's identity. Thus `'a ' BETWEEN CAST('a' AS CHAR(3)) AND
+  CAST('a' AS TEXT)` and `'a ' IN (CAST('b' AS CHAR(3)), CAST('a' AS TEXT))` both return FALSE
+  (`src/backend/parser/parse_expr.c:1325-1333`, `:1182-1190`).
+  ALTER COLUMN validates every CHAR length change, widening included, and refuses changes that
+  would repad existing non-null values. An unchanged length can change nullability when existing
+  values satisfy it. Empty or all-null columns can change length. Table rewrites remain deferred
+  to #1447; code-first validation on populated tables runs on the provisioning worker.
   Branch string literals retain this dialect's TEXT identity, unlike PostgreSQL's unknown literals.
   CHARACTER VARYING, bpchar, :: casts and typed string prefixes are not accepted spellings; use
   VARCHAR and CAST.

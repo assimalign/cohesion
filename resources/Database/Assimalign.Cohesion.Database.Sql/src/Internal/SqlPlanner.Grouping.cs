@@ -92,6 +92,7 @@ internal sealed partial class SqlPlanner
         {
             var (call, function) = aggregates[i];
             var arguments = sourceScope.BindArguments(call.Arguments, out SqlBoundCollation collation);
+            sourceScope.BindParameterCoercions(function, arguments, collation);
             boundAggregates[i] = new SqlGroupAggregate(call, function, arguments,
                 SqlFunctionResolver.CoercionTargets(function, arguments.Length), collation, _functions.Database);
         }

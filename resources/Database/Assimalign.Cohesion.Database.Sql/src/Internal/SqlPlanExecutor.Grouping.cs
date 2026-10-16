@@ -214,7 +214,8 @@ internal sealed partial class SqlPlanExecutor
         {
             ref var value = ref values[i];
             value = SqlValue.FromObject(evaluator.Evaluate(arguments[i], row));
-            if (targets is not null && targets[i] != DatabaseType.Null && targets[i] != value.Type)
+            if (targets is not null && targets[i] != DatabaseType.Null
+                && (targets[i] != value.Type || targets[i] == DatabaseType.Character))
             {
                 value = Coerce(aggregate, i, value, targets[i]);
             }

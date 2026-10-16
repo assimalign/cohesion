@@ -33,6 +33,35 @@ padding rule. PostgreSQL behavior and differences are specified with source anch
 The file-backed session/wire tests repeat these contracts after reopen; the NativeAOT smoke tests
 exercise CHAR output, casts, length, concatenation, LIKE, seek and column metadata.
 
+Join probes preserve both CLR strings and `SqlCharacter` values whole until index normalization:
+assignment bounds must not discard a longer collation-equivalent comparand. Scalar and aggregate
+binding share parameter coercion nodes, applying declared CHAR bounds (and domain checks) before
+STRICT dispatch, even when the argument already has Character storage identity. This covers the
+single-argument, inline-buffer and pooled aggregate paths without adding conversion work to numeric
+aggregates. The resolved scalar and aggregate conversion paths also enforce CHAR widths when
+storage types match: native domain checks can enter these paths without a bound argument wrapper.
+CHECK's application-function type validator recognizes CHAR and TEXT as comparable character types.
+Runtime unary-sign errors name Character, matching the planner's diagnostic instead of exposing the
+private wrapper's CLR name. The complete boundary review is in [CHAR_REVIEW_AUDIT.md](CHAR_REVIEW_AUDIT.md).
+
+Validation-only ALTER COLUMN compares the exact padded CLR values, not wrapper references or SQL
+trailing-space-insensitive equality. Every CHAR length change requires validation, including widening;
+non-null values that would be repadded cause refusal before metadata publication. Empty or all-null
+columns may change length. Code-first changes on populated tables defer that validation to the existing
+provisioning worker. Rewriting remains #1447's responsibility, sharing #1265's machinery; this change
+does not invent a metadata-only repadding behavior or a separate rewrite implementation.
+
+BETWEEN binds independent comparands for its lower and upper comparisons. IN resolves the character
+comparison type across the operand and its entire list before coercion: typed TEXT/VARCHAR selects
+TEXT, while untyped string literals and parameters take a CHAR-only list's identity without length
+coercion. PostgreSQL's corresponding binding decisions are `src/backend/parser/parse_expr.c:1325-1333`
+and `:1182-1190`. The shared operand is still evaluated once. VARCHAR/TEXT, domain/base and differing
+DECIMAL-scale control probes do not reproduce the CHAR shared-operand defect.
+
+Historical script function signatures accept storage code 19 (Character) when recovering a dropped
+domain's signature from its receipt. A later catalog generation must not make the same declaration
+unopenable. The existing unreleased formats 12, v6 and result-header 2 remain unchanged.
+
 The SQL engine (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
 against shared storage, with the catalog (`Sql.Catalog`) as schema authority.

@@ -94,8 +94,9 @@ public abstract class SqlAggregateAccumulator
     /// application one, so the conversion and the call share one frame, which holds the one value
     /// and the call's arguments and no buffer of four values for the prologue to clear. A value
     /// that has its parameter's type already, as a column of that type always does, is not passed
-    /// through the conversion; an integer that does not fit its parameter is coded as the evaluator
-    /// codes one (<c>COHSQLE002</c>), not as a failure of the function.
+    /// through the conversion, except CHAR whose declared width must still be applied. An integer
+    /// that does not fit its parameter is coded as the evaluator codes one (<c>COHSQLE002</c>), not
+    /// as a failure of the function.
     /// </remarks>
     /// <param name="value">The argument as the row holds it.</param>
     /// <param name="target">The storage type the argument converts to; <see cref="DatabaseType.Null"/> for a pseudo-type parameter.</param>
@@ -107,7 +108,7 @@ public abstract class SqlAggregateAccumulator
         CancellationToken cancellationToken)
     {
         var argument = SqlValue.FromObject(value);
-        if (target != DatabaseType.Null && target != argument.Type)
+        if (target != DatabaseType.Null && (target != argument.Type || target == DatabaseType.Character))
         {
             argument = CoerceArgument(argument, target);
         }

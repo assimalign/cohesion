@@ -137,9 +137,9 @@ public abstract class SqlScalarFunction : SqlFunction
     /// conversion, the call and the check share one frame: it holds the one value, the call's
     /// arguments and the result, and no buffer of four values for the prologue to clear. A value
     /// that has its parameter's type already, as a column of that type always does, is not passed
-    /// through the conversion. The conversion runs before the coded call, so an integer that does
-    /// not fit its parameter reaches the evaluator as the arithmetic fault it codes, not as a
-    /// failure of the function.
+    /// through the conversion, except CHAR whose declared width must still be applied. The
+    /// conversion runs before the coded call, so an integer that does not fit its parameter reaches
+    /// the evaluator as the arithmetic fault it codes, not as a failure of the function.
     /// </remarks>
     /// <param name="value">The argument as the row holds it.</param>
     /// <param name="target">The storage type the argument converts to; <see cref="DatabaseType.Null"/> for a pseudo-type parameter.</param>
@@ -153,7 +153,7 @@ public abstract class SqlScalarFunction : SqlFunction
         CancellationToken cancellationToken)
     {
         var argument = SqlValue.FromObject(value);
-        if (target != DatabaseType.Null && target != argument.Type)
+        if (target != DatabaseType.Null && (target != argument.Type || target == DatabaseType.Character))
         {
             argument = SqlFunctionResolver.Coerce(argument, target, this, 0);
         }

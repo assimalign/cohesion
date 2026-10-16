@@ -256,11 +256,16 @@ internal static class SqlFunctionResolver
     /// <param name="target">The parameter's storage type.</param>
     /// <param name="function">The function, for the message.</param>
     /// <param name="index">The argument's position, for the message.</param>
-    /// <returns>The converted argument; NULL and a value of the target type unchanged.</returns>
+    /// <returns>The converted argument; CHAR always applies its declared width, even when the storage type already matches.</returns>
     /// <exception cref="OverflowException">An integer does not fit the parameter's type; the evaluator codes it <c>COHSQLE002</c>.</exception>
     /// <exception cref="DatabaseException">The value's type does not convert to the parameter's.</exception>
     internal static SqlValue Coerce(in SqlValue value, DatabaseType target, SqlFunction function, int index)
     {
+        if (target == DatabaseType.Character && value.Type is DatabaseType.String or DatabaseType.Character)
+        {
+            return SqlValue.FromObject(SqlCastConverter.ApplyModifiers(value.AsString(), function.ParameterAt(index).Storage));
+        }
+
         // A JSON column's values are read as text, and a JSONB column's as bytes.
         if (value.IsNull || value.Type == target
             || target == DatabaseType.Json && value.Type == DatabaseType.String
@@ -272,10 +277,6 @@ internal static class SqlFunctionResolver
         if (target == DatabaseType.String && value.Type == DatabaseType.Character)
         {
             return SqlValue.FromString(value.AsString().TrimEnd(' '));
-        }
-        if (target == DatabaseType.Character && value.Type == DatabaseType.String)
-        {
-            return SqlValue.FromObject(SqlCastConverter.ApplyModifiers(value.AsString(), function.ParameterAt(index).Storage));
         }
         if (IsExactInteger(value.Type))
         {

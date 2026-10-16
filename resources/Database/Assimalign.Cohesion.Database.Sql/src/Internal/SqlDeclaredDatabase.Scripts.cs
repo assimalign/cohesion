@@ -216,7 +216,7 @@ internal sealed partial class SqlDeclaredDatabase
                 {
                     string[] types = target[(opening + 1)..^1].Split(',');
                     if (parameter < types.Length && int.TryParse(types[parameter], NumberStyles.None, CultureInfo.InvariantCulture, out int storage) &&
-                        storage > (int)DatabaseType.Null && storage <= (int)DatabaseType.JsonBinary)
+                        storage > (int)DatabaseType.Null && storage <= (int)DatabaseType.Character)
                     {
                         return SqlType.ForStorage(new DatabaseTypeInfo((DatabaseType)storage));
                     }
