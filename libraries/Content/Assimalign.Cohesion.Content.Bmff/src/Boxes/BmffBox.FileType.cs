@@ -1,123 +1,97 @@
-﻿using System;
-using System.Diagnostics;
-using static System.Text.Encoding;
-using static System.Buffers.Binary.BinaryPrimitives;
+﻿using System.Buffers.Binary;
+using System;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
-
-[DebuggerDisplay("Bmff Box: File Type (ftyp)")]
+/// <summary>The file brand and compatible-brand declarations.</summary>
 public sealed class FileTypeBox : BmffBox
 {
-    private uint[] _compatibleBrands;
-    private uint _majorBrand;
-    private uint _minorBrand;
-
-    public FileTypeBox(long offset)
-    {
-        this.Offset = offset;
-    }
-    public FileTypeBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
-
-
-    /// <inheritdoc />
+    private uint[] _compatibleBrands = Array.Empty<uint>();
+    /// <summary>Creates a file-type box at an original offset.</summary>
+    /// <param name="offset">The original header offset.</param>
+    public FileTypeBox(long offset) { Offset = offset; }
+    /// <summary>Creates a file-type box with its original location.</summary>
+    /// <param name="offset">The original header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public FileTypeBox(long offset, long limit) { Offset = offset; Limit = limit; }
+    /// <inheritdoc/>
     public override bool IsLeaf => true;
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override bool IsComposite => false;
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override long Limit { get; }
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override long Offset { get; }
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.FileType;
-    /// <summary>
-    /// 
-    /// </summary>
-    public uint MajorBrand
-    {
-        get => _majorBrand;
-        init => _majorBrand = value;
-    }
-    /// <summary>
-    /// 
-    /// </summary>
-    public uint MinorBrand
-    {
-        get => _minorBrand;
-        init => _minorBrand = value;
-    }
-    /// <summary>
-    /// Represents a collection of other ISO BMFF Types this file is compatible with.
-    /// </summary>
-    public uint[] CompatableBrands
-    {
-        get => _compatibleBrands; 
-        init => _compatibleBrands = value ?? Array.Empty<uint>();
-    }
-
-   
-    public string GetMajorBrand()
-    {
-        var span = new Span<byte>(new byte[4]);
-        WriteInt32BigEndian(span, (int)MajorBrand);
-        return UTF8.GetString(span.ToArray());
-    }
-    public string GetMinorBrand()
-    {
-        var span = new Span<byte>(new byte[4]);
-        WriteInt32BigEndian(span, (int)MinorBrand);
-        return UTF8.GetString(span.ToArray());
-    }
+    /// <summary>Gets or sets the major brand FourCC.</summary>
+    public uint MajorBrand { get; set; }
+    /// <summary>Gets or sets the minor version integer (the legacy property name is retained).</summary>
+    public uint MinorBrand { get; set; }
+    /// <summary>Gets or sets compatible-brand FourCCs (the legacy spelling is retained).</summary>
+    public uint[] CompatableBrands { get => _compatibleBrands; set => _compatibleBrands = value ?? Array.Empty<uint>(); }
+    /// <summary>Formats the major brand as four ISO-8859-1 characters.</summary>
+    /// <returns>The brand text.</returns>
+    public string GetMajorBrand() => FourCC.FromUInt32(MajorBrand).ToString();
+    /// <summary>Formats the legacy minor-brand value as four ISO-8859-1 characters.</summary>
+    /// <returns>The raw text, not the numeric minor version.</returns>
+    public string GetMinorBrand() => FourCC.FromUInt32(MinorBrand).ToString();
+    /// <summary>Formats each compatible brand.</summary>
+    /// <returns>The brand strings.</returns>
     public string[] GetCompatibleBrands()
     {
-        var values = new string[_compatibleBrands.Length];
-
-        for (int i = 0; i < values.Length; i++)
+        var result = new string[_compatibleBrands.Length];
+        for (var index = 0; index < result.Length; index++)
         {
-            var span = new Span<byte>(new byte[4]);
-            WriteInt32BigEndian(span, (int)_compatibleBrands[i]);
-            values[i] = UTF8.GetString(span.ToArray());
+            result[index] = FourCC.FromUInt32(_compatibleBrands[index]).ToString();
         }
-
-        return values;
+        return result;
     }
-
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        Span<byte> buffer = stackalloc byte[8];
-        _majorBrand = (uint)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian();
-        _minorBrand = (uint)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian();
-
-        var remaining = stream.Remaining / 4;
-
-        _compatibleBrands = new uint[remaining];
-
-        for (int i = 0; i < remaining; i++) 
+        if (stream.Remaining < 8)
         {
-            _compatibleBrands[i] = (uint)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian();
+            throw new ContentFormatException(ErrorMessages.TruncatedHeader, ContentFormatErrorCode.Truncated, stream.Offset + stream.Length);
+        }
+        if ((stream.Remaining - 8) % 4 != 0)
+        {
+            throw new ContentFormatException(ErrorMessages.InvalidBrands, ContentFormatErrorCode.InvalidStructure, stream.Offset);
+        }
+        if (stream.Remaining > stream.Options.MaxBufferedPayloadSize)
+        {
+            throw new ContentFormatException(ErrorMessages.BufferLimit, ContentFormatErrorCode.LimitExceeded, stream.Offset);
+        }
+        Span<byte> bytes = stackalloc byte[4];
+        MajorBrand = BmffBinary.ReadField(stream, bytes).ReadUInt32BigEndian();
+        MinorBrand = BmffBinary.ReadField(stream, bytes).ReadUInt32BigEndian();
+        _compatibleBrands = new uint[(int)(stream.Remaining / 4)];
+        for (var index = 0; index < _compatibleBrands.Length; index++)
+        {
+            _compatibleBrands[index] = BmffBinary.ReadField(stream, bytes).ReadUInt32BigEndian();
         }
     }
-
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        
+        Span<byte> bytes = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(bytes, MajorBrand);
+        stream.Write(bytes);
+        BinaryPrimitives.WriteUInt32BigEndian(bytes, MinorBrand);
+        stream.Write(bytes);
+        foreach (var brand in _compatibleBrands)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(bytes, brand);
+            stream.Write(bytes);
+        }
     }
-
-
-
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
-    {
-        return visitor.Visit(this);
-    }
+    /// <inheritdoc/>
+    public override long GetPayloadSize() => 8L + 4L * _compatibleBrands.Length;
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

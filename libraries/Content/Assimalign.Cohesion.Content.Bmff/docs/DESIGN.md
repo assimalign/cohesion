@@ -48,3 +48,20 @@ Zero size is legal only at top level and consumes the rest of the input. BmffStr
 ContentSliceStream for reads, returns short counts at its boundary, and uses window-relative
 Position/Length with an absolute Offset. Writes cannot exceed the window. Borrowed parents remain open.
 BmffFullBox centralizes the byte version and 24-bit flags; the composite hierarchy is retained by owner request.
+
+## Stage 2 reader, writer and document lifecycle
+
+Read is header-first; Current materializes, Payload exposes an exclusive bounded stream, and
+ReadChildren enters a container using the same registry and limits. Advancing seeks or drains the
+unread range; disposing only releases windows. BmffDocument requires seekable input and borrows
+it unless leaveOpen is false. Unknown, deferred, media and padding payloads stay lazy. On a
+non-seekable source these payloads must be consumed through Payload or skipped, not materialized.
+The immutable registry snapshots explicit delegates; builder registrations replace default factories.
+
+BmffWriter computes a tree's sizes before emitting it and supports streaming BeginContainer /
+EndContainer with supplied payload sizes or bounded buffering. Original headers retain their wire
+encoding for unchanged sizes; newly sized boxes use a large header exactly above uint.MaxValue.
+Full-box meta and ipro prefixes are validated. The other containers traverse editable child lists.
+The root reader/writer contracts are implemented on BmffReader and BmffWriter. LoadAsync provides
+synchronous parsing with cancellation checkpoints; SaveAsync performs asynchronous payload copying.
+Field models awaiting #447 are preserved, including previously unsafe/no-op mvhd, stco and hdlr.

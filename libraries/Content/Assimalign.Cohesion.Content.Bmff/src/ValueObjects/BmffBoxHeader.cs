@@ -106,6 +106,11 @@ public readonly struct BmffBoxHeader
                 size = BinaryPrimitives.ReadUInt64BigEndian(bytes);
                 headerSize += 8;
             }
+            var requiredHeaderSize = headerSize + (type == BmffBoxType.uuid ? 16 : 0);
+            if (size32 != 0 && size < (ulong)requiredHeaderSize)
+            {
+                throw new ContentFormatException(ErrorMessages.InvalidBoxSize, ContentFormatErrorCode.InvalidStructure, offset);
+            }
             Guid? extendedType = null;
             if (type == BmffBoxType.uuid)
             {

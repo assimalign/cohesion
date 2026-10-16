@@ -1,56 +1,42 @@
 ﻿using System;
-using System.IO;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
-
-/// <summary>
-/// A BMFF is arranged in a composite design pattern
-/// </summary>
+/// <summary>A node in the BMFF composite tree, with payload I/O and visitor dispatch.</summary>
+// Deviates from the repo interface-first rule per the owner's Stage 2 composite-design requirement.
 public abstract class BmffBox
 {
-    /// <summary>
-    /// 
-    /// </summary>
+    /// <summary>Gets whether the box has no child boxes.</summary>
     public abstract bool IsLeaf { get; }
-    /// <summary>
-    /// 
-    /// </summary>
+    /// <summary>Gets whether the box contains child boxes.</summary>
     public abstract bool IsComposite { get; }
-    /// <summary>
-    /// The size of the box.
-    /// </summary>
+    /// <summary>Gets the original total size supplied at creation, not the recomputed serialized size.</summary>
     public abstract long Limit { get; }
-    /// <summary>
-    /// Represents the starting position in a stream for the specific box.
-    /// </summary>
-    /// <remarks>
-    /// <b>NOTE:</b> This is usually the position of the stream in which the box was parsed.
-    /// </remarks>
+    /// <summary>Gets the original absolute header offset.</summary>
     public abstract long Offset { get; }
-    /// <summary>
-    /// Represents the known BMFF box type.
-    /// </summary>
+    /// <summary>Gets the raw FourCC, including unregistered types.</summary>
     public abstract BmffBoxType BoxType { get; }
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="stream"></param>
+    /// <summary>Gets the original header, or default for a newly constructed model.</summary>
+    public BmffBoxHeader Header { get; internal set; }
+    /// <summary>Reads the payload from its exclusive bounded window.</summary>
+    /// <param name="stream">The payload window.</param>
+    /// <exception cref="ContentFormatException">The payload is invalid or unsupported.</exception>
     public abstract void Read(BmffStream stream);
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="stream"></param>
+    /// <summary>Writes only the payload; BmffWriter writes the enclosing header.</summary>
+    /// <param name="stream">The bounded payload output.</param>
+    /// <exception cref="ContentFormatException">The model is invalid or unsupported.</exception>
     public abstract void Write(BmffStream stream);
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="visitor"></param>
-    /// <returns></returns>
-    public virtual T Accept<T>(IBmffBoxVisitor<T> visitor)
-    {
-        return visitor.Visit(this);
-    }
+    /// <summary>Computes the payload byte count before writing its header.</summary>
+    /// <returns>The nonnegative payload size.</returns>
+    /// <exception cref="ContentFormatException">The model has no implemented writer.</exception>
+    public virtual long GetPayloadSize() =>
+        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
+    /// <summary>Dispatches to the type-specific visitor.</summary>
+    /// <typeparam name="T">The result type.</typeparam>
+    /// <param name="visitor">The visitor.</param>
+    /// <returns>The visitor result.</returns>
+    public virtual T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <summary>Dispatches to the type-specific visitor.</summary>
+    /// <param name="visitor">The visitor.</param>
+    public virtual void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }
