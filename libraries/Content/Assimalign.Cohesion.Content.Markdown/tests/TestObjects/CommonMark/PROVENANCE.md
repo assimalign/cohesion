@@ -7,8 +7,9 @@
 - SHA-256: `d431b29d97b6f73e69d547109cf5081578fac931e72afe95639ebe766c1b2a20`.
 - Attribution: CommonMark specification by John MacFarlane and contributors.
 - License: [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), as in the existing
-  `MarkdownSpecCorpusTests`. The upstream specification additionally offers a BSD license;
-  this corpus uses the CC-BY-SA attribution path.
+  `MarkdownSpecCorpusTests`. The specification text and its examples carry that license; the
+  upstream repository's BSD license covers its test scripts, not this file. This fixture keeps
+  the CC-BY-SA attribution and license, and the repository's MIT license does not apply to it.
 
 This fixture is the brief's explicit exception to the repository's no-download rule.
 No tests access the network. `degradations.json` was authored from local renderer output,
