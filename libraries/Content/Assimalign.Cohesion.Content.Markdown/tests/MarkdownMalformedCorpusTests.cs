@@ -109,4 +109,32 @@ public class MarkdownMalformedCorpusTests
 
         return count;
     }
+    [Fact(DisplayName = "Cohesion Test [Content.Markdown] - Hostile authored corpus: literal accumulation allocates linearly", Timeout = 15000)]
+    public async Task Parse_UnresolvedBracketRuns_AllocatesWithinLinearBoundAsync()
+    {
+        // Arrange. Authored unresolved labels become one literal; quadrupling the source must not
+        // repeatedly copy its accumulated prefix. Allocation growth is independent of CI speed.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+        var small = Repeat("[x]", 4096);
+        var large = Repeat("[x]", 16384);
+
+        // Act
+        var (smallBytes, largeBytes) = await Task.Run(() =>
+        {
+            MarkdownText.Parse("[warmup]");
+            return (Allocated(small), Allocated(large));
+        }, timeout.Token).WaitAsync(timeout.Token);
+
+        // Assert
+        largeBytes.ShouldBeLessThan(smallBytes * 6, "Four times the input must stay within a generous linear allocation bound.");
+
+        static long Allocated(string source)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            var document = MarkdownText.Parse(source);
+            var bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            GC.KeepAlive(document);
+            return bytes;
+        }
+    }
 }

@@ -701,7 +701,7 @@ internal static class MarkdownInlineParser
 
     private static void Materialize(List<Atom> atoms, int start, int end, IList<MarkdownInline> target)
     {
-        MarkdownLiteral? pending = null;
+        StringBuilder? pending = null;
         for (var index = start; index < end; index++)
         {
             var atom = atoms[index];
@@ -721,14 +721,24 @@ internal static class MarkdownInlineParser
                 node = atom.Node!;
             }
 
-            if (node is MarkdownLiteral incoming && pending is not null)
+            if (node is MarkdownLiteral incoming)
             {
-                pending.Text += incoming.Text;
+                (pending ??= new StringBuilder()).Append(incoming.Text);
                 continue;
             }
 
-            pending = node as MarkdownLiteral;
+            if (pending is { Length: > 0 })
+            {
+                target.Add(new MarkdownLiteral(pending.ToString()));
+                pending.Clear();
+            }
+
             target.Add(node);
+        }
+
+        if (pending is { Length: > 0 })
+        {
+            target.Add(new MarkdownLiteral(pending.ToString()));
         }
     }
 

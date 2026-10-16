@@ -42,6 +42,11 @@ parser complexity and accidental-input surprise, and fence-first Markdown is the
 (the same call MDX v2 made). Both are recorded here so "should we add X?" starts from the reason
 it was cut.
 
+The full [CommonMark corpus contract](../tests/TestObjects/CommonMark/PROVENANCE.md) executes all
+652 official examples: 406 retained expectations and 246 explicit degradation records. Sections
+that mix retained and excluded constructs carry example-number exceptions; retained defects are
+never reclassified as exclusions. New conformance in a degradation record requires scope review.
+
 ## Two-phase parser on the shared text layer
 
 The block phase (`MarkdownBlockParser`) consumes lines from a `TextTokenizer` with default options
@@ -94,6 +99,9 @@ decoding: each maximal ill-formed subpart becomes U+FFFD before ordinary Markdow
 - **Inline nesting is unbounded by parsing** (emphasis wraps bottom-up), so **both renderers walk
   iteratively** with explicit op stacks — no recursion anywhere in the package, and caller-built
   trees of any depth render without stack overflow.
+- Unresolved inline literals accumulate in a StringBuilder and materialize once per run, avoiding
+  quadratic copying for long bracket sequences. The hostile corpus guards both wall-clock bounds
+  at geometrically increasing sizes and linear allocation growth for unresolved labels.
 - `U+0000` becomes `U+FFFD` at inline parse, per the spec's insecure-characters rule.
 
 Marker-only quotes and list items contain no synthetic empty paragraph. An empty item may start
@@ -128,7 +136,8 @@ emphasis delimiters alternating `*`/`_` by nesting depth (so nested emphasis nev
 `**`), conservative literal escaping (structural characters always; block markers at line start;
 `!` only before a bracket), and prefix-stack container writing where a quote opening mid-line
 (first block of a list item) emits its marker inline. The invariant tests enforce:
-**write → parse → write is a fixed point, and parse → write → parse preserves the rendered HTML.**
+**write → parse → write is a fixed point, and parse → write → parse preserves every model field,
+child node and the rendered HTML across all 652 corpus examples.**
 Literal CR/LF/tab and edge spaces use numeric references when raw whitespace would change the
 model; literal hashes are escaped so heading text cannot become a closing ATX sequence.
 All-space code spans emit exactly their space count; padding is only added when code-span
