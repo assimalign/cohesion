@@ -55,6 +55,7 @@ jobs:
             'Assimalign.Cohesion.Content.Text',
             'Assimalign.Cohesion.Content.Ebml',
             'Assimalign.Cohesion.Content.Markdown',
+            'Assimalign.Cohesion.Content.Pdf',
             'Assimalign.Cohesion.Content.Yaml'
         ]]
     steps:
