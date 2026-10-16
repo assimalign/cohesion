@@ -117,4 +117,18 @@ public class MarkdownCorpusRegressionTests
         // Assert
         MarkdownModelComparison.ShouldEqual(expected, MarkdownText.Parse(written), source);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Writer: thematic breaks stay inside bullet items")]
+    [InlineData("- Foo\n- * * *")]
+    [InlineData("- - * * *")]
+    public void Write_ListItemThematicBreak_PreservesContainer(string source)
+    {
+        // Arrange. Authored variants of CommonMark 61, including a nested item.
+        var expected = MarkdownText.Parse(source);
+
+        // Act
+        var written = MarkdownText.Write(expected);
+
+        // Assert
+        MarkdownModelComparison.ShouldEqual(expected, MarkdownText.Parse(written), source);
+    }
 }

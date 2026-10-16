@@ -102,7 +102,7 @@ internal sealed class MarkdownWriter
 
             case MarkdownThematicBreak:
                 _ops.Push(Op.NewLineOp);
-                _ops.Push(Op.Raw("---"));
+                _ops.Push(Op.Raw(_atLineStart ? "---" : "***"));
                 break;
 
             case MarkdownCodeBlock code:

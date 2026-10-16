@@ -118,7 +118,8 @@ attributes — including percent-encoding square brackets in destinations while 
 text — so spec-derived expectations assert byte-for-byte.
 
 **Canonical Markdown** (`MarkdownWriter`) normalizes on output: `-` bullets, `N.` ordered markers,
-ATX headings, backtick fences (tilde when the info string carries a backtick), `---` breaks,
+ATX headings, backtick fences (tilde when the info string carries a backtick), `---` breaks
+(`***` after an item marker, where dashes could swallow the item),
 emphasis delimiters alternating `*`/`_` by nesting depth (so nested emphasis never fuses into
 `**`), conservative literal escaping (structural characters always; block markers at line start;
 `!` only before a bracket), and prefix-stack container writing where a quote opening mid-line
