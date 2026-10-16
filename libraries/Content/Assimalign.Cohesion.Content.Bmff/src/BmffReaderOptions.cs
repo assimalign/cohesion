@@ -9,6 +9,8 @@ public sealed class BmffReaderOptions
     public int MaxBufferedPayloadSize { get; init; } = 16 * 1024 * 1024;
     /// <summary>Gets the maximum nesting depth, with top-level boxes at depth zero; defaults to 64.</summary>
     public int MaxDepth { get; init; } = 64;
+    /// <summary>Gets the maximum entries in any table, including constant-size sample tables; defaults to one million.</summary>
+    public int MaxTableEntryCount { get; init; } = 1_000_000;
     /// <summary>Gets whether unregistered or unsupported boxes fail instead of being preserved.</summary>
     public bool Strict { get; init; }
 
@@ -17,5 +19,6 @@ public sealed class BmffReaderOptions
         ArgumentOutOfRangeException.ThrowIfNegative(MaxBufferedPayloadSize);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxBufferedPayloadSize, Array.MaxLength);
         ArgumentOutOfRangeException.ThrowIfNegative(MaxDepth);
+        ArgumentOutOfRangeException.ThrowIfNegative(MaxTableEntryCount);
     }
 }

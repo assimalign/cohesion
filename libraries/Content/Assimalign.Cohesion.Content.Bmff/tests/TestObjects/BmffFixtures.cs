@@ -46,7 +46,7 @@ internal static class BmffFixtures
         {
             MajorBrand = FourCC.Parse("isom").Value,
             MinorBrand = 0x200,
-            CompatableBrands = new[] { FourCC.Parse("isom").Value, FourCC.Parse("iso2").Value }
+            CompatibleBrands = new[] { FourCC.Parse("isom").Value, FourCC.Parse("iso2").Value }
         });
         var movie = new MovieBox(0);
         var track = new TrackBox(0, 0);

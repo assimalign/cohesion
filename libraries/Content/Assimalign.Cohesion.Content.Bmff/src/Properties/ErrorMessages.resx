@@ -36,4 +36,7 @@
   <data name="InvalidTree" xml:space="preserve"><value>The box tree contains a cycle, null node or invalid size.</value></data>
   <data name="WriterClosed" xml:space="preserve"><value>No boxes may follow a size-zero box.</value></data>
   <data name="BufferRequired" xml:space="preserve"><value>An unknown-size streaming container exceeds the configured buffer cap.</value></data>
+  <data name="EntryLimit" xml:space="preserve"><value>The table entry count exceeds the configured limit.</value></data>
+  <data name="EntryBounds" xml:space="preserve"><value>The declared entries do not fit in the payload.</value></data>
+  <data name="FieldRange" xml:space="preserve"><value>A box field is outside its permitted range or has an invalid length.</value></data>
 </root>

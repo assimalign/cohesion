@@ -56,6 +56,8 @@ public sealed class BmffStream : Stream
         Limit = limit;
     }
 
+    internal BmffBoxType ChildContext { get; init; }
+    internal long AllocatedFieldBytes { get; set; }
     internal BmffWritePlan? WritePlan { get; init; }
     internal long AbsoluteOrigin { get; init; }
     internal BmffReaderOptions Options { get; init; } = new();
@@ -75,7 +77,7 @@ public sealed class BmffStream : Stream
         {
             throw new ContentFormatException(ErrorMessages.DepthLimit, ContentFormatErrorCode.LimitExceeded, Offset + Position);
         }
-        var window = new BmffStream(this, Position, Remaining) { Depth = Depth + 1 };
+        var window = new BmffStream(this, Position, Remaining) { Depth = Depth + 1, ChildContext = BoxType };
         return new BmffReaderDefault(window, false, expectedCount);
     }
 

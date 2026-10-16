@@ -73,7 +73,14 @@ public class BmffRegistryTests
         using var output = new MemoryStream();
         document.Save(output);
         // Assert
-        document.Boxes[0].ShouldBeOfType<UnknownBox>().BoxType.ShouldBe(type);
+        if (type == BmffBoxType.OriginalFormat)
+        {
+            document.Boxes[0].ShouldBeOfType<OriginalFormatBox>().DataFormat.Value.ShouldBe(0xff010203u);
+        }
+        else
+        {
+            document.Boxes[0].ShouldBeOfType<UnknownBox>().BoxType.ShouldBe(type);
+        }
         output.ToArray().ShouldBe(bytes);
     }
 

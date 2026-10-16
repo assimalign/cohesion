@@ -121,10 +121,10 @@ Sizes smaller than the header, children outside their parent and Int64-unreprese
 rejected before allocating a payload.
 
 BmffFullBox centralizes a byte Version and uint Flags constrained to 24 bits for full leaf boxes.
-MovieHeaderBox retains its BmffVersion convenience property over that byte. MetaBox and
+MovieHeaderBox now uses that shared byte Version. MetaBox and
 ItemProtectionBox retain composite inheritance and carry their own byte Version and 24-bit Flags.
 Version zero and flags zero are supported for both. ipro also validates its 16-bit protection count
-and sinf child types. The field-level leaf models remain the next stage's work.
+and sinf child types. The strategic field models below use the same version/flags convention.
 
 ## Registry and profile extension
 
@@ -151,8 +151,8 @@ prefix grammar of the package's own containers.
 Lenient mode preserves unregistered types and registered models that cannot parse their
 version/flags. UnknownBox retains the raw type, original header, BinarySegment payload and
 PreservationReason. The default registry marks deferred models unsupported without calling their
-old allocating, empty or incomplete parsers. NotImplementedException from a profile parser also
-uses the preservation path. Other format errors are not swallowed.
+deferred parsers. Only ContentFormatException(Unsupported) selects preservation; other errors
+are not swallowed.
 
 Strict mode rejects unregistered/deferred types when their header is encountered and rejects
 unsupported versions when materialized. Header-only scanning does not inspect supported boxes'
@@ -185,79 +185,51 @@ Malformed wire input uses ContentFormatException and absolute byte positions. Ar
 and InvalidOperationException represent API misuse, such as invalid options or consuming a payload
 twice. Package-authored exception text is generated from Properties/ErrorMessages.resx.
 
-## What #447 still owes
+## Strategic field models
 
-Stage 3 must implement the deferred fields, their versions and flags, field-level mutation and
-validation, and media-dependent offsets. This stage recomputes box and ancestor sizes, but it does
-not relocate stco/co64 or other references when media moves. Preserve media layout until those
-models can update offsets; a byte-exact unchanged save is the supported fidelity guarantee.
+The first wave parses and writes mvhd, mehd, trex, tkhd, elst, mdhd, hdlr, vmhd, smhd, nmhd, hmhd,
+dref with url / urn entries, stsd, stts, ctts, stss, stsz, stz2, stsc, stco, co64, sdtp, sbgp, sgpd,
+subs, mfhd, tfhd, tfdt, trun, tfra, mfro, cprt, xml / bxml, pitm, iloc, iinf / infe, pdin, frma
+and schm. Existing structural containers, including full-box meta, remain composites.
+dref, stsd and iinf now also derive from BmffBoxComposite; their entry count comes from Children.
+stsd always preserves its children as opaque sample entries, including in strict mode.
 
-The default registry preserves these models instead of interpreting their fields:
+Track-reference lists for hint, cdsc, hind, dpnd, ipir, mpod and sync are interpreted only inside
+tref. Other reference types remain opaque. New box classes dispatch to the existing
+Visit(BmffBox) visitor fallback; neither public visitor interface gained members.
 
-| FourCC | Model |
-| --- | --- |
-| `bxml` | `BinaryXmlBox` |
-| `stco` | `ChunkOffsetBox` |
-| `co64` | `ChunkOffset64BitBox` |
-| `cprt` | `CopyrightBox` |
-| `dref` | `DataReferenceBox` |
-| `sdtp` | `DisposableSampleBox` |
-| `elst` | `EditListBox` |
-| `fecr` | `FecReservoirBox` |
-| `fiin` | `FileDeliveryItemInfoBox` |
-| `segr` | `FileDeliverySessionGroupBox` |
-| `fpar` | `FilePartitionBox` |
-| `gitn` | `GroupIdToNameBox` |
-| `hdlr` | `HandlerBox` |
-| `hmhd` | `HintMediaHeaderBox` |
-| `ipmc` | `IpmpControlBox` |
-| `imif` | `IpmpInfoBox` |
-| `iinf` | `ItemInfoBox` |
-| `iloc` | `ItemLocationBox` |
-| `mdhd` | `MediaHeaderBox` |
-| `mere` | `MetaRelationshipBox` |
-| `mehd` | `MovieExtensionHeaderBox` |
-| `mfhd` | `MovieFragmentHeaderBox` |
-| `mfro` | `MovieFragmentRandomAccessOffsetBox` |
-| `mvhd` | `MovieHeaderBox` |
-| `nmhd` | `NullMediaHeaderBox` |
-| `frma` | `OriginalFormatBox` |
-| `pitm` | `PrimaryItemReferenceBox` |
-| `pdin` | `ProgressiveDownloadInfoBox` |
-| `ctts` | `SampleCompositionTimeBox` |
-| `stts` | `SampleDecodingTimeBox` |
-| `stdp` | `SampleDegradationPriorityBox` |
-| `stsd` | `SampleDescriptionBox` |
-| `sgpd` | `SampleGroupDescriptionBox` |
-| `padb` | `SamplePaddingBitsBox` |
-| `stsz` | `SampleSizeBox` |
-| `stz2` | `CompactSampleSizeBox` |
-| `subs` | `SampleSubInfoBox` |
-| `stsc` | `SampleToChunkBox` |
-| `sbgp` | `SampleToGroupBox` |
-| `schm` | `SchemeTypeBox` |
-| `stsh` | `ShadowSyncSampleTableBox` |
-| `smhd` | `SoundMediaHeaderBox` |
-| `stss` | `SyncSampleTableBox` |
-| `trex` | `TrackExtensionBox` |
-| `tfhd` | `TrackFragmentHeaderBox` |
-| `tfra` | `TrackFragmentRandomAccessBox` |
-| `trun` | `TrackFragmentRunBox` |
-| `tkhd` | `TrackHeaderBox` |
-| `tsel` | `TrackSelectionBox` |
-| `vmhd` | `VideoMediaHeaderBox` |
-| `xml ` | `XmlBox` |
+All mutable leaf models retain bytes following the defined fields. Counted containers retain the
+suffix after their declared children; uncounted containers must contain complete child boxes.
+Versions, optional-field flags, reserved values, widths, raw text bytes and compact-size padding
+retain their wire representation. Numeric times are unsigned seconds since the 1904 epoch, not
+DateTime, and fixed-point values use Content.Binary types. Callers select versions explicitly.
 
-TrackBox's legacy timing/rate properties are retained for compatibility but are not trak wire fields.
-The timing fields belong to track/header models in #447. Codec sample entries, MP4/HEIF brand
-validation, sample indexing, fast-start relocation, playback and transcoding are outside this layer.
+Large tables use primitive arrays or arrays of nested value-type entries. MaxTableEntryCount
+defaults to 1,000,000, including the implicit count in constant-size stsz and fieldless trun.
+Every count is checked against the remaining wire bytes, entry limit and cumulative per-leaf
+decoded array/string byte budget before allocation; the byte budget is MaxBufferedPayloadSize.
+Nested subs/iloc arrays consume the same leaf budget. The input rental is separately bounded by
+MaxBufferedPayloadSize. Each counted child list is count-limited without buffering child payloads.
+
+sgpd v1/v2 preserves descriptions as byte arrays. v0 knows fixed lengths for roll/prol (2 bytes)
+and rap / sync / tele (1 byte); other nonempty v0 descriptions preserve the entire box.
+infe v2/v3 supports typed item identities, names and mime/uri fields; v0/v1 remains opaque.
+iloc v0-v2 retains 0/4/8-byte offset, length, base and index widths and all construction methods.
+
+Still deferred: fecr, fiin, segr, fpar, gitn, ipmc, imif, mere, stdp, padb, stsh and tsel.
+Other unregistered boxes and codec sample entries remain opaque. Earlier structural meco, paen
+and ipro support is retained. MP4/HEIF profile semantics, codecs, sample indexing and decryption
+are outside this package.
+
+FileTypeBox.CompatableBrands is renamed CompatibleBrands. TrackBox loses its misplaced Version,
+Flags, TimeScale, Duration, Rate, Volume, Reserved, Matrix, PreDefined and NextTrackID properties.
+Their applicable wire fields live on mvhd, tkhd or mdhd.
+
+Offset relocation is the next item; field models can now express the references it will update.
 
 ## Verification
 
-The portable xUnit/Shouldly corpus builds its own bytes in tests/TestObjects. It links
-Content.Binary/tests/Shared helpers and maps header cases to ISO BMFF rule families.
-It covers every pure container and deferred model, ordinary/large/UUID/zero headers, every truncated
-header prefix, invalid lengths, parent bounds, depth bombs, version/flags fallback, immutable
-registry extension, editable nested trees, synchronous and asynchronous save, ownership, and
-streaming containers. A synthetic 40 GiB source throws on any media read. Forward-only fixtures
-verify no payload is read while acquiring a header and bounded draining when advancing.
+Portable xUnit/Shouldly fixtures are authored in tests/TestObjects without downloaded media.
+The Stage 2 corpus covers bounded streaming, headers, registry extension, ownership and lazy
+40 GiB media. BmffModelTests exercises every strategic field model and labels each case with its
+ISO/IEC 14496-12 clause, including independent composition-offset and packed-language checks.

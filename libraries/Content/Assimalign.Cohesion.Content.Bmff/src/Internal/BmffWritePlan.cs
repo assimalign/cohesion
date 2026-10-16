@@ -126,13 +126,14 @@ internal sealed class BmffWritePlan
         await output.WriteAsync(header.GetBuffer().AsMemory(0, (int)header.Length), cancellationToken).ConfigureAwait(false);
         using var payload = new BmffStream(output, output.Position, PayloadSize) { WritePlan = this };
         payload.CancellationToken = cancellationToken;
-        if (_box is BmffBoxComposite { SupportsAsyncPlan: true })
+        if (_box is BmffBoxComposite { SupportsAsyncPlan: true } composite)
         {
             await payload.WriteAsync(_prefix, cancellationToken).ConfigureAwait(false);
             foreach (var child in _children)
             {
                 await child.WriteAsync(payload, bufferLimit, cancellationToken).ConfigureAwait(false);
             }
+            await payload.WriteAsync(composite.TrailingData, cancellationToken).ConfigureAwait(false);
         }
         else if (_box is BmffBoxComposite)
         {

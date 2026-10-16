@@ -144,5 +144,13 @@ public enum BmffBoxType : uint
     FecReservoir                            = 0x66656372, // ISO/IEC 14496-12 8.13.4
     FileDeliverySessionGroup                            = 0x73656772, // ISO/IEC 14496-12 8.13.5
     GroupIdToName                            = 0x6769746e, // ISO/IEC 14496-12 8.13.6
+    /// <summary>Track fragment decode time; ISO/IEC 14496-12 8.8.12.</summary>
+    TrackFragmentDecodeTime = 0x74666474,
+    /// <summary>URL data entry; ISO/IEC 14496-12 8.7.2.</summary>
+    DataEntryUrl = 0x75726c20,
+    /// <summary>URN data entry; ISO/IEC 14496-12 8.7.2.</summary>
+    DataEntryUrn = 0x75726e20,
+    /// <summary>Item information entry; ISO/IEC 14496-12 8.11.6.</summary>
+    ItemInfoEntry = 0x696e6665,
     uuid                            = 0x75756964, // ISO/IEC 14496-12 11.1
 }

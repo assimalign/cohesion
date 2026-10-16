@@ -27,6 +27,11 @@ internal sealed class BmffReaderDefault : BmffReader
         _expectedChildren = expectedChildren;
     }
 
+    private bool IsSampleEntry => _stream.ChildContext == BmffBoxType.SampleDescription;
+    private bool IsTrackReference => _stream.ChildContext == BmffBoxType.TrackReference && (uint)_header.BoxType is
+        0x68696e74 or 0x63647363 or 0x68696e64 or 0x64706e64 or 0x69706972 or 0x6d706f64 or 0x73796e63;
+    private bool CanParse => !IsSampleEntry && (IsTrackReference || _stream.Registry.CanParse(_header.BoxType));
+
     internal override BmffReaderOptions DocumentOptions => _stream.Options;
     internal override BmffBoxRegistry DocumentRegistry => _stream.Registry;
     internal void SetCancellationToken(System.Threading.CancellationToken cancellationToken) => _stream.CancellationToken = cancellationToken;
@@ -46,11 +51,11 @@ internal sealed class BmffReaderDefault : BmffReader
             {
                 throw new InvalidOperationException(ErrorMessages.PayloadConsumed);
             }
-            if (!_stream.Registry.CanParse(_header.BoxType))
+            if (!CanParse)
             {
                 return _current = Preserve(ContentFormatErrorCode.Unsupported);
             }
-            var box = _stream.Registry.Create(_header)!;
+            var box = IsTrackReference ? new TrackReferenceTypeBox(_header) : _stream.Registry.Create(_header)!;
             try
             {
                 if (box is BmffBoxComposite || box is MediaDataBox || box is FreeSpaceBox || box is SkipBox)
@@ -93,16 +98,12 @@ internal sealed class BmffReaderDefault : BmffReader
             {
                 return _current = Preserve(error.ErrorCode);
             }
-            catch (NotImplementedException)
-            {
-                return _current = Preserve(ContentFormatErrorCode.Unsupported);
-            }
         }
     }
 
     private BmffBox Preserve(ContentFormatErrorCode reason)
     {
-        if (_stream.Options.Strict)
+        if (_stream.Options.Strict && !IsSampleEntry)
         {
             throw new ContentFormatException(ErrorMessages.UnsupportedBox, reason, _header.Offset);
         }
@@ -127,6 +128,11 @@ internal sealed class BmffReaderDefault : BmffReader
                 return false;
             }
         }
+        if (_expectedChildren.HasValue && _childCount == _expectedChildren.Value && _stream.ChildContext is BmffBoxType.DataReference or BmffBoxType.SampleDescription or BmffBoxType.ItemInfo)
+        {
+            _ended = true;
+            return false;
+        }
         _current = null;
         _consumed = false;
         var offset = _stream.Offset + _stream.Position;
@@ -139,7 +145,7 @@ internal sealed class BmffReaderDefault : BmffReader
             }
             return false;
         }
-        if (_stream.Options.Strict && !_stream.Registry.CanParse(_header.BoxType))
+        if (_stream.Options.Strict && !IsSampleEntry && !CanParse)
         {
             throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, offset);
         }

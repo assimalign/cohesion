@@ -39,7 +39,7 @@ public class BmffWriterTests
         using var document = BmffDocument.Load(source);
         var movie = (MovieBox)document.Boxes[1];
         movie.Children.Add(new FreeSpaceBox(0, 0) { Payload = BinarySegment.Create(new byte[3]) });
-        ((FileTypeBox)document.Boxes[0]).CompatableBrands = new[] { FourCC.Parse("iso6").Value };
+        ((FileTypeBox)document.Boxes[0]).CompatibleBrands = new[] { FourCC.Parse("iso6").Value };
         using var memory = new MemoryStream();
         using var output = new ProbeStream(memory, false);
         // Act
@@ -50,7 +50,7 @@ public class BmffWriterTests
         var changedMovie = (MovieBox)reloaded.Boxes[1];
         changedMovie.Children.Count.ShouldBe(2);
         changedMovie.Header.TotalSize.ShouldBe(movie.Header.TotalSize + 11);
-        ((FileTypeBox)reloaded.Boxes[0]).CompatableBrands.Length.ShouldBe(1);
+        ((FileTypeBox)reloaded.Boxes[0]).CompatibleBrands.Length.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Bmff] - Streaming containers work on non-seekable output")]

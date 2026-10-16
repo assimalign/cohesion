@@ -31,8 +31,8 @@ public sealed class FileTypeBox : BmffBox
     public uint MajorBrand { get; set; }
     /// <summary>Gets or sets the minor version integer (the legacy property name is retained).</summary>
     public uint MinorBrand { get; set; }
-    /// <summary>Gets or sets compatible-brand FourCCs (the legacy spelling is retained).</summary>
-    public uint[] CompatableBrands { get => _compatibleBrands; set => _compatibleBrands = value ?? Array.Empty<uint>(); }
+    /// <summary>Gets or sets compatible-brand FourCCs.</summary>
+    public uint[] CompatibleBrands { get => _compatibleBrands; set => _compatibleBrands = value ?? Array.Empty<uint>(); }
     /// <summary>Formats the major brand as four ISO-8859-1 characters.</summary>
     /// <returns>The brand text.</returns>
     public string GetMajorBrand() => FourCC.FromUInt32(MajorBrand).ToString();
