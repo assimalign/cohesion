@@ -126,7 +126,7 @@ public class EbmlVIntTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Content.Ebml] - IsValidIdentifier: only shortest-form, non-reserved encodings qualify")]
-    [InlineData(0x80ul, true)]
+    [InlineData(0x80ul, false)] // RFC 8794 section 5 forbids all-zero ID data.
     [InlineData(0x81ul, true)]
     [InlineData(0x4001ul, false)] // Allows shorter form
     [InlineData(0xfful, false)]   // Reserved value

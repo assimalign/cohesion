@@ -43,25 +43,29 @@ public class EbmlVIntReadTests
         actual.Length.ShouldBe(4);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Read: empty stream reports end of stream")]
-    public void Read_FromEmptyStream_ShouldThrowEndOfStream()
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Read: empty stream reports classified truncation")]
+    public void Read_FromEmptyStream_ShouldReportTruncation()
     {
         // Arrange
         var source = new MemoryStream([]);
 
         // Act / Assert
-        Should.Throw<EndOfStreamException>(() => VInt.Read(source, 8, new byte[8]));
+        var error = Should.Throw<EbmlDataFormatException>(() => VInt.Read(source, 8, new byte[8]));
+        error.ErrorCode.ShouldBe(ContentFormatErrorCode.Truncated);
+        error.Position.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Read: truncated trailing octets report end of stream")]
-    public void Read_WhenTrailingOctetsAreTruncated_ShouldThrowEndOfStream()
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Read: truncated trailing octets report classified truncation")]
+    public void Read_WhenTrailingOctetsAreTruncated_ShouldReportTruncation()
     {
         // Arrange — width marker announces 4 bytes but only 2 are present.
         var encoded = Encode(0xdeffad);
         var source = new MemoryStream([encoded[0], encoded[1]]);
 
         // Act / Assert
-        Should.Throw<EndOfStreamException>(() => VInt.Read(source, 8, new byte[8]));
+        var error = Should.Throw<EbmlDataFormatException>(() => VInt.Read(source, 8, new byte[8]));
+        error.ErrorCode.ShouldBe(ContentFormatErrorCode.Truncated);
+        error.Position.ShouldBe(2);
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Read: rejects a VInt wider than the caller's maximum")]

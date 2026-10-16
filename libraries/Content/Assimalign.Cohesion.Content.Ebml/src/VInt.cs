@@ -2,8 +2,12 @@
 using System.IO;
 using System.Diagnostics;
 
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Ebml.Internal;
+
 namespace Assimalign.Cohesion.Content.Ebml;
 
+/// <summary>An EBML variable-size integer retaining its encoded width.</summary>
 public readonly struct VInt
 {
     private readonly sbyte _length;
@@ -27,7 +31,7 @@ public readonly struct VInt
     public ulong Value => EncodedValue & _dataBitsMask[_length];
 
     /// <summary>
-    /// Gets true if value is reserved (i.e. all data bits are zeros or 1's)
+    /// Gets true if all data bits are one (the unknown-size sentinel).
     /// </summary>
     public bool IsReserved => Value == _dataBitsMask[_length];
 
@@ -38,8 +42,8 @@ public readonly struct VInt
     {
         get
         {
-            var isShortest = _length == 1 || Value > _dataBitsMask[_length - 1];
-            return isShortest && !IsReserved;
+            var isShortest = _length == 1 || (_length > 1 && Value >= _dataBitsMask[_length - 1]);
+            return _length > 0 && Value != 0 && isShortest && !IsReserved;
         }
     }
 
@@ -70,7 +74,7 @@ public readonly struct VInt
     {
         if (value > MaxSizeValue)
         {
-            throw new ArgumentException("Value exceed VInt capacity", nameof(value));
+            throw new ArgumentException(ErrorMessages.VIntCapacity, nameof(value));
         }
         if (length < 0 || length > 8)
         {
@@ -78,7 +82,7 @@ public readonly struct VInt
         }
         if (length > 0 && _dataBitsMask[length] <= value)
         {
-            throw new ArgumentException("Specified width is not sufficient to encode value", nameof(value));
+            throw new ArgumentException(ErrorMessages.VIntWidth, nameof(value));
         }
 
         if (length == 0)
@@ -99,7 +103,7 @@ public readonly struct VInt
     {
         if (elementId > MaxElementIdValue)
         {
-            throw new ArgumentException("Value exceed VInt capacity", nameof(elementId));
+            throw new ArgumentException(ErrorMessages.VIntCapacity, nameof(elementId));
         }
 
         var id = EncodeSize(elementId);
@@ -133,7 +137,7 @@ public readonly struct VInt
     {
         if (encodedValue == 0)
         {
-            throw new ArgumentException("Zero is not a correct value", nameof(encodedValue));
+            throw new ArgumentException(ErrorMessages.InvalidVInt, nameof(encodedValue));
         }
 
         var mostSignificantOctetIndex = 7;
@@ -147,7 +151,7 @@ public readonly struct VInt
 
         if (extraBytes != mostSignificantOctetIndex)
         {
-            throw new ArgumentException("Width marker does not match its position", nameof(encodedValue));
+            throw new ArgumentException(ErrorMessages.InvalidVInt, nameof(encodedValue));
         }
 
         return new VInt(encodedValue, extraBytes + 1);
@@ -166,36 +170,33 @@ public readonly struct VInt
     /// <returns></returns>
     public static VInt Read(Stream source, int maxLength, byte[] buffer)
     {
-        buffer = buffer ?? new byte[maxLength];
-
-        // ReadExactly throws EndOfStreamException when the stream ends before
-        // the requested count is satisfied, which is exactly the contract this
-        // reader needs for both the width marker and its trailing octets.
-        source.ReadExactly(buffer, 0, 1);
-
-        if (buffer[0] == 0)
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxLength, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxLength, 8);
+        if (buffer is not null && buffer.Length < maxLength)
         {
-            throw new EbmlDataFormatException("Length bigger than 8 is not supported");
-        }
-        // TODO handle EBMLMaxSizeWidth
-
-        var extraBytes = (buffer[0] & 0xf0) != 0
-            ? _extraBytesSize[buffer[0] >> 4]
-            : 4 + _extraBytesSize[buffer[0]];
-
-        if (extraBytes + 1 > maxLength)
-        {
-            throw new EbmlDataFormatException($"Expected VInt with a max length of {maxLength}. Got {extraBytes + 1}");
+            throw new ArgumentException(ErrorMessages.VIntWidth, nameof(buffer));
         }
 
-        source.ReadExactly(buffer, 1, extraBytes);
-
-        ulong encodedValue = buffer[0];
-        for (var i = 0; i < extraBytes; i++)
+        var input = new EbmlInput(source);
+        Span<byte> bytes = stackalloc byte[8];
+        try
         {
-            encodedValue = encodedValue << 8 | buffer[i + 1];
+            input.ReadContentExactly(bytes[..1]);
+            var length = GetLength(bytes[0], maxLength, input.Position - 1);
+            input.ReadContentExactly(bytes.Slice(1, length - 1));
+            ulong encoded = bytes[0];
+            for (var i = 1; i < length; i++)
+            {
+                encoded = (encoded << 8) | bytes[i];
+            }
+
+            return new VInt(encoded, length);
         }
-        return new VInt(encodedValue, extraBytes + 1);
+        catch (ContentFormatException error) when (error is not EbmlDataFormatException)
+        {
+            throw new EbmlDataFormatException(ErrorMessages.TruncatedInput, error.ErrorCode, input.Position, error);
+        }
     }
 
     /// <summary>
@@ -206,7 +207,7 @@ public readonly struct VInt
     {
         ArgumentNullException.ThrowIfNull(stream);
 
-        var buffer = new byte[Length];
+        Span<byte> buffer = stackalloc byte[Length];
 
         int p = Length;
         for (var data = EncodedValue; --p >= 0; data >>= 8)
@@ -214,11 +215,27 @@ public readonly struct VInt
             buffer[p] = (byte)(data & 0xff);
         }
 
-        stream.Write(buffer, 0, buffer.Length);
+        stream.Write(buffer);
         return buffer.Length;
     }
 
     private static readonly sbyte[] _extraBytesSize = { 4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+    internal static int GetLength(byte first, int maximum, long position)
+    {
+        if (first == 0)
+        {
+            throw new EbmlDataFormatException(ErrorMessages.InvalidVInt, ContentFormatErrorCode.InvalidStructure, position);
+        }
+
+        var length = ((first & 0xf0) != 0 ? _extraBytesSize[first >> 4] : 4 + _extraBytesSize[first]) + 1;
+        if (length > maximum)
+        {
+            throw new EbmlDataFormatException(ErrorMessages.LengthLimit, ContentFormatErrorCode.LimitExceeded, position);
+        }
+
+        return length;
+    }
 
     /// <summary>
     /// Maps length to data bits mask

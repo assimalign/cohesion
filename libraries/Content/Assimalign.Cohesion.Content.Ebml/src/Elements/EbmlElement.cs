@@ -1,54 +1,97 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Xml.Linq;
+
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Ebml.Internal;
 
 namespace Assimalign.Cohesion.Content.Ebml;
 
-public class EbmlElement
+/// <summary>An editable typed leaf or master with ordered children.</summary>
+/// <remarks>Leaf values use ulong, long, double, string, or BinarySegment. Dates use signed nanoseconds
+/// since 2001-01-01T00:00:00 UTC, preserving precision beyond DateTime ticks.</remarks>
+public sealed class EbmlElement
 {
-    public static readonly EbmlElement Empty = new EbmlElement();
+    private object? _value;
+    private bool _unknownSize;
+    private int _sizeLength;
+    private readonly List<EbmlElement> _children = new();
 
-    public EbmlElement(VInt identifier, long sizeValue, EbmlElementType type)
+    private EbmlElement(VInt identifier, EbmlElementType type, object? value)
     {
         Identifier = identifier;
-        Size = sizeValue;
-        Remaining = sizeValue;
         Type = type;
+        Value = value;
     }
 
-    private EbmlElement() : this(VInt.UnknownSize(2), 0L, EbmlElementType.None)
+    /// <summary>Creates a typed leaf or an empty master.</summary>
+    /// <param name="identifier">The encoded ID.</param>
+    /// <param name="type">The payload type.</param>
+    /// <param name="value">The typed leaf value; null for masters.</param>
+    /// <returns>The editable element.</returns>
+    /// <exception cref="ArgumentException">The ID or value type is invalid.</exception>
+    public static EbmlElement Create(VInt identifier, EbmlElementType type, object? value = null)
     {
+        if (!identifier.IsValidIdentifier)
+        {
+            throw new ArgumentException(ErrorMessages.InvalidVInt, nameof(identifier));
+        }
+
+        return new EbmlElement(identifier, type, value);
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    public readonly long Size;
-    /// <summary>
-    /// 
-    /// </summary>
-    public readonly VInt Identifier;    
-
-    /// <summary>
-    /// 
-    /// </summary>
-    public bool IsEmpty => !Identifier.IsValidIdentifier && Size == 0 && Type == EbmlElementType.None;
-
-    /// <summary>
-    /// 
-    /// </summary>
-    public bool HasInvalidIdentifier => !Identifier.IsValidIdentifier;
-
-    /// <summary>
-    /// 
-    /// </summary>
-    public long Remaining { get; }
-
-    /// <summary>
-    /// 
-    /// </summary>
+    /// <summary>Gets the ID.</summary>
+    public VInt Identifier { get; }
+    /// <summary>Gets the payload type.</summary>
     public EbmlElementType Type { get; }
+    /// <summary>Gets or replaces the typed leaf value; replacement discards preserved wire bytes.</summary>
+    /// <exception cref="ArgumentException">The value does not match Type.</exception>
+    public object? Value
+    {
+        get => _value;
+        set
+        {
+            if (!EbmlValueCodec.Matches(Type, value))
+            {
+                throw new ArgumentException(ErrorMessages.InvalidType, nameof(value));
+            }
+
+            _value = value;
+            RawPayload = null;
+        }
+    }
+    /// <summary>Gets ordered children of a master.</summary>
+    /// <exception cref="InvalidOperationException">This is a leaf.</exception>
+    public IList<EbmlElement> Children => Type == EbmlElementType.MasterElement
+        ? _children : throw new InvalidOperationException(ErrorMessages.InvalidType);
+    /// <summary>Gets or sets whether a master is written with unknown size.</summary>
+    /// <exception cref="ArgumentException">Unknown size was requested for a leaf.</exception>
+    public bool IsUnknownSize
+    {
+        get => _unknownSize;
+        set
+        {
+            if (value && Type != EbmlElementType.MasterElement)
+            {
+                throw new ArgumentException(ErrorMessages.UnknownSize);
+            }
+
+            _unknownSize = value;
+        }
+    }
+    /// <summary>Gets or sets the size VINT width; zero selects the smallest width.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">The width is outside zero through eight.</exception>
+    public int SizeLength
+    {
+        get => _sizeLength;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 8);
+            _sizeLength = value;
+        }
+    }
+    /// <summary>Gets the original absolute header offset, or zero for an element built in code.</summary>
+    public long Offset { get; internal set; }
+
+    internal BinarySegment? RawPayload { get; set; }
 }

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="InvalidVInt" xml:space="preserve"><value>The VINT marker or identifier is invalid.</value></data>
+  <data name="VIntCapacity" xml:space="preserve"><value>The value exceeds the VINT capacity.</value></data>
+  <data name="VIntWidth" xml:space="preserve"><value>The VINT width cannot represent the value.</value></data>
+  <data name="TruncatedInput" xml:space="preserve"><value>The EBML element is truncated.</value></data>
+  <data name="LengthLimit" xml:space="preserve"><value>The encoded length exceeds the configured limit.</value></data>
+  <data name="BufferLimit" xml:space="preserve"><value>The value exceeds the buffered-value limit.</value></data>
+  <data name="DepthLimit" xml:space="preserve"><value>The nesting depth exceeds the configured limit.</value></data>
+  <data name="ElementLimit" xml:space="preserve"><value>The document element count exceeds the configured limit.</value></data>
+  <data name="ParentBoundary" xml:space="preserve"><value>The element extends beyond its parent.</value></data>
+  <data name="InvalidSize" xml:space="preserve"><value>The data size is invalid for this element type.</value></data>
+  <data name="InvalidValue" xml:space="preserve"><value>The element value is invalid.</value></data>
+  <data name="InvalidType" xml:space="preserve"><value>The value type does not match the element type.</value></data>
+  <data name="UnknownSize" xml:space="preserve"><value>Unknown size requires an eligible master element.</value></data>
+  <data name="ReaderState" xml:space="preserve"><value>Consume the current element or finish its master before advancing.</value></data>
+  <data name="WriterState" xml:space="preserve"><value>The master element size or writer state is inconsistent.</value></data>
+  <data name="SourceReadable" xml:space="preserve"><value>The source must be readable.</value></data>
+  <data name="SourceSeekable" xml:space="preserve"><value>Document loading requires a readable, seekable source.</value></data>
+  <data name="OutputWritable" xml:space="preserve"><value>The destination must be writable.</value></data>
+  <data name="OutputSeekable" xml:space="preserve"><value>Back-patching requires a seekable destination.</value></data>
+  <data name="InPlaceSave" xml:space="preserve"><value>Save to a different stream so lazy payloads remain intact.</value></data>
+  <data name="HeaderRequired" xml:space="preserve"><value>An EBML document must begin with its header.</value></data>
+  <data name="BodyRequired" xml:space="preserve"><value>An EBML document requires one body root master.</value></data>
+  <data name="SchemaConflict" xml:space="preserve"><value>The schema contains conflicting or invalid definitions.</value></data>
+  <data name="SchemaViolation" xml:space="preserve"><value>The element violates its schema definition.</value></data>
+  <data name="MissingElement" xml:space="preserve"><value>A mandatory element is missing.</value></data>
+  <data name="CrcMismatch" xml:space="preserve"><value>The CRC-32 does not match the parent data.</value></data>
+  <data name="UnsupportedVersion" xml:space="preserve"><value>The EBML version or maximum width is unsupported.</value></data>
+</root>
