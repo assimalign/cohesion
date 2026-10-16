@@ -114,7 +114,8 @@ columns remain available to nested markers and become literal spaces in fenced c
 **HTML** (`MarkdownHtmlRenderer`) emits the shapes the spec's examples use — tight list items
 render bare inline content, loose items wrap paragraphs, image alt text flattens to plain text,
 destinations percent-encode over the reference implementation's safe set and entity-escape in
-attributes — so spec-derived expectations assert byte-for-byte.
+attributes — including percent-encoding square brackets in destinations while preserving display
+text — so spec-derived expectations assert byte-for-byte.
 
 **Canonical Markdown** (`MarkdownWriter`) normalizes on output: `-` bullets, `N.` ordered markers,
 ATX headings, backtick fences (tilde when the info string carries a backtick), `---` breaks,

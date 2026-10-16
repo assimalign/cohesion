@@ -69,4 +69,18 @@ public class MarkdownCorpusRegressionTests
         actual.ShouldBe(expected);
         MarkdownModelComparison.ShouldEqual(document, MarkdownText.Parse(MarkdownText.Write(document)), source);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - HTML: URI brackets are percent encoded")]
+    [InlineData("<https://example.test/[x]>", "<p><a href=\"https://example.test/%5Bx%5D\">https://example.test/[x]</a></p>\n")]
+    [InlineData("[x](/a[b])", "<p><a href=\"/a%5Bb%5D\">x</a></p>\n")]
+    public void ToHtml_BracketInDestination_UsesCommonMarkEscaping(string source, string expected)
+    {
+        // Arrange. Authored reductions of CommonMark 526/603; display text stays unencoded.
+        var document = MarkdownText.Parse(source);
+
+        // Act
+        var actual = MarkdownText.ToHtml(document);
+
+        // Assert
+        actual.ShouldBe(expected);
+    }
 }

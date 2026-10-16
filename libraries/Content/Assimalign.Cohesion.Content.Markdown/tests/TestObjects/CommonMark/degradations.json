@@ -1221,7 +1221,7 @@
     "example": 538,
     "section": "Links",
     "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
-    "html": "<p>[foo<a href=\"https://example.com/?search=][ref]\">https://example.com/?search=][ref]</a></p>\n<p>[ref]: /uri</p>\n",
+    "html": "<p>[foo<a href=\"https://example.com/?search=%5D%5Bref%5D\">https://example.com/?search=][ref]</a></p>\n<p>[ref]: /uri</p>\n",
     "matchesSpec": false
   },
   {
