@@ -39,6 +39,21 @@ public class ContentFormatException : ContentException
     {
     }
 
+    /// <summary>Initializes a classified content format failure.</summary>
+    /// <param name="message">The message describing the failure.</param>
+    /// <param name="errorCode">The format-independent failure classification.</param>
+    /// <param name="position">The absolute byte or character position, when known.</param>
+    /// <param name="innerException">The underlying failure, when present.</param>
+    public ContentFormatException(string message, ContentFormatErrorCode errorCode, long? position = null, Exception? innerException = null)
+        : base(message, innerException!)
+    {
+        ErrorCode = errorCode;
+        Position = position;
+    }
+
+    /// <summary>Gets the failure classification; legacy constructors use <see cref="ContentFormatErrorCode.Unspecified"/>.</summary>
+    public ContentFormatErrorCode ErrorCode { get; } = ContentFormatErrorCode.Unspecified;
+
     /// <summary>Gets the byte or character position at which the malformed input was detected, when known.</summary>
     public long? Position { get; }
 }

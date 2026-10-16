@@ -1,41 +1,59 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
+using System.IO;
 using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
-[DebuggerDisplay("Bmff Box: Original Format (nmhd)")]
+namespace Assimalign.Cohesion.Content.Bmff;
+
+/// <summary>The OriginalFormat box; ISO/IEC 14496-12 8.12.2.</summary>
 public sealed class OriginalFormatBox : BmffBox
 {
-    public OriginalFormatBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
-    public override bool IsLeaf => throw new NotImplementedException();
+    private byte[] _trailing = Array.Empty<byte>();
+    /// <summary>Creates a OriginalFormatBox at its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public OriginalFormatBox(long offset, long limit) { SetOriginalLocation(offset, limit);  }
 
-    public override bool IsComposite => throw new NotImplementedException();
-
-    public override long Limit { get; }
-
-    public override long Offset { get; }
-
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.OriginalFormat;
 
+    /// <summary>Gets or sets the original sample entry FourCC.</summary>
+    public FourCC DataFormat { get; set; }
+
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        
+        DataFormat = FourCC.FromUInt32(BmffFields.U32(stream));
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
     }
-
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new NotImplementedException();
+        Validate();
+
+        BmffFields.U32(stream, DataFormat.Value);
+        stream.Write(_trailing);
     }
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    /// <inheritdoc/>
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 4L + _trailing.Length;
+    }
+    private void Validate()
+    {
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" format={DataFormat}"));
     }
 }

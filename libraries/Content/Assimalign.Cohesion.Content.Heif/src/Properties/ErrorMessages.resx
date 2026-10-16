@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="Truncated" xml:space="preserve"><value>The HEIF field is truncated.</value></data>
+  <data name="LimitExceeded" xml:space="preserve"><value>The HEIF resource limit was exceeded.</value></data>
+  <data name="Unsupported" xml:space="preserve"><value>The HEIF version, property, item or construction method is unsupported.</value></data>
+  <data name="InvalidValue" xml:space="preserve"><value>The HEIF field value is invalid.</value></data>
+  <data name="InvalidStructure" xml:space="preserve"><value>The HEIF item structure is inconsistent.</value></data>
+  <data name="MissingPrimary" xml:space="preserve"><value>The HEIF primary item is absent or hidden.</value></data>
+  <data name="InvalidExtent" xml:space="preserve"><value>The HEIF item extent is outside its data source.</value></data>
+  <data name="InvalidBrand" xml:space="preserve"><value>The file has no supported HEIF still-image brand.</value></data>
+  <data name="MissingProperty" xml:space="preserve"><value>The item property association has no matching property.</value></data>
+  <data name="InvalidGrid" xml:space="preserve"><value>The derived image dimensions or input count are inconsistent.</value></data>
+  <data name="InvalidExif" xml:space="preserve"><value>The Exif TIFF header offset is outside the item.</value></data>
+  <data name="InvalidEdit" xml:space="preserve"><value>The requested HEIF edit cannot be applied to this item.</value></data>
+  <data name="SameSource" xml:space="preserve"><value>HEIF output must be separate from every borrowed source.</value></data>
+</root>

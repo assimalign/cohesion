@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.IO.Mpeg</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Content.Mpeg</RootNamespace>
 	</PropertyGroup>
 
 
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Bmff" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Media" />
+	</ItemGroup>
 </Project>

@@ -3,11 +3,11 @@ using System;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.IO.Ebml.Tests;
+namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlVIntTests
 {
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - EncodeSize: auto-width encoding picks the shortest form")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: EncodeSize: auto-width encoding picks the shortest form")]
     [InlineData(0, 1, 0x80ul)]
     [InlineData(1, 1, 0x81ul)]
     [InlineData(126, 1, 0xfeul)]
@@ -24,7 +24,7 @@ public class EbmlVIntTests
         actual.EncodedValue.ShouldBe(expectedEncoded);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - EncodeSize: explicit length pads to the requested width")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: EncodeSize: explicit length pads to the requested width")]
     [InlineData(0, 1, 0x80ul)]
     [InlineData(0, 2, 0x4000ul)]
     [InlineData(0, 3, 0x200000ul)]
@@ -40,7 +40,7 @@ public class EbmlVIntTests
         actual.EncodedValue.ShouldBe(expectedEncoded);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - EncodeSize: width too narrow for the value throws")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: EncodeSize: width too narrow for the value throws")]
     [InlineData(127, 1)]
     public void EncodeSize_WithInsufficientLength_ShouldThrow(int value, int length)
     {
@@ -48,7 +48,7 @@ public class EbmlVIntTests
         Should.Throw<ArgumentException>(() => VInt.EncodeSize((ulong)value, length));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - UnknownSize: all data bits set marks the value reserved")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: UnknownSize: all data bits set marks the value reserved")]
     [InlineData(1, 0xfful)]
     [InlineData(2, 0x7ffful)]
     [InlineData(3, 0x3ffffful)]
@@ -68,7 +68,7 @@ public class EbmlVIntTests
         actual.EncodedValue.ShouldBe(expectedEncoded);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - UnknownSize: width outside 1-8 throws")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: UnknownSize: width outside 1-8 throws")]
     [InlineData(-1)]
     [InlineData(0)]
     [InlineData(9)]
@@ -78,7 +78,7 @@ public class EbmlVIntTests
         Should.Throw<ArgumentOutOfRangeException>(() => VInt.UnknownSize(length));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - FromEncoded: strips the width marker to recover the value")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: FromEncoded: strips the width marker to recover the value")]
     [InlineData(0x80ul, 0ul)]
     [InlineData(0xaful, 0x2ful)]
     [InlineData(0x40FFul, 0xFFul)]
@@ -94,7 +94,7 @@ public class EbmlVIntTests
         actual.Value.ShouldBe(expectedValue);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - FromEncoded: width marker not matching its position throws")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: FromEncoded: width marker not matching its position throws")]
     [InlineData(0ul)]
     [InlineData(1ul)]
     [InlineData(0x40ul)]
@@ -107,7 +107,7 @@ public class EbmlVIntTests
         Should.Throw<ArgumentException>(() => VInt.FromEncoded(encodedValue));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - EncodeSize: round-trips the value at the expected width")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: EncodeSize: round-trips the value at the expected width")]
     [InlineData(0ul, 1)]
     [InlineData(126ul, 1)]
     [InlineData(127ul, 2)]
@@ -125,8 +125,8 @@ public class EbmlVIntTests
         actual.Length.ShouldBe(expectedLength);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - IsValidIdentifier: only shortest-form, non-reserved encodings qualify")]
-    [InlineData(0x80ul, true)]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§4–6: IsValidIdentifier: only shortest-form, non-reserved encodings qualify")]
+    [InlineData(0x80ul, false)] // RFC 8794 section 5 forbids all-zero ID data.
     [InlineData(0x81ul, true)]
     [InlineData(0x4001ul, false)] // Allows shorter form
     [InlineData(0xfful, false)]   // Reserved value

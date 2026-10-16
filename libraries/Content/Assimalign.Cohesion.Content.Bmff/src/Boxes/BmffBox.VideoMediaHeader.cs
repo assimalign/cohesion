@@ -1,37 +1,74 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
+using System.IO;
 using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
-[DebuggerDisplay("Bmff Box: Video Media Header (vmhd)")]
-public sealed class VideoMediaHeaderBox : BmffBox
+namespace Assimalign.Cohesion.Content.Bmff;
+
+/// <summary>The VideoMediaHeader box; ISO/IEC 14496-12 8.4.5.2.</summary>
+public sealed class VideoMediaHeaderBox : BmffFullBox
 {
-    public VideoMediaHeaderBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
+    private byte[] _trailing = Array.Empty<byte>();
+    /// <summary>Creates a VideoMediaHeaderBox at its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public VideoMediaHeaderBox(long offset, long limit) { SetOriginalLocation(offset, limit);  }
 
-    public override bool IsLeaf => true;
-    public override bool IsComposite => false;
-    public override long Limit { get; }
-    public override long Offset { get; }
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.VideoMediaHeader;
+
+    /// <summary>Gets or sets the graphics mode.</summary>
+    public ushort GraphicsMode { get; set; }
+    /// <summary>Gets or sets the first operation color component.</summary>
+    public ushort OpColorRed { get; set; }
+    /// <summary>Gets or sets the second operation color component.</summary>
+    public ushort OpColorGreen { get; set; }
+    /// <summary>Gets or sets the third operation color component.</summary>
+    public ushort OpColorBlue { get; set; }
+
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 0, 1, stream.Offset);
+        GraphicsMode = BmffFields.U16(stream);
+        OpColorRed = BmffFields.U16(stream);
+        OpColorGreen = BmffFields.U16(stream);
+        OpColorBlue = BmffFields.U16(stream);
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
     }
-
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new NotImplementedException();
+        Validate();
+        WriteFullBoxHeader(stream);
+        BmffFields.U16(stream, GraphicsMode);
+        BmffFields.U16(stream, OpColorRed);
+        BmffFields.U16(stream, OpColorGreen);
+        BmffFields.U16(stream, OpColorBlue);
+        stream.Write(_trailing);
     }
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    /// <inheritdoc/>
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 12L + _trailing.Length;
+    }
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 0, 1, Offset);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" graphics-mode={GraphicsMode}"));
     }
 }

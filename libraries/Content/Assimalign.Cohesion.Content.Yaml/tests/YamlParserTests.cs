@@ -140,6 +140,7 @@ public class YamlParserTests
     public void Parse_UndefinedAlias_Throws()
     {
         var exception = Should.Throw<YamlException>(() => YamlText.ParseDocument("a: *missing"));
+        exception.ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidStructure);
 
         exception.Message.ShouldContain("missing");
         exception.Line.ShouldBe(1);
@@ -180,7 +181,7 @@ public class YamlParserTests
     [Fact(DisplayName = "Cohesion Test [Content.Yaml] - Parse: directives without a document marker are rejected")]
     public void Parse_DirectiveWithoutMarker_Throws()
     {
-        Should.Throw<YamlException>(() => YamlText.Parse("%YAML 1.2\nkey: value"));
+        Should.Throw<YamlException>(() => YamlText.Parse("%YAML 1.2\nkey: value")).ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidStructure);
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Yaml] - Parse: explicit keys support complex keys")]
@@ -216,13 +217,13 @@ public class YamlParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Content.Yaml] - Parse: malformed input produces diagnostics")]
-    [InlineData("key: \"unterminated")]
-    [InlineData("[1, 2")]
-    [InlineData("{a: 1")]
-    [InlineData("key: \"bad \\q escape\"")]
-    [InlineData("%YAML 2.0\n---\na: 1")]
-    public void Parse_MalformedInput_Throws(string text)
+    [InlineData("key: \"unterminated", ContentFormatErrorCode.Truncated)]
+    [InlineData("[1, 2", ContentFormatErrorCode.Truncated)]
+    [InlineData("{a: 1", ContentFormatErrorCode.Truncated)]
+    [InlineData("key: \"bad \\q escape\"", ContentFormatErrorCode.InvalidValue)]
+    [InlineData("%YAML 2.0\n---\na: 1", ContentFormatErrorCode.Unsupported)]
+    public void Parse_MalformedInput_Throws(string text, ContentFormatErrorCode code)
     {
-        Should.Throw<YamlException>(() => YamlText.Parse(text));
+        Should.Throw<YamlException>(() => YamlText.Parse(text)).ErrorCode.ShouldBe(code);
     }
 }

@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Content;
 /// <b>Stream ownership.</b> Streams returned by <see cref="OpenRead"/> and <see cref="OpenReadAsync"/>
 /// are owned by the caller and must be disposed by the caller. They remain valid only while the content
 /// itself is undisposed. Whether the content owns or borrows its own backing resource is decided when
-/// the content is created (see <c>ContentFactory</c>); disposing the content disposes owned backing
+/// the content is created (see <see cref="StreamContent"/>); disposing the content disposes owned backing
 /// resources and leaves borrowed ones open.
 /// </para>
 /// <para>
@@ -55,6 +55,7 @@ public interface IContent : IDisposable, IAsyncDisposable
     /// <exception cref="ContentException">Thrown when single-use content is read a second time.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the content has been disposed.</exception>
     /// <exception cref="NotSupportedException">Thrown when the content has no serialized representation of its own, such as a pure composite.</exception>
+    /// <exception cref="System.IO.IOException">Opening or positioning the underlying source fails.</exception>
     Stream OpenRead();
 
     /// <summary>
@@ -65,5 +66,7 @@ public interface IContent : IDisposable, IAsyncDisposable
     /// <exception cref="ContentException">Thrown when single-use content is read a second time.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the content has been disposed.</exception>
     /// <exception cref="NotSupportedException">Thrown when the content has no serialized representation of its own, such as a pure composite.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.IO.IOException">Opening or positioning the underlying source fails.</exception>
     ValueTask<Stream> OpenReadAsync(CancellationToken cancellationToken = default);
 }

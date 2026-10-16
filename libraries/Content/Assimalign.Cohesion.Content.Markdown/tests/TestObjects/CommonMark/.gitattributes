@@ -1,0 +1,2 @@
+# Preserve the downloaded bytes and SHA-256 on Windows checkouts.
+spec-0.31.2.json -text

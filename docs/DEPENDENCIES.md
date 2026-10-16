@@ -29,11 +29,11 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 689 |
-| Shipped library/resource projects | 255 |
+| Projects indexed | 694 |
+| Shipped library/resource projects | 256 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 731 |
+| Declared project references | 737 |
 | Declared shared-source links | 23 |
 
 ## Ambiguous project names
@@ -286,48 +286,23 @@ flowchart LR
 
 ### `libraries/Content`
 
-12 shipped projects.
+13 shipped projects.
 
-Intra-area references:
-
-```mermaid
-flowchart LR
-    N0["Content"]
-    N1["Content.Binary"]
-    N2["Content.Bmff"]
-    N3["Content.Ebml"]
-    N4["Content.Exe"]
-    N5["Content.Markdown"]
-    N6["Content.Media"]
-    N7["Content.Mkv"]
-    N8["Content.Mpeg"]
-    N9["Content.Pdf"]
-    N10["Content.Text"]
-    N11["Content.Yaml"]
-    N1 --> N0
-    N2 --> N6
-    N4 --> N1
-    N5 --> N0
-    N5 --> N10
-    N6 --> N1
-    N7 --> N2
-    N10 --> N0
-    N11 --> N0
-    N11 --> N10
-```
+_More than twelve projects: the table below is the area's graph (see the node ceiling in `.claude/rules/documentation.md`)._
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Content` | — | — | — | — |
 | `Assimalign.Cohesion.Content.Binary` | `Assimalign.Cohesion.Content` | — | — | — |
 | `Assimalign.Cohesion.Content.Bmff` | `Assimalign.Cohesion.Content.Media` | — | — | — |
-| `Assimalign.Cohesion.Content.Ebml` | — | — | — | — |
+| `Assimalign.Cohesion.Content.Ebml` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Exe` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
+| `Assimalign.Cohesion.Content.Heif` | `Assimalign.Cohesion.Content.Bmff` | — | — | — |
 | `Assimalign.Cohesion.Content.Markdown` | `Assimalign.Cohesion.Content`<br>`Assimalign.Cohesion.Content.Text` | — | — | — |
 | `Assimalign.Cohesion.Content.Media` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
-| `Assimalign.Cohesion.Content.Mkv` | `Assimalign.Cohesion.Content.Bmff` | — | — | — |
-| `Assimalign.Cohesion.Content.Mpeg` | — | — | — | — |
-| `Assimalign.Cohesion.Content.Pdf` | — | — | — | — |
+| `Assimalign.Cohesion.Content.Mkv` | `Assimalign.Cohesion.Content.Ebml`<br>`Assimalign.Cohesion.Content.Media` | — | — | — |
+| `Assimalign.Cohesion.Content.Mpeg` | `Assimalign.Cohesion.Content.Bmff`<br>`Assimalign.Cohesion.Content.Media` | — | — | — |
+| `Assimalign.Cohesion.Content.Pdf` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Text` | `Assimalign.Cohesion.Content` | — | — | — |
 | `Assimalign.Cohesion.Content.Yaml` | `Assimalign.Cohesion.Content`<br>`Assimalign.Cohesion.Content.Text` | — | — | — |
 
@@ -1126,7 +1101,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-323 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+327 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1139,9 +1114,9 @@ membership is an item list, not a project reference: App's kernel roots in
 | Kind | Count |
 | --- | --- |
 | `examples/` | 5 |
-| `fixtures/` | 8 |
+| `fixtures/` | 9 |
 | `samples/` | 10 |
-| `tests/` | 300 |
+| `tests/` | 303 |
 
 Samples, which live in the repository-root `samples/` tree:
 

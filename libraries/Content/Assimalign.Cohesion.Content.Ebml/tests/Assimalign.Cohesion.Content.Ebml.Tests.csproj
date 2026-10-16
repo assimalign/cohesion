@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.IO.Ebml.Tests</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Content.Ebml.Tests</RootNamespace>
 	</PropertyGroup>
 
   <ItemGroup>
@@ -12,5 +12,6 @@
 	</ItemGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Content.Ebml" />
+    <Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\*.cs" Link="Shared\Binary\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

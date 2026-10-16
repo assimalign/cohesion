@@ -24,7 +24,7 @@ public class YamlTextFacadeTests
     [Fact(DisplayName = "Cohesion Test [Content.Yaml] - Facade: ParseDocument rejects multi-document input")]
     public void ParseDocument_MultipleDocuments_Throws()
     {
-        Should.Throw<YamlException>(() => YamlText.ParseDocument("---\na: 1\n---\nb: 2"));
+        Should.Throw<YamlException>(() => YamlText.ParseDocument("---\na: 1\n---\nb: 2")).ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidStructure);
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Yaml] - Facade: the content reader and writer seams round-trip")]
@@ -58,6 +58,8 @@ public class YamlTextFacadeTests
         var exception = Should.Throw<YamlException>(() => YamlText.Parse("[1, 2"));
 
         exception.ShouldBeAssignableTo<ContentFormatException>();
+        exception.ErrorCode.ShouldBe(ContentFormatErrorCode.Truncated);
+        exception.Position.ShouldBe(5);
         exception.Line.ShouldBeGreaterThan(0);
     }
 

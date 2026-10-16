@@ -14,7 +14,7 @@ public class StreamContentTests
     {
         byte[] data = [1, 2, 3];
         var source = new TrackingStream(data);
-        using var content = ContentFactory.FromStream(source);
+        using var content = StreamContent.Create(source);
 
         content.CanReopen.ShouldBeTrue();
         content.Length.ShouldBe(3);
@@ -32,7 +32,7 @@ public class StreamContentTests
     public void OpenRead_NonSeekableSource_SecondReadThrows()
     {
         var source = new TrackingStream([1, 2, 3], seekable: false);
-        using var content = ContentFactory.FromStream(source);
+        using var content = StreamContent.Create(source);
 
         content.CanReopen.ShouldBeFalse();
         content.Length.ShouldBeNull();
@@ -49,7 +49,7 @@ public class StreamContentTests
     public void Dispose_OwnedSource_DisposesSource()
     {
         var source = new TrackingStream([1]);
-        var content = ContentFactory.FromStream(source);
+        var content = StreamContent.Create(source);
 
         content.Dispose();
 
@@ -60,7 +60,7 @@ public class StreamContentTests
     public void Dispose_BorrowedSource_LeavesSourceOpen()
     {
         var source = new TrackingStream([1]);
-        var content = ContentFactory.FromStream(source, leaveOpen: true);
+        var content = StreamContent.Create(source, leaveOpen: true);
 
         content.Dispose();
 
@@ -69,10 +69,10 @@ public class StreamContentTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Content] - Stream: disposing a read view does not dispose the source")]
-    public void DisposeReadView_DoesNotDisposeSource()
+    public void DisposeReadView_BorrowedSource_DoesNotDisposeSource()
     {
         var source = new TrackingStream([1, 2]);
-        using var content = ContentFactory.FromStream(source);
+        using var content = StreamContent.Create(source);
 
         var view = content.OpenRead();
         view.Dispose();
@@ -84,7 +84,7 @@ public class StreamContentTests
     [Fact(DisplayName = "Cohesion Test [Content] - Stream: read views are read-only")]
     public void ReadView_Write_Throws()
     {
-        using var content = ContentFactory.FromStream(new TrackingStream([1]));
+        using var content = StreamContent.Create(new TrackingStream([1]));
         using var view = content.OpenRead();
 
         view.CanWrite.ShouldBeFalse();
@@ -95,7 +95,7 @@ public class StreamContentTests
     public async Task DisposeAsync_OwnedSource_DisposesSource()
     {
         var source = new TrackingStream([1]);
-        var content = ContentFactory.FromStream(source);
+        var content = StreamContent.Create(source);
 
         await content.DisposeAsync();
 
@@ -103,12 +103,12 @@ public class StreamContentTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Content] - Stream: unreadable source is rejected by the factory")]
-    public void FromStream_UnreadableSource_Throws()
+    public void Create_UnreadableSource_Throws()
     {
         var unreadable = new MemoryStream();
         unreadable.Dispose();
 
-        Should.Throw<ArgumentException>(() => ContentFactory.FromStream(unreadable));
+        Should.Throw<ArgumentException>(() => StreamContent.Create(unreadable));
     }
 
     private static byte[] ReadAll(Stream stream)

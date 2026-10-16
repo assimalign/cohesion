@@ -11,6 +11,7 @@ parse-event pipeline (`YamlEvent`), parser, and deterministic emitter, entered t
   reconstruction for shared nodes.
 - Core-schema scalar resolution (null/bool/int/float/string) with typed accessors.
 - The content family's `IContentReader<YamlStream>`/`IContentWriter<YamlStream>` seams.
+- `YamlParserOptions` — depth and expanded alias budgets shared by document and event parsing.
 
 ## Dependencies
 
@@ -66,5 +67,38 @@ Writer indentation must be positive. `YamlText.CreateWriter(new YamlWriterOption
 creates a writer with four-space indentation; zero or negative sizes throw
 `ArgumentOutOfRangeException` at creation. Direct `YamlText.Write` calls enforce the same guard
 before emission.
+
+## Resource limits and diagnostics
+
+All parsing entry points use a default depth of **512 nested collections** and an alias budget of
+**1,000,000 expanded nodes per document**. Configure the same limits on direct parsing or a reader:
+
+```csharp
+var limits = new YamlParserOptions { MaxDepth = 128, MaxAliasExpansion = 10_000 };
+var parsed = YamlText.ParseDocument("key: [one, two]", limits);
+var events = YamlText.ParseEvents("key: [one, two]", limits);
+var reader = YamlText.CreateReader(limits);
+```
+
+Depth must be positive; the alias budget can be zero to disallow aliases. Invalid options throw
+`ArgumentOutOfRangeException`. Aliases retain shared node identity. Their budget charges the
+expanded target's node count without allocating the expansion; cyclic back-references cost one.
+Raising the depth cannot bypass the runtime stack safety guard. Input text is still fully buffered.
+
+Catch `YamlException` (or `ContentFormatException`) and inspect `ErrorCode`:
+
+| Code | Failure |
+| --- | --- |
+| `LimitExceeded` | Nesting, available execution stack, or alias budget |
+| `InvalidStructure` | Invalid syntax or undefined alias |
+| `InvalidValue` | Invalid anchor/tag or escape value |
+| `Truncated` | Unterminated collection, quoted scalar, tag or escape |
+| `Unsupported` | Retained-scope exclusions, including supplementary Unicode escapes |
+
+YAML syntax diagnostics provide one-based `Line`/`Column` and an absolute UTF-16
+`Position` in the decoded source, preserving BOM and CRLF offsets. Strict decoding failures
+propagate separately with `InvalidValue`, a byte position when known, and the original decoder
+exception. The existing three-argument `YamlException` constructor uses `InvalidStructure`
+with an unknown offset.
 
 See [DESIGN.md](./DESIGN.md) for the architecture and the conformance/known-gaps statement.

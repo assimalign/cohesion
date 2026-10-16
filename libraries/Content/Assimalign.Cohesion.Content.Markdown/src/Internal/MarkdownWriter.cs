@@ -69,7 +69,7 @@ internal sealed class MarkdownWriter
                     break;
 
                 case OpKind.Literal:
-                    WriteLiteral(op.Text!, op.NextStartsBracket);
+                    WriteLiteral(op.Text!, op.NextStartsBracket, op.PreserveLeadingSpace, op.PreserveTrailingSpace, op.StartsAfterEmphasis, op.EndsBeforeEmphasis);
                     break;
 
                 case OpKind.Inlines:
@@ -102,7 +102,7 @@ internal sealed class MarkdownWriter
 
             case MarkdownThematicBreak:
                 _ops.Push(Op.NewLineOp);
-                _ops.Push(Op.Raw("---"));
+                _ops.Push(Op.Raw(_atLineStart ? "---" : "***"));
                 break;
 
             case MarkdownCodeBlock code:
@@ -125,7 +125,7 @@ internal sealed class MarkdownWriter
                 break;
 
             case MarkdownList list:
-                PushList(list);
+                PushList(list, op.ListMarker);
                 break;
         }
     }
@@ -133,9 +133,27 @@ internal sealed class MarkdownWriter
     /// <summary>Pushes sibling blocks; loose contexts separate them with blank lines.</summary>
     private void PushBlocks(IList<MarkdownBlock> blocks, bool tight)
     {
+        var runStart = blocks.Count;
         for (var index = blocks.Count - 1; index >= 0; index--)
         {
-            _ops.Push(Op.ForNode(blocks[index]));
+            var marker = '\0';
+            if (blocks[index] is MarkdownList list)
+            {
+                if (index < runStart)
+                {
+                    runStart = index;
+                    while (runStart > 0 && blocks[runStart - 1] is MarkdownList previous
+                        && previous.IsOrdered == list.IsOrdered)
+                    {
+                        runStart--;
+                    }
+                }
+
+                var alternate = (index - runStart) % 2 != 0;
+                marker = list.IsOrdered ? (alternate ? ')' : '.') : (alternate ? '+' : '-');
+            }
+
+            _ops.Push(Op.ForNode(blocks[index], marker));
             if (index > 0 && !tight)
             {
                 _ops.Push(Op.BlankLineOp);
@@ -143,14 +161,14 @@ internal sealed class MarkdownWriter
         }
     }
 
-    private void PushList(MarkdownList list)
+    private void PushList(MarkdownList list, char listMarker)
     {
         for (var index = list.Items.Count - 1; index >= 0; index--)
         {
             var item = list.Items[index];
             var marker = list.IsOrdered
-                ? (list.Start + index).ToString() + ". "
-                : "- ";
+                ? (list.Start + index).ToString(System.Globalization.CultureInfo.InvariantCulture) + listMarker + " "
+                : listMarker + " ";
 
             _ops.Push(Op.PopPrefixOp);
             if (item.Blocks.Count == 0)
@@ -197,7 +215,9 @@ internal sealed class MarkdownWriter
             switch (inline)
             {
                 case MarkdownLiteral literal:
-                    _ops.Push(Op.ForLiteral(literal.Text, NextStartsBracket(inlines, index)));
+                    _ops.Push(Op.ForLiteral(literal.Text, NextStartsBracket(inlines, index), index == 0 || inlines[index - 1] is MarkdownLineBreak, index == inlines.Count - 1 || inlines[index + 1] is MarkdownLineBreak,
+                        index > 0 && inlines[index - 1] is MarkdownEmphasis or MarkdownStrong,
+                        index + 1 < inlines.Count && inlines[index + 1] is MarkdownEmphasis or MarkdownStrong));
                     break;
 
                 case MarkdownEmphasis emphasis:
@@ -290,16 +310,42 @@ internal sealed class MarkdownWriter
     /// every structural inline character escapes, plus the line-start block markers and
     /// <c>!</c> when a bracket follows.
     /// </summary>
-    private void WriteLiteral(string text, bool nextStartsBracket)
+    private void WriteLiteral(string text, bool nextStartsBracket, bool preserveLeadingSpace, bool preserveTrailingSpace, bool startsAfterEmphasis, bool endsBeforeEmphasis)
     {
         var startedAtLineStart = _atLineStart;
+        var leadingSpaces = 0;
+        while (leadingSpaces < text.Length && text[leadingSpaces] == ' ') { leadingSpaces++; }
+        var trailingSpaces = text.Length;
+        while (trailingSpaces > 0 && text[trailingSpaces - 1] == ' ') { trailingSpaces--; }
         for (var index = 0; index < text.Length; index++)
         {
             var character = text[index];
+            var scalarLength = char.IsHighSurrogate(character) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]) ? 2 : 1;
+            if (((startsAfterEmphasis && index == 0) || (endsBeforeEmphasis && index + scalarLength == text.Length))
+                && !char.IsWhiteSpace(character) && !char.IsPunctuation(character) && !char.IsSymbol(character)
+                && (scalarLength == 2 || !char.IsSurrogate(character)))
+            {
+                var scalar = scalarLength == 2 ? char.ConvertToUtf32(character, text[index + 1]) : character;
+                // Entity spelling supplies punctuation at a delimiter boundary without changing the
+                // decoded literal. This preserves underscore flanking in intraword nested emphasis.
+                WriteContent("&#" + scalar.ToString(System.Globalization.CultureInfo.InvariantCulture) + ";");
+                index += scalarLength - 1;
+                continue;
+            }
+
+            if (character is '\n' or '\r' or '\t'
+                || (character == ' ' && ((preserveLeadingSpace && index < leadingSpaces)
+                    || (preserveTrailingSpace && index >= trailingSpaces))))
+            {
+                WriteContent("&#" + ((int)character).ToString(System.Globalization.CultureInfo.InvariantCulture) + ";");
+                continue;
+            }
+
             var escape = character switch
             {
                 '\\' or '`' or '*' or '_' or '[' or ']' or '<' or '&' => true,
-                '#' or '-' or '+' or '>' or '~' => startedAtLineStart && index == 0,
+                '#' => true,
+                '-' or '+' or '>' or '~' => startedAtLineStart && index == 0,
                 '!' => index + 1 < text.Length ? text[index + 1] == '[' : nextStartsBracket,
                 '.' or ')' => startedAtLineStart && IsOrderedMarkerPosition(text, index),
                 _ => false,
@@ -358,9 +404,9 @@ internal sealed class MarkdownWriter
     private static string FormatCodeSpan(string literal)
     {
         var fence = new string('`', Math.Max(1, LongestRun(literal, '`') + 1));
-        var pad = literal.Length == 0
-            || literal[0] is '`' or ' '
-            || literal[^1] is '`' or ' ';
+        var allSpaces = literal.AsSpan().IndexOfAnyExcept(' ') < 0;
+        var pad = literal.Length == 0 || literal[0] == '`' || literal[^1] == '`'
+            || (!allSpaces && (literal[0] == ' ' || literal[^1] == ' '));
         return pad ? $"{fence} {literal} {fence}" : fence + literal + fence;
     }
 
@@ -380,21 +426,32 @@ internal sealed class MarkdownWriter
         if (needsAngle)
         {
             builder.Append('<');
-            foreach (var character in destination)
+        }
+
+        foreach (var character in destination)
+        {
+            if (character == '&')
             {
-                if (character is '<' or '>' or '\\')
+                builder.Append("&amp;");
+            }
+            else if (char.IsControl(character))
+            {
+                builder.Append("&#").Append(((int)character).ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(';');
+            }
+            else
+            {
+                if (character == '\\' || (needsAngle && character is '<' or '>'))
                 {
                     builder.Append('\\');
                 }
 
-                builder.Append(character == '\n' ? ' ' : character);
+                builder.Append(character);
             }
-
-            builder.Append('>');
         }
-        else
+
+        if (needsAngle)
         {
-            builder.Append(destination);
+            builder.Append('>');
         }
 
         if (title is not null)
@@ -402,6 +459,16 @@ internal sealed class MarkdownWriter
             builder.Append(" \"");
             foreach (var character in title)
             {
+                if (character == '&')
+                {
+                    builder.Append("&amp;");
+                    continue;
+                }
+                if (char.IsControl(character))
+                {
+                    builder.Append("&#").Append(((int)character).ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(';');
+                    continue;
+                }
                 if (character is '"' or '\\')
                 {
                     builder.Append('\\');
@@ -455,6 +522,7 @@ internal sealed class MarkdownWriter
         public OpKind Kind { get; private init; }
 
         public MarkdownNode? Node { get; private init; }
+        public char ListMarker { get; private init; }
 
         public string? Text { get; private init; }
 
@@ -463,6 +531,10 @@ internal sealed class MarkdownWriter
         public int EmphasisDepth { get; private init; }
 
         public bool NextStartsBracket { get; private init; }
+        public bool PreserveLeadingSpace { get; private init; }
+        public bool PreserveTrailingSpace { get; private init; }
+        public bool StartsAfterEmphasis { get; private init; }
+        public bool EndsBeforeEmphasis { get; private init; }
 
         public bool EmitIfMidLine { get; private init; }
 
@@ -472,12 +544,14 @@ internal sealed class MarkdownWriter
 
         public static Op PopPrefixOp { get; } = new() { Kind = OpKind.PopPrefix };
 
-        public static Op ForNode(MarkdownNode node) => new() { Kind = OpKind.Node, Node = node };
+        public static Op ForNode(MarkdownNode node, char listMarker = '\0') => new() { Kind = OpKind.Node, Node = node, ListMarker = listMarker };
 
         public static Op Raw(string text) => new() { Kind = OpKind.Raw, Text = text };
 
-        public static Op ForLiteral(string text, bool nextStartsBracket)
-            => new() { Kind = OpKind.Literal, Text = text, NextStartsBracket = nextStartsBracket };
+        public static Op ForLiteral(string text, bool nextStartsBracket, bool preserveLeadingSpace, bool preserveTrailingSpace, bool startsAfterEmphasis, bool endsBeforeEmphasis)
+            => new() { Kind = OpKind.Literal, Text = text, NextStartsBracket = nextStartsBracket,
+                PreserveLeadingSpace = preserveLeadingSpace, PreserveTrailingSpace = preserveTrailingSpace,
+                StartsAfterEmphasis = startsAfterEmphasis, EndsBeforeEmphasis = endsBeforeEmphasis };
 
         public static Op ForInlines(IList<MarkdownInline> inlines, int emphasisDepth)
             => new() { Kind = OpKind.Inlines, InlineList = inlines, EmphasisDepth = emphasisDepth };

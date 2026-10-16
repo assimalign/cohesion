@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="NameInvalid" xml:space="preserve"><value>The PDF name is invalid.</value></data>
+  <data name="RealInvalid" xml:space="preserve"><value>The PDF real must be finite.</value></data>
+  <data name="EncryptionUnsupported" xml:space="preserve"><value>PDF encryption and security handlers are unsupported.</value></data>
+  <data name="SourceNotSeekable" xml:space="preserve"><value>PDF requires a readable, seekable source for random access.</value></data>
+  <data name="TokenInvalid" xml:space="preserve"><value>The PDF token is invalid.</value></data>
+  <data name="StructureInvalid" xml:space="preserve"><value>The PDF structure is invalid.</value></data>
+  <data name="InputTruncated" xml:space="preserve"><value>The PDF input is truncated.</value></data>
+  <data name="ReaderLimit" xml:space="preserve"><value>The PDF reader limit was exceeded.</value></data>
+  <data name="HeaderInvalid" xml:space="preserve"><value>The PDF header is invalid or missing.</value></data>
+  <data name="XrefInvalid" xml:space="preserve"><value>The PDF cross-reference structure is invalid.</value></data>
+  <data name="StreamLengthInvalid" xml:space="preserve"><value>The PDF stream length does not match its extent.</value></data>
+  <data name="FilterUnsupported" xml:space="preserve"><value>The PDF stream filter is unsupported.</value></data>
+  <data name="FilterInvalid" xml:space="preserve"><value>The PDF stream filter data or parameters are invalid.</value></data>
+  <data name="PageTreeInvalid" xml:space="preserve"><value>The PDF page tree is invalid.</value></data>
+  <data name="WriterLimit" xml:space="preserve"><value>The PDF writer limit was exceeded.</value></data>
+  <data name="ObjectNotLive" xml:space="preserve"><value>The PDF identity does not identify a current live object.</value></data>
+  <data name="OutputForwardOnly" xml:space="preserve"><value>The PDF output supports forward-only writing.</value></data>
+  <data name="DirectCycle" xml:space="preserve"><value>A direct PDF container cycle cannot be serialized.</value></data>
+  <data name="ObjectUnsupported" xml:space="preserve"><value>The PDF object implementation or placement is unsupported.</value></data>
+  <data name="PackingNeedsStream" xml:space="preserve"><value>PDF object packing requires cross-reference streams.</value></data>
+  <data name="DestinationInvalid" xml:space="preserve"><value>The PDF destination must be writable, separate from the source, and have no trailing bytes.</value></data>
+  <data name="SourceChanged" xml:space="preserve"><value>The PDF backing source has changed since loading.</value></data>
+  <data name="VersionUnsupported" xml:space="preserve"><value>PDF cross-reference and object streams require version 1.5 or later.</value></data>
+  <data name="TableOffsetLimit" xml:space="preserve"><value>The PDF offset cannot fit a classic cross-reference table; use cross-reference streams.</value></data>
+  <data name="RepairedIncremental" xml:space="preserve"><value>A recovered PDF requires a full save before incremental updates.</value></data>
+  <data name="ObjectStreamEdited" xml:space="preserve"><value>Edit compressed members individually before replacing or freeing their object stream container.</value></data>
+  <data name="IdentifierInvalid" xml:space="preserve"><value>The PDF file identifier must contain exactly two byte strings.</value></data>
+  <data name="IdentifierChanged" xml:space="preserve"><value>The original first PDF file identifier must be retained when saving.</value></data>
+  <data name="VersionReduced" xml:space="preserve"><value>An incremental PDF update cannot reduce the effective document version.</value></data>
+</root>

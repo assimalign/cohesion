@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Content.Yaml.Internal;
 
@@ -10,12 +11,12 @@ namespace Assimalign.Cohesion.Content.Yaml.Internal;
 /// </summary>
 internal static class YamlComposer
 {
-    internal static YamlStream Compose(IReadOnlyList<YamlEvent> events)
+    internal static YamlStream Compose(IReadOnlyList<YamlEvent> events, string source)
     {
         var stream = new YamlStream();
         var index = 0;
 
-        Expect(events, ref index, YamlEventKind.StreamStart);
+        Expect(events, ref index, source, YamlEventKind.StreamStart);
 
         while (events[index].Kind == YamlEventKind.DocumentStart)
         {
@@ -25,20 +26,24 @@ internal static class YamlComposer
 
             if (events[index].Kind != YamlEventKind.DocumentEnd)
             {
-                document.Root = ComposeNode(events, ref index, anchors);
+                document.Root = ComposeNode(events, ref index, anchors, source);
             }
 
-            Expect(events, ref index, YamlEventKind.DocumentEnd);
+            Expect(events, ref index, source, YamlEventKind.DocumentEnd);
             stream.Documents.Add(document);
         }
 
-        Expect(events, ref index, YamlEventKind.StreamEnd);
+        Expect(events, ref index, source, YamlEventKind.StreamEnd);
         return stream;
     }
 
-    private static YamlNode ComposeNode(IReadOnlyList<YamlEvent> events, ref int index, Dictionary<string, YamlNode> anchors)
+    private static YamlNode ComposeNode(IReadOnlyList<YamlEvent> events, ref int index, Dictionary<string, YamlNode> anchors, string source)
     {
         var current = events[index++];
+        if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        {
+            throw YamlException.At(ErrorMessages.NestingLimitExceeded, ContentFormatErrorCode.LimitExceeded, current.Line, current.Column, source);
+        }
 
         switch (current.Kind)
         {
@@ -53,7 +58,7 @@ internal static class YamlComposer
             {
                 if (current.Value is null || !anchors.TryGetValue(current.Value, out var target))
                 {
-                    throw new YamlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AliasAnchorMissing, current.Value), current.Line, current.Column);
+                    throw YamlException.At(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AliasAnchorMissing, current.Value), ContentFormatErrorCode.InvalidStructure, current.Line, current.Column, source);
                 }
 
                 return target;
@@ -71,7 +76,7 @@ internal static class YamlComposer
 
                 while (events[index].Kind != YamlEventKind.SequenceEnd)
                 {
-                    sequence.Add(ComposeNode(events, ref index, anchors));
+                    sequence.Add(ComposeNode(events, ref index, anchors, source));
                 }
 
                 index++; // SequenceEnd
@@ -90,8 +95,8 @@ internal static class YamlComposer
 
                 while (events[index].Kind != YamlEventKind.MappingEnd)
                 {
-                    var key = ComposeNode(events, ref index, anchors);
-                    var value = ComposeNode(events, ref index, anchors);
+                    var key = ComposeNode(events, ref index, anchors, source);
+                    var value = ComposeNode(events, ref index, anchors, source);
                     mapping.Add(key, value);
                 }
 
@@ -100,7 +105,7 @@ internal static class YamlComposer
             }
 
             default:
-                throw new YamlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.NodeEventUnexpected, current.Kind), current.Line, current.Column);
+                throw YamlException.At(string.Format(CultureInfo.CurrentCulture, ErrorMessages.NodeEventUnexpected, current.Kind), ContentFormatErrorCode.InvalidStructure, current.Line, current.Column, source);
         }
     }
 
@@ -147,12 +152,12 @@ internal static class YamlComposer
         }
     }
 
-    private static void Expect(IReadOnlyList<YamlEvent> events, ref int index, YamlEventKind kind)
+    private static void Expect(IReadOnlyList<YamlEvent> events, ref int index, string source, YamlEventKind kind)
     {
         var current = events[index++];
         if (current.Kind != kind)
         {
-            throw new YamlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EventKindUnexpected, kind, current.Kind), current.Line, current.Column);
+            throw YamlException.At(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EventKindUnexpected, kind, current.Kind), ContentFormatErrorCode.InvalidStructure, current.Line, current.Column, source);
         }
     }
 }

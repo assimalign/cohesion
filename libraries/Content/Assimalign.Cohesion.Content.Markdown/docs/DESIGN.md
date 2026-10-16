@@ -7,7 +7,8 @@ and a canonical Markdown writer, built on `Content.Text` (the `TextTokenizer` dr
 phases) for the static content engine and any service that stores, transforms, or serves Markdown.
 The package implements a **deliberately scoped subset of CommonMark 0.31.2** — the baseline is
 named, the subset is enumerated below, and everything outside it degrades predictably to literal
-text. Parsing never throws for input: Markdown has no malformed documents, only text.
+text. Decoded Markdown text always parses: Markdown has no malformed documents, only text.
+Byte decoding can fail under a caller-supplied strict encoding, as described below.
 
 ## The retained subset (baseline: CommonMark 0.31.2)
 
@@ -41,6 +42,11 @@ parser complexity and accidental-input surprise, and fence-first Markdown is the
 (the same call MDX v2 made). Both are recorded here so "should we add X?" starts from the reason
 it was cut.
 
+The full [CommonMark corpus contract](../tests/TestObjects/CommonMark/PROVENANCE.md) executes all
+652 official examples: 406 retained expectations and 246 explicit degradation records. Sections
+that mix retained and excluded constructs carry example-number exceptions; retained defects are
+never reclassified as exclusions. New conformance in a degradation record requires scope review.
+
 ## Two-phase parser on the shared text layer
 
 The block phase (`MarkdownBlockParser`) consumes lines from a `TextTokenizer` with default options
@@ -72,7 +78,7 @@ renderer applies its own encoding.
 `Parse(string | Stream | ITextContent)`, `ToHtml`, `Write`, and the `IContentReader<>`/
 `IContentWriter<>` seams.
 
-## Error model: parsing never throws
+## Error model: total text parsing, explicit decoding failures
 
 Unlike YAML (which has malformed input and a `YamlException`), Markdown assigns meaning to every
 input, so this package defines **no exception root** — the parser cannot fail, and renderer/model
@@ -80,29 +86,79 @@ argument misuse throws BCL argument exceptions. There is deliberately no
 `MarkdownException`; a future need for one should be treated as a design smell (it would mean the
 parser stopped being total).
 
+Parse(ITextContent) propagates Content.Text decoding failures unchanged as ContentFormatException
+with InvalidValue, the first invalid byte position when known (including BOM bytes), and the
+DecoderFallbackException as InnerException. It does not wrap these as Markdown syntax errors.
+The detected-encoding Stream path and lenient ITextContent path retain replacement-character
+decoding: each maximal ill-formed subpart becomes U+FFFD before ordinary Markdown parsing.
+
 ## Robustness posture
 
-- **Container depth caps at 128** during parsing; deeper markers degrade to paragraph text. This
-  bounds block nesting from hostile input.
+- **`MarkdownParserOptions.MaxContainerDepth` defaults to 128**. The document does not count;
+  quotes, lists and list items each count one. Excess block starts degrade to paragraph text.
+  A new list/item pair must fit in the remaining budget. A positive caller value can raise or
+  lower the cap; the parser and renderers use explicit stacks.
+- **`MaxLinkDestinationDepth` defaults to 32** nested parentheses inside a bare destination.
+  Zero permits no nested parentheses. A deeper destination fails link recognition and its source
+  follows ordinary inline parsing; angle-bracket destinations are unaffected.
+- Both options are init-only and apply to every parse overload and `CreateReader`. Invalid
+  ranges throw `ArgumentOutOfRangeException` at composition. Neither limit rejects decoded
+  Markdown, so neither produces `LimitExceeded`; strict decoder failures retain `InvalidValue`.
+  There is no delimiter-run cap: emphasis and code-span runs are scanned in memory and long
+  runs remain accepted. The whole source and resulting model remain buffered.
 - **Inline nesting is unbounded by parsing** (emphasis wraps bottom-up), so **both renderers walk
   iteratively** with explicit op stacks — no recursion anywhere in the package, and caller-built
   trees of any depth render without stack overflow.
+- Unresolved inline literals accumulate in a StringBuilder and materialize once per run, avoiding
+  quadratic copying for long bracket sequences. The hostile corpus guards both wall-clock bounds
+  at geometrically increasing sizes and linear allocation growth for unresolved labels.
+- Bracket openers use an explicit stack; successful links invalidate prior link openers with a
+  generation counter. Nested labels therefore do not repeatedly scan the accumulated atom prefix.
 - `U+0000` becomes `U+FFFD` at inline parse, per the spec's insecure-characters rule.
+
+Marker-only quotes and list items contain no synthetic empty paragraph. An empty item may start
+with one blank marker line; a second blank closes it. Blank separators after empty items still
+participate in list looseness. CommonMark examples 239–241, 279–280 and 315 protect this boundary.
+
+List continuation indentation is measured relative to the current parent prefix, not the absolute
+column on the opening line. Quotes may vary their leading spaces without moving list content.
+
+Blank lines loosen their immediate list item. A child quote or an interior blank in a nested list
+does not loosen the outer list; a trailing blank propagates when the nested list closes.
+
+Tabs expand at four-column stops even when a container consumes only part of one. Unconsumed
+columns remain available to nested markers and become literal spaces in fenced code payloads.
+
+Blank fenced-code lines consume their list-item prefix exactly as nonblank lines do; additional
+payload spaces are preserved. Canonical re-indentation therefore cannot inflate blank code lines.
 
 ## Renderers
 
 **HTML** (`MarkdownHtmlRenderer`) emits the shapes the spec's examples use — tight list items
 render bare inline content, loose items wrap paragraphs, image alt text flattens to plain text,
 destinations percent-encode over the reference implementation's safe set and entity-escape in
-attributes — so spec-derived expectations assert byte-for-byte.
+attributes — including percent-encoding square brackets in destinations while preserving display
+text — so spec-derived expectations assert byte-for-byte.
 
-**Canonical Markdown** (`MarkdownWriter`) normalizes on output: `-` bullets, `N.` ordered markers,
-ATX headings, backtick fences (tilde when the info string carries a backtick), `---` breaks,
+**Canonical Markdown** (`MarkdownWriter`) normalizes on output: `-` bullets, `N.` ordered markers (alternating `+` / `N)` for adjacent
+same-kind lists, preserving their boundaries),
+ATX headings, backtick fences (tilde when the info string carries a backtick), `---` breaks
+(`***` after an item marker, where dashes could swallow the item),
 emphasis delimiters alternating `*`/`_` by nesting depth (so nested emphasis never fuses into
 `**`), conservative literal escaping (structural characters always; block markers at line start;
 `!` only before a bracket), and prefix-stack container writing where a quote opening mid-line
 (first block of a list item) emits its marker inline. The invariant tests enforce:
-**write → parse → write is a fixed point, and parse → write → parse preserves the rendered HTML.**
+**write → parse → write is a fixed point, and parse → write → parse preserves every model field,
+child node and the rendered HTML across all 652 corpus examples.**
+Literal CR/LF/tab and edge spaces use numeric references when raw whitespace would change the
+model; literal hashes are escaped so heading text cannot become a closing ATX sequence.
+All-space code spans emit exactly their space count; padding is only added when code-span
+normalization will remove it (or to separate literal backticks from the fence).
+Destinations and titles escape backslashes and ampersands and encode control characters as
+numeric references, preserving decoded values without a second entity/escape interpretation.
+At word/emphasis boundaries the writer may spell an edge scalar as a numeric reference. This
+preserves the literal value while giving alternating nested delimiters the punctuation context
+needed for CommonMark flanking rules, including intraword strong/emphasis combinations.
 The guarantee covers parser-produced trees; hand-built trees can express forms with no Markdown
 spelling (emphasis around whitespace) and round-trip only when they stay inside what the parser
 can produce.
@@ -111,6 +167,19 @@ can produce.
 
 `<IsAotCompatible>true</IsAotCompatible>` (inherited). Hand-written scanning over spans and the
 `TextTokenizer`; no regular expressions, no reflection, no dynamic code.
+
+## Resource-limit regression coverage
+
+Authored child-process probes exercise 1,000, 10,000 and 100,000 nested quotes, lists, emphasis,
+link labels, images and destination parentheses. Passing probes repeat in-process and render.
+Boundary tests lower and raise the options, ensure list/item pairs stay within the cap, preserve
+sibling items after a full-depth item, and verify destination degradation and long delimiter runs.
+The full CommonMark corpus and canonical round trips remain the conformance floor.
+
+The old block guard counted the document's stack entry and could add a two-entry list/item pair
+across the threshold. The explicit option now consistently excludes the document and checks the
+whole pair. At the default this permits 128 quotes (previously 127), while still limiting lists
+to 128 combined list/item levels.
 
 ## Non-goals
 

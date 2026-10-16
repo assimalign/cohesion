@@ -1,38 +1,53 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
-[DebuggerDisplay("Bmff Box: Null Media Header (nmhd)")]
-public sealed class NullMediaHeaderBox : BmffBox
+namespace Assimalign.Cohesion.Content.Bmff;
+
+/// <summary>The NullMediaHeader box; ISO/IEC 14496-12 8.4.5.5.</summary>
+public sealed class NullMediaHeaderBox : BmffFullBox
 {
-    public NullMediaHeaderBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
+    private byte[] _trailing = Array.Empty<byte>();
+    /// <summary>Creates a NullMediaHeaderBox at its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public NullMediaHeaderBox(long offset, long limit) { SetOriginalLocation(offset, limit);  }
 
-    public override bool IsLeaf => true;
-    public override bool IsComposite => false;
-    public override long Limit { get; }
-    public override long Offset { get; }
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.NullMediaHeader;
 
+
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 0, 0, stream.Offset);
 
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
     }
-
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new NotImplementedException();
+        Validate();
+        WriteFullBoxHeader(stream);
+
+        stream.Write(_trailing);
     }
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    /// <inheritdoc/>
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 4L + _trailing.Length;
     }
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 0, 0, Offset);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

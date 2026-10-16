@@ -279,7 +279,7 @@ internal static class MarkdownHtmlRenderer
 
     // The characters a destination may carry into an href unencoded — the reference
     // implementation's safe set. Everything else percent-encodes as UTF-8.
-    private const string urlSafe = "!#$%&'()*+,-./0123456789:;=?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz~";
+    private const string urlSafe = "!#$%&'()*+,-./0123456789:;=?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~";
 
     private static void AppendUrl(StringBuilder builder, string destination)
     {
