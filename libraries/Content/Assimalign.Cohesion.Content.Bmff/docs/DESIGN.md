@@ -393,3 +393,23 @@ sample-entry dispatch, inherited depth limits, sidx/saio v0/v1 preservation, nes
 width promotion, absolute and fragment-relative auxiliary addresses, and transactional custom
 rules. MP4 fixtures verify fast-start sample and auxiliary bytes; HEIF fixtures exercise payload
 compaction, partial sharing and rollback. These are container checks, not codec certification.
+
+## Primary traversal
+
+BmffBoxWalker and BmffQueryExtensions are the primary traversal API (O-C5). The walker visits
+any box or document in depth-first order, including unknown and profile boxes, with enter/leave
+callbacks carrying the node, zero-based depth and a borrowed read-only FourCC path. SkipSubtree
+still receives a matching leave; Stop ends immediately without unwinding callbacks. The walk is
+iterative, keeps only ancestor frames, rejects cycles and defaults to a maximum depth of 64.
+Copy a callback path before retaining it. Do not edit child lists during traversal.
+
+Children<T> queries direct children; Descendants<T>, FindAll and First/FirstOrDefault search
+in preorder. Composite queries exclude their receiver; document queries include top-level boxes.
+FindAll and First/FirstOrDefault accept BmffBoxType or FourCC, including unregistered values.
+Queries are lazy and bounded by depth, so first-match queries stop without visiting later trees.
+Their depth is measured from each direct child, starting at zero. No query reads a lazy payload.
+
+Accept and both visitor interfaces retain their exact signatures for compatibility. Their typed
+overload set is closed: BMFF cannot reference profile assemblies, and profile boxes cannot add
+methods to those interfaces. They use Visit(BmffBox); walker callbacks and generic type queries
+see the concrete profile nodes without extending that closed set.
