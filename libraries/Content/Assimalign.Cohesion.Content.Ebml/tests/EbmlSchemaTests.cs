@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlSchemaTests
 {
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - Defaults: zero remains distinct from a nonzero schema default")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Defaults: zero remains distinct from a nonzero schema default")]
     [InlineData(0UL, 1)]
     [InlineData(7UL, 0)]
     public void WriteUnsignedInteger_DefaultedValue_UsesCorrectMinimalLength(ulong value, int length)
@@ -34,7 +34,7 @@ public class EbmlSchemaTests
         reader.ReadValue().ShouldBe(value);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Build: schema snapshots are immutable")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Build: schema snapshots are immutable")]
     public void Build_AfterBuilderChanges_PreservesSnapshot()
     {
         // Arrange
@@ -50,7 +50,7 @@ public class EbmlSchemaTests
         Should.Throw<ArgumentException>(() => builder.Include(EbmlSchema.Header));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Registry: derived DocType resolves typed body without core edits")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Registry: derived DocType resolves typed body without core edits")]
     public void Load_RegisteredDerivedType_ResolvesBody()
     {
         // Arrange
@@ -75,7 +75,7 @@ public class EbmlSchemaTests
         registry.Find("DERIVED-TEST").ShouldBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - Validation: range violations throw or record diagnostics")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Validation: range violations throw or record diagnostics")]
     [InlineData(false)]
     [InlineData(true)]
     public void ReadValue_OutOfRange_UsesValidationMode(bool lenient)
@@ -103,7 +103,7 @@ public class EbmlSchemaTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Validation: missing required child is detected at master exit")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Validation: missing required child is detected at master exit")]
     public void LeaveMaster_MissingMandatoryChild_ReportsStructure()
     {
         // Arrange
@@ -118,7 +118,7 @@ public class EbmlSchemaTests
         error.Position.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Validation: empty values resolve declared defaults")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Validation: empty values resolve declared defaults")]
     public void ReadValue_EmptyDefaultedElement_UsesSchemaDefault()
     {
         // Arrange
@@ -135,7 +135,7 @@ public class EbmlSchemaTests
         reader.LeaveMaster();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Validation: wrong model type has a classified failure")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Validation: wrong model type has a classified failure")]
     public void Validate_WrongTypeForId_ReportsInvalidValue()
     {
         // Arrange
@@ -149,7 +149,7 @@ public class EbmlSchemaTests
         error.ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidValue);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - Validation: invalid scalar sizes retain raw bytes in lenient mode")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Validation: invalid scalar sizes retain raw bytes in lenient mode")]
     [InlineData(false)]
     [InlineData(true)]
     public void ReadValue_InvalidScalarWidth_ReportsOrPreserves(bool lenient)
@@ -173,7 +173,7 @@ public class EbmlSchemaTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Validation: duplicate singleton is rejected")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Validation: duplicate singleton is rejected")]
     public void ReadNext_DuplicateSingleton_ReportsStructure()
     {
         // Arrange
@@ -187,7 +187,7 @@ public class EbmlSchemaTests
         Should.Throw<ContentFormatException>(() => reader.ReadNext()).ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidStructure);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Validation: unknown-size eligibility is schema controlled")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Validation: unknown-size eligibility is schema controlled")]
     public void ReadNext_DisallowedUnknownSize_ReportsStructure()
     {
         // Arrange
@@ -198,7 +198,7 @@ public class EbmlSchemaTests
         Should.Throw<ContentFormatException>(() => reader.ReadNext()).ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidStructure);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Build: invalid parent and recursive unknown-size definitions are refused")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11: Build: invalid parent and recursive unknown-size definitions are refused")]
     public void Build_InvalidDefinitions_RejectsConfiguration()
     {
         // Arrange

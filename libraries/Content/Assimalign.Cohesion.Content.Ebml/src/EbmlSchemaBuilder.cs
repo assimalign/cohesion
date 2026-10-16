@@ -8,6 +8,9 @@ public sealed class EbmlSchemaBuilder
 {
     private readonly Dictionary<ulong, EbmlElementDefinition> _definitions = new();
 
+    /// <summary>Creates an empty builder; use Include to compose the RFC header schema.</summary>
+    public EbmlSchemaBuilder() { }
+
     /// <summary>Adds an element definition.</summary>
     /// <param name="definition">The immutable definition.</param>
     /// <returns>This builder.</returns>
@@ -50,7 +53,8 @@ public sealed class EbmlSchemaBuilder
             foreach (var parentId in definition.ParentIds)
             {
                 if (!_definitions.TryGetValue(parentId.EncodedValue, out var parent) || parent.Type != EbmlElementType.MasterElement ||
-                    (definition.UnknownSizeAllowed && !parent.UnknownSizeAllowed))
+                    (definition.UnknownSizeAllowed && !parent.UnknownSizeAllowed) ||
+                    (parentId.EncodedValue == definition.Identifier.EncodedValue && !definition.Recursive))
                 {
                     throw new ArgumentException(ErrorMessages.SchemaConflict);
                 }

@@ -30,7 +30,7 @@ public sealed partial class EbmlWriter
 
             if (element.IsUnknownSize && _schema.Find(element.Identifier)?.UnknownSizeAllowed != true)
             {
-                throw new ArgumentException(ErrorMessages.UnknownSize);
+                throw new EbmlDataFormatException(ErrorMessages.UnknownSize, ContentFormatErrorCode.InvalidStructure, _position);
             }
 
             await WriteHeaderAsync(element.Identifier, element.IsUnknownSize ? null : length, width, cancellationToken).ConfigureAwait(false);

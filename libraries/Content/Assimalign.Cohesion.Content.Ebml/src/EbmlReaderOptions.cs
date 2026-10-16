@@ -5,6 +5,9 @@ namespace Assimalign.Cohesion.Content.Ebml;
 /// <summary>Bounds parsing and document materialization. Values are snapshotted at creation.</summary>
 public sealed class EbmlReaderOptions
 {
+    /// <summary>Creates options with bounded RFC-compatible defaults.</summary>
+    public EbmlReaderOptions() { }
+
     /// <summary>Gets or sets the maximum buffered leaf length, initially 16 MiB.</summary>
     public int MaxBufferedValueLength { get; set; } = 16 * 1024 * 1024;
     /// <summary>Gets or sets the maximum entered master depth, initially 64 (at most 256).</summary>

@@ -58,6 +58,9 @@ public readonly struct VInt
     public int Length => _length;
 
 
+    /// <summary>Converts a known size to its data value, or unknown size to null.</summary>
+    /// <param name="value">The VINT.</param>
+    /// <returns>The size, or null for the reserved sentinel.</returns>
     public static implicit operator ulong?(VInt value) => !value.IsReserved ? value.Value : (ulong?)null;
 
     #endregion
@@ -69,7 +72,9 @@ public readonly struct VInt
     /// </summary>
     /// <param name="value">(Size) value to be encoded.</param>
     /// <param name="length">VInt length to store value to.</param>
-    /// <returns></returns>
+    /// <returns>The encoded size, preserving an explicit width.</returns>
+    /// <exception cref="ArgumentException">The value cannot fit in the requested width or VINT capacity.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The width is outside zero through eight.</exception>
     public static VInt EncodeSize(ulong value, int length = 0)
     {
         if (value > MaxSizeValue)
@@ -95,13 +100,14 @@ public readonly struct VInt
     }
 
     /// <summary>
-    /// 
+    /// Encodes nonzero identifier data into a shortest valid ID of at most four octets.
     /// </summary>
-    /// <param name="elementId"></param>
-    /// <returns></returns>
+    /// <param name="elementId">The ID data bits, without a width marker.</param>
+    /// <returns>The encoded identifier.</returns>
+    /// <exception cref="ArgumentException">The identifier is zero or exceeds the four-octet ID capacity.</exception>
     public static VInt MakeId(uint elementId)
     {
-        if (elementId > MaxElementIdValue)
+        if (elementId == 0 || elementId >= MaxElementIdValue)
         {
             throw new ArgumentException(ErrorMessages.VIntCapacity, nameof(elementId));
         }
@@ -114,11 +120,12 @@ public readonly struct VInt
     /// <summary>
     /// Creates VInt for unknown size (all databits are 1's)
     /// </summary>
-    /// <param name="length"></param>
-    /// <returns></returns>
+    /// <param name="length">The encoded width, from one through eight.</param>
+    /// <returns>The unknown-size sentinel at the requested width.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The width is outside one through eight.</exception>
     public static VInt UnknownSize(int length)
     {
-        if (length < 0 || length > 8)
+        if (length < 1 || length > 8)
         {
             throw new ArgumentOutOfRangeException(nameof(length));
         }
@@ -131,8 +138,9 @@ public readonly struct VInt
     /// <summary>
     /// Constructs the VInt value from its encoded form
     /// </summary>
-    /// <param name="encodedValue"></param>
-    /// <returns></returns>
+    /// <param name="encodedValue">The marker and data bits in wire order.</param>
+    /// <returns>The decoded VINT, retaining its marker and width.</returns>
+    /// <exception cref="ArgumentException">The marker does not agree with the encoded width.</exception>
     public static VInt FromEncoded(ulong encodedValue)
     {
         if (encodedValue == 0)
@@ -164,11 +172,15 @@ public readonly struct VInt
     /// <summary>
     /// Reads the value from the stream
     /// </summary>
-    /// <param name="source"></param>
-    /// <param name="maxLength">Maximal expected length (either 4 or 8)</param>
-    /// <param name="buffer">The buffer for optimization purposes. Must match the maxlength</param>
-    /// <returns></returns>
-    public static VInt Read(Stream source, int maxLength, byte[] buffer)
+    /// <param name="source">The readable source; a non-seekable source is assumed to start at offset zero.</param>
+    /// <param name="maxLength">The maximum encoded width, from one through eight.</param>
+    /// <param name="buffer">Optional scratch storage of at least maxLength bytes; null uses stack storage.</param>
+    /// <returns>The encoded VINT.</returns>
+    /// <exception cref="ArgumentNullException">The source is null.</exception>
+    /// <exception cref="ArgumentException">The scratch buffer is too short.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The maximum width is outside one through eight.</exception>
+    /// <exception cref="ContentFormatException">The input is truncated, has a zero marker, or exceeds the width limit.</exception>
+    public static VInt Read(Stream source, int maxLength, byte[]? buffer)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxLength, 1);
@@ -179,7 +191,7 @@ public readonly struct VInt
         }
 
         var input = new EbmlInput(source);
-        Span<byte> bytes = stackalloc byte[8];
+        Span<byte> bytes = buffer is null ? stackalloc byte[8] : buffer;
         try
         {
             input.ReadContentExactly(bytes[..1]);
@@ -202,7 +214,9 @@ public readonly struct VInt
     /// <summary>
     /// Writes value to stream
     /// </summary>
-    /// <param name="stream"></param>
+    /// <param name="stream">The writable destination, which remains open.</param>
+    /// <returns>The number of octets written.</returns>
+    /// <exception cref="ArgumentNullException">The destination is null.</exception>
     public int Write(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -264,6 +278,7 @@ public readonly struct VInt
 
     #region Equality members
 
+    /// <inheritdoc/>
     public override int GetHashCode()
     {
         unchecked
@@ -277,6 +292,7 @@ public readonly struct VInt
         return other.EncodedValue == EncodedValue && other._length == _length;
     }
 
+    /// <inheritdoc/>
     public override bool Equals(object? obj)
     {
         return obj is VInt i && Equals(i);
@@ -284,6 +300,7 @@ public readonly struct VInt
 
     #endregion
 
+    /// <inheritdoc/>
     public override string ToString()
     {
         return $"VInt, value = {Value}, length = {Length}, encoded = {EncodedValue:X}";

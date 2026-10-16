@@ -357,10 +357,11 @@ public sealed partial class EbmlReader : IDisposable
     internal EbmlElement ReadTree(ref int count, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (++count > _options.MaxElementCount)
+        if (count >= _options.MaxElementCount)
         {
             throw new EbmlDataFormatException(ErrorMessages.ElementLimit, ContentFormatErrorCode.LimitExceeded, Current.Offset);
         }
+        count++;
 
         var header = Current;
         var sourceOffset = _source.CanSeek ? _source.Position : 0;

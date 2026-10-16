@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlDocumentTests
 {
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Save: recalculates CRC after metadata edits")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§8,11: Save: recalculates CRC after metadata edits")]
     public void Save_EditedCrcParent_RecalculatesChecksum()
     {
         // Arrange
@@ -36,7 +36,7 @@ public class EbmlDocumentTests
         reloaded.Body.Elements[0].Children[1].Value.ShouldBe(128UL);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Content contracts: use async I/O including CRC and lazy copy-through")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§8,11: Content contracts: use async I/O including CRC and lazy copy-through")]
     public async Task ReadAsync_AsyncOnlyStreams_RoundTripsWithoutSyncIo()
     {
         // Arrange
@@ -61,7 +61,7 @@ public class EbmlDocumentTests
         ((BinarySegment)loaded.Body.Elements[0].Children[^1].Value!).IsMaterialized.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - ReadAsync: cancellation during short reads leaves source borrowed")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§8,11: ReadAsync: cancellation during short reads leaves source borrowed")]
     public async Task ReadAsync_CancelledDuringIo_StopsParsing()
     {
         // Arrange
@@ -78,7 +78,7 @@ public class EbmlDocumentTests
         source.CanRead.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Save: constructed document round-trips byte-for-byte")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§8,11: Save: constructed document round-trips byte-for-byte")]
     public void Save_ConstructedDocument_PreservesBytesAndLazyUnknowns()
     {
         // Arrange
@@ -102,7 +102,7 @@ public class EbmlDocumentTests
         original.CanRead.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Save: edited metadata recomputes parent lengths")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§8,11: Save: edited metadata recomputes parent lengths")]
     public void Save_EditedMetadata_UpdatesSizesAndCopiesBinary()
     {
         // Arrange
@@ -124,7 +124,7 @@ public class EbmlDocumentTests
         ((BinarySegment)reloaded.Body.Elements[0].Children[^1].Value!).ToArray(3).ShouldBe(new byte[] { 9, 8, 7 });
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Dispose: closes only explicitly owned sources")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§8,11: Dispose: closes only explicitly owned sources")]
     public void Dispose_OwnedSource_ClosesSource()
     {
         // Arrange
@@ -141,7 +141,7 @@ public class EbmlDocumentTests
         source.CanRead.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - Content contracts: load and save with cancellation")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§8,11: Content contracts: load and save with cancellation")]
     public async Task ReadAsync_ContentContracts_RoundTrips()
     {
         // Arrange

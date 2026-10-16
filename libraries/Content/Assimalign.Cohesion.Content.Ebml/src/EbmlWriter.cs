@@ -152,7 +152,8 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="size">A precomputed payload size; null requests unknown size or back-patching.</param>
     /// <param name="sizeLength">The size VINT width; zero uses minimal known width or eight for unknown size.</param>
     /// <param name="backPatch">Whether to fill the size when EndMaster is called; requires seekable output and null size.</param>
-    /// <exception cref="ArgumentException">The ID, size, schema eligibility, or mode is invalid.</exception>
+    /// <exception cref="ArgumentException">The ID, size, or mode is invalid.</exception>
+    /// <exception cref="ContentFormatException">The schema prohibits this type or unknown size.</exception>
     /// <exception cref="InvalidOperationException">The output cannot seek or nesting exceeds its limit.</exception>
     public void BeginMaster(VInt identifier, long? size = null, int sizeLength = 0, bool backPatch = false)
     {
@@ -164,7 +165,7 @@ public sealed partial class EbmlWriter : IDisposable
         var definition = _schema.Find(identifier);
         if (definition is not null && definition.Type != EbmlElementType.MasterElement)
         {
-            throw new ArgumentException(ErrorMessages.InvalidType, nameof(identifier));
+            throw new EbmlDataFormatException(ErrorMessages.InvalidType, ContentFormatErrorCode.InvalidValue, _position);
         }
 
         if (backPatch && (!_output.CanSeek || size is not null))
@@ -174,7 +175,7 @@ public sealed partial class EbmlWriter : IDisposable
 
         if (size is null && !backPatch && definition?.UnknownSizeAllowed != true)
         {
-            throw new ArgumentException(ErrorMessages.UnknownSize, nameof(identifier));
+            throw new EbmlDataFormatException(ErrorMessages.UnknownSize, ContentFormatErrorCode.InvalidStructure, _position);
         }
 
         var width = sizeLength == 0 && size is null ? 8 : sizeLength;

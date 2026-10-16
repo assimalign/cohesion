@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlCrcTests
 {
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - CRC-32: checks all sibling bytes on seekable and streaming input")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11.3.1: CRC-32: checks all sibling bytes on seekable and streaming input")]
     [InlineData(false)]
     [InlineData(true)]
     public void Skip_ValidCrc_VerifiesWithoutMasterBuffer(bool forwardOnly)
@@ -30,7 +30,7 @@ public class EbmlCrcTests
         reader.Diagnostics.ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - CRC-32: mismatches throw or become lenient diagnostics")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11.3.1: CRC-32: mismatches throw or become lenient diagnostics")]
     [InlineData(false)]
     [InlineData(true)]
     public void Skip_TamperedPayload_ReportsMismatch(bool lenient)
@@ -58,7 +58,7 @@ public class EbmlCrcTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - CRC-32: nested unknown masters exclude their sibling lookahead")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11.3.1: CRC-32: nested unknown masters exclude their sibling lookahead")]
     public void Skip_NestedUnknownCrc_AccountsForEachParent()
     {
         // Arrange
@@ -76,7 +76,7 @@ public class EbmlCrcTests
         reader.ReadNext().ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - CRC-32: an opt-out scan does not verify a checksum")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§11.3.1: CRC-32: an opt-out scan does not verify a checksum")]
     public void Skip_VerificationDisabled_IgnoresMismatch()
     {
         // Arrange

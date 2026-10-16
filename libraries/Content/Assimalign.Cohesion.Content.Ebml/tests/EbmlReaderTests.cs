@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlReaderTests
 {
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - ReadNext: iterates typed values with absolute headers")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: ReadNext: iterates typed values with absolute headers")]
     public void ReadNext_TypedTree_ReturnsValuesAndOffsets()
     {
         // Arrange
@@ -53,7 +53,7 @@ public class EbmlReaderTests
         binary.ToArray(3).ShouldBe(new byte[] { 1, 2, 3 });
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - ReadNext: non-seekable unknown master ends before its sibling")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: ReadNext: non-seekable unknown master ends before its sibling")]
     public void ReadNext_UnknownMasterOnNonSeekableInput_PreservesSibling()
     {
         // Arrange
@@ -87,7 +87,7 @@ public class EbmlReaderTests
         reader.ReadNext().ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - ReadValue: preserves integer and date extrema")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: ReadValue: preserves integer and date extrema")]
     [InlineData(long.MinValue)]
     [InlineData(-129)]
     [InlineData(-128)]
@@ -107,7 +107,7 @@ public class EbmlReaderTests
         reader.ReadSignedInteger().ShouldBe(value);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - ReadValue: empty scalar values have zero defaults")]
+    [Theory(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: ReadValue: empty scalar values have zero defaults")]
     [InlineData(EbmlElementType.UnsignedInteger)]
     [InlineData(EbmlElementType.SignedInteger)]
     [InlineData(EbmlElementType.Float)]
@@ -128,7 +128,7 @@ public class EbmlReaderTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - ReadValue: ignores bytes following a string NUL")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: ReadValue: ignores bytes following a string NUL")]
     public void ReadValue_TerminatedString_IgnoresFollowingBytes()
     {
         // Arrange
@@ -139,7 +139,7 @@ public class EbmlReaderTests
         reader.ReadUtf8String().ShouldBe("a");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - ReadBinary: non-seekable materialization respects cap")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: ReadBinary: non-seekable materialization respects cap")]
     public void ReadBinary_NonSeekableOverCap_ReportsLimit()
     {
         // Arrange
@@ -153,7 +153,7 @@ public class EbmlReaderTests
         error.Position.ShouldBe(2);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - ReadNext: requires consumption before advancing")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: ReadNext: requires consumption before advancing")]
     public void ReadNext_UnreadPayload_RejectsAdvance()
     {
         // Arrange

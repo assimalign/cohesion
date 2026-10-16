@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlWriterTests
 {
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - WriteElement: precomputes master size on non-seekable output")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: WriteElement: precomputes master size on non-seekable output")]
     public void WriteElement_ForwardOnlyOutput_RoundTrips()
     {
         // Arrange
@@ -27,7 +27,7 @@ public class EbmlWriterTests
         loaded.Body.Elements[0].Children.Count.ShouldBe(8);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - EndMaster: patches reserved size and restores cursor")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: EndMaster: patches reserved size and restores cursor")]
     public void EndMaster_BackPatch_WritesKnownSize()
     {
         // Arrange
@@ -44,7 +44,7 @@ public class EbmlWriterTests
         bytes.Position.ShouldBe(6);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - WriteValue: explicit widths and Void padding are honored")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: WriteValue: explicit widths and Void padding are honored")]
     public void WriteValue_ExplicitWidths_EmitsPadding()
     {
         // Arrange / Act
@@ -58,7 +58,7 @@ public class EbmlWriterTests
         bytes.ShouldBe(new byte[] { 0xA4, 0x40, 3, 0x61, 0, 0, 0xEC, 0x82, 0, 0 });
     }
 
-    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - EndMaster: rejects declared size mismatch")]
+    [Fact(DisplayName = "Cohesion Test [Content.Ebml] - RFC 8794 §§6–7: EndMaster: rejects declared size mismatch")]
     public void EndMaster_SizeMismatch_Throws()
     {
         // Arrange

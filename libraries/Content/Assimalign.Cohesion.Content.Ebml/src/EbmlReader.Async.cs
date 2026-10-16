@@ -80,10 +80,11 @@ public sealed partial class EbmlReader
     internal async ValueTask<EbmlElement> ReadTreeAsync(int[] count, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (++count[0] > _options.MaxElementCount)
+        if (count[0] >= _options.MaxElementCount)
         {
             throw new EbmlDataFormatException(ErrorMessages.ElementLimit, ContentFormatErrorCode.LimitExceeded, Current.Offset);
         }
+        count[0]++;
 
         var header = Current;
         var sourceOffset = _source.Position; // Document adapters require seekable input.

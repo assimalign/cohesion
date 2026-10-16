@@ -168,6 +168,10 @@ public sealed class EbmlElementDefinition
     {
         if (IsGlobal)
         {
+            if (parent is 0x1A45DFA3 or 0x4281 && Identifier.EncodedValue is not (0xEC or 0xBF))
+            {
+                return false; // RFC 8794 section 11.3: derived globals apply only to the body.
+            }
             return Identifier.EncodedValue != 0xBF || parent is not null;
         }
 
