@@ -495,8 +495,6 @@
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Heif/docs/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Heif/docs/DESIGN.md" />
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Heif/docs/OVERVIEW.md" />
-		<File Path="libraries/Content/Assimalign.Cohesion.Content.Heif/docs/PUBLIC_SURFACE.md" />
-		<File Path="libraries/Content/Assimalign.Cohesion.Content.Heif/docs/VERIFICATION.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Heif/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Heif/src/Assimalign.Cohesion.Content.Heif.csproj" />

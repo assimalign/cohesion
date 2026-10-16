@@ -88,8 +88,6 @@
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Heif/docs/">
 		<File Path="Assimalign.Cohesion.Content.Heif/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Content.Heif/docs/OVERVIEW.md" />
-		<File Path="Assimalign.Cohesion.Content.Heif/docs/PUBLIC_SURFACE.md" />
-		<File Path="Assimalign.Cohesion.Content.Heif/docs/VERIFICATION.md" />
 	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Heif/src/">
 		<Project Path="Assimalign.Cohesion.Content.Heif/src/Assimalign.Cohesion.Content.Heif.csproj" />
