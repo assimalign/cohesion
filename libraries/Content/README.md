@@ -54,7 +54,7 @@ Media, and MPEG references BMFF and Media. The target direction is in the [area 
 | [`Assimalign.Cohesion.Content.Heif`](./Assimalign.Cohesion.Content.Heif/) | HEIF/AVIF still-image items, derived images, lazy payloads and metadata editing | Content.Bmff | Strategic | Implemented (still-image container scope) |
 | [`Assimalign.Cohesion.Content.Mpeg`](./Assimalign.Cohesion.Content.Mpeg/) | MP4 profile over BMFF: brands, sample entries, media model, edit lists, fast start, CMAF checks | Content.Bmff, Content.Media | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Ebml`](./Assimalign.Cohesion.Content.Ebml/) | EBML reader, writer, document, schema and DocType registry | Content.Binary | Strategic | Implemented |
-| [`Assimalign.Cohesion.Content.Mkv`](./Assimalign.Cohesion.Content.Mkv/) | Matroska and WebM over EBML: schema, blocks and lacing, media model, metadata editing | Content.Ebml, Content.Media | Strategic | Implemented (typed chapters and forward-only frames in #1559) |
+| [`Assimalign.Cohesion.Content.Mkv`](./Assimalign.Cohesion.Content.Mkv/) | Matroska and WebM over EBML: schema, blocks and lacing, media model, metadata editing | Content.Ebml, Content.Media | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Pdf`](./Assimalign.Cohesion.Content.Pdf/) | PDF object model, parser, cross-reference resolution, full save and incremental update | Content.Binary | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Exe`](./Assimalign.Cohesion.Content.Exe/) | Executable inspection and, separately, process invocation (owner decision O-C1) | Content.Binary | Strategic | Implemented |
 
