@@ -139,16 +139,6 @@ public class GlobTests
         Assert.Equal(pattern, resultPattern);
     }
 
-    //[Theory]
-
-    //public void EscapeCharactersTest(string pattern, string expectedFormatted)
-    //{
-    //    var glob = Globbing.Glob.Parse(pattern);
-    //    Assert.Equal(expectedFormatted, glob.ToString());
-    //}
-
-
-
     [Theory]
     [InlineData("path/hatstand",
         typeof(LiteralToken),
@@ -237,81 +227,6 @@ public class GlobTests
                 }
             }
         }
-    }
-
-    //[Theory]
-    // Identifier tests
-    [InlineData("$tf/", @"$tf/", "xtf")]
-
-    // Wildcard tests
-    [InlineData("*.txt", @"c:\windows\file.txt", "file.zip")]
-    [InlineData("*.txt", "file.txt")]
-    [InlineData("/some/dir/folder/foo.*", "/some/dir/folder/foo.txt")]
-    [InlineData("/some/dir/folder/foo.*", "/some/dir/folder/foo.csv")]
-    [InlineData("a_*file.txt", "a_bigfile.txt", "another_file.txt")]
-    [InlineData("a_*file.txt", "a_file.txt")]
-    [InlineData("*file.txt", "bigfile.txt")]
-    [InlineData("*file.txt", "smallfile.txt")]
-    [InlineData("a/*", "a/", "a")]
-    [InlineData("*", "a")]
-    [InlineData("*", "folder1/a")]
-    [InlineData("~$*", "~$ ~$a ~$aa")]
-
-    // Character Range tests
-    [InlineData("[]-]", "] -")]
-    [InlineData("[/]", null, "/ a b")]
-    [InlineData("[!]-]", "a b c", "] -")]
-    [InlineData("[a-]", "a -")]
-    [InlineData("[!a-]", "b", "a -")]
-    [InlineData("[-a]", "a -")]
-    [InlineData("[!-a]", "b", "a -")]
-    [InlineData("[--0]", "- . 0", "/")]
-    [InlineData("[!--0]", "a b c", "- . 0 /")]
-    [InlineData("[!]a-]", "b c d", "] a -")]
-    [InlineData(@"[[?*]", @"[ ? *", "a b c")]
-    [InlineData("*fil[e-z].txt", "bigfile.txt", "smallfila.txt")]
-    [InlineData("*fil[e-z].txt", "smallfilf.txt", "smallfilez.txt")]
-    [InlineData("*file[1-9].txt", "bigfile1.txt", "smallfile0.txt")]
-    [InlineData("*file[1-9].txt", "smallfile8.txt", "smallfilea.txt")]
-
-    // CharacterList tests
-    [InlineData("*file[abc].txt", "bigfilea.txt", "smallfiled.txt")]
-    [InlineData("file[]].txt", "file].txt")]
-    [InlineData("*file[abc].txt", "smallfileb.txt", "smallfileaa.txt")]
-    [InlineData("*file[!abc].txt", "smallfiled.txt", "bigfilea.txt")]
-    [InlineData("*file[!abc].txt", "smallfile-.txt", "smallfileaa.txt")]
-    [InlineData("*file[!abc].txt", null, "smallfileb.txt")]
-
-    // LiteralSet tests
-    [InlineData("a{b,c}d", "abd", "acd")]
-    [InlineData("a{,c}d", "acd ad")]
-    [InlineData("a{b,}d", "abd ad")]
-
-    // Root tests
-    [InlineData("/**/*.sln", "/mnt/e/code/csharp-glob/Glob.sln", "/mnt/e/code/csharp-glob/Glob.Tests/Glob.Tests.csproj")]
-    [InlineData(@"C:/**/*.txt", @"C:\Users\Kevin\Desktop\notes.txt", @"C:\Users\Kevin\Downloads\yarn-0.17.6.msi")]
-
-    // Double wildcard tests
-    [InlineData("a**/*.cs", "ab/c.cs", "a/b/c.cs")]
-    [InlineData("a**/*.cs", "a/c.cs")]
-    [InlineData("**a/*.cs", "a/c.cs", "b/a/a.cs")]
-    [InlineData("**a/*.cs", "ba/c.cs")]
-    [InlineData("b**a/*.cs", "bccca/c.cs bda/a.cs")]
-    [InlineData("**", "ba/c.cs")]
-    [InlineData("**", "a")]
-    [InlineData("**", "a/b")]
-    [InlineData("a/**", "a/b/c")]
-    [InlineData("a/**", "a/", "a")]
-    [InlineData("/**/somefile", "/somefile")]
-
-    // Escape sequences
-    [InlineData(@"\[a-d\]", "[a-d]", @"b c \ [ ]")]
-    [InlineData(@"\{ab,bc\}", "{ab,bc}", @"ab bc")]
-    [InlineData(@"hat\?", "hat?", "hata hatb")]
-    [InlineData(@"hat\*", "hat*", "hata hatb hat hat/taco hata/taco")]
-    void ParseTest2(string pattern, string? positiveMatch, string? negativeMatch = null)
-    {
-        var glob = Glob.Parse(pattern);
     }
 
     [Theory]
