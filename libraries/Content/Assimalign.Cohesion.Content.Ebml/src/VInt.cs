@@ -180,6 +180,10 @@ public readonly struct VInt
     /// <exception cref="ArgumentException">The scratch buffer is too short.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The maximum width is outside one through eight.</exception>
     /// <exception cref="ContentFormatException">The input is truncated, has a zero marker, or exceeds the width limit.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The element encoding is invalid, truncated, unsupported, or exceeds a configured limit.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public static VInt Read(Stream source, int maxLength, byte[]? buffer)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -217,6 +221,9 @@ public readonly struct VInt
     /// <param name="stream">The writable destination, which remains open.</param>
     /// <returns>The number of octets written.</returns>
     /// <exception cref="ArgumentNullException">The destination is null.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public int Write(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);

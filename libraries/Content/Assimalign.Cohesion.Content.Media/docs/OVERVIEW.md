@@ -2,7 +2,7 @@
 
 Content.Media describes encoded media independently of its container. It provides presentation and
 track contracts, exact rational timestamps, lazy sample indexes, and seek results expressed as source
-byte ranges. Content.Mpeg and Content.Mkv implement this vocabulary in Stage 4 over BMFF and Matroska.
+byte ranges. Content.Mpeg and Content.Mkv implement this vocabulary over BMFF and Matroska.
 
 Its only direct dependency is Content.Binary. Codec identifiers remain native strings; codec private
 data remains an opaque, preferably lazy BinarySegment. There is no container reader, codec parser,

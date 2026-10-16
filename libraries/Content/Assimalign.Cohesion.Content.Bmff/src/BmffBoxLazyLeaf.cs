@@ -19,6 +19,7 @@ public abstract class BmffBoxLazyLeaf : BmffBox
     /// <inheritdoc/>
     public sealed override bool IsComposite => false;
     /// <inheritdoc/>
+    /// <exception cref="System.ArgumentNullException"><paramref name="stream"/> is null.</exception>
     public override void Read(BmffStream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -26,6 +27,7 @@ public abstract class BmffBoxLazyLeaf : BmffBox
         Payload = stream.GetSegment(stream.Position, stream.Remaining);
     }
     /// <inheritdoc/>
+    /// <exception cref="System.ArgumentNullException">The output stream is null.</exception>
     public override void Write(BmffStream stream) => Payload.CopyTo(stream);
     /// <inheritdoc/>
     public override long GetPayloadSize() => Payload.Length;
@@ -33,6 +35,9 @@ public abstract class BmffBoxLazyLeaf : BmffBox
     /// <summary>Materializes the payload only after checking the originating reader's buffer cap.</summary>
     /// <returns>A new array containing the payload.</returns>
     /// <exception cref="ContentFormatException">The payload exceeds the cap or is truncated.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     protected byte[] ReadPayloadBytes()
     {
         if (Payload.Length > _bufferLimit || Payload.Length > Array.MaxLength)

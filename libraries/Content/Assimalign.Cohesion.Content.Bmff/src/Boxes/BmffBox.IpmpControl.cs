@@ -9,8 +9,8 @@ using System;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
+/// <summary>Retains the ipmp control box identity; typed payload reading and writing are unsupported.</summary>
 [DebuggerDisplay("Bmff Box: IPMP Control (ipmc)")]
-/// <summary>The IpmpControlBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class IpmpControlBox : BmffFullBox
 {
     /// <summary>Creates a IpmpControlBox at its original location.</summary>

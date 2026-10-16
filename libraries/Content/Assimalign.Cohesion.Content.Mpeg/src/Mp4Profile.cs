@@ -74,6 +74,8 @@ public static partial class Mp4Profile
     /// <exception cref="ArgumentException">The source is not readable and seekable, or a limit is invalid.</exception>
     /// <exception cref="ContentFormatException">The container or entry is malformed or exceeds limits.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.ArgumentNullException">The source is null.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An option is outside its documented range.</exception>
     public static BmffDocument LoadDocument(Stream source, BmffReaderOptions? options = null, bool leaveOpen = true, CancellationToken cancellationToken = default)
     {
         var limits = options ?? new BmffReaderOptions();

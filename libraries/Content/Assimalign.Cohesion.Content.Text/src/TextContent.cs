@@ -57,6 +57,9 @@ public sealed class TextContent : ITextContent
     /// <returns>Text content decoding through the detected encoding, skipping any byte order mark.</returns>
     /// <exception cref="ContentException">Thrown when <paramref name="content"/> is not reopenable.</exception>
     /// <exception cref="ArgumentNullException">The content is null.</exception>
+    /// <exception cref="System.ObjectDisposedException">The underlying content has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">The content has no readable byte representation.</exception>
+    /// <exception cref="System.IO.IOException">Reading the encoding-detection prefix fails.</exception>
     public static TextContent Create(IContent content, bool leaveOpen = false)
     {
         ArgumentNullException.ThrowIfNull(content);

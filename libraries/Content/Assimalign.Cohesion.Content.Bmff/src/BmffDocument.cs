@@ -30,6 +30,10 @@ public sealed class BmffDocument : IDisposable
     /// <returns>The document.</returns>
     /// <exception cref="ArgumentException">The source is not readable and seekable.</exception>
     /// <exception cref="ContentFormatException">The input is malformed or exceeds limits.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.ArgumentNullException">The source or destination is null.</exception>
     public static BmffDocument Load(Stream source, BmffReaderOptions? options = null, BmffBoxRegistry? registry = null, bool leaveOpen = true) =>
         LoadCore(source, options, registry, leaveOpen, default);
 
@@ -43,6 +47,11 @@ public sealed class BmffDocument : IDisposable
     /// <returns>A synchronously completed document task.</returns>
     /// <exception cref="ContentFormatException">The input is malformed or exceeds limits.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.ArgumentNullException">The source or destination is null.</exception>
+    /// <exception cref="System.ArgumentException">The source is not readable and seekable.</exception>
     public static ValueTask<BmffDocument> LoadAsync(Stream source, BmffReaderOptions? options = null, BmffBoxRegistry? registry = null, bool leaveOpen = true, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(LoadCore(source, options, registry, leaveOpen, cancellationToken));
 
@@ -78,6 +87,11 @@ public sealed class BmffDocument : IDisposable
     /// <param name="output">A separate borrowed output stream.</param>
     /// <exception cref="ContentFormatException">The tree is invalid or unsupported.</exception>
     /// <exception cref="InvalidOperationException">The output is the borrowed source.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.ArgumentNullException">The source or destination is null.</exception>
+    /// <exception cref="System.ArgumentException">The destination is not writable.</exception>
     public void Save(Stream output) => SaveCore(output, 16 * 1024 * 1024, 64);
 
     internal void SaveCore(Stream output, int bufferLimit, int maxDepth)
@@ -97,6 +111,12 @@ public sealed class BmffDocument : IDisposable
     /// <returns>A task completing after the document is saved.</returns>
     /// <exception cref="ContentFormatException">The tree is invalid or unsupported.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.ArgumentNullException">The source or destination is null.</exception>
+    /// <exception cref="System.ArgumentException">The destination is not writable.</exception>
+    /// <exception cref="System.InvalidOperationException">The destination is the borrowed source.</exception>
     public ValueTask SaveAsync(Stream output, CancellationToken cancellationToken = default) =>
         SaveCoreAsync(output, 16 * 1024 * 1024, 64, cancellationToken);
 
@@ -121,6 +141,8 @@ public sealed class BmffDocument : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">The output offset is negative.</exception>
     /// <exception cref="ContentFormatException">The layout or a relocation is invalid or unsupported.</exception>
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public void RelocateMediaOffsets(long outputOffset = 0)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -139,6 +161,8 @@ public sealed class BmffDocument : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">The output offset is negative.</exception>
     /// <exception cref="ContentFormatException">A reference cannot be mapped or represented.</exception>
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public void RelocateMediaOffsets(Func<BmffBox, long, bool, long> mapPayloadOffset, long outputOffset = 0)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

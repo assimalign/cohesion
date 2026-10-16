@@ -78,6 +78,9 @@ public readonly struct BinarySegment : IEquatable<BinarySegment>
     /// Disposing the returned stream never disposes a lazy segment's source.</remarks>
     /// <exception cref="ArgumentException">The lazy source is no longer readable and seekable, including after disposal.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The lazy source no longer contains the recorded range.</exception>
+    /// <exception cref="System.ObjectDisposedException">The borrowed source has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A borrowed stream no longer supports the required read, seek or write operation.</exception>
+    /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
     public Stream OpenRead()
     {
         if (_source is not null)
@@ -95,6 +98,9 @@ public readonly struct BinarySegment : IEquatable<BinarySegment>
     /// <param name="destination">The caller-owned destination stream.</param>
     /// <exception cref="ArgumentNullException">The destination is null.</exception>
     /// <exception cref="ContentFormatException">The lazy source is truncated during the copy.</exception>
+    /// <exception cref="System.ObjectDisposedException">The borrowed source has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A borrowed stream no longer supports the required read, seek or write operation.</exception>
+    /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
     public void CopyTo(Stream destination)
     {
         ArgumentNullException.ThrowIfNull(destination);
@@ -118,6 +124,9 @@ public readonly struct BinarySegment : IEquatable<BinarySegment>
     /// <exception cref="ArgumentNullException">The destination is null.</exception>
     /// <exception cref="ContentFormatException">The lazy source is truncated during the copy.</exception>
     /// <exception cref="OperationCanceledException">The nonempty operation is canceled.</exception>
+    /// <exception cref="System.ObjectDisposedException">The borrowed source has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A borrowed stream no longer supports the required read, seek or write operation.</exception>
+    /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
     public async ValueTask CopyToAsync(Stream destination, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(destination);
@@ -159,6 +168,9 @@ public readonly struct BinarySegment : IEquatable<BinarySegment>
     /// <returns>A copy of the payload.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The maximum length is negative.</exception>
     /// <exception cref="ContentFormatException">The length exceeds the cap or maximum array length (LimitExceeded), or the source is truncated (Truncated).</exception>
+    /// <exception cref="System.ObjectDisposedException">The borrowed source has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A borrowed stream no longer supports the required read, seek or write operation.</exception>
+    /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
     public byte[] ToArray(int maxLength)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxLength);

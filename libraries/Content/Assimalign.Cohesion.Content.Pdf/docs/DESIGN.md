@@ -2,7 +2,7 @@
 
 ## Intent and dependency direction
 
-Stages 2 and 3 of feature #470 provide an ISO 32000-2 structural reader for PDF 1.0–1.7 and 2.0,
+Feature #470 provides an ISO 32000-2 structural reader for PDF 1.0–1.7 and 2.0,
 an editable retained model, and full/incremental saves through IContentWriter<PdfDocument>.
 The package does not claim PDF rendering,
 semantic validation of every dictionary, or preservation of the original whitespace spelling.

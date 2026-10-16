@@ -9,8 +9,8 @@ using System;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
+/// <summary>Retains the sample padding bits box identity; typed payload reading and writing are unsupported.</summary>
 [DebuggerDisplay("Bmff Box: Sample Padding Bits (padb)")]
-/// <summary>The SamplePaddingBitsBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class SamplePaddingBitsBox : BmffFullBox
 {
     /// <summary>Creates a SamplePaddingBitsBox at its original location.</summary>

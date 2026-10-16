@@ -77,6 +77,10 @@ public abstract class MediaSampleIndex : IMediaSampleIndex
     /// <summary>Streams samples without expanding the whole index.</summary>
     /// <param name="cancellationToken">The enumeration's cancellation token; check it during I/O and scans.</param>
     /// <returns>The lazy sample sequence in decode/source order.</returns>
+    /// <exception cref="ContentFormatException">The profile encounters malformed, unsupported or unrepresentable container data, or a configured limit.</exception>
+    /// <exception cref="System.ObjectDisposedException">The owning file or its borrowed source has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading native sample metadata fails.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
     protected abstract IAsyncEnumerable<MediaSample> ReadSamplesCoreAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Implements supported random lookup by index.</summary>
@@ -84,6 +88,10 @@ public abstract class MediaSampleIndex : IMediaSampleIndex
     /// <param name="cancellationToken">A token checked before dispatch; keep checking it during I/O and scans.</param>
     /// <returns>The sample, or null outside the available index.</returns>
     /// <exception cref="NotSupportedException">The operation has not been implemented.</exception>
+    /// <exception cref="ContentFormatException">The profile encounters malformed, unsupported or unrepresentable container data, or a configured limit.</exception>
+    /// <exception cref="System.ObjectDisposedException">The owning file or its borrowed source has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading native sample metadata fails.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
     protected virtual ValueTask<MediaSample?> GetSampleCoreAsync(long index, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(ErrorMessages.IndexLookupUnavailable);
 
@@ -92,6 +100,10 @@ public abstract class MediaSampleIndex : IMediaSampleIndex
     /// <param name="cancellationToken">A token checked before dispatch; keep checking it during I/O and scans.</param>
     /// <returns>The preceding/equal sample, or null before the first available presentation timestamp.</returns>
     /// <exception cref="NotSupportedException">The operation has not been implemented.</exception>
+    /// <exception cref="ContentFormatException">The profile encounters malformed, unsupported or unrepresentable container data, or a configured limit.</exception>
+    /// <exception cref="System.ObjectDisposedException">The owning file or its borrowed source has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading native sample metadata fails.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
     protected virtual ValueTask<MediaSample?> FindSampleCoreAsync(MediaTimestamp presentationTime, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(ErrorMessages.TimeLookupUnavailable);
 
@@ -100,6 +112,10 @@ public abstract class MediaSampleIndex : IMediaSampleIndex
     /// <param name="cancellationToken">A token checked before dispatch; keep checking it during I/O and scans.</param>
     /// <returns>The safe range, or null if no target or preceding sync sample exists.</returns>
     /// <exception cref="NotSupportedException">The operation is not implemented or a safe range cannot be established.</exception>
+    /// <exception cref="ContentFormatException">The profile encounters malformed, unsupported or unrepresentable container data, or a configured limit.</exception>
+    /// <exception cref="System.ObjectDisposedException">The owning file or its borrowed source has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading native sample metadata fails.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
     protected virtual ValueTask<MediaSeekResult?> SeekCoreAsync(MediaTimestamp presentationTime, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(ErrorMessages.SeekUnavailable);
 }

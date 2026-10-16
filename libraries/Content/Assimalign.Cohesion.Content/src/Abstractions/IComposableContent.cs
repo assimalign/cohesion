@@ -21,5 +21,7 @@ public interface IComposableContent : IContent
     /// </summary>
     /// <param name="cancellationToken">A token used to cancel the enumeration.</param>
     /// <returns>The child items. Items remain owned by the composite; do not dispose them individually.</returns>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.ObjectDisposedException">The composite has been disposed.</exception>
     IAsyncEnumerable<IContent> GetItemsAsync(CancellationToken cancellationToken = default);
 }

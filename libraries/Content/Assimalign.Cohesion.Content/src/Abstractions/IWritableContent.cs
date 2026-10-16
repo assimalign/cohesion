@@ -20,6 +20,8 @@ public interface IWritableContent : IContent
     /// </summary>
     /// <returns>A writable stream owned by the caller.</returns>
     /// <exception cref="System.ObjectDisposedException">Thrown when the content has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">The content is read-only.</exception>
+    /// <exception cref="System.IO.IOException">Opening or positioning the underlying destination fails.</exception>
     Stream OpenWrite();
 
     /// <summary>
@@ -28,5 +30,8 @@ public interface IWritableContent : IContent
     /// <param name="cancellationToken">A token used to cancel the operation.</param>
     /// <returns>A writable stream owned by the caller.</returns>
     /// <exception cref="System.ObjectDisposedException">Thrown when the content has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">The content is read-only.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.IO.IOException">Opening or positioning the underlying destination fails.</exception>
     ValueTask<Stream> OpenWriteAsync(CancellationToken cancellationToken = default);
 }

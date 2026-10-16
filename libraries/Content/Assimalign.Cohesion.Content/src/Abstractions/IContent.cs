@@ -55,6 +55,7 @@ public interface IContent : IDisposable, IAsyncDisposable
     /// <exception cref="ContentException">Thrown when single-use content is read a second time.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the content has been disposed.</exception>
     /// <exception cref="NotSupportedException">Thrown when the content has no serialized representation of its own, such as a pure composite.</exception>
+    /// <exception cref="System.IO.IOException">Opening or positioning the underlying source fails.</exception>
     Stream OpenRead();
 
     /// <summary>
@@ -65,5 +66,7 @@ public interface IContent : IDisposable, IAsyncDisposable
     /// <exception cref="ContentException">Thrown when single-use content is read a second time.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the content has been disposed.</exception>
     /// <exception cref="NotSupportedException">Thrown when the content has no serialized representation of its own, such as a pure composite.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.IO.IOException">Opening or positioning the underlying source fails.</exception>
     ValueTask<Stream> OpenReadAsync(CancellationToken cancellationToken = default);
 }

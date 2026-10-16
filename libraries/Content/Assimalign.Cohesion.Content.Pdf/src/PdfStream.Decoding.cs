@@ -17,6 +17,9 @@ public sealed partial class PdfStream
     /// <returns>The decoded bytes; each call reflects the current dictionary.</returns>
     /// <exception cref="ArgumentOutOfRangeException">An option is invalid.</exception>
     /// <exception cref="ContentFormatException">Data is invalid, truncated, exceeds a limit, or requires an unsupported filter or encryption.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public ReadOnlyMemory<byte> Decode(PdfReaderOptions? options = null)
     {
         var limits = options ?? _options;

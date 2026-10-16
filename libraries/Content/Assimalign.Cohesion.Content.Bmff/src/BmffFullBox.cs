@@ -28,6 +28,10 @@ public abstract class BmffFullBox : BmffBox
     /// <summary>Reads the version and flags from a bounded payload.</summary>
     /// <param name="stream">The box payload.</param>
     /// <exception cref="ContentFormatException">The prefix is truncated.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.OperationCanceledException">The payload window's cancellation token was canceled.</exception>
     protected void ReadFullBoxHeader(BmffStream stream)
     {
         Span<byte> bytes = stackalloc byte[4];
@@ -38,6 +42,11 @@ public abstract class BmffFullBox : BmffBox
 
     /// <summary>Writes the version and flags.</summary>
     /// <param name="stream">The box payload output.</param>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.OperationCanceledException">The payload window's cancellation token was canceled.</exception>
+    /// <exception cref="ContentFormatException">The output window cannot contain the full-box prefix.</exception>
     protected void WriteFullBoxHeader(BmffStream stream)
     {
         Span<byte> bytes = stackalloc byte[4];

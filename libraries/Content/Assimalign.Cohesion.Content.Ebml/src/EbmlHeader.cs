@@ -16,18 +16,25 @@ public sealed class EbmlHeader
     /// <summary>Gets the ordered header tree, including unknown elements and DocTypeExtension masters.</summary>
     public EbmlElement Element { get; }
     /// <summary>Gets or sets EBMLVersion, defaulting to one when absent.</summary>
+    /// <exception cref="System.ArgumentException">An existing header element has a type incompatible with the assigned value.</exception>
     public ulong EBMLVersion { get => Number(0x4286, 1); set => Set(0x4286, EbmlElementType.UnsignedInteger, value); }
     /// <summary>Gets or sets EBMLReadVersion, defaulting to one when absent.</summary>
+    /// <exception cref="System.ArgumentException">An existing header element has a type incompatible with the assigned value.</exception>
     public ulong EBMLReadVersion { get => Number(0x42F7, 1); set => Set(0x42F7, EbmlElementType.UnsignedInteger, value); }
     /// <summary>Gets or sets the maximum ID width, defaulting to four.</summary>
+    /// <exception cref="System.ArgumentException">An existing header element has a type incompatible with the assigned value.</exception>
     public ulong EBMLMaxIDLength { get => Number(0x42F2, 4); set => Set(0x42F2, EbmlElementType.UnsignedInteger, value); }
     /// <summary>Gets or sets the maximum size width, defaulting to eight.</summary>
+    /// <exception cref="System.ArgumentException">An existing header element has a type incompatible with the assigned value.</exception>
     public ulong EBMLMaxSizeLength { get => Number(0x42F3, 8); set => Set(0x42F3, EbmlElementType.UnsignedInteger, value); }
     /// <summary>Gets or sets the required ASCII document type.</summary>
+    /// <exception cref="System.ArgumentException">An existing header element has a type incompatible with the assigned value.</exception>
     public string DocType { get => Find(0x4282)?.Value as string ?? string.Empty; set => Set(0x4282, EbmlElementType.AsciiString, value); }
     /// <summary>Gets or sets the DocType version, defaulting to one.</summary>
+    /// <exception cref="System.ArgumentException">An existing header element has a type incompatible with the assigned value.</exception>
     public ulong DocTypeVersion { get => Number(0x4287, 1); set => Set(0x4287, EbmlElementType.UnsignedInteger, value); }
     /// <summary>Gets or sets the minimum DocType reader version, defaulting to one.</summary>
+    /// <exception cref="System.ArgumentException">An existing header element has a type incompatible with the assigned value.</exception>
     public ulong DocTypeReadVersion { get => Number(0x4285, 1); set => Set(0x4285, EbmlElementType.UnsignedInteger, value); }
     /// <summary>Enumerates DocTypeExtension master elements in wire order. Edit them through Element.Children.</summary>
     public IEnumerable<EbmlElement> DocTypeExtension

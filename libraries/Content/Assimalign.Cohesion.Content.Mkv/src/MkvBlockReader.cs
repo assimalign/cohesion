@@ -84,6 +84,8 @@ public sealed class MkvBlockReader : IDisposable
     /// stream, including one disposed early. Stream cursors are relative; FrameOffsets supplies absolute positions.</remarks>
     /// <exception cref="ObjectDisposedException">This reader or the enclosing EBML payload is disposed or advanced.</exception>
     /// <exception cref="ContentFormatException">Draining encounters truncated encoded frame bytes.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public ContentSliceStream? ReadFrame()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

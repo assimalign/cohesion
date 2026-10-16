@@ -41,6 +41,8 @@ public sealed partial class EbmlWriter
     /// <returns>The combined ID, size and payload length.</returns>
     /// <exception cref="ArgumentException">The identifier, type, value or explicit width is invalid.</exception>
     /// <exception cref="ContentFormatException">The leaf violates its schema type, range or length constraints.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The element encoding is invalid, truncated, unsupported, or exceeds a configured limit.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An explicit VINT width is outside its supported range.</exception>
     public static long GetEncodedLength(VInt identifier, EbmlElementType type, object value,
         EbmlSchema? schema = null, int length = -1, int sizeLength = 0)
     {
@@ -76,6 +78,9 @@ public sealed partial class EbmlWriter
     /// <exception cref="ContentFormatException">The original header is invalid, truncated, or disagrees with its range or schema.</exception>
     /// <exception cref="InvalidOperationException">The bytes exceed an open master's declared size.</exception>
     /// <exception cref="ObjectDisposedException">The writer is disposed.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The element encoding is invalid, truncated, unsupported, or exceeds a configured limit.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public void WriteRawElement(BinarySegment source)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

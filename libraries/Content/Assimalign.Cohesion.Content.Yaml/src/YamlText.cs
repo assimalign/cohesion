@@ -35,6 +35,7 @@ public static class YamlText
     /// <param name="text">The YAML text.</param>
     /// <returns>The parsed stream.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
+    /// <exception cref="System.ArgumentNullException">The YAML text is null.</exception>
     public static YamlStream Parse(string text) => Parse(text, null);
 
     /// <summary>Parses YAML text with resource limits.</summary>
@@ -56,6 +57,9 @@ public static class YamlText
     /// <param name="stream">The readable stream carrying the YAML bytes. Read to its end; not disposed.</param>
     /// <returns>The parsed stream of documents.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
+    /// <exception cref="System.NotSupportedException">The source stream does not support reading.</exception>
+    /// <exception cref="System.ObjectDisposedException">The source stream has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading the source fails.</exception>
     public static YamlStream Parse(Stream stream) => Parse(stream, null);
 
     /// <summary>Parses a Unicode byte stream with resource limits.</summary>
@@ -65,6 +69,9 @@ public static class YamlText
     /// <exception cref="ArgumentNullException">The stream is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">An option is outside its documented range.</exception>
     /// <exception cref="YamlException">The decoded input is malformed or exceeds a resource limit.</exception>
+    /// <exception cref="System.NotSupportedException">The source stream does not support reading.</exception>
+    /// <exception cref="System.ObjectDisposedException">The source stream has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading the source fails.</exception>
     public static YamlStream Parse(Stream stream, YamlParserOptions? options)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -87,6 +94,10 @@ public static class YamlText
     /// <returns>The parsed stream of documents.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
     /// <exception cref="ContentFormatException">The content's strict decoder rejected malformed bytes; the error code is InvalidValue and the position is a byte offset when known.</exception>
+    /// <exception cref="ContentException">The content cannot be reopened, or its reader reports a content failure.</exception>
+    /// <exception cref="System.ObjectDisposedException">The text content or its source has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">The text content has no readable representation.</exception>
+    /// <exception cref="System.IO.IOException">Reading the text content fails.</exception>
     public static YamlStream Parse(ITextContent content) => Parse(content, null);
 
     /// <summary>Parses text content with resource limits.</summary>
@@ -97,6 +108,10 @@ public static class YamlText
     /// <exception cref="ArgumentOutOfRangeException">An option is outside its documented range.</exception>
     /// <exception cref="YamlException">The decoded input is malformed or exceeds a resource limit.</exception>
     /// <exception cref="ContentFormatException">The strict decoder rejected malformed bytes with InvalidValue and a byte position when known.</exception>
+    /// <exception cref="ContentException">The content cannot be reopened, or its reader reports a content failure.</exception>
+    /// <exception cref="System.ObjectDisposedException">The text content or its source has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">The text content has no readable representation.</exception>
+    /// <exception cref="System.IO.IOException">Reading the text content fails.</exception>
     public static YamlStream Parse(ITextContent content, YamlParserOptions? options)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -111,6 +126,7 @@ public static class YamlText
     /// <param name="text">The YAML text.</param>
     /// <returns>The single parsed document.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed or does not contain exactly one document.</exception>
+    /// <exception cref="System.ArgumentNullException">The YAML text is null.</exception>
     public static YamlDocument ParseDocument(string text) => ParseDocument(text, null);
 
     /// <summary>Parses exactly one YAML document with resource limits.</summary>
@@ -136,6 +152,7 @@ public static class YamlText
     /// <param name="text">The YAML text.</param>
     /// <returns>The events, in document order.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
+    /// <exception cref="System.ArgumentNullException">The YAML text is null.</exception>
     public static IReadOnlyList<YamlEvent> ParseEvents(string text) => ParseEvents(text, null);
 
     /// <summary>Parses YAML events with the same depth and alias budgets as document parsing.</summary>
@@ -158,6 +175,8 @@ public static class YamlText
     /// <param name="options">The writer options, or <see langword="null"/> for defaults.</param>
     /// <returns>The YAML text.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The indentation size is not positive.</exception>
+    /// <exception cref="System.ArgumentNullException"><paramref name="stream"/> is null.</exception>
+    /// <exception cref="System.InvalidOperationException">The tree contains a node subtype the emitter does not support.</exception>
     public static string Write(YamlStream stream, YamlWriterOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -171,6 +190,8 @@ public static class YamlText
     /// <param name="options">The writer options, or <see langword="null"/> for defaults.</param>
     /// <returns>The YAML text.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The indentation size is not positive.</exception>
+    /// <exception cref="System.ArgumentNullException"><paramref name="document"/> is null.</exception>
+    /// <exception cref="System.InvalidOperationException">The tree contains a node subtype the emitter does not support.</exception>
     public static string Write(YamlDocument document, YamlWriterOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -184,6 +205,11 @@ public static class YamlText
     /// <param name="stream">The documents to write.</param>
     /// <param name="options">The writer options, or <see langword="null"/> for defaults.</param>
     /// <exception cref="ArgumentOutOfRangeException">The indentation size is not positive.</exception>
+    /// <exception cref="System.ArgumentNullException"><paramref name="output"/> is null.</exception>
+    /// <exception cref="System.ArgumentException">The destination does not support writing.</exception>
+    /// <exception cref="System.ObjectDisposedException">The destination has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Writing the destination fails.</exception>
+    /// <exception cref="System.InvalidOperationException">The tree contains a node subtype the emitter does not support.</exception>
     public static void Write(Stream output, YamlStream stream, YamlWriterOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(output);

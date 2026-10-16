@@ -22,6 +22,11 @@ public interface IContentReader<TDocument>
     /// <param name="stream">The readable stream to consume.</param>
     /// <returns>The parsed document.</returns>
     /// <exception cref="ContentFormatException">Thrown when the input is malformed for the format.</exception>
+    /// <exception cref="System.ArgumentNullException">The source stream is null.</exception>
+    /// <exception cref="System.IO.IOException">Reading the source fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The source has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">The source rejects a required stream operation.</exception>
+    /// <exception cref="System.ArgumentException">The source does not satisfy this reader's stream requirements.</exception>
     TDocument Read(Stream stream);
 
     /// <summary>
@@ -31,5 +36,11 @@ public interface IContentReader<TDocument>
     /// <param name="cancellationToken">A token used to cancel the operation.</param>
     /// <returns>The parsed document.</returns>
     /// <exception cref="ContentFormatException">Thrown when the input is malformed for the format.</exception>
+    /// <exception cref="System.ArgumentNullException">The source stream is null.</exception>
+    /// <exception cref="System.IO.IOException">Reading the source fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The source has been disposed.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.NotSupportedException">The source rejects a required stream operation.</exception>
+    /// <exception cref="System.ArgumentException">The source does not satisfy this reader's stream requirements.</exception>
     ValueTask<TDocument> ReadAsync(Stream stream, CancellationToken cancellationToken = default);
 }

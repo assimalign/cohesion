@@ -38,6 +38,9 @@ public sealed class ContentSliceStream : Stream
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentException">The source is not readable and seekable.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The range does not fit in the source.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
     public static ContentSliceStream Create(Stream source, long offset, long length, bool leaveOpen = true)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -61,6 +64,9 @@ public sealed class ContentSliceStream : Stream
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentException">The source is unreadable.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The length is negative or the absolute end exceeds Int64.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
     public static ContentSliceStream CreateForwardOnly(Stream source, long length, bool leaveOpen = true)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -82,6 +88,7 @@ public sealed class ContentSliceStream : Stream
     public long SourceOffset { get; }
 
     /// <summary>Gets the unread bytes in the window; zero when positioned at or past its end.</summary>
+    /// <exception cref="System.ObjectDisposedException">The instance has been disposed.</exception>
     public long Remaining
     {
         get
@@ -144,6 +151,8 @@ public sealed class ContentSliceStream : Stream
     /// <exception cref="ObjectDisposedException">This slice is disposed.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The child does not fit, or requires rewinding a forward-only parent.</exception>
     /// <exception cref="ContentFormatException">Skipping to a forward-only child encounters truncated input.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
     public ContentSliceStream CreateSlice(long offset, long length)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -163,6 +172,8 @@ public sealed class ContentSliceStream : Stream
     /// <summary>Advances to the window end; forward-only sources are drained through a pooled buffer.</summary>
     /// <exception cref="ObjectDisposedException">The slice is disposed.</exception>
     /// <exception cref="ContentFormatException">The source ends before the window end.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
     public void SkipToEnd() => this.SkipExactly(Remaining);
 
     /// <summary>Advances to the window end; forward-only sources are drained through a pooled buffer.</summary>
@@ -171,6 +182,8 @@ public sealed class ContentSliceStream : Stream
     /// <exception cref="ObjectDisposedException">The slice is disposed.</exception>
     /// <exception cref="ContentFormatException">The source ends before the window end.</exception>
     /// <exception cref="OperationCanceledException">The nonempty operation is canceled.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
     public ValueTask SkipToEndAsync(CancellationToken cancellationToken = default) =>
         this.SkipExactlyAsync(Remaining, cancellationToken);
 
@@ -185,6 +198,8 @@ public sealed class ContentSliceStream : Stream
     /// <param name="buffer">The destination.</param>
     /// <returns>The count read, or zero at the source or window end.</returns>
     /// <exception cref="ObjectDisposedException">The slice is disposed.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
     public override int Read(Span<byte> buffer)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -210,6 +225,7 @@ public sealed class ContentSliceStream : Stream
     }
 
     /// <inheritdoc/>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(buffer);
@@ -222,6 +238,8 @@ public sealed class ContentSliceStream : Stream
     /// <returns>The count read, or zero at the source or window end.</returns>
     /// <exception cref="ObjectDisposedException">The slice is disposed.</exception>
     /// <exception cref="OperationCanceledException">The nonempty operation is canceled.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -271,6 +289,7 @@ public sealed class ContentSliceStream : Stream
     }
 
     /// <inheritdoc/>
+    /// <exception cref="System.ObjectDisposedException">The instance has been disposed.</exception>
     public override void Flush() => ObjectDisposedException.ThrowIf(_disposed, this);
 
     /// <inheritdoc/>
@@ -288,6 +307,7 @@ public sealed class ContentSliceStream : Stream
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.SliceReadOnly);
 
     /// <inheritdoc/>
+    /// <exception cref="System.NotSupportedException">The slice is read-only.</exception>
     public override void Write(ReadOnlySpan<byte> buffer) => throw new NotSupportedException(ErrorMessages.SliceReadOnly);
 
     /// <inheritdoc/>
@@ -298,6 +318,7 @@ public sealed class ContentSliceStream : Stream
         throw new NotSupportedException(ErrorMessages.SliceReadOnly);
 
     /// <inheritdoc/>
+    /// <exception cref="System.NotSupportedException">The slice is read-only.</exception>
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(ErrorMessages.SliceReadOnly);
 

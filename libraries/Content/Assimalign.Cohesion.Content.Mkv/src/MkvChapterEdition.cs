@@ -23,6 +23,7 @@ public sealed class MkvChapterEdition
 
     /// <summary>Gets or sets EditionUID; null removes the optional field.</summary>
     /// <exception cref="ArgumentOutOfRangeException">The supplied UID is zero.</exception>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public ulong? Uid
     {
         get => MkvElements.Find(Element, 0x45BC)?.Value as ulong?;
@@ -33,12 +34,14 @@ public sealed class MkvChapterEdition
         }
     }
     /// <summary>Gets or sets EditionFlagDefault; absent means false.</summary>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public bool IsDefault
     {
         get => MkvElements.Number(Element, 0x45DB) != 0;
         set => MkvElements.Set(Element, 0x45DB, EbmlElementType.UnsignedInteger, value ? 1UL : 0UL);
     }
     /// <summary>Gets or sets EditionFlagOrdered; absent means false.</summary>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public bool IsOrdered
     {
         get => MkvElements.Number(Element, 0x45DD) != 0;

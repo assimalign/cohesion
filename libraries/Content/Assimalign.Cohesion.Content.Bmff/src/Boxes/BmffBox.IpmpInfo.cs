@@ -9,8 +9,8 @@ using System;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
+/// <summary>Retains the ipmp info box identity; typed payload reading and writing are unsupported.</summary>
 [DebuggerDisplay("Bmff Box: IPMP Information (imif)")]
-/// <summary>The IpmpInfoBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class IpmpInfoBox : BmffFullBox
 {
     /// <summary>Creates a IpmpInfoBox at its original location.</summary>

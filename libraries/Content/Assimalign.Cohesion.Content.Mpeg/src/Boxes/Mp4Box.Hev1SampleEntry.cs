@@ -26,6 +26,8 @@ public sealed class Hev1SampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     public ushort Height { get => _fields.Height; set => _fields.Height = value; }
     /// <summary>Gets or sets the Pascal ISO-8859-1 compressor label (at most 31 bytes).</summary>
     /// <exception cref="System.ArgumentException">The label is null, too long or not ISO-8859-1.</exception>
+    /// <exception cref="System.ArgumentNullException">The new compressor name is null.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">The compressor name contains more than 31 characters.</exception>
     public string CompressorName { get => _fields.CompressorName; set => _fields.CompressorName = value; }
     /// <inheritdoc/>
     public override long Offset { get; }

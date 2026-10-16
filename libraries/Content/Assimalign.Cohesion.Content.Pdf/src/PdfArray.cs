@@ -33,5 +33,6 @@ public sealed class PdfArray : IPdfObject, IReadOnlyList<IPdfObject>
     public void RemoveAt(int index) { _items.RemoveAt(index); Revision++; }
     /// <inheritdoc/>
     public IEnumerator<IPdfObject> GetEnumerator() => _items.GetEnumerator();
+    /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

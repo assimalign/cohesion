@@ -69,6 +69,9 @@ public sealed class BmffStream : Stream
     /// <summary>Enumerates child headers in the remaining payload using the enclosing reader's limits.</summary>
     /// <returns>A caller-owned reader borrowing this window.</returns>
     /// <exception cref="ContentFormatException">The depth limit is exceeded.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public BmffReader ReadChildren() => ReadChildrenCore(null);
 
     internal BmffReader ReadChildrenCore(int? expectedCount)
@@ -99,6 +102,7 @@ public sealed class BmffStream : Stream
     /// <summary>Gets the allowed byte length.</summary>
     public long Limit { get; }
     /// <summary>Gets the bytes remaining in this window.</summary>
+    /// <exception cref="System.ObjectDisposedException">The window has been disposed.</exception>
     public long Remaining => Math.Max(0, Limit - Position);
     /// <inheritdoc/>
     public override bool CanRead => !_disposed && _stream.CanRead;
@@ -118,12 +122,14 @@ public sealed class BmffStream : Stream
         set { Seek(value, SeekOrigin.Begin); }
     }
     /// <inheritdoc/>
+    /// <exception cref="System.ObjectDisposedException">The instance has been disposed.</exception>
     public override void Flush()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _stream.Flush();
     }
     /// <inheritdoc/>
+    /// <exception cref="System.OperationCanceledException">The payload window's cancellation token was canceled.</exception>
     public override int Read(byte[] buffer, int offset, int count)
     {
         ArgumentNullException.ThrowIfNull(buffer);
@@ -145,6 +151,10 @@ public sealed class BmffStream : Stream
         return _slice;
     }
     /// <inheritdoc/>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public override int Read(Span<byte> buffer)
     {
         CancellationToken.ThrowIfCancellationRequested();
@@ -153,6 +163,9 @@ public sealed class BmffStream : Stream
         return count;
     }
     /// <inheritdoc/>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         var count = await GetSlice().ReadAsync(buffer[..(int)Math.Min(buffer.Length, Remaining)], cancellationToken).ConfigureAwait(false);
@@ -160,6 +173,7 @@ public sealed class BmffStream : Stream
         return count;
     }
     /// <inheritdoc/>
+    /// <exception cref="System.ArgumentException">The seek origin is not a defined SeekOrigin value.</exception>
     public override long Seek(long offset, SeekOrigin origin)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -190,6 +204,8 @@ public sealed class BmffStream : Stream
     /// <inheritdoc/>
     public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.FixedWindow);
     /// <inheritdoc/>
+    /// <exception cref="ContentFormatException">The write would exceed the bounded payload window.</exception>
+    /// <exception cref="System.OperationCanceledException">The payload window's cancellation token was canceled.</exception>
     public override void Write(byte[] buffer, int offset, int count)
     {
         ArgumentNullException.ThrowIfNull(buffer);
@@ -210,6 +226,11 @@ public sealed class BmffStream : Stream
         }
     }
     /// <inheritdoc/>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="ContentFormatException">The write would exceed the bounded payload window.</exception>
     public override void Write(ReadOnlySpan<byte> buffer)
     {
         CancellationToken.ThrowIfCancellationRequested();
@@ -218,6 +239,10 @@ public sealed class BmffStream : Stream
         _position += buffer.Length;
     }
     /// <inheritdoc/>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="ContentFormatException">The write would exceed the bounded payload window.</exception>
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
         PrepareWrite(buffer.Length);

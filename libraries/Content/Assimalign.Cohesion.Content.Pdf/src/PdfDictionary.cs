@@ -44,6 +44,7 @@ public sealed class PdfDictionary : IPdfObject, IReadOnlyDictionary<PdfName, IPd
     }
     /// <inheritdoc/>
     public IEnumerator<KeyValuePair<PdfName, IPdfObject>> GetEnumerator() => _items.GetEnumerator();
+    /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     internal IPdfObject? Get(string key) => _items.TryGetValue(PdfName.Create(Encoding.ASCII.GetBytes(key)), out var value) ? value : null;
 }
