@@ -47,8 +47,9 @@ Predictable parsing and serving requires every stream's lifetime to have exactly
   locking, because the media formats will hand out large streams where implicit synchronization would
   be a performance trap.
 
-Writes commit atomically: `IWritableContent.OpenWrite` buffers and replaces the visible bytes when the
-write stream is disposed, so a failed emit never leaves half-written content visible.
+`IWritableContent.OpenWrite` buffers and replaces the visible bytes when the write stream is
+disposed. Replacement is atomic, but disposal also commits bytes written before an emission error;
+callers that publish only on successful emission must prepare the complete payload separately.
 
 ## Composition
 
@@ -71,8 +72,7 @@ stabilization-feature concern that must not weigh down the contract root.
 `ContentException` is the area root (inherits `Exception` per the AGENTS area-root rule).
 `ContentFormatException` adds the malformed-input `Position` and is the type every format reader
 throws instead of leaking raw parsing exceptions; format packages derive from it when they need
-richer diagnostics (the EBML package's existing exceptions should migrate onto this root as part of
-its repair feature).
+richer diagnostics. EBML's EbmlDataFormatException and YAML's YamlException now derive from this root.
 
 ContentFormatException also carries ErrorCode: Unspecified (legacy constructors), Truncated,
 InvalidStructure, InvalidValue, LimitExceeded, or Unsupported. Positions are absolute when the
@@ -81,15 +81,23 @@ All package-authored exception messages live in Properties/ErrorMessages.resx.
 
 ## Family dependency direction
 
-```
-Assimalign.Cohesion.Content            (this package — neutral contracts)
- ├── Content.Binary                    (shared binary parsing surface)
- │    └── Content.Media               (shared media abstractions)
- │         └── Content.Bmff → Mpeg…  (container formats and profiles)
- ├── Content.Text                      (encoding + text reading surface)
- │    ├── Content.Markdown           (text-derived formats)
- │    └── Content.Yaml               (YAML 1.2 — document model, parser, emitter)
- └── Content.Ebml → Content.Mkv       (EBML-based formats)
+The integrated [area family map](../../../../docs/libraries/Content/DESIGN.md#family-map) records
+all thirteen packages. Direct references point from consumers toward their shared layer:
+
+```mermaid
+flowchart LR
+    Binary["Content.Binary"] --> Root["Content"]
+    Media["Content.Media"] --> Binary
+    Bmff["Content.Bmff"] --> Media
+    Mpeg["Content.Mpeg"] --> Bmff
+    Mpeg --> Media
+    Heif["Content.Heif"] --> Bmff
+    Ebml["Content.Ebml"] --> Binary
+    Mkv["Content.Mkv"] --> Ebml
+    Mkv --> Media
+    Pdf["Content.Pdf"] --> Binary
+    Exe["Content.Exe"] --> Binary
+    Text["Text; YAML/Markdown also reference Text"] --> Root
 ```
 
 One-way, root-anchored: format packages depend on shared intermediate layers (`Binary`, `Media`,

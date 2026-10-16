@@ -6,9 +6,9 @@ This package supplies the shared byte machinery for forward-only readers, forwar
 and editable document models. It must handle 40 GB inputs without materializing unchanged payloads.
 The root Content package supplies the exception contract; Binary supplies no container grammar.
 
-The diagram shows primitive dependencies and the format packages that consume them as the
-foundation program progresses. BMFF reaches Binary through Media; the EBML/PDF reference migrations
-belong to their format stages.
+The diagram shows primitive dependencies and their integrated format consumers. BMFF reaches
+Binary through Media; EBML, PDF and Exe reference Binary directly. Profiles reuse their container
+package and shared primitives without consuming another package's internals.
 
 ```mermaid
 flowchart LR

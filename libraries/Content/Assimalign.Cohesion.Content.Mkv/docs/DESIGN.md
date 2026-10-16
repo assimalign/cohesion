@@ -332,8 +332,8 @@ names. The concrete names above implement those capabilities; none adds an unrel
 
 1. EBML's recursive MinOccurs also applies to the recursive parent. SimpleTag and ChapterAtom use
    optional recursion in the schema; the adapter enforces their first occurrence in Tag/EditionEntry.
-2. The shared Content area README still describes MKV as a scaffold; it is outside this worktree's
-   owned paths and should be refreshed by the integration session with the parallel MPEG work.
+2. The shared [Content area README](../../README.md) now records the integrated MKV implementation
+   and its EBML/Media dependencies; the earlier scaffold-status escalation is resolved.
 
 The schema-ID, payload-stream, encoded-length and raw-copy escalations are resolved by #1559.
 Regression coverage includes every existing golden, typed chapter add/rename/retime and recursive

@@ -4,7 +4,7 @@
 
 Content.Media is the shared vocabulary for encoded presentations, tracks, exact time, lazy sample
 locations, and seek ranges. Services can locate bytes for streaming, thumbnails, and segment planning
-without referencing container packages. The Stage 4 MP4 and Matroska profiles implement these contracts.
+without referencing container packages. The MP4 and Matroska profiles implement these contracts.
 This assembly neither parses containers nor interprets codec bitstreams.
 
 The mapping follows [ISO/IEC 14496-12](https://www.iso.org/obp/ui#iso:std:iso-iec:14496:-12:ed-8:v1:en)
@@ -14,16 +14,17 @@ and source capabilities; missing metadata is not permission to invent a value.
 
 ## Family and dependencies
 
-Media references Binary only, and Binary references Content. BMFF currently references Media.
-The planned MP4 profile uses BMFF; the planned Matroska profile uses EBML and Media. EBML remains
-format-generic. Dashed edges below are the Stage 4 profile references.
+Media references Binary only, and Binary references Content. BMFF references Media.
+The MP4 profile references BMFF and Media; Matroska references EBML and Media. EBML remains
+format-generic. All arrows below are integrated direct project references.
 
 ```mermaid
 flowchart LR
-    Mpeg["Content.Mpeg (Stage 4)"] -.-> Bmff["Content.Bmff"]
+    Mpeg["Content.Mpeg"] --> Bmff["Content.Bmff"]
+    Mpeg --> Media
     Bmff --> Media["Content.Media"]
-    Mkv["Content.Mkv (Stage 4)"] -.-> Media
-    Mkv -.-> Ebml["Content.Ebml"]
+    Mkv["Content.Mkv"] --> Media
+    Mkv --> Ebml["Content.Ebml"]
     Ebml --> Binary["Content.Binary"]
     Media --> Binary
     Binary --> Root["Content"]
@@ -35,7 +36,7 @@ flowchart LR
 | Assimalign.Cohesion.Content.Binary | BinarySegment, bounded streams, binary primitives |
 | Assimalign.Cohesion.Content.Media | Shared contracts and value objects |
 | Assimalign.Cohesion.Content.Bmff / Content.Ebml | Container readers, writers, editable documents |
-| Assimalign.Cohesion.Content.Mpeg / Content.Mkv | Planned adapters over native structures |
+| Assimalign.Cohesion.Content.Mpeg / Content.Mkv | Implemented adapters over native structures |
 
 ## Why this shape
 
@@ -252,7 +253,8 @@ oracle, equality/hash consistency, and 30,000 NTSC frame additions. The generate
 no sample table. On the measured .NET 10 Debug run, both 64- and 1,000,000-sample tracks use 136 bytes
 at construction and zero allocation for 4,096 index/time/seek query sets, producing exactly 16,384
 descriptors with no enumeration. Tests allow a fixed 1 KiB budget. This proves the contract permits
-lazy implementations; Stage 4 adapters must repeat the check over their native structures.
+lazy implementations. The MP4 and Matroska suites separately exercise native sample queries;
+these contract-fixture allocation measurements do not establish the container lazy-save gate.
 
 Tests also cover offsets beyond 40 GB, opaque lazy codec bytes, ownership, cancellation, early exit,
 absent DTS, invalid ranges, irregular sync intervals, edit-like shifts and B-frame dependencies.
