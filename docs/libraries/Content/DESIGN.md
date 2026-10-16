@@ -150,7 +150,7 @@ settled its scope. These classifications follow the program plan's survey, secti
 | `Content.Mkv` | Strategic | Implemented Matroska/WebM profile over EBML and Media, including typed chapters and streamed frames. |
 | `Content.Mpeg` | Strategic | Implemented MP4 profile over BMFF and Media, with retained CMAF checks and lazy native sample indexes. |
 | `Content.Heif` | Strategic | O-C3 retains implemented HEIF/AVIF still-image items, metadata editing and physical payload erasure. |
-| `Content.Pdf` | Strategic | Implemented structural read/edit/save, including incremental updates; its seekable-only reader still fails gate 6. |
+| `Content.Pdf` | Strategic | Implemented structural read/edit/save, including incremental updates; documented seekable input is required for trailing cross-reference data. |
 | `Content.Exe` | Strategic | O-C1 retains implemented inspection and separate bounded process invocation with cleanup tests. |
 
 O-C1 was decided by the owner on 2026-10-16: "Keep process invocation in Content.Exe, separated
@@ -267,7 +267,10 @@ with non-format requirements marked inapplicable only for an explicit reason.
    the forward-only reader can descend, skip and consume elements. Instrumented source and
    output streams prove the document saves through the writer without loading untouched
    payloads into memory. Verify bounded buffering and unchanged payload bytes, not merely a
-   successful parse over `MemoryStream`.
+   successful parse over `MemoryStream`. A format whose structure requires random access,
+   such as PDF with its trailing cross-reference data, is judged on lazy loading and bounded
+   saving rather than a non-seekable reader: its documented seekable-source requirement is
+   the contract. This exception does not imply spooling a non-seekable source into memory.
 7. **Current documentation and complete public API docs.** Review `docs/OVERVIEW.md` and
    `docs/DESIGN.md` against the delivered behavior, and review every public member's XML
    documentation, including parameters, returns and exceptions. File existence and a build
@@ -291,18 +294,20 @@ evidence even when the implementation and its existing tests succeed. `n/a` has 
 scope explanations below; gate 9 is **pending** [#1549](https://github.com/assimalign/cohesion/issues/1549).
 The historical `f7197e97f` table and its evidence are preserved below this snapshot. The later
 [documentation delta](#close-out-documentation-delta) records repairs without rewriting the base evidence.
+The six gate 6 cells include the later [bounded-save evidence](#gate-6-bounded-save-evidence)
+from #1564; every other cell retains the close-out's recorded value.
 
 | Package | 1 CI/release | 2 Failures | 3 Spec tests | 4 Round trip | 5 Malformed | 6 Streaming | 7 Docs | 8 AOT | 9 Perf |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `Content` | pass | pass | n/a | n/a | n/a | n/a | fail | pass | pending |
 | `Content.Binary` | pass | pass | n/a | n/a | n/a | n/a | fail | pass | pending |
 | `Content.Media` | pass | pass | n/a | n/a | n/a | n/a | fail | pass | pending |
-| `Content.Bmff` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
-| `Content.Mpeg` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
-| `Content.Heif` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
-| `Content.Ebml` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
-| `Content.Mkv` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
-| `Content.Pdf` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
+| `Content.Bmff` | pass | pass | pass | pass | pass | pass | fail | pass | pending |
+| `Content.Mpeg` | pass | pass | pass | pass | pass | pass | fail | pass | pending |
+| `Content.Heif` | pass | pass | pass | pass | pass | pass | fail | pass | pending |
+| `Content.Ebml` | pass | pass | pass | pass | pass | pass | fail | pass | pending |
+| `Content.Mkv` | pass | pass | pass | pass | pass | pass | fail | pass | pending |
+| `Content.Pdf` | pass | pass | pass | pass | pass | pass | fail | pass | pending |
 | `Content.Exe` | pass | pass | pass | n/a | pass | n/a | fail | pass | pending |
 | `Content.Text` | pass | pass | pass | n/a | pass | n/a | fail | pass | pending |
 | `Content.Markdown` | pass | pass | pass | pass | pass | n/a | fail | pass | pending |
@@ -415,12 +420,14 @@ recorded provenance and licenses; other binary fixtures are authored bytes or wr
 | Markdown | [CommonMark 0.31.2 provenance](../../../libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/TestObjects/CommonMark/PROVENANCE.md): all 652 official examples, 406 retained and 246 pinned degradations, plus the construct corpus. | All 652 canonical structural round trips plus `MarkdownRoundTripTests`; exclusions stay explicit rather than becoming test skips. |
 | YAML | [Versioned official-suite subset](../../../libraries/Content/Assimalign.Cohesion.Content.Yaml/tests/TestData/yaml-test-suite/README.md), commit `6ad3d2c62885d82fc349026c136ef560838fdf3d`: 223 vendored cases from 333 runnable cases at vendoring, 110 explicitly excluded; YAML 1.2.2 core-schema and boundary tests. | `YamlEmitterTests.Write_RoundTrip_IsStable`, facade seams and anchor/tag shared-node regressions. Comments and original presentation are not preserved. |
 
-#### Gate 6 — evidence gaps, not inferred passes
+#### Gate 6 — gaps recorded at the documentation close-out
 
-All named tests below ran in the full suites above. A sparse **load** test, a tiny round trip
+This table preserves the gaps recorded before #1564; the later
+[bounded-save evidence](#gate-6-bounded-save-evidence) closes them. All named tests below ran
+in the full suites above. A sparse **load** test, a tiny round trip
 or a save that fails before reaching the payload does not establish a bounded successful
-large-payload save. The five media/container rows need a completed save above the buffering
-cap, with instrumented input/output and a buffering/allocation bound plus payload equality.
+large-payload save. At close-out, the five media/container rows needed a completed save above
+the buffering cap, with instrumented input/output and a buffering/allocation bound plus payload equality.
 No acceptance test was added or weakened in this documentation-only review.
 
 | Package | Forward-only and lazy evidence present | Why gate 6 still fails |
@@ -470,8 +477,8 @@ benchmark record and budgets required by #1549.
 
 ### Close-out documentation delta
 
-The implementation matrix above remains the evidence at `17e58c2a1`. XML repairs in
-`714312eca` and the accompanying record refresh change gate 7 as follows; no implementation,
+Apart from the later gate 6 update, the implementation matrix above remains the evidence at
+`17e58c2a1`. XML repairs in `714312eca` and the accompanying record refresh change gate 7 as follows; no implementation,
 public signature, fixture, test, dependency or build property changed.
 
 | Package | Declarations reviewed | XML declarations edited | Exception tags added | Gate 7 after close-out |
@@ -543,7 +550,9 @@ headless renderer under the scratch directory. No desktop automation or image in
 The initial missing-browser/launch failures were renderer setup failures, resolved before this
 successful run; they were not diagram parse failures.
 
-The remaining failed gates are explicit:
+The remaining failed gates at the documentation close-out were as follows. The six gate 6
+rows are superseded by the [bounded-save evidence](#gate-6-bounded-save-evidence); the YAML
+gate 7 finding remains unchanged.
 
 | Package | Failed gate | Reason still open after documentation close-out |
 | --- | --- | --- |
@@ -560,6 +569,99 @@ repairs; inapplicable gates retain the scope reasons above. **All thirteen packa
 on gate 9 / #1549.** This content close-out records delivered work and unresolved acceptance;
 it does not grant an all-gates-pass approval or close GitHub issues. The orchestrator owns program
 plan updates and any changes to the allowed scope.
+
+### Gate 6 bounded-save evidence
+
+[Task #1564](https://github.com/assimalign/cohesion/issues/1564) adds the missing save evidence
+in `87dc9d1d3`, based on `6cf8f88ea`. All six container formats now pass gate 6. No production
+source or existing test changed, and no unbounded save was found. Gate 7 still uses the
+close-out documentation delta above; gate 9 remains pending for every package.
+
+Each new theory loads an original, license-clean virtual source with a 4 GiB or 40 GiB
+payload, makes the metadata edit below, and completes a synchronous save to a non-seekable
+counting sink that retains no output. Tests assert the exact output length, source bytes
+read during copying, lazy payload state and maximum output transfer size. Two
+`GC.GetAllocatedBytesForCurrentThread()` samples enclose only the save on the same thread.
+Setup and assertions are outside the measurement; neither payload size gets a larger budget.
+
+The existing sparse helpers are reused directly or through new companions under each package's
+`tests/TestObjects/`. BMFF's load-only helper rejects payload reads, so its authored framing is
+reused with readable implicit zeros. HEIF delegates framing to its existing probe and supplies
+zeros inside idat. PDF reuses its sparse four-object prefix with a small authored 64-bit xref
+stream: classic tables cannot encode a new /Info object beyond their ten-digit offset limit.
+Every payload chunk is actually read and written; no stream overrides copy-through to skip it.
+The byte-preserving goldens and metadata round trips cited above supply payload-fidelity evidence.
+
+| Format | Completed bounded-save regression and edit | Named forward-only evidence or random-access contract |
+| --- | --- | --- |
+| BMFF | [`BmffBoundedSaveTests.Save_MetadataEditOverVirtualPayload_UsesFixedAllocationBudget`](../../../libraries/Content/Assimalign.Cohesion.Content.Bmff/tests/BmffBoundedSaveTests.cs): insert udta before mdat. | `BmffComplianceTests.Read_NonSeekableSource_ReachesFinalBoxWithBoundedTransfers`, `ReadChildren_NonSeekableContainers_ReachesSibling`, `Skip_NonSeekableMedia_DrainsWithoutMaterialization`. |
+| MP4 | [`Mp4BoundedSaveTests.Save_MetadataEditOverVirtualPayload_UsesFixedAllocationBudget`](../../../libraries/Content/Assimalign.Cohesion.Content.Mpeg/tests/Mp4BoundedSaveTests.cs): change the major brand through the loaded MP4 document. | `Mp4BoundaryTests.Read_NonSeekablePartialDelivery_ShouldSkipWithoutBufferingMedia`. |
+| HEIF | [`HeifBoundedSaveTests.Save_MetadataEditOverVirtualPayload_UsesFixedAllocationBudget`](../../../libraries/Content/Assimalign.Cohesion.Content.Heif/tests/HeifBoundedSaveTests.cs): rotate the primary image over a lazy idat extent. | `HeifStreamingTests.Read_NonSeekableInput_DescendsIntoMeta`. |
+| EBML | [`EbmlBoundedSaveTests.Save_MetadataEditOverVirtualPayload_UsesFixedAllocationBudget`](../../../libraries/Content/Assimalign.Cohesion.Content.Ebml/tests/EbmlBoundedSaveTests.cs): insert a UTF-8 title beside a lazy binary element. | `EbmlReaderTests.ReadNext_UnknownMasterOnNonSeekableInput_PreservesSibling`, `EbmlPayloadStreamTests.OpenPayloadStream_NonSeekablePayload_StopsAtBoundary`. |
+| Matroska | [`MkvBoundedSaveTests.Save_MetadataEditOverVirtualPayload_UsesFixedAllocationBudget`](../../../libraries/Content/Assimalign.Cohesion.Content.Mkv/tests/MkvBoundedSaveTests.cs): change the segment title while copying an untouched cluster with a huge frame. | `MkvStreamingTests.Read_LivePartialReads_DoesNotBufferBlocks`, `MkvFrameReaderTests.ReadFrame_NonSeekableLiveSource_EqualsSeekableFrames`. |
+| PDF | [`PdfBoundedSaveTests.Write_InfoEditOverVirtualPayload_UsesFixedAllocationBudget`](../../../libraries/Content/Assimalign.Cohesion.Content.Pdf/tests/PdfBoundedSaveTests.cs): add /Info, exercising both full and incremental writes at both sizes. | `PdfMalformedCorpusTests.Read_LargeSparseSource_SeeksWithoutMaterializingPayload` and `Read_StreamCapabilities_RejectsNonSeekableAndHandlesShortReads`; the [documented seekable-source contract](../../../libraries/Content/Assimalign.Cohesion.Content.Pdf/docs/DESIGN.md#source-ownership-and-caching) applies under gate 6's random-access exception. |
+
+Measured on 2026-10-16 with SDK `10.0.401` and .NET `10.0.13`, Debug, on the Windows arm64
+host; `--arch x64` runs the installed x64 runtime under Windows emulation. The test output
+records `RuntimeInformation.ProcessArchitecture` as Arm64 or X64. Values below are **allocated
+bytes during save**, not resident memory or payload bytes. Arm64 values come from the final
+full suites; x64 values come from the filtered acceptance runs.
+
+| Save | arm64, 4 GiB | arm64, 40 GiB | x64, 4 GiB | x64, 40 GiB | Asserted budget, arm64 / x64 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| BMFF | 5,104 | 137,160 | 5,104 | 136,872 | 262,144 / 262,144 |
+| MP4 | 20,616 | 151,712 | 20,616 | 151,800 | 262,144 / 262,144 |
+| HEIF | 155,784 | 24,688 | 155,832 | 24,688 | 262,144 / 262,144 |
+| EBML | 134,688 | 3,592 | 134,800 | 3,592 | 262,144 / 262,144 |
+| Matroska | 100,760 | 232,224 | 100,760 | 232,224 | 524,288 / 524,288 |
+| PDF full | 35,552 | 35,312 | 35,552 | 35,312 | 262,144 / 262,144 |
+| PDF incremental | 143,896 | 12,744 | 152,136 | 12,744 | 262,144 / 262,144 |
+
+Budgets were selected from the measured runs with headroom: 256 KiB exceeds the largest
+155,832-byte measurement outside Matroska, and 512 KiB exceeds Matroska's 232,224 bytes.
+The first case on a thread can pay for a 128 KiB pooled transfer buffer; case ordering and
+pool state explain the different 4/40 GiB measurements. The assertion is the same fixed
+budget at both sizes, including that first rental. This proves payload-size independence
+for the tested metadata shape, not a bound independent of object/box/element count, and
+does not replace the gate 9 performance baseline.
+
+Final verification ran the following exact csproj command forms from the repository root.
+`P` is `Assimalign.Cohesion.` plus each package in the table; the x64 command ran for the
+six container packages only. Logs are under `%TEMP%/content-s8-gate6`.
+
+```powershell
+dotnet build libraries/Content/<P>/src/<P>.csproj
+dotnet test libraries/Content/<P>/tests/<P>.Tests.csproj --logger "console;verbosity=detailed"
+dotnet test libraries/Content/<P>/tests/<P>.Tests.csproj --arch x64 --filter FullyQualifiedName~BoundedSaveTests --logger "console;verbosity=detailed"
+git diff --check
+git diff --cached --check
+```
+
+| Package | arm64 build warnings / errors | arm64 tests passed / failed / skipped | x64 acceptance passed / failed / skipped |
+| --- | --- | --- | --- |
+| Content | 0 / 0 | 22 / 0 / 0 | n/a |
+| Content.Binary | 0 / 0 | 201 / 0 / 0 | n/a |
+| Content.Media | 0 / 0 | 93 / 0 / 0 | n/a |
+| Content.Bmff | 0 / 0 | 415 / 0 / 0 | 2 / 0 / 0 |
+| Content.Mpeg | 0 / 0 | 106 / 0 / 0 | 2 / 0 / 0 |
+| Content.Heif | 0 / 0 | 87 / 0 / 0 | 2 / 0 / 0 |
+| Content.Ebml | 0 / 0 | 269 / 0 / 0 | 2 / 0 / 0 |
+| Content.Mkv | 0 / 0 | 79 / 0 / 0 | 2 / 0 / 0 |
+| Content.Pdf | 0 / 0 | 260 / 0 / 0 | 4 / 0 / 0 |
+| Content.Exe | 0 / 0 | 107 / 0 / 0 | n/a |
+| Content.Text | 0 / 0 | 505 / 0 / 0 | n/a |
+| Content.Markdown | 0 / 0 | 1,536 / 0 / 0 | n/a |
+| Content.Yaml | 0 / 0 | 480 / 0 / 0 | n/a |
+
+All 32 final build/test commands exit 0: **4,160 arm64 tests** and **14 x64 acceptance cases**,
+with no failures or skips. No references, workflow, packaging configuration or Mermaid blocks
+changed. The random-access exception specializes the generic reader triad for PDF; the
+orchestrator-owned program plan was not edited. The historical baseline below is unchanged.
+
+The scratch guard `node (Join-Path $env:TEMP 'content-s8-gate6/verify-gate6.cjs')` exits 0:
+only the six final gate 6 cells change, all 28 allocation measurements and the test totals
+match their logs, 16 relative links and 17 named tests resolve, and the historical baseline,
+Mermaid blocks, permitted paths and CRLF/UTF-8 encoding checks pass.
 
 ### f7197e97f baseline (original snapshot)
 
