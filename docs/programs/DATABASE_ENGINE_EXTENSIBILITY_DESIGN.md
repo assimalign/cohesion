@@ -1235,7 +1235,8 @@ compile-time constants and reports a coded diagnostic for a value it cannot eval
 `DefaultSql`. The document still records only `DefaultLiteral`, so a typed value and the same
 literal supplied through `DefaultSql` have identical documents and hashes. B2 kept format v4;
 #1438 later advances runtime and SDK documents to `cohesion/database-schema/v5` because decimal
-scale normalization changes v4 identities. Earlier artifacts, applied markers and pending targets
+scale normalization changes v4 identities, and #1437 advances them again to
+`cohesion/database-schema/v6`, which records CHAR separately from VARCHAR. Earlier artifacts, applied markers and pending targets
 are refused through the document format gate before hash comparison; rebuild artifacts and recreate
 affected databases. Both catalog records retain the versioned document, so catalog format 10
 does not change. There is no old-hash reconciliation or upgrade path.
