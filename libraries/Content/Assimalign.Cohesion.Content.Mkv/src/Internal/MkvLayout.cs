@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Content.Mkv.Internal;
 internal sealed class MkvLayout
 {
     private readonly Dictionary<EbmlElement, Snapshot> _original = new();
+    private readonly HashSet<EbmlElement> _relocatedPositions = new();
     private readonly EbmlSchema _schema;
     private readonly int _maxDepth;
 
@@ -48,7 +49,7 @@ internal sealed class MkvLayout
 
     internal bool Unchanged(EbmlElement element)
     {
-        if (!_original.TryGetValue(element, out var original) || element.SizeLength != original.SizeLength ||
+        if (_relocatedPositions.Contains(element) || !_original.TryGetValue(element, out var original) || element.SizeLength != original.SizeLength ||
             element.IsUnknownSize != original.UnknownSize || !Equals(element.Value, original.Value)) { return false; }
         if (element.Type == EbmlElementType.MasterElement)
         {
@@ -72,6 +73,8 @@ internal sealed class MkvLayout
     }
 
     internal long OriginalLength(EbmlElement element) => _original[element].Bytes.Length;
+    internal void Relocate(EbmlElement field, ulong position)
+    { _relocatedPositions.Add(field); field.Value = position; }
 
     internal long Measure(EbmlElement element, int depth = 0)
     {
@@ -130,6 +133,7 @@ internal sealed class MkvLayout
             case ulong number:
                 var width = 1;
                 for (var rest = number >> 8; rest != 0; rest >>= 8) { width++; }
+                if (_relocatedPositions.Contains(element)) { width = 8; }
                 writer.WriteUnsignedInteger(element.Identifier, number, width, sizeWidth); break;
             case long number when element.Type == EbmlElementType.Date:
                 writer.WriteDate(element.Identifier, number, 8, sizeWidth); break;

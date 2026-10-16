@@ -238,7 +238,7 @@ public sealed class MkvDocument : IMediaFile
                 if (relative >= (ulong)(_layout.OriginalLength(target) - target.Identifier.Length - target.SizeLength))
                 { throw new ContentFormatException(ErrorMessages.CueInvalid, ContentFormatErrorCode.InvalidValue, position.Offset); }
                 _positionTargets.Add(field, target);
-                _cues.Add(new MkvCue(trackId, MkvElements.Number(point, 0xB3), target));
+                _cues.Add(new MkvCue(trackId, MkvElements.Number(point, 0xB3), target, MkvElements.Number(position, 0xEA) != 0));
             }
         }
         foreach (var head in MkvElements.All(Segment, 0x114D9B74))
@@ -284,7 +284,7 @@ public sealed class MkvDocument : IMediaFile
             {
                 if (!Contains(Segment, pair.Key)) { continue; }
                 if (!offsets.TryGetValue(pair.Value, out var position)) { throw new NotSupportedException(ErrorMessages.PositionTargetRemoved); }
-                if ((ulong)pair.Key.Value! != position) { pair.Key.Value = position; changed = true; }
+                if ((ulong)pair.Key.Value! != position) { _layout.Relocate(pair.Key, position); changed = true; }
             }
             if (!changed) { return; }
         }

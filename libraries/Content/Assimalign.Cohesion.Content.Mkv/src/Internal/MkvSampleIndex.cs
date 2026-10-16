@@ -51,6 +51,7 @@ internal sealed class MkvSampleIndex : MediaSampleIndex
             cancellationToken.ThrowIfCancellationRequested();
             if (candidate.TrackId != TrackId) { continue; }
             hasCues = true;
+            if (candidate.HasCodecState) { throw new NotSupportedException(ErrorMessages.CodecStateUnsupported); }
             var time = _document.BlockTimestamp(candidate.Timestamp, 0, _track.CodecDelay, candidate.Cluster.Offset);
             if (time <= presentationTime && (cue is null || candidate.Timestamp > cue.Timestamp)) { cue = candidate; }
         }
@@ -151,10 +152,10 @@ internal sealed class MkvSampleIndex : MediaSampleIndex
                     foreach (var other in Walk(cancellationToken))
                     { if (other.Sample.PresentationTime == wanted) { dependency = other; break; } }
                     if (dependency is null) { throw new NotSupportedException(ErrorMessages.ReferenceUnsupported); }
-                    // Include all source history through the referenced block. This also covers
-                    // transitive preceding references and permits B-frame presentation reordering.
+                    // Conservative complete media coverage includes transitive and forward
+                    // references. Every reference in this track is checked by the outer walk.
                     start = _document.Clusters[0].Offset;
-                    end = Math.Max(end, _document.ClusterEnd(dependency.Cluster));
+                    end = _document.ClusterEnd(_document.Clusters[^1]);
                 }
             }
         }
@@ -196,6 +197,8 @@ internal sealed class MkvSampleIndex : MediaSampleIndex
             foreach (var child in cluster.Children)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (child.Identifier.EncodedValue == 0xAF)
+                { throw new ContentFormatException(ErrorMessages.EncryptedBlockUnsupported, ContentFormatErrorCode.Unsupported, child.Offset); }
                 var simple = child.Identifier.EncodedValue == 0xA3;
                 var group = child.Identifier.EncodedValue == 0xA0 ? child : null;
                 var element = simple ? child : MkvElements.Find(group, 0xA1);

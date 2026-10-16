@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Content.Mkv.Tests;
 // Codec bytes are deliberately placeholders, not playable or downloaded bitstreams.
 internal static class MkvFixtures
 {
-    internal static byte[] Create(bool webm = true, bool cues = true, bool live = false, bool metadata = false, bool laces = false)
+    internal static byte[] Create(bool webm = true, bool cues = true, bool live = false, bool metadata = false, bool laces = false, int clusterCount = 3)
     {
         using var output = new MemoryStream();
         using var writer = EbmlWriter.Create(output, MkvSchema.Matroska);
@@ -33,7 +33,7 @@ internal static class MkvFixtures
         writer.WriteUtf8String(Id(0x4D80), "Cohesion fixture writer");
         writer.WriteUtf8String(Id(0x5741), "Cohesion tests");
         writer.WriteUtf8String(Id(0x7BA9), "Fixture title");
-        writer.WriteFloat(Id(0x4489), 2500, 8);
+        writer.WriteFloat(Id(0x4489), clusterCount * 1000 - 500, 8);
         writer.EndMaster();
         var tracksPosition = (ulong)(writer.Position - segmentData);
         Start(0x1654AE6B);
@@ -56,7 +56,7 @@ internal static class MkvFixtures
             writer.WriteBinary(Id(0x1043A770), BinarySegment.Create(Chapters()));
         }
         var clusterPositions = new List<ulong>();
-        for (var cluster = 0; cluster < 3; cluster++)
+        for (var cluster = 0; cluster < clusterCount; cluster++)
         {
             clusterPositions.Add((ulong)(writer.Position - segmentData));
             writer.BeginMaster(Id(0x1F43B675), sizeLength: 8, backPatch: !live);

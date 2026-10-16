@@ -13,5 +13,6 @@
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Content.Mkv" />
     <Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\*.cs" Link="Shared\Binary\%(Filename)%(Extension)" />
+    <None Update="TestObjects\Golden\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
