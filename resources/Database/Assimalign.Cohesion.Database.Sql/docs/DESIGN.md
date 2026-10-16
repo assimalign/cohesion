@@ -1301,7 +1301,7 @@ allocated index pages, including split siblings/roots and abandoned allocations.
 older formats; the storage header and B-tree node formats are unchanged. The kind-14 tuple
 codec belongs to the catalog alone. The review's narrow catalog snapshot/completion API carries
 identities, never record locations or a mutable collection; no friend assembly grant is added.
-The review keeps unreleased format 11 unchanged. Pending space alone does **not** report Degraded: the requested catalog is complete
+The #1443 review kept format 11 unchanged; #1437 advances it to 12 for CHAR. Pending space alone does **not** report Degraded: the requested catalog is complete
 and the database is usable. Existing worker failure health still applies to actual cleanup failures.
 EventSource IDs 23/24 report reclamation started/completed with engine, database and retired id;
 completion includes pages reclaimed by that process (after a crash it counts remaining work).

@@ -43,7 +43,7 @@ pages: a storage iterator's pin does not protect a record against ordinary delet
 Only after data durability does it ask the catalog to retire the intent. Recovery restores free headers and the FSM
 before resumption: no cursor or cross-file atomic commit is required. An intent with no remaining
 pages is harmless and completes on retry. Catalog itself never walks or frees the data file.
-This review changes no records or format marker: unreleased record-space format 11 remains 11.
+The #1443 review kept record-space format 11 unchanged. #1437 advances it to 12 for CHAR, as described above.
 
 ## Durable pending migrations (49a)
 
