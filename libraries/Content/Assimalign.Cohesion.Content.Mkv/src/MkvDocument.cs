@@ -96,6 +96,10 @@ public sealed class MkvDocument : IMediaFile
     /// <exception cref="ArgumentException">The source cannot read/seek or options request leniency.</exception>
     /// <exception cref="ArgumentOutOfRangeException">An option is invalid.</exception>
     /// <exception cref="ContentFormatException">The source violates framing, schema, profile or configured limits.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The native EBML document violates its schema, encoding or limits.</exception>
     public static MkvDocument Load(Stream source, MkvReaderOptions? options = null, bool leaveOpen = true)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -118,6 +122,10 @@ public sealed class MkvDocument : IMediaFile
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
     /// <exception cref="ContentFormatException">The edited schema is invalid or a source was truncated.</exception>
     /// <exception cref="NotSupportedException">Clusters or referenced position targets were removed/edited.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.InvalidOperationException">The edited native tree exceeds the writer depth limit or a master boundary.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An edited native element requests an invalid VINT width.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The native EBML document violates its schema, encoding or limits.</exception>
     public void Save(Stream destination)
     {
         EnsureOpen();
@@ -149,6 +157,8 @@ public sealed class MkvDocument : IMediaFile
     /// <exception cref="ArgumentException">The element is not an attachment with FileData.</exception>
     /// <exception cref="ContentFormatException">The data exceeds the cap or is truncated.</exception>
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public byte[] ReadAttachmentData(EbmlElement attachedFile)
     {
         EnsureOpen();

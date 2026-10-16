@@ -9,8 +9,8 @@ using System;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
+/// <summary>Retains the shadow sync sample table box identity; typed payload reading and writing are unsupported.</summary>
 [DebuggerDisplay("Bmff Box: Shadow Sync Sample Table (stsh)")]
-/// <summary>The ShadowSyncSampleTableBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class ShadowSyncSampleTableBox : BmffFullBox
 {
     /// <summary>Creates a ShadowSyncSampleTableBox at its original location.</summary>

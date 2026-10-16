@@ -11,6 +11,7 @@ public static partial class Mp4Profile
     /// <param name="document">The native document.</param>
     /// <returns>Whether the file declares or contains fragmented media.</returns>
     /// <exception cref="ArgumentNullException">The document is null.</exception>
+    /// <exception cref="ContentFormatException">The movie contains duplicate movie-extends declarations.</exception>
     public static bool IsFragmented(BmffDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -27,6 +28,9 @@ public static partial class Mp4Profile
     /// <param name="document">A document loaded with the MP4 profile.</param>
     /// <exception cref="ArgumentNullException">The document is null.</exception>
     /// <exception cref="ContentFormatException">The layout is invalid or its relocation is unsupported.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public static void FastStart(BmffDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);

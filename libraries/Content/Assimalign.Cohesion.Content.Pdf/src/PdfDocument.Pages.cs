@@ -10,6 +10,8 @@ public sealed partial class PdfDocument
     /// <summary>Walks the current page tree, resolving inherited attributes into a fresh ordered view (§7.7.3).</summary>
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
     /// <exception cref="ContentFormatException">The tree is malformed, cyclic, over a limit or requires unsupported encryption.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public IReadOnlyList<PdfPage> Pages
     {
         get
@@ -25,6 +27,8 @@ public sealed partial class PdfDocument
     /// <summary>Gets the actual leaf count by walking the current page tree.</summary>
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
     /// <exception cref="ContentFormatException">The page tree cannot be resolved within the configured limits.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public int PageCount => Pages.Count;
     private int WalkPages(PdfIndirectReference reference, PdfObjectIdentifier? parent, PdfDictionary? resources,
         PdfArray? mediaBox, PdfArray? cropBox, int rotate, int depth, List<PdfPage> pages, HashSet<PdfObjectIdentifier> visited)

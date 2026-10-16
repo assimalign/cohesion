@@ -37,6 +37,7 @@ public sealed class MkvChapter
 
     /// <summary>Gets or sets the nonzero ChapterUID.</summary>
     /// <exception cref="ArgumentOutOfRangeException">The UID is zero.</exception>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public ulong Uid
     {
         get => MkvElements.Number(Element, 0x73C4);
@@ -47,30 +48,35 @@ public sealed class MkvChapter
         }
     }
     /// <summary>Gets or sets ChapterStringUID; null removes the optional field.</summary>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public string? StringUid
     {
         get => MkvElements.Text(Element, 0x5654);
         set => MkvElements.Set(Element, 0x5654, EbmlElementType.Utf8String, value);
     }
     /// <summary>Gets or sets ChapterTimeStart in nanoseconds, independent of TimestampScale.</summary>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public ulong TimeStart
     {
         get => MkvElements.Number(Element, 0x91);
         set => MkvElements.Set(Element, 0x91, EbmlElementType.UnsignedInteger, value);
     }
     /// <summary>Gets or sets the exclusive ChapterTimeEnd in nanoseconds; null removes it.</summary>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public ulong? TimeEnd
     {
         get => MkvElements.Find(Element, 0x92)?.Value as ulong?;
         set => MkvElements.Set(Element, 0x92, EbmlElementType.UnsignedInteger, value);
     }
     /// <summary>Gets or sets ChapterFlagHidden; absent means false.</summary>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public bool IsHidden
     {
         get => MkvElements.Number(Element, 0x98) != 0;
         set => MkvElements.Set(Element, 0x98, EbmlElementType.UnsignedInteger, value ? 1UL : 0UL);
     }
     /// <summary>Gets or sets ChapterFlagEnabled; absent means true.</summary>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public bool IsEnabled
     {
         get => MkvElements.Number(Element, 0x4598, 1) != 0;

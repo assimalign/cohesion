@@ -19,6 +19,7 @@ public sealed class YamlSequence : YamlNode, IEnumerable<YamlNode>
 
     /// <summary>Gets the item at the given index.</summary>
     /// <param name="index">The zero-based index.</param>
+    /// <returns>The item at the requested index or key.</returns>
     public YamlNode this[int index] => Items[index];
 
     /// <summary>Adds an item to the end of the sequence.</summary>
@@ -28,5 +29,6 @@ public sealed class YamlSequence : YamlNode, IEnumerable<YamlNode>
     /// <inheritdoc/>
     public IEnumerator<YamlNode> GetEnumerator() => Items.GetEnumerator();
 
+    /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

@@ -56,6 +56,9 @@ public sealed partial class HeifDocument : IDisposable
     /// <exception cref="ArgumentNullException">The document is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">An option is invalid.</exception>
     /// <exception cref="ContentFormatException">Required structure is invalid in strict mode or a limit is exceeded.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public static HeifDocument Create(BmffDocument document, HeifReaderOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -73,6 +76,11 @@ public sealed partial class HeifDocument : IDisposable
     /// <returns>The loaded document.</returns>
     /// <exception cref="ArgumentException">The source or options are invalid.</exception>
     /// <exception cref="ContentFormatException">The input is malformed, unsupported in strict mode or exceeds a limit.</exception>
+    /// <exception cref="System.ArgumentNullException">The source is null.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An option is outside its documented range.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public static HeifDocument Load(Stream source, HeifReaderOptions? options = null, bool leaveOpen = true)
     {
         options ??= new HeifReaderOptions();
@@ -122,6 +130,10 @@ public sealed partial class HeifDocument : IDisposable
     /// <exception cref="ContentFormatException">The edit cannot be relocated safely.</exception>
     /// <exception cref="InvalidOperationException">The output is the original source.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
+    /// <exception cref="System.ArgumentNullException">The output is null.</exception>
+    /// <exception cref="System.ArgumentException">The output is not writable.</exception>
+    /// <exception cref="System.IO.IOException">Reading retained data or writing the output fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public void Save(Stream output) { ValidateSave(); CompactDeletedData(output); Document.Save(output); }
 
     /// <summary>Saves with BMFF asynchronous output; external profile box writes remain synchronous.</summary>
@@ -132,6 +144,10 @@ public sealed partial class HeifDocument : IDisposable
     /// <exception cref="InvalidOperationException">The output is the original source.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
+    /// <exception cref="System.ArgumentNullException">The output is null.</exception>
+    /// <exception cref="System.ArgumentException">The output is not writable.</exception>
+    /// <exception cref="System.IO.IOException">Reading retained data or writing the output fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public ValueTask SaveAsync(Stream output, CancellationToken cancellationToken = default)
     { cancellationToken.ThrowIfCancellationRequested(); ValidateSave(); CompactDeletedData(output); return Document.SaveAsync(output, cancellationToken); }
 

@@ -65,6 +65,12 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="length">Zero through eight, or -1 for minimal width.</param>
     /// <param name="sizeLength">The size VINT width, or zero for minimal width.</param>
     /// <exception cref="ArgumentException">The ID, value, or width is invalid.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The write would cross a master boundary or cannot be represented at the current position.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An explicit VINT width is outside its supported range.</exception>
     public void WriteUnsignedInteger(VInt identifier, ulong value, int length = -1, int sizeLength = 0) =>
         WriteValue(identifier, EbmlElementType.UnsignedInteger, value, length, sizeLength);
 
@@ -74,6 +80,12 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="length">Zero through eight, or -1 for minimal width.</param>
     /// <param name="sizeLength">The size VINT width, or zero for minimal width.</param>
     /// <exception cref="ArgumentException">The ID, value, or width is invalid.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The write would cross a master boundary or cannot be represented at the current position.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An explicit VINT width is outside its supported range.</exception>
     public void WriteSignedInteger(VInt identifier, long value, int length = -1, int sizeLength = 0) =>
         WriteValue(identifier, EbmlElementType.SignedInteger, value, length, sizeLength);
 
@@ -83,6 +95,12 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="length">Zero, four, eight, or -1 for minimal lossless width.</param>
     /// <param name="sizeLength">The size VINT width, or zero for minimal width.</param>
     /// <exception cref="ArgumentException">The ID, value, or width is invalid.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The write would cross a master boundary or cannot be represented at the current position.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An explicit VINT width is outside its supported range.</exception>
     public void WriteFloat(VInt identifier, double value, int length = -1, int sizeLength = 0) =>
         WriteValue(identifier, EbmlElementType.Float, value, length, sizeLength);
 
@@ -92,6 +110,12 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="length">The padded byte length, or -1 for minimal width.</param>
     /// <param name="sizeLength">The size VINT width, or zero for minimal width.</param>
     /// <exception cref="ArgumentException">The ID, characters, or width is invalid.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The write would cross a master boundary or cannot be represented at the current position.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An explicit VINT width is outside its supported range.</exception>
     public void WriteAsciiString(VInt identifier, string value, int length = -1, int sizeLength = 0) =>
         WriteValue(identifier, EbmlElementType.AsciiString, value, length, sizeLength);
 
@@ -101,6 +125,12 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="length">The padded byte length, or -1 for minimal width.</param>
     /// <param name="sizeLength">The size VINT width, or zero for minimal width.</param>
     /// <exception cref="ArgumentException">The ID, encoding, or width is invalid.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The write would cross a master boundary or cannot be represented at the current position.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An explicit VINT width is outside its supported range.</exception>
     public void WriteUtf8String(VInt identifier, string value, int length = -1, int sizeLength = 0) =>
         WriteValue(identifier, EbmlElementType.Utf8String, value, length, sizeLength);
 
@@ -110,6 +140,12 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="length">Zero, eight, or -1 for minimal width.</param>
     /// <param name="sizeLength">The size VINT width, or zero for minimal width.</param>
     /// <exception cref="ArgumentException">The ID, value, or width is invalid.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The write would cross a master boundary or cannot be represented at the current position.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An explicit VINT width is outside its supported range.</exception>
     public void WriteDate(VInt identifier, long nanoseconds, int length = -1, int sizeLength = 0) =>
         WriteValue(identifier, EbmlElementType.Date, nanoseconds, length, sizeLength);
 
@@ -119,6 +155,12 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="sizeLength">The size VINT width, or zero for minimal width.</param>
     /// <exception cref="ArgumentException">The ID or width is invalid.</exception>
     /// <exception cref="ContentFormatException">The lazy source is truncated.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The write would cross a master boundary or cannot be represented at the current position.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An explicit VINT width is outside its supported range.</exception>
     public void WriteBinary(VInt identifier, BinarySegment value, int sizeLength = 0)
     {
         ValidateLeaf(identifier, EbmlElementType.Binary, value, value.Length);
@@ -133,6 +175,10 @@ public sealed partial class EbmlWriter : IDisposable
     /// <param name="sizeLength">The size VINT width, or zero for minimal width.</param>
     /// <exception cref="ArgumentOutOfRangeException">The length is negative.</exception>
     /// <exception cref="ArgumentException">The width is invalid.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The write would cross a master boundary or cannot be represented at the current position.</exception>
     public void WriteVoid(long length, int sizeLength = 0)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(length);
@@ -155,6 +201,12 @@ public sealed partial class EbmlWriter : IDisposable
     /// <exception cref="ArgumentException">The ID, size, or mode is invalid.</exception>
     /// <exception cref="ContentFormatException">The schema prohibits this type or unknown size.</exception>
     /// <exception cref="InvalidOperationException">The output cannot seek or nesting exceeds its limit.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The element encoding is invalid, truncated, unsupported, or exceeds a configured limit.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">The declared size is negative or the size VINT width is outside one through eight.</exception>
     public void BeginMaster(VInt identifier, long? size = null, int sizeLength = 0, bool backPatch = false)
     {
         if (_baseDepth + _masters.Count >= _maxDepth)
@@ -187,6 +239,9 @@ public sealed partial class EbmlWriter : IDisposable
     /// <summary>Completes a master, checking or back-patching its size.</summary>
     /// <exception cref="InvalidOperationException">No master is open or its actual size differs from the declared size.</exception>
     /// <exception cref="ArgumentException">The reserved size width cannot hold the result.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
     public void EndMaster()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -222,6 +277,10 @@ public sealed partial class EbmlWriter : IDisposable
     /// <exception cref="ArgumentException">An ID, value, or explicit width is invalid.</exception>
     /// <exception cref="InvalidOperationException">The depth limit or master boundary is violated.</exception>
     /// <exception cref="ContentFormatException">A lazy source is truncated.</exception>
+    /// <exception cref="System.IO.IOException">Reading a lazy payload or writing the output fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The writer or a stream used by it has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">A retained source or the destination rejects a required operation.</exception>
+    /// <exception cref="EbmlDataFormatException">The element violates its schema or encoding constraints.</exception>
     public void WriteElement(EbmlElement element)
     {
         ArgumentNullException.ThrowIfNull(element);

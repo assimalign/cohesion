@@ -49,6 +49,8 @@ public sealed partial class PdfDocument
     /// <summary>Gets the catalog dictionary through the current trailer's Root reference (§7.7.2).</summary>
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
     /// <exception cref="ContentFormatException">The catalog is malformed or requires unsupported encryption.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public PdfDictionary Catalog
     {
         get
@@ -68,6 +70,8 @@ public sealed partial class PdfDocument
     /// <exception cref="ArgumentOutOfRangeException">The object number is zero.</exception>
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
     /// <exception cref="ContentFormatException">The object is malformed, cyclic, over a limit or requires unsupported decoding.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public IPdfObject Resolve(PdfObjectIdentifier identifier)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

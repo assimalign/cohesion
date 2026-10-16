@@ -16,6 +16,7 @@ public sealed class YamlScalar : YamlNode
     /// <c>new YamlScalar("true")</c> is a boolean and <c>new YamlScalar("text")</c> is a string.
     /// </summary>
     /// <param name="value">The scalar content.</param>
+    /// <exception cref="System.ArgumentNullException"><paramref name="value"/> is null.</exception>
     public YamlScalar(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
@@ -66,6 +67,7 @@ public sealed class YamlScalar : YamlNode
     /// </summary>
     /// <param name="value">The string content.</param>
     /// <returns>A scalar of kind <see cref="YamlScalarKind.String"/>.</returns>
+    /// <exception cref="System.ArgumentNullException"><paramref name="value"/> is null.</exception>
     public static YamlScalar FromString(string value)
     {
         ArgumentNullException.ThrowIfNull(value);

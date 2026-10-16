@@ -10,8 +10,8 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 
+/// <summary>Retains the track selection box identity; typed payload reading and writing are unsupported.</summary>
 [DebuggerDisplay("Bmff Box: Track Reference (tref)")]
-/// <summary>The TrackSelectionBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class TrackSelectionBox : BmffFullBox
 {
     /// <summary>Creates a TrackSelectionBox at its original location.</summary>

@@ -32,6 +32,9 @@ public interface IMediaSampleIndex
     /// <param name="cancellationToken">A token checked during enumeration.</param>
     /// <returns>The samples. Re-enumeration is not guaranteed for a single-use source.</returns>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    /// <exception cref="ContentFormatException">The profile encounters malformed, unsupported or unrepresentable container data, or a configured limit.</exception>
+    /// <exception cref="System.ObjectDisposedException">The owning file or its borrowed source has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading native sample metadata fails.</exception>
     IAsyncEnumerable<MediaSample> ReadSamplesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Looks up a sample by its zero-based decode/source-order index.</summary>
@@ -41,6 +44,9 @@ public interface IMediaSampleIndex
     /// <exception cref="ArgumentOutOfRangeException">The index is negative.</exception>
     /// <exception cref="NotSupportedException">Lookup by index is unavailable.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    /// <exception cref="ContentFormatException">The profile encounters malformed, unsupported or unrepresentable container data, or a configured limit.</exception>
+    /// <exception cref="System.ObjectDisposedException">The owning file or its borrowed source has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading native sample metadata fails.</exception>
     ValueTask<MediaSample?> GetSampleAsync(long index, CancellationToken cancellationToken = default);
 
     /// <summary>Finds the sample with the greatest presentation timestamp no later than the requested time.</summary>
@@ -50,6 +56,9 @@ public interface IMediaSampleIndex
     /// presentation timestamp. After the last timestamp, returns that last sample, even in a gap.</returns>
     /// <exception cref="NotSupportedException">Lookup by time is unavailable.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    /// <exception cref="ContentFormatException">The profile encounters malformed, unsupported or unrepresentable container data, or a configured limit.</exception>
+    /// <exception cref="System.ObjectDisposedException">The owning file or its borrowed source has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading native sample metadata fails.</exception>
     ValueTask<MediaSample?> FindSampleAsync(MediaTimestamp presentationTime, CancellationToken cancellationToken = default);
 
     /// <summary>Resolves the preceding sync sample and a source range sufficient to decode through the time lookup's target.</summary>
@@ -64,5 +73,8 @@ public interface IMediaSampleIndex
     /// Never substitute the sync sample's payload alone for a decode range.</remarks>
     /// <exception cref="NotSupportedException">Seeking is unavailable or a safe range cannot be established.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    /// <exception cref="ContentFormatException">The profile encounters malformed, unsupported or unrepresentable container data, or a configured limit.</exception>
+    /// <exception cref="System.ObjectDisposedException">The owning file or its borrowed source has been disposed.</exception>
+    /// <exception cref="System.IO.IOException">Reading native sample metadata fails.</exception>
     ValueTask<MediaSeekResult?> SeekAsync(MediaTimestamp presentationTime, CancellationToken cancellationToken = default);
 }

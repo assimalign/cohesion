@@ -49,6 +49,11 @@ public sealed partial class EbmlDocument : IDisposable
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentException">The source is not readable and seekable.</exception>
     /// <exception cref="ContentFormatException">The document is malformed or exceeds a limit.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">A reader option is outside its supported range.</exception>
+    /// <exception cref="EbmlDataFormatException">The document violates schema, encoding or configured limits.</exception>
     public static EbmlDocument Load(Stream source, EbmlSchema? schema = null, EbmlReaderOptions? options = null, bool leaveOpen = true,
         EbmlSchemaRegistry? registry = null) =>
         LoadCore(source, schema, options, leaveOpen, registry, CancellationToken.None);
@@ -58,6 +63,12 @@ public sealed partial class EbmlDocument : IDisposable
     /// <exception cref="ArgumentException">The destination is the source or an element cannot be encoded.</exception>
     /// <exception cref="ContentFormatException">A lazy source was truncated.</exception>
     /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
+    /// <exception cref="System.ArgumentNullException"><paramref name="destination"/> is null.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The edited tree exceeds the writer depth limit or a master boundary.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An edited element requests an invalid VINT width.</exception>
+    /// <exception cref="EbmlDataFormatException">The document violates schema, encoding or configured limits.</exception>
     public void Save(Stream destination)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

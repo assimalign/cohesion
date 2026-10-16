@@ -16,6 +16,7 @@ public sealed class MarkdownDocument : MarkdownNode, IEnumerable<MarkdownBlock>
 
     /// <summary>Gets the block at the given index.</summary>
     /// <param name="index">The zero-based index.</param>
+    /// <returns>The item at the requested index or key.</returns>
     public MarkdownBlock this[int index] => Blocks[index];
 
     /// <summary>Adds a block to the end of the document.</summary>
@@ -25,5 +26,6 @@ public sealed class MarkdownDocument : MarkdownNode, IEnumerable<MarkdownBlock>
     /// <inheritdoc/>
     public IEnumerator<MarkdownBlock> GetEnumerator() => Blocks.GetEnumerator();
 
+    /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

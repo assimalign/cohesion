@@ -11,6 +11,7 @@ namespace Assimalign.Cohesion.Content.Ebml;
 /// </summary>
 public enum EbmlElementType
 {
+    /// <summary>An unspecified element type; no scalar encoding is selected.</summary>
     None = -1,
     /// <summary>
     /// The signed integer

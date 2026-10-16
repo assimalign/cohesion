@@ -131,6 +131,9 @@ public sealed class Mp4File : IMediaFile
     /// <exception cref="ArgumentException">The source or limits are invalid.</exception>
     /// <exception cref="ContentFormatException">The input is malformed, unsupported or exceeds limits.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.ArgumentNullException"><paramref name="source"/> is null.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An option is outside its documented range.</exception>
+    /// <exception cref="System.ArgumentNullException">The source is null.</exception>
     public static Mp4File Load(Stream source, Mp4ReaderOptions? options = null, bool leaveOpen = true, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -153,6 +156,8 @@ public sealed class Mp4File : IMediaFile
     /// <exception cref="ArgumentException">The source or limits are invalid.</exception>
     /// <exception cref="ContentFormatException">The input is malformed, unsupported or exceeds limits.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="System.ArgumentNullException">The source is null.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">An option is outside its documented range.</exception>
     public static ValueTask<Mp4File> LoadAsync(Stream source, Mp4ReaderOptions? options = null, bool leaveOpen = true, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(Load(source, options, leaveOpen, cancellationToken));
 

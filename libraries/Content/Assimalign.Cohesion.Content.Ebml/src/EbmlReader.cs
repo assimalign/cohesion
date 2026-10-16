@@ -69,6 +69,9 @@ public sealed partial class EbmlReader : IDisposable
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentException">The source is unreadable.</exception>
     /// <exception cref="ArgumentOutOfRangeException">An option is invalid.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public static EbmlReader Create(Stream source, EbmlSchema? schema = null, EbmlReaderOptions? options = null, bool leaveOpen = true,
         EbmlSchemaRegistry? registry = null)
     {
@@ -99,6 +102,10 @@ public sealed partial class EbmlReader : IDisposable
     /// <exception cref="ContentFormatException">The header, size, or parent boundary is invalid.</exception>
     /// <exception cref="InvalidOperationException">The previous element has not been consumed, entered, or opened as a payload stream.</exception>
     /// <exception cref="ObjectDisposedException">The reader is disposed.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The element encoding is invalid, truncated, unsupported, or exceeds a configured limit.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public bool ReadNext()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -195,6 +202,7 @@ public sealed partial class EbmlReader : IDisposable
     /// <summary>Enters the current master without reading its children.</summary>
     /// <exception cref="InvalidOperationException">The current element is not a master.</exception>
     /// <exception cref="ContentFormatException">The depth limit is exceeded.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The element encoding is invalid, truncated, unsupported, or exceeds a configured limit.</exception>
     public void EnterMaster()
     {
         EnsurePayloadClosed();
@@ -218,6 +226,7 @@ public sealed partial class EbmlReader : IDisposable
     /// <summary>Leaves a master after ReadNext has reported its end.</summary>
     /// <exception cref="InvalidOperationException">The master has not ended or none is entered.</exception>
     /// <exception cref="ContentFormatException">Header limits are unsupported.</exception>
+    /// <exception cref="Assimalign.Cohesion.Content.Ebml.EbmlDataFormatException">The element encoding is invalid, truncated, unsupported, or exceeds a configured limit.</exception>
     public void LeaveMaster()
     {
         if (!_atEnd || _current is not null || _masters.Count == 0)
@@ -265,35 +274,74 @@ public sealed partial class EbmlReader : IDisposable
     /// <returns>A ulong, long, double, string, or BinarySegment.</returns>
     /// <exception cref="ContentFormatException">The size, value, or buffering limit is invalid.</exception>
     /// <exception cref="InvalidOperationException">No leaf is current.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public object ReadValue() => ReadValueCore(Current.Type);
 
     /// <summary>Reads an unsigned integer of zero through eight octets.</summary>
     /// <returns>The unsigned value.</returns>
     /// <exception cref="ContentFormatException">The type, length, or value is invalid.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.InvalidOperationException">No suitable element is current, or an open payload stream prevents the operation.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public ulong ReadUnsignedInteger() => ReadScalar<ulong>(EbmlElementType.UnsignedInteger);
     /// <summary>Reads a two's-complement signed integer of zero through eight octets.</summary>
     /// <returns>The signed value.</returns>
     /// <exception cref="ContentFormatException">The type, length, or value is invalid.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.InvalidOperationException">No suitable element is current, or an open payload stream prevents the operation.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public long ReadSignedInteger() => ReadScalar<long>(EbmlElementType.SignedInteger);
     /// <summary>Reads a float of zero, four, or eight octets.</summary>
     /// <returns>The floating value.</returns>
     /// <exception cref="ContentFormatException">The type, length, or value is invalid.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.InvalidOperationException">No suitable element is current, or an open payload stream prevents the operation.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public double ReadFloat() => ReadScalar<double>(EbmlElementType.Float);
     /// <summary>Reads printable ASCII up to the first NUL, ignoring subsequent padding.</summary>
     /// <returns>The decoded string.</returns>
     /// <exception cref="ContentFormatException">The type, characters, or buffer limit is invalid.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.InvalidOperationException">No suitable element is current, or an open payload stream prevents the operation.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public string ReadAsciiString() => ReadScalar<string>(EbmlElementType.AsciiString);
     /// <summary>Reads strict UTF-8 up to the first NUL, ignoring subsequent padding.</summary>
     /// <returns>The decoded string.</returns>
     /// <exception cref="ContentFormatException">The type, encoding, or buffer limit is invalid.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.InvalidOperationException">No suitable element is current, or an open payload stream prevents the operation.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public string ReadUtf8String() => ReadScalar<string>(EbmlElementType.Utf8String);
     /// <summary>Reads signed nanoseconds since 2001-01-01T00:00:00 UTC without rounding.</summary>
     /// <returns>The exact nanosecond value.</returns>
     /// <exception cref="ContentFormatException">The type or size is invalid.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.InvalidOperationException">No suitable element is current, or an open payload stream prevents the operation.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public long ReadDate() => ReadScalar<long>(EbmlElementType.Date);
     /// <summary>Returns a lazy binary range for seekable input; otherwise buffers within the configured cap.</summary>
     /// <returns>The binary value. Lazy values borrow the source.</returns>
     /// <exception cref="ContentFormatException">The type, size, or buffering limit is invalid.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.InvalidOperationException">No suitable element is current, or an open payload stream prevents the operation.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public BinarySegment ReadBinary() => ReadScalar<BinarySegment>(EbmlElementType.Binary);
 
     /// <summary>Opens a bounded, forward-only stream over the current element's raw payload.</summary>
@@ -325,6 +373,10 @@ public sealed partial class EbmlReader : IDisposable
     /// <summary>Skips the current element, descending through masters without buffering binary values.</summary>
     /// <exception cref="ContentFormatException">A malformed child or a depth limit is encountered.</exception>
     /// <exception cref="InvalidOperationException">There is no current element.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance has been disposed.</exception>
+    /// <exception cref="EbmlDataFormatException">The encoding, schema value, CRC or configured limit is invalid.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public void Skip()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

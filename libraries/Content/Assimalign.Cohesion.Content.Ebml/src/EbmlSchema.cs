@@ -35,6 +35,7 @@ public sealed class EbmlSchema
     /// <exception cref="ArgumentNullException">The document is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The depth is invalid.</exception>
     /// <exception cref="ContentFormatException">A violation occurs in strict mode, or a safety limit is exceeded.</exception>
+    /// <exception cref="EbmlDataFormatException">The document violates schema, encoding or configured limits.</exception>
     public IReadOnlyList<ContentFormatException> Validate(EbmlDocument document, bool lenient = false, int maxDepth = 64)
     {
         ArgumentNullException.ThrowIfNull(document);

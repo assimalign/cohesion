@@ -16,26 +16,48 @@ public abstract class BmffWriter : IDisposable, IContentWriter<BmffDocument>
     /// <summary>Writes a complete box tree with precomputed sizes.</summary>
     /// <param name="box">The root box.</param>
     /// <exception cref="ContentFormatException">The tree is invalid, too deep or unsupported.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The writer has completed a box extending to end of output.</exception>
     public abstract void Write(BmffBox box);
     /// <summary>Writes a box tree with asynchronous output and lazy-payload copy-through.</summary>
     /// <param name="box">The root box.</param>
     /// <param name="cancellationToken">Cancellation for output operations.</param>
     /// <returns>A task completing after the box.</returns>
     /// <exception cref="ContentFormatException">The model is invalid or exceeds limits.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The writer has completed a box extending to end of output.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
     public abstract ValueTask WriteAsync(BmffBox box, CancellationToken cancellationToken = default);
     /// <summary>Starts a streaming container, with a known payload size or bounded buffering.</summary>
     /// <param name="type">The raw box type.</param>
     /// <param name="payloadSize">The byte count excluding the header; null selects buffering.</param>
     /// <param name="extendedType">The UUID for a uuid box.</param>
     /// <exception cref="ContentFormatException">The depth limit is exceeded.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
+    /// <exception cref="System.InvalidOperationException">The writer has completed a box extending to end of output.</exception>
+    /// <exception cref="System.ArgumentException">The UUID does not match the box type.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">The supplied payload size is negative or cannot be represented with its header.</exception>
     public abstract void BeginContainer(BmffBoxType type, long? payloadSize = null, Guid? extendedType = null);
     /// <summary>Finishes a streaming container and verifies its supplied size.</summary>
     /// <exception cref="ContentFormatException">The emitted size differs from the supplied size.</exception>
     /// <exception cref="InvalidOperationException">There is no open container.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
     public abstract void EndContainer();
     /// <summary>Copies a raw payload segment inside the current streaming container.</summary>
     /// <param name="payload">The bytes to copy without materialization.</param>
     /// <exception cref="InvalidOperationException">There is no open container.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required operation.</exception>
+    /// <exception cref="ContentFormatException">The payload is truncated or exceeds the output window or buffering limit.</exception>
     public abstract void WritePayload(BinarySegment payload);
     /// <inheritdoc/>
     public abstract void Dispose();
@@ -47,6 +69,10 @@ public abstract class BmffWriter : IDisposable, IContentWriter<BmffDocument>
     /// <returns>The writer.</returns>
     /// <exception cref="ArgumentException">The output or limits are invalid.</exception>
     /// <exception cref="ArgumentNullException">The output is null.</exception>
+    /// <exception cref="System.ArgumentOutOfRangeException">The buffered-payload limit is negative or exceeds Array.MaxLength, or the maximum depth is negative.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public static BmffWriter Create(Stream stream, int maxBufferedPayloadSize = 16 * 1024 * 1024, int maxDepth = 64)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -63,8 +89,12 @@ public abstract class BmffWriter : IDisposable, IContentWriter<BmffDocument>
     internal virtual int DocumentBufferLimit => 16 * 1024 * 1024;
     internal virtual int DocumentMaxDepth => 64;
 
+    /// <inheritdoc/>
+    /// <exception cref="NullReferenceException">The document is null.</exception>
     void IContentWriter<BmffDocument>.Write(Stream stream, BmffDocument document) =>
         document.SaveCore(stream, DocumentBufferLimit, DocumentMaxDepth);
+    /// <inheritdoc/>
+    /// <exception cref="NullReferenceException">The document is null.</exception>
     ValueTask IContentWriter<BmffDocument>.WriteAsync(Stream stream, BmffDocument document, CancellationToken cancellationToken) =>
         document.SaveCoreAsync(stream, DocumentBufferLimit, DocumentMaxDepth, cancellationToken);
 }

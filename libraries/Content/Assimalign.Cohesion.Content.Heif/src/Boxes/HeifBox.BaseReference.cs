@@ -29,10 +29,22 @@ public sealed class BaseReferenceBox : BmffBox
     /// <summary>Gets or sets whether IDs have 32 bits; must match the enclosing iref version.</summary>
     public bool LargeIds { get => _fields.LargeIds; set => _fields.LargeIds = value; }
     /// <summary>Gets or sets the referring item ID.</summary>
+    /// <exception cref="ContentFormatException">The retained reference payload is malformed or exceeds the configured item-reference limit.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public uint FromItemId { get { _fields.Decode(Options); return _fields.FromItemId; } set { _fields.Decode(Options); _fields.FromItemId = value; } }
     /// <summary>Gets or sets the referenced item IDs in encoded order.</summary>
+    /// <exception cref="ContentFormatException">The retained reference payload is malformed or exceeds the configured item-reference limit.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public uint[] ToItemIds { get { _fields.Decode(Options); return _fields.ToItemIds; } set { _fields.Decode(Options); _fields.ToItemIds = value; } }
     /// <summary>Gets or sets bytes following the defined reference list.</summary>
+    /// <exception cref="ContentFormatException">The retained reference payload is malformed or exceeds the configured item-reference limit.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public byte[] TrailingData { get { _fields.Decode(Options); return _fields.TrailingData; } set { _fields.Decode(Options); _fields.TrailingData = value; } }
     internal HeifReferenceFields Fields => _fields;
     /// <inheritdoc/>

@@ -25,6 +25,9 @@ public interface ITextContent : IContent
     /// <returns>A reader owned by the caller.</returns>
     /// <exception cref="ContentException">Thrown when single-use content is read a second time.</exception>
     /// <exception cref="System.ObjectDisposedException">Thrown when the content has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">The underlying content has no readable representation.</exception>
+    /// <exception cref="System.IO.IOException">Opening or reading the underlying content fails.</exception>
+    /// <remarks>The returned reader can report <see cref="ContentFormatException"/> with InvalidValue when a strict decoder encounters malformed bytes; decoding is deferred until the reader consumes them.</remarks>
     TextReader OpenText();
 
     /// <summary>
@@ -34,5 +37,9 @@ public interface ITextContent : IContent
     /// <returns>A reader owned by the caller.</returns>
     /// <exception cref="ContentException">Thrown when single-use content is read a second time.</exception>
     /// <exception cref="System.ObjectDisposedException">Thrown when the content has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">The underlying content has no readable representation.</exception>
+    /// <exception cref="System.IO.IOException">Opening or reading the underlying content fails.</exception>
+    /// <exception cref="System.OperationCanceledException">Cancellation was requested.</exception>
+    /// <remarks>The returned reader can report <see cref="ContentFormatException"/> with InvalidValue when a strict decoder encounters malformed bytes; decoding is deferred until the reader consumes them.</remarks>
     ValueTask<TextReader> OpenTextAsync(CancellationToken cancellationToken = default);
 }

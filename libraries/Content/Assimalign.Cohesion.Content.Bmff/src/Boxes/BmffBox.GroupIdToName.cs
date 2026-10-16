@@ -10,8 +10,8 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 
+/// <summary>Retains the group id to name box identity; typed payload reading and writing are unsupported.</summary>
 [DebuggerDisplay("Bmff Box: Group ID to Name (gitn)")]
-/// <summary>The GroupIdToNameBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class GroupIdToNameBox : BmffBox
 {
     /// <summary>Creates a GroupIdToNameBox at its original location.</summary>

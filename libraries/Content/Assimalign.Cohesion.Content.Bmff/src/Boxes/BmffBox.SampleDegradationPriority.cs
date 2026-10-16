@@ -9,8 +9,8 @@ using System;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
+/// <summary>Retains the sample degradation priority box identity; typed payload reading and writing are unsupported.</summary>
 [DebuggerDisplay("Bmff Box: Sample Degradation Priority (stdp)")]
-/// <summary>The SampleDegradationPriorityBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class SampleDegradationPriorityBox : BmffFullBox
 {
     /// <summary>Creates a SampleDegradationPriorityBox at its original location.</summary>

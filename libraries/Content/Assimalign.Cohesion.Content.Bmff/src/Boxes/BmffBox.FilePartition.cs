@@ -9,8 +9,8 @@ using System;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
+/// <summary>Retains the file partition box identity; typed payload reading and writing are unsupported.</summary>
 [DebuggerDisplay("Bmff Box: File Partition (fpar)")]
-/// <summary>The FilePartitionBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class FilePartitionBox : BmffFullBox
 {
     /// <summary>Creates a FilePartitionBox at its original location.</summary>

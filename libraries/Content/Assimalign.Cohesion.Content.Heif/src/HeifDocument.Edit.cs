@@ -35,6 +35,8 @@ public sealed partial class HeifDocument
     /// <param name="payload">Borrowed bytes; the TIFF header begins four plus the encoded offset bytes from the start.</param>
     /// <exception cref="ContentFormatException">The item or TIFF offset is invalid, or a limit is exceeded.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public void ReplaceExif(uint itemId, BinarySegment payload)
     {
         var item = Editable(itemId);
@@ -69,6 +71,8 @@ public sealed partial class HeifDocument
     /// <param name="payload">The borrowed replacement bytes.</param>
     /// <exception cref="ContentFormatException">The item is not XMP or a limit is exceeded.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public void ReplaceXmp(uint itemId, BinarySegment payload)
     {
         var item = Editable(itemId);
@@ -89,6 +93,8 @@ public sealed partial class HeifDocument
     /// <exception cref="ArgumentNullException">The property list is null.</exception>
     /// <exception cref="ContentFormatException">The master, type, properties or resource counts are invalid.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public HeifItem AddThumbnail(uint imageId, FourCC itemType, BinarySegment payload, IReadOnlyList<BmffBox> properties)
     {
         ArgumentNullException.ThrowIfNull(properties);

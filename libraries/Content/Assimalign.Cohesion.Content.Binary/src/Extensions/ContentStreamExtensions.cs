@@ -20,6 +20,9 @@ public static class ContentStreamExtensions
         /// <returns>True when filled, or false for clean end.</returns>
         /// <exception cref="ArgumentNullException">The stream is null.</exception>
         /// <exception cref="ContentFormatException">The stream ends after returning part of the buffer.</exception>
+        /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
+        /// <exception cref="System.NotSupportedException">The source does not support reading.</exception>
+        /// <exception cref="System.ObjectDisposedException">A stream used by the operation has been disposed.</exception>
         public bool TryReadExactly(Span<byte> buffer)
         {
             ArgumentNullException.ThrowIfNull(stream);
@@ -44,6 +47,9 @@ public static class ContentStreamExtensions
         /// <param name="buffer">The buffer to fill; an empty buffer succeeds.</param>
         /// <exception cref="ArgumentNullException">The stream is null.</exception>
         /// <exception cref="ContentFormatException">The stream ends before filling the buffer.</exception>
+        /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
+        /// <exception cref="System.NotSupportedException">The source does not support reading.</exception>
+        /// <exception cref="System.ObjectDisposedException">A stream used by the operation has been disposed.</exception>
         public void ReadContentExactly(Span<byte> buffer)
         {
             if (!(stream.TryReadExactly(buffer)))
@@ -57,6 +63,9 @@ public static class ContentStreamExtensions
         /// <exception cref="ArgumentNullException">A required stream is null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">The count is negative.</exception>
         /// <exception cref="ContentFormatException">The source ends before the requested count.</exception>
+        /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
+        /// <exception cref="System.NotSupportedException">The source does not support reading.</exception>
+        /// <exception cref="System.ObjectDisposedException">A stream used by the operation has been disposed.</exception>
         public void SkipExactly(long count)
         {
             ArgumentNullException.ThrowIfNull(stream);
@@ -101,6 +110,9 @@ public static class ContentStreamExtensions
         /// <exception cref="ArgumentNullException">A required stream is null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">The count is negative.</exception>
         /// <exception cref="ContentFormatException">The source ends before the requested count.</exception>
+        /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
+        /// <exception cref="System.NotSupportedException">The source is not readable or the destination is not writable.</exception>
+        /// <exception cref="System.ObjectDisposedException">A stream used by the operation has been disposed.</exception>
         public void CopyExactlyTo(Stream destination, long count)
         {
             ArgumentNullException.ThrowIfNull(stream);
@@ -138,6 +150,9 @@ public static class ContentStreamExtensions
         /// <exception cref="ArgumentNullException">The stream is null.</exception>
         /// <exception cref="ContentFormatException">The stream ends after returning part of the buffer.</exception>
         /// <exception cref="OperationCanceledException">The nonempty operation is canceled.</exception>
+        /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
+        /// <exception cref="System.NotSupportedException">The source does not support reading.</exception>
+        /// <exception cref="System.ObjectDisposedException">A stream used by the operation has been disposed.</exception>
         public async ValueTask<bool> TryReadExactlyAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(stream);
@@ -165,6 +180,9 @@ public static class ContentStreamExtensions
         /// <exception cref="ArgumentNullException">The stream is null.</exception>
         /// <exception cref="ContentFormatException">The stream ends before filling the buffer.</exception>
         /// <exception cref="OperationCanceledException">The nonempty operation is canceled.</exception>
+        /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
+        /// <exception cref="System.NotSupportedException">The source does not support reading.</exception>
+        /// <exception cref="System.ObjectDisposedException">A stream used by the operation has been disposed.</exception>
         public async ValueTask ReadContentExactlyAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             if (!(await stream.TryReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false)))
@@ -181,6 +199,9 @@ public static class ContentStreamExtensions
         /// <exception cref="ArgumentOutOfRangeException">The count is negative.</exception>
         /// <exception cref="ContentFormatException">The source ends before the requested count.</exception>
         /// <exception cref="OperationCanceledException">The nonempty operation is canceled.</exception>
+        /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
+        /// <exception cref="System.NotSupportedException">The source does not support reading.</exception>
+        /// <exception cref="System.ObjectDisposedException">A stream used by the operation has been disposed.</exception>
         public async ValueTask SkipExactlyAsync(long count, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(stream);
@@ -229,6 +250,9 @@ public static class ContentStreamExtensions
         /// <exception cref="ArgumentOutOfRangeException">The count is negative.</exception>
         /// <exception cref="ContentFormatException">The source ends before the requested count.</exception>
         /// <exception cref="OperationCanceledException">The nonempty operation is canceled.</exception>
+        /// <exception cref="System.IO.IOException">Reading or writing the underlying stream fails.</exception>
+        /// <exception cref="System.NotSupportedException">The source is not readable or the destination is not writable.</exception>
+        /// <exception cref="System.ObjectDisposedException">A stream used by the operation has been disposed.</exception>
         public async ValueTask CopyExactlyToAsync(Stream destination, long count, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(stream);

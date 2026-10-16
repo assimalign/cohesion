@@ -69,6 +69,10 @@ public readonly struct BmffBoxHeader
     /// <exception cref="ContentFormatException">The header is truncated, invalid, or exceeds the supported range.</exception>
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The supplied bounds are invalid.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
+    /// <exception cref="System.ArgumentException">The source is not readable.</exception>
     public static bool TryRead(Stream stream, long offset, long? containerEnd, bool isTopLevel, out BmffBoxHeader header)
     {
         ArgumentNullException.ThrowIfNull(stream);

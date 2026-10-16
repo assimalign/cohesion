@@ -42,6 +42,9 @@ public sealed class MkvBlock
     /// <returns>The validated frame boundaries.</returns>
     /// <exception cref="ArgumentOutOfRangeException">A caller limit or offset is invalid.</exception>
     /// <exception cref="ContentFormatException">The framing is truncated, invalid, or exceeds the frame cap.</exception>
+    /// <exception cref="System.IO.IOException">An underlying stream operation fails.</exception>
+    /// <exception cref="System.ObjectDisposedException">The instance or a borrowed stream has been disposed.</exception>
+    /// <exception cref="System.NotSupportedException">An underlying stream rejects a required read, write or seek operation.</exception>
     public static MkvBlock Parse(BinarySegment payload, long absoluteOffset, bool simpleBlock = true, int maxFrames = 256)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(absoluteOffset);

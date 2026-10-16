@@ -35,6 +35,7 @@ public sealed class MkvChapterDisplay
 
     /// <summary>Gets or sets ChapString.</summary>
     /// <exception cref="ArgumentNullException">The text is null.</exception>
+    /// <exception cref="System.ArgumentException">An existing native element has a type incompatible with this value.</exception>
     public string Text
     {
         get => MkvElements.Text(Element, 0x85) ?? string.Empty;

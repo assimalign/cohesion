@@ -58,6 +58,8 @@ public sealed class TextLineReader : IDisposable
     /// <returns><see langword="true"/> when a line was read; <see langword="false"/> at the end of the text.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when the reader has been disposed.</exception>
     /// <exception cref="ContentFormatException">A line exceeds MaxLineLength: LimitExceeded, with the first excess UTF-16 character's absolute offset. Subsequent reads repeat the failure.</exception>
+    /// <exception cref="System.IO.IOException">The underlying text reader fails to read or peek.</exception>
+    /// <exception cref="System.Text.DecoderFallbackException">A caller-supplied text reader rejects malformed encoded text.</exception>
     public bool TryReadLine(out TextLine line)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
