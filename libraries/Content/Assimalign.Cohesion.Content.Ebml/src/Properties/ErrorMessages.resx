@@ -31,4 +31,6 @@
   <data name="MissingElement" xml:space="preserve"><value>A mandatory element is missing.</value></data>
   <data name="CrcMismatch" xml:space="preserve"><value>The CRC-32 does not match the parent data.</value></data>
   <data name="UnsupportedVersion" xml:space="preserve"><value>The EBML version or maximum width is unsupported.</value></data>
+  <data name="PayloadActive" xml:space="preserve"><value>Advance or skip the active payload stream before another element operation.</value></data>
+  <data name="PayloadSizeUnknown" xml:space="preserve"><value>A payload stream requires a known element size.</value></data>
 </root>

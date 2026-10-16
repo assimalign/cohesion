@@ -294,15 +294,22 @@ public sealed partial class EbmlWriter : IDisposable
         }
     }
 
-    internal long DataLength(EbmlElement element, int depth)
+    internal long DataLength(EbmlElement element, int depth) => GetDataLength(element, _schema, depth, _maxDepth);
+
+    private static long GetDataLength(EbmlElement element, EbmlSchema schema, int depth, int maxDepth)
     {
+        ArgumentNullException.ThrowIfNull(element);
+        if (!element.Identifier.IsValidIdentifier && schema.Find(element.Identifier) is null)
+        {
+            throw new ArgumentException(ErrorMessages.InvalidVInt, nameof(element));
+        }
         if (element.Type != EbmlElementType.MasterElement)
         {
             return element.RawPayload?.Length ?? (element.Value is BinarySegment segment ? segment.Length :
-                EbmlValueCodec.GetWireLength(_schema.Find(element.Identifier), element.Type, element.Value!));
+                EbmlValueCodec.GetWireLength(schema.Find(element.Identifier), element.Type, element.Value!));
         }
 
-        if (depth >= _maxDepth)
+        if (depth >= maxDepth)
         {
             throw new InvalidOperationException(ErrorMessages.DepthLimit);
         }
@@ -310,9 +317,14 @@ public sealed partial class EbmlWriter : IDisposable
         long total = 0;
         foreach (var child in element.Children)
         {
-            var size = DataLength(child, depth + 1);
+            var size = GetDataLength(child, schema, depth + 1, maxDepth);
             var width = SizeWidth(child, size);
-            var next = size + child.Identifier.Length + width;
+            var headerLength = child.Identifier.Length + width;
+            if (size > long.MaxValue - headerLength)
+            {
+                throw new ArgumentException(ErrorMessages.InvalidSize);
+            }
+            var next = size + headerLength;
             if (next > long.MaxValue - total)
             {
                 throw new ArgumentException(ErrorMessages.InvalidSize);
