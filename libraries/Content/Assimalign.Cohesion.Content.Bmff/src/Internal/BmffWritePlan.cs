@@ -105,7 +105,18 @@ internal sealed class BmffWritePlan
         {
             throw new ContentFormatException(ErrorMessages.InvalidTree, ContentFormatErrorCode.InvalidStructure, offset);
         }
-        var childOffset = offset + Header.HeaderSize + _prefix.Length;
+        // Profile composites can add a prefix through GetPayloadSize + Write without
+        // overriding the package-internal PrefixSize seam. Their extra bytes precede children.
+        var prefixSize = PayloadSize - (_box is BmffBoxComposite composite ? composite.TrailingData.Length : 0);
+        foreach (var child in _children)
+        {
+            prefixSize -= child.Size;
+        }
+        if (prefixSize < 0)
+        {
+            throw new ContentFormatException(ErrorMessages.InvalidTree, ContentFormatErrorCode.InvalidStructure, offset);
+        }
+        var childOffset = offset + Header.HeaderSize + prefixSize;
         foreach (var child in _children)
         {
             child.AddLayout(layout, childOffset);

@@ -73,7 +73,8 @@ profile parse a custom prefix from a payload before enumerating that payload's r
 BmffWriter computes the complete tree's sizes before emitting its first header. It detects cycles
 and excessive nesting. Each model writes only its payload, into a bounded BmffStream. A mismatched
 GetPayloadSize/Write implementation fails with InvalidStructure. Profile composite overrides are
-honored; their GetPayloadSize can extend base.GetPayloadSize for a custom prefix.
+honored; their GetPayloadSize can extend base.GetPayloadSize for a custom prefix. Extra profile bytes must precede the ordered children;
+relocation derives that prefix length from the declared payload size and child sizes.
 
 New or resized boxes use the ordinary header through uint.MaxValue and the large-size header above
 that boundary. Unchanged loaded boxes retain their original header encoding, including a small box
@@ -265,6 +266,20 @@ The existing writer switches any oversized ancestor to a large-size header witho
 
 
 ## Verification
+
+The golden corpus is generated in code by the package writer, with provenance in
+tests/TestObjects/BmffGoldenFixtures.cs: progressive video/audio MP4-shaped data, the same file
+after fast-start relocation, two moof/mdat pairs with mvex and mfra, and HEIF-shaped meta/iloc/iinf.
+These are structural fixtures with numbered sample bytes, not codec-conformance media.
+Every golden loads/saves identically; chunk references resolve the same bytes for both tracks,
+fragment indexes resolve both fragment payloads, and HEIF item extents survive metadata growth.
+
+Malformed cases include every strategic ordinary header truncation, every full-box-prefix
+truncation, table counts exceeding payloads, stsz unsigned-count overflow, v1 elst media times
+below -1, invalid packed field widths, impossible child bounds, nesting and allocation limits.
+Unknown children are interleaved at every progressive-file container level. Flags are checked
+across every valid tfhd/trun presence combination; independent field vectors cover signedness
+and compact-table padding. Profile prefix sizes participate in relocation as well as writing.
 
 Portable xUnit/Shouldly fixtures are authored in tests/TestObjects without downloaded media.
 The Stage 2 corpus covers bounded streaming, headers, registry extension, ownership and lazy

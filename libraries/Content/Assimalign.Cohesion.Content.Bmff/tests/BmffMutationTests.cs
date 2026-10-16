@@ -188,4 +188,24 @@ public class BmffMutationTests
         BinaryPrimitives.ReadUInt32BigEndian(headers).ShouldBe(1u);
         BinaryPrimitives.ReadUInt64BigEndian(headers.AsSpan(8)).ShouldBe((ulong)SparseMediaStream.MediaSize + 32);
     }
+    [Fact(DisplayName = "Cohesion Test [Content.Bmff] - ISO/IEC 14496-12 4.2 and 8.7.5 profile prefixes count toward media positions")]
+    public void Save_ProfilePrefixWithMedia_AccountsForPrefixDuringRelocation()
+    {
+        // Arrange: header(8), profile prefix(1), stco(20), mdat header(8), sample(3).
+        var offsets = new ChunkOffsetBox(0, 0) { Entries = [37] };
+        var bytes = BmffFixtures.Box("cont", BmffFixtures.Join(new byte[] { 42 }, BmffModelFixtures.Write(offsets), BmffFixtures.Box("mdat", [7, 8, 9])));
+        var registry = BmffBoxRegistry.CreateBuilder().Register(FourCC.Parse("cont").ToBmffBoxType(), header => new ProfileContainer(header)).Build();
+        using var source = new MemoryStream(bytes);
+        using var document = BmffDocument.Load(source, registry: registry);
+        var container = (ProfileContainer)document.Boxes[0];
+        container.Children.Insert(0, BmffModelFixtures.Opaque("zzzz", [1]));
+        using var output = new MemoryStream();
+        // Act
+        document.Save(output);
+        // Assert
+        var relocated = ((ChunkOffsetBox)container.Children[1]).Entries[0];
+        relocated.ShouldBe(46u);
+        output.ToArray().AsSpan((int)relocated, 3).ToArray().ShouldBe(new byte[] { 7, 8, 9 });
+    }
+
 }
