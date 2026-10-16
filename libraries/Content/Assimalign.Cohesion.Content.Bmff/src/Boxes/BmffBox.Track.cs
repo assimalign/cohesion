@@ -13,14 +13,9 @@ public sealed class TrackBox : BmffBoxComposite
     /// <param name="size">The original total size.</param>
     public TrackBox(long size, long offset)
     {
-        Offset = offset;
-        Limit = size;
+        SetOriginalLocation(offset, size);
     }
 
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.Track;
     /// <inheritdoc/>

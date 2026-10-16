@@ -19,12 +19,16 @@ hosting, reflection, assembly discovery or generated runtime code. NativeAOT com
 The owner explicitly retained the existing abstract BmffBox, BmffBoxComposite, one sealed class
 per box, and both visitor interfaces. This is a scoped exception to the repository's interface-first
 rule. The tree represents the file's ordered structure directly, lets each box own its payload
-Read/Write behavior, and lets visitors inspect or transform models without merging unrelated
+Read/Write behavior, and lets the walker and typed queries inspect models without merging unrelated
 field layouts into a generic box.
 
 BmffBoxComposite.Children is an editable IList rather than the former read-only enumeration.
-IsLeaf/IsComposite report the structural role. Offset and Limit describe the original header position
-and total size; they do not change when a model is edited. Header preserves the parsed wire header.
+BmffBox derives IsLeaf/IsComposite from the composite base type, including empty containers.
+Offset keeps its existing name and means the absolute source header position; Limit is the original
+total byte count, not an end position. Both come from Header after loading and never track edits,
+relocation or saving. Before loading they retain the constructor-supplied values (zero when omitted).
+The writer computes a separate output layout and does not initialize or replace Header. The base
+properties stay virtual for existing custom subclasses; package box classes inherit the defaults.
 GetPayloadSize and the writer's size plan determine the new serialized size.
 
 The dependencies between access modes and the shared primitives are:
@@ -210,7 +214,7 @@ versions follow the usual strict/lenient policy. No second reader pass is requir
 
 Track-reference lists for hint, cdsc, hind, dpnd, ipir, mpod and sync are interpreted only inside
 tref. Other reference types remain opaque. The original public field models have overloads on both visitor
-interfaces and on `BmffBoxVisitor<T>` (one `Visit` per public field model is part of the composite design), so
+interfaces and on `BmffBoxVisitor<T>` (retained for compatibility), so
 `TrackReferenceTypeBox`, `TrackFragmentDecodeTimeBox`, `DataEntryUrlBox`, `DataEntryUrnBox` and
 `ItemInfoEntryBox` dispatch to typed overloads rather than to `Visit(BmffBox)`. This follow-up keeps those
 interfaces unchanged: profile boxes and the internal sidx/saio implementations use the existing
@@ -389,3 +393,64 @@ sample-entry dispatch, inherited depth limits, sidx/saio v0/v1 preservation, nes
 width promotion, absolute and fragment-relative auxiliary addresses, and transactional custom
 rules. MP4 fixtures verify fast-start sample and auxiliary bytes; HEIF fixtures exercise payload
 compaction, partial sharing and rollback. These are container checks, not codec certification.
+
+## Primary traversal
+
+BmffBoxWalker and BmffQueryExtensions are the primary traversal API (O-C5). The walker visits
+any box or document in depth-first order, including unknown and profile boxes, with enter/leave
+callbacks carrying the node, zero-based depth and a borrowed read-only FourCC path. SkipSubtree
+still receives a matching leave; Stop ends immediately without unwinding callbacks. The walk is
+iterative, keeps only ancestor frames, rejects cycles and defaults to a maximum depth of 64.
+Copy a callback path before retaining it. Do not edit child lists during traversal.
+
+`Children<T>` queries direct children; `Descendants<T>`, FindAll and First/FirstOrDefault search
+in preorder. Composite queries exclude their receiver; document queries include top-level boxes.
+FindAll and First/FirstOrDefault accept BmffBoxType or FourCC, including unregistered values.
+Queries are lazy and bounded by depth, so first-match queries stop without visiting later trees.
+Their depth is measured from each direct child, starting at zero. No query reads a lazy payload.
+
+Accept and both visitor interfaces retain their exact signatures for compatibility. Their typed
+overload set is closed: BMFF cannot reference profile assemblies, and profile boxes cannot add
+methods to those interfaces. They use Visit(BmffBox); walker callbacks and generic type queries
+see the concrete profile nodes without extending that closed set.
+
+## Tree inspection
+
+BmffTreeFormatter.Write accepts a box or document and a borrowed TextWriter; Format returns a
+string with LF endings. Both use the bounded walker. Each line records FourCC, absolute source
+offset, original total size, large-size/size-zero markers, shape, full-box version/flags and current
+key fields. UnknownBox is explicitly marked unknown and preserved, with its preservation reason.
+Lazy payloads show only their segment lengths. Unloaded boxes are marked and never measured by
+calling a writer, so inspection does not initialize headers or compute edited output sizes.
+
+The protected WriteDescription(TextWriter) hook lets each box append already materialized fields.
+BmffFullBox supplies version/flags; overrides call the base and append fields with a leading space.
+Hooks must not read payloads or mutate the tree. Numbers use invariant culture; control characters
+are escaped to keep one physical line per box. MP4 opaque full-box prefixes (esds/vpcC) are labeled
+lazy rather than decoded for display. HEIF reference descriptions inspect the retained memory prefix
+without triggering array decoding; ICC profiles and configuration records remain untouched.
+
+## Debugger inspection
+
+One inherited DebuggerDisplay on BmffBox uses the raw FourCC, source offset and original header
+size, with a child count for composites or a lazy marker for opaque payloads. Large totals are
+shown in GiB; other totals use invariant digit grouping. Unloaded and preserved models are marked.
+The composite debugger proxy exposes the existing Children list without copying or enumerating it.
+Neither display evaluates field descriptions, writer size plans or payload accessors.
+
+## Inspection examples and extension contract
+
+See [OVERVIEW](OVERVIEW.md#traverse-and-inspect-a-tree) for traversal examples and fixture output.
+
+A profile implements protected override void WriteDescription(TextWriter writer), calls base, then
+appends fields preceded by a space. Inside BMFF the override is protected internal. The hook is
+for already materialized state only; arbitrary custom overrides must uphold the no-I/O/no-mutation
+contract. Opaque full-box prefixes remain lazy. Large-size and size-zero mark header encodings;
+a loaded size always describes the source, even when current fields would serialize differently.
+
+A fixture subtree excerpt illustrates the header and field split:
+
+```text
+moov @0x201A size=982 children=3
+  mvhd @0x2022 size=108 version=0 flags=0x000000 timescale=1000 duration=4000 next-track-id=3
+```

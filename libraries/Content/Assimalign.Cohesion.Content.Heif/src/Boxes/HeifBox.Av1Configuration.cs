@@ -11,10 +11,6 @@ public sealed class Av1ConfigurationBox : BmffBoxLazyLeaf
     /// <summary>Creates an empty Av1ConfigurationBox model.</summary>
     public Av1ConfigurationBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x61763143;
     internal HeifReaderOptions Options { get; set; } = new();
 }

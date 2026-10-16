@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
@@ -14,16 +15,8 @@ public sealed class ImageMirrorBox : BmffBox
     /// <summary>Creates an empty ImageMirrorBox model.</summary>
     public ImageMirrorBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x696d6972;
     internal HeifReaderOptions Options { get; set; } = new();
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
     /// <summary>Gets or sets bytes following the defined fields, preserved verbatim.</summary>
     public byte[] TrailingData { get; set; } = Array.Empty<byte>();
     /// <summary>Gets or sets the mirror axis (0 vertical, 1 horizontal).</summary>
@@ -55,5 +48,11 @@ public sealed class ImageMirrorBox : BmffBox
         {
             throw new ContentFormatException(ErrorMessages.InvalidValue, ContentFormatErrorCode.InvalidValue, Offset);
         }
+    }
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" axis={Axis}"));
     }
 }

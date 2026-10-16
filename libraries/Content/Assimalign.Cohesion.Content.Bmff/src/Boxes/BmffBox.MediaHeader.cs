@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Text;
 
 using Assimalign.Cohesion.Content.Binary;
@@ -13,16 +14,8 @@ public sealed class MediaHeaderBox : BmffFullBox
     /// <summary>Creates a MediaHeaderBox at its original location.</summary>
     /// <param name="offset">The original absolute header offset.</param>
     /// <param name="limit">The original total size.</param>
-    public MediaHeaderBox(long offset, long limit) { Offset = offset; Limit = limit;  }
+    public MediaHeaderBox(long offset, long limit) { SetOriginalLocation(offset, limit);  }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.MediaHeader;
 
@@ -89,4 +82,10 @@ public sealed class MediaHeaderBox : BmffFullBox
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" timescale={TimeScale} duration={Duration}"));
+    }
 }

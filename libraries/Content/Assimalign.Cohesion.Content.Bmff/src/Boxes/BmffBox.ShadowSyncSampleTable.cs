@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the shadow sync sample table box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: Shadow Sync Sample Table (stsh)")]
 public sealed class ShadowSyncSampleTableBox : BmffFullBox
 {
     /// <summary>Creates a ShadowSyncSampleTableBox at its original location.</summary>
@@ -18,20 +16,11 @@ public sealed class ShadowSyncSampleTableBox : BmffFullBox
     /// <param name="limit">The original total byte size.</param>
     public ShadowSyncSampleTableBox(long offset, long limit)
     {
-        this.Offset = offset;
-        this.Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
 
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
 
-    /// <inheritdoc/>
-    public override long Limit { get;}
 
-    /// <inheritdoc/>
-    public override long Offset { get; }
 
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.ShadowSyncSampleTable;

@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Bmff.Internal;
 
@@ -52,5 +53,11 @@ public abstract class BmffFullBox : BmffBox
         Span<byte> bytes = stackalloc byte[4];
         BinaryPrimitives.WriteUInt32BigEndian(bytes, ((uint)Version << 24) | Flags);
         stream.Write(bytes);
+    }
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" version={Version} flags=0x{Flags:X6}"));
     }
 }

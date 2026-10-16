@@ -13,11 +13,7 @@ internal sealed class BmffSegmentIndexBox : BmffFullBox
     internal ushort Reserved { get; set; }
     internal record struct Entry(uint Reference, uint Duration, uint Sap);
     internal Entry[] Entries { get; set; } = Array.Empty<Entry>();
-    public override long Offset => Header.Offset;
-    public override long Limit => Header.TotalSize ?? 0;
     public override BmffBoxType BoxType => (BmffBoxType)0x73696478;
-    public override bool IsLeaf => true;
-    public override bool IsComposite => false;
     public override void Read(BmffStream stream)
     {
         ReadFullBoxHeader(stream);

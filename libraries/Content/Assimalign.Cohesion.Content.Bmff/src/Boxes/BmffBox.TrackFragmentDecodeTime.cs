@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Text;
 
 using Assimalign.Cohesion.Content.Binary;
@@ -12,16 +13,8 @@ public sealed class TrackFragmentDecodeTimeBox : BmffFullBox
     private byte[] _trailing = Array.Empty<byte>();
     /// <summary>Creates an empty TrackFragmentDecodeTimeBox.</summary>
     public TrackFragmentDecodeTimeBox() { }
-    internal TrackFragmentDecodeTimeBox(long offset, long limit) { Offset = offset; Limit = limit; }
+    internal TrackFragmentDecodeTimeBox(long offset, long limit) { SetOriginalLocation(offset, limit); }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.TrackFragmentDecodeTime;
 
@@ -60,4 +53,10 @@ public sealed class TrackFragmentDecodeTimeBox : BmffFullBox
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" decode-time={BaseMediaDecodeTime}"));
+    }
 }

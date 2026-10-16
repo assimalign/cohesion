@@ -12,7 +12,7 @@ public sealed class MediaInfoBox : BmffBoxComposite
     /// <param name="offset">The original absolute header offset.</param>
     public MediaInfoBox(long offset)
     {
-        Offset = offset;
+        SetOriginalLocation(offset);
     }
 
     /// <summary>Creates a MediaInfo box with its original location.</summary>
@@ -20,14 +20,9 @@ public sealed class MediaInfoBox : BmffBoxComposite
     /// <param name="limit">The original total size.</param>
     public MediaInfoBox(long offset, long limit)
     {
-        Offset = offset;
-        Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
 
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.MediaInfo;
     /// <inheritdoc/>

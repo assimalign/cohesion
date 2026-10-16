@@ -12,16 +12,8 @@ public sealed class DataEntryUrnBox : BmffFullBox
     private byte[] _trailing = Array.Empty<byte>();
     /// <summary>Creates an empty DataEntryUrnBox.</summary>
     public DataEntryUrnBox() { }
-    internal DataEntryUrnBox(long offset, long limit) { Offset = offset; Limit = limit; }
+    internal DataEntryUrnBox(long offset, long limit) { SetOriginalLocation(offset, limit); }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.DataEntryUrn;
 

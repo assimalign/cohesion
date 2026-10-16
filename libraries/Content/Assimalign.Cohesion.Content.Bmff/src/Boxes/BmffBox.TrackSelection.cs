@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -11,7 +10,6 @@ namespace Assimalign.Cohesion.Content.Bmff;
 
 
 /// <summary>Retains the track selection box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: Track Reference (tref)")]
 public sealed class TrackSelectionBox : BmffFullBox
 {
     /// <summary>Creates a TrackSelectionBox at its original location.</summary>
@@ -19,20 +17,11 @@ public sealed class TrackSelectionBox : BmffFullBox
     /// <param name="limit">The original total byte size.</param>
     public TrackSelectionBox(long offset, long limit)
     {
-        this.Offset = offset;
-        this.Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
 
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
 
-    /// <inheritdoc/>
-    public override long Limit { get;}
 
-    /// <inheritdoc/>
-    public override long Offset { get; }
 
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.TrackSelection;

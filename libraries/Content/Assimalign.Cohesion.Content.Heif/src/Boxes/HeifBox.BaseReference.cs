@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
@@ -14,16 +15,8 @@ public sealed class BaseReferenceBox : BmffBox
     /// <summary>Creates an empty BaseReferenceBox model.</summary>
     public BaseReferenceBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x62617365;
     internal HeifReaderOptions Options { get; set; } = new();
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
 
     private readonly HeifReferenceFields _fields = new();
     /// <summary>Gets or sets whether IDs have 32 bits; must match the enclosing iref version.</summary>
@@ -53,4 +46,10 @@ public sealed class BaseReferenceBox : BmffBox
     public override void Write(BmffStream stream) => _fields.Write(stream, Options);
     /// <inheritdoc/>
     public override long GetPayloadSize() => _fields.Size(Options);
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        _fields.WriteDescription(writer);
+    }
 }

@@ -38,8 +38,8 @@ Codec decoding is out of scope.
 
 ## Visitor and model contracts
 
-- BMFF's typed visitor rule conflicts with the prohibition on changing its interfaces. New
-  profile boxes use inherited Visit(BmffBox) dispatch; no visitor interface is widened.
+- Generic traversal is primary. The existing typed visitor interfaces remain for compatibility;
+  profile boxes use inherited Visit(BmffBox) dispatch, and no visitor interface is widened.
 - Sealed box classes follow the explicit brief's composite model exception to interface-first.
 
 ## Media interpretation
@@ -191,3 +191,58 @@ No public track implementation or index class was added: consumers use the exist
 
 Content.Heif uses these BMFF seams independently of Mpeg's track interpretation. Neither profile
 adds a reverse reference or a shipped InternalsVisibleTo grant.
+
+## Source coordinates and shape
+
+Profile boxes inherit Offset, Limit, IsLeaf and IsComposite from BmffBox. Offset is the original
+absolute read position; Limit is the original total size. Edits, relocation and saving leave both
+unchanged. A new profile box has zero coordinates until loaded; the writer computes its output
+layout separately. Even an empty sample-entry or item container is a composite.
+
+## Tree inspection
+
+BmffTreeFormatter.Write accepts a box or document and a borrowed TextWriter; Format returns a
+string with LF endings. Both use the bounded walker. Each line records FourCC, absolute source
+offset, original total size, large-size/size-zero markers, shape, full-box version/flags and current
+key fields. UnknownBox is explicitly marked unknown and preserved, with its preservation reason.
+Lazy payloads show only their segment lengths. Unloaded boxes are marked and never measured by
+calling a writer, so inspection does not initialize headers or compute edited output sizes.
+
+The protected WriteDescription(TextWriter) hook lets each box append already materialized fields.
+BmffFullBox supplies version/flags; overrides call the base and append fields with a leading space.
+Hooks must not read payloads or mutate the tree. Numbers use invariant culture; control characters
+are escaped to keep one physical line per box. MP4 opaque full-box prefixes (esds/vpcC) are labeled
+lazy rather than decoded for display. HEIF reference descriptions inspect the retained memory prefix
+without triggering array decoding; ICC profiles and configuration records remain untouched.
+
+## Debugger inspection
+
+One inherited DebuggerDisplay on BmffBox uses the raw FourCC, source offset and original header
+size, with a child count for composites or a lazy marker for opaque payloads. Large totals are
+shown in GiB; other totals use invariant digit grouping. Unloaded and preserved models are marked.
+The composite debugger proxy exposes the existing Children list without copying or enumerating it.
+Neither display evaluates field descriptions, writer size plans or payload accessors.
+
+## Inspection examples and extension contract
+
+See [OVERVIEW](OVERVIEW.md#traverse-and-inspect-the-native-tree) for traversal examples and fixture output.
+
+BmffBoxWalker and BmffQueryExtensions are the primary traversal for this profile, including
+`Children<T>`, `Descendants<T>`, FindAll(type), First and FirstOrDefault. Types can be profile classes
+or BmffBoxType/FourCC identities. The iteration and cycle/depth rules are shared with BMFF.
+The existing Accept/visitor dispatch remains for compatibility: BMFF cannot depend on this profile,
+so its visitor interface cannot acquire overloads for these boxes; they call Visit(BmffBox).
+
+A profile implements protected override void WriteDescription(TextWriter writer), calls base, then
+appends fields preceded by a space. Inside BMFF the override is protected internal. The hook is
+for already materialized state only; arbitrary custom overrides must uphold the no-I/O/no-mutation
+contract. Opaque full-box prefixes remain lazy. Large-size and size-zero mark header encodings;
+a loaded size always describes the source, even when current fields would serialize differently.
+
+A fixture subtree excerpt illustrates the header and field split:
+
+```text
+stsd @0x216F size=114 children=1 version=0 flags=0x000000 entries=1
+  avc1 @0x217F size=98 children=1 dimensions=1920x1080 data-reference=1
+    avcC @0x21D5 size=12 lazy-payload=4
+```

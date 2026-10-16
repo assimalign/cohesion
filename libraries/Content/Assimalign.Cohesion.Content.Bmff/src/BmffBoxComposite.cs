@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>A BMFF node with an editable ordered list of children.</summary>
+[DebuggerTypeProxy(typeof(BmffBoxCompositeDebugView))]
 public abstract class BmffBoxComposite : BmffBox
 {
     /// <summary>Creates an empty composite box.</summary>
@@ -30,10 +32,6 @@ public abstract class BmffBoxComposite : BmffBox
         }
     }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => false;
-    /// <inheritdoc/>
-    public override bool IsComposite => true;
     /// <summary>Gets the mutable ordered child list.</summary>
     public virtual IList<BmffBox> Children { get; } = new List<BmffBox>();
 

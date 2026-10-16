@@ -43,6 +43,20 @@ internal sealed class HeifReferenceFields
         TrailingData = reader.UnreadSpan.ToArray();
         _encoded = null;
     }
+    // Inspect the retained in-memory prefix without decoding arrays or changing the model.
+    internal void WriteDescription(System.IO.TextWriter writer)
+    {
+        var from = FromItemId;
+        var count = ToItemIds.Length;
+        if (_encoded is not null)
+        {
+            var reader = new BinaryContentReader(_encoded, _position);
+            from = LargeIds ? reader.ReadUInt32BigEndian() : reader.ReadUInt16BigEndian();
+            count = reader.ReadUInt16BigEndian();
+        }
+        writer.Write(FormattableString.Invariant($" from-item-id={from} references={count}"));
+    }
+
     internal void Write(BmffStream stream, HeifReaderOptions options)
     {
         Decode(options);

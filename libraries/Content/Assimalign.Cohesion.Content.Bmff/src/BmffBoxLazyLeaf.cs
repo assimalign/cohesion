@@ -15,10 +15,6 @@ public abstract class BmffBoxLazyLeaf : BmffBox
     /// <summary>Gets or sets the borrowed payload, excluding the box header.</summary>
     public BinarySegment Payload { get; set; }
     /// <inheritdoc/>
-    public sealed override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public sealed override bool IsComposite => false;
-    /// <inheritdoc/>
     /// <exception cref="System.ArgumentNullException"><paramref name="stream"/> is null.</exception>
     public override void Read(BmffStream stream)
     {

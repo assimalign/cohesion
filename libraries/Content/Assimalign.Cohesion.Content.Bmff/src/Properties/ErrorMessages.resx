@@ -42,4 +42,7 @@
   <data name="RelocationTarget" xml:space="preserve"><value>A referenced media range was removed or shortened.</value></data>
   <data name="RelocationUnsupported" xml:space="preserve"><value>The changed layout contains an opaque offset box or an unsupported implicit fragment base.</value></data>
   <data name="RelocationConvergence" xml:space="preserve"><value>The media relocation layout did not converge.</value></data>
+  <data name="BoxNotFound" xml:space="preserve">
+    <value>No box matches the query.</value>
+  </data>
 </root>

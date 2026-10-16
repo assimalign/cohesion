@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Bmff.Internal;
 
@@ -12,11 +13,7 @@ public sealed class SampleDescriptionBox : BmffBoxComposite
     /// <summary>Creates an empty container at its original location.</summary>
     /// <param name="offset">The original absolute header offset.</param>
     /// <param name="limit">The original total size.</param>
-    public SampleDescriptionBox(long offset, long limit) { Offset = offset; Limit = limit; }
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
+    public SampleDescriptionBox(long offset, long limit) { SetOriginalLocation(offset, limit); }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.SampleDescription;
     /// <summary>Gets or sets the encoded full-box version.</summary>
@@ -46,4 +43,10 @@ public sealed class SampleDescriptionBox : BmffBoxComposite
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" version={Version} flags=0x{Flags:X6} entries={EntryCount}"));
+    }
 }

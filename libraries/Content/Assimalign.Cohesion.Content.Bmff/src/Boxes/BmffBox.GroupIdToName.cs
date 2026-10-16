@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -11,7 +10,6 @@ namespace Assimalign.Cohesion.Content.Bmff;
 
 
 /// <summary>Retains the group id to name box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: Group ID to Name (gitn)")]
 public sealed class GroupIdToNameBox : BmffBox
 {
     /// <summary>Creates a GroupIdToNameBox at its original location.</summary>
@@ -19,21 +17,12 @@ public sealed class GroupIdToNameBox : BmffBox
     /// <param name="limit">The original total byte size.</param>
     public GroupIdToNameBox(long offset, long limit)
     {
-        this.Offset = offset;
-        this.Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
 
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
 
-    /// <inheritdoc/>
-    public override long Limit { get;}
 
-    /// <inheritdoc/>
-    public override long Offset { get; }
 
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.GroupIdToName;

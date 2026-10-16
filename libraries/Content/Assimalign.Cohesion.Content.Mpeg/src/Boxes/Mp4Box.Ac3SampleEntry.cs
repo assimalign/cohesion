@@ -1,3 +1,5 @@
+using System.IO;
+
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
 using Assimalign.Cohesion.Content.Mpeg.Internal;
@@ -13,8 +15,6 @@ public sealed class Ac3SampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     public Ac3SampleEntryBox() : this(default, 16 * 1024 * 1024) { }
     internal Ac3SampleEntryBox(BmffBoxHeader header, int limit)
     {
-        Offset = header.Offset;
-        Limit = header.TotalSize ?? 0;
         _fields = new Mp4SampleEntryFields("Audio", 28, limit);
     }
     Mp4SampleEntryFields IMp4SampleEntry.Fields => _fields;
@@ -25,10 +25,6 @@ public sealed class Ac3SampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     /// <summary>Gets or sets the unsigned 16.16 sampling frequency in hertz.</summary>
     /// <exception cref="System.ArgumentOutOfRangeException">The value is outside unsigned 16.16 range.</exception>
     public double SampleRate { get => _fields.SampleRate; set => _fields.SampleRate = value; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
-    /// <inheritdoc/>
-    public override long Limit { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x61632d33;
     /// <inheritdoc/>
@@ -45,4 +41,10 @@ public sealed class Ac3SampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     }
     /// <inheritdoc/>
     public override long GetPayloadSize() => _fields.Length + base.GetPayloadSize();
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" channels={ChannelCount} sample-rate={SampleRate} data-reference={DataReferenceIndex}"));
+    }
 }

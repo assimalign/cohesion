@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
@@ -14,16 +15,8 @@ public sealed class ItemPropertyAssociationBox : BmffFullBox
     /// <summary>Creates an empty ItemPropertyAssociationBox model.</summary>
     public ItemPropertyAssociationBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x69706d61;
     internal HeifReaderOptions Options { get; set; } = new();
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
     /// <summary>Gets or sets bytes following the defined fields, preserved verbatim.</summary>
     public byte[] TrailingData { get; set; } = Array.Empty<byte>();
 
@@ -127,5 +120,11 @@ public sealed class ItemPropertyAssociationBox : BmffFullBox
                 }
             }
         }
+    }
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" entries={Entries.Length}"));
     }
 }

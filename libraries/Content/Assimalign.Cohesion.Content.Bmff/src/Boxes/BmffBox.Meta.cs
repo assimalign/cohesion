@@ -1,5 +1,6 @@
-﻿using System.Buffers.Binary;
-using System;
+﻿using System;
+using System.Buffers.Binary;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Bmff.Internal;
 
@@ -14,14 +15,9 @@ public sealed class MetaBox : BmffBoxComposite
     /// <param name="limit">The original total size.</param>
     public MetaBox(long offset, long limit)
     {
-        Offset = offset;
-        Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
 
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.Meta;
     private uint _flags;
@@ -70,4 +66,10 @@ public sealed class MetaBox : BmffBoxComposite
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" version={Version} flags=0x{Flags:X6}"));
+    }
 }

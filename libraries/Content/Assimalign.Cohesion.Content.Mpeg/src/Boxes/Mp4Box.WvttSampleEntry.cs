@@ -1,3 +1,5 @@
+using System.IO;
+
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
 using Assimalign.Cohesion.Content.Mpeg.Internal;
@@ -13,17 +15,11 @@ public sealed class WvttSampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     public WvttSampleEntryBox() : this(default, 16 * 1024 * 1024) { }
     internal WvttSampleEntryBox(BmffBoxHeader header, int limit)
     {
-        Offset = header.Offset;
-        Limit = header.TotalSize ?? 0;
         _fields = new Mp4SampleEntryFields("Text", 8, limit);
     }
     Mp4SampleEntryFields IMp4SampleEntry.Fields => _fields;
     /// <summary>Gets or sets the one-based data-reference index.</summary>
     public ushort DataReferenceIndex { get => _fields.DataReferenceIndex; set => _fields.DataReferenceIndex = value; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
-    /// <inheritdoc/>
-    public override long Limit { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x77767474;
     /// <inheritdoc/>
@@ -40,4 +36,10 @@ public sealed class WvttSampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     }
     /// <inheritdoc/>
     public override long GetPayloadSize() => _fields.Length + base.GetPayloadSize();
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" data-reference={DataReferenceIndex}"));
+    }
 }

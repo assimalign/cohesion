@@ -9,11 +9,7 @@ internal sealed class BmffAuxiliaryOffsetsBox : BmffFullBox
     internal uint AuxiliaryType { get; set; }
     internal uint AuxiliaryParameter { get; set; }
     internal ulong[] Offsets { get; set; } = Array.Empty<ulong>();
-    public override long Offset => Header.Offset;
-    public override long Limit => Header.TotalSize ?? 0;
     public override BmffBoxType BoxType => (BmffBoxType)0x7361696f;
-    public override bool IsLeaf => true;
-    public override bool IsComposite => false;
     public override void Read(BmffStream stream)
     {
         ReadFullBoxHeader(stream);

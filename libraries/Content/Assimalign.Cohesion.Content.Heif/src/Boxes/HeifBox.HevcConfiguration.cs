@@ -11,10 +11,6 @@ public sealed class HevcConfigurationBox : BmffBoxLazyLeaf
     /// <summary>Creates an empty HevcConfigurationBox model.</summary>
     public HevcConfigurationBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x68766343;
     internal HeifReaderOptions Options { get; set; } = new();
 }
