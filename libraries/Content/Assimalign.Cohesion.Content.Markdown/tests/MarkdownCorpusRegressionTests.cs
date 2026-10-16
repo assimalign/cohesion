@@ -181,4 +181,24 @@ public class MarkdownCorpusRegressionTests
         MarkdownModelComparison.ShouldEqual(expected, actual, source);
         MarkdownText.Write(actual).ShouldBe(written);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Writer: nested emphasis preserves flanking at word boundaries")]
+    [InlineData("*foo**bar**baz*")]
+    [InlineData("*foo**bar***")]
+    [InlineData("foo***bar***baz")]
+    [InlineData("foo******bar*********baz")]
+    [InlineData("**foo*bar*baz**")]
+    [InlineData("*é**bar**\U00010400*")]
+    public void Write_IntrawordNestedEmphasis_PreservesModel(string source)
+    {
+        // Arrange. CommonMark 411/415-417/429 and authored non-ASCII boundary scalars.
+        var expected = MarkdownText.Parse(source);
+
+        // Act
+        var written = MarkdownText.Write(expected);
+        var actual = MarkdownText.Parse(written);
+
+        // Assert
+        MarkdownModelComparison.ShouldEqual(expected, actual, source);
+        MarkdownText.Write(actual).ShouldBe(written);
+    }
 }

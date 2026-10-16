@@ -135,6 +135,9 @@ All-space code spans emit exactly their space count; padding is only added when 
 normalization will remove it (or to separate literal backticks from the fence).
 Destinations and titles escape backslashes and ampersands and encode control characters as
 numeric references, preserving decoded values without a second entity/escape interpretation.
+At word/emphasis boundaries the writer may spell an edge scalar as a numeric reference. This
+preserves the literal value while giving alternating nested delimiters the punctuation context
+needed for CommonMark flanking rules, including intraword strong/emphasis combinations.
 The guarantee covers parser-produced trees; hand-built trees can express forms with no Markdown
 spelling (emphasis around whitespace) and round-trip only when they stay inside what the parser
 can produce.
