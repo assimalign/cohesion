@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,11 +12,12 @@ namespace Assimalign.Cohesion.Content.Media.Tests;
 public class MediaFileTests
 {
     [Theory(DisplayName = "Cohesion Test [Content.Media] - Media kinds retain the binary content contract")]
-    [InlineData(MediaFileKind.Video)]
-    [InlineData(MediaFileKind.Audio)]
-    [InlineData(MediaFileKind.Image)]
-    [InlineData(MediaFileKind.Other)]
-    public async Task OpenReadAsync_MediaContract_ReturnsReopenableBinaryContent(MediaFileKind kind)
+    [InlineData(MediaTrackKind.Video)]
+    [InlineData(MediaTrackKind.Audio)]
+    [InlineData(MediaTrackKind.Text)]
+    [InlineData(MediaTrackKind.Metadata)]
+    [InlineData(MediaTrackKind.Other)]
+    public async Task OpenReadAsync_MediaContract_ReturnsReopenableBinaryContent(MediaTrackKind kind)
     {
         // Arrange
         using var media = new MemoryMediaFile(kind);
@@ -29,7 +30,7 @@ public class MediaFileTests
         }
         using var reopened = binary.OpenRead();
         // Assert
-        media.Kind.ShouldBe(kind);
+        media.Tracks[0].Kind.ShouldBe(kind);
         binary.CanReopen.ShouldBeTrue();
         binary.Length.ShouldBe(3);
         bytes.ShouldBe(new byte[] { 1, 2, 3 });
@@ -40,7 +41,7 @@ public class MediaFileTests
     public async Task GetItemsAsync_MediaContract_ExposesItsContent()
     {
         // Arrange
-        using var media = new MemoryMediaFile(MediaFileKind.Video);
+        using var media = new MemoryMediaFile(MediaTrackKind.Video);
         IComposableContent composite = media;
         var count = 0;
         // Act
