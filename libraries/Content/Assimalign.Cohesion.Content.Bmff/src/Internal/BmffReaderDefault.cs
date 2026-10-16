@@ -30,7 +30,7 @@ internal sealed class BmffReaderDefault : BmffReader
     private bool IsSampleEntry => _stream.ChildContext == BmffBoxType.SampleDescription;
     private bool IsTrackReference => _stream.ChildContext == BmffBoxType.TrackReference && (uint)_header.BoxType is
         0x68696e74 or 0x63647363 or 0x68696e64 or 0x64706e64 or 0x69706972 or 0x6d706f64 or 0x73796e63;
-    private bool CanParse => !IsSampleEntry && (IsTrackReference || _stream.Registry.CanParse(_header.BoxType));
+    private bool CanParse => IsTrackReference || _stream.Registry.CanParse(_header.BoxType, IsSampleEntry);
 
     internal override BmffReaderOptions DocumentOptions => _stream.Options;
     internal override BmffBoxRegistry DocumentRegistry => _stream.Registry;
@@ -55,7 +55,7 @@ internal sealed class BmffReaderDefault : BmffReader
             {
                 return _current = Preserve(ContentFormatErrorCode.Unsupported);
             }
-            var box = IsTrackReference ? new TrackReferenceTypeBox(_header) : _stream.Registry.Create(_header)!;
+            var box = IsTrackReference ? new TrackReferenceTypeBox(_header) : _stream.Registry.Create(_header, IsSampleEntry)!;
             try
             {
                 if (box is BmffBoxComposite || box is BmffBoxLazyLeaf || box is MediaDataBox || box is FreeSpaceBox || box is SkipBox)
@@ -173,7 +173,7 @@ internal sealed class BmffReaderDefault : BmffReader
         {
             throw new InvalidOperationException(ErrorMessages.PayloadConsumed);
         }
-        if (!_stream.Registry.CanParse(_header.BoxType) || _stream.Registry.Create(_header) is not BmffBoxComposite composite)
+        if (!_stream.Registry.CanParse(_header.BoxType, IsSampleEntry) || _stream.Registry.Create(_header, IsSampleEntry) is not BmffBoxComposite composite)
         {
             throw new ContentFormatException(ErrorMessages.NotContainer, ContentFormatErrorCode.Unsupported, _header.Offset);
         }

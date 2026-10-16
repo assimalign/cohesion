@@ -136,6 +136,8 @@ Track-reference type children use their enclosing tref context; they are not glo
 BmffBoxRegistry.CreateBuilder copies the defaults; new BmffBoxRegistryBuilder starts empty.
 Register adds or replaces a factory; Build freezes a snapshot unaffected by later builder changes.
 Registering a default deferred type opts into the replacement parser.
+RegisterSampleEntry registers an explicit stsd factory as well as a standalone entry factory.
+Ordinary default registrations never interpret coincident sample-entry FourCCs.
 
 Factories receive the validated BmffBoxHeader and must return a matching BoxType. They do not
 receive arbitrary wire sizes before header validation. There is no reflection or assembly scanning.
@@ -202,7 +204,9 @@ dref with url / urn entries, stsd, stts, ctts, stss, stsz, stz2, stsc, stco, co6
 subs, mfhd, tfhd, tfdt, trun, tfra, mfro, cprt, xml / bxml, pitm, iloc, iinf / infe, pdin, frma
 and schm. Existing structural containers, including full-box meta, remain composites.
 dref, stsd and iinf now also derive from BmffBoxComposite; their entry count comes from Children.
-stsd always preserves its children as opaque sample entries, including in strict mode.
+stsd resolves registered entries through the active registry, preserving the reader's limits and
+depth. Unregistered sample entries stay opaque even in strict mode; registered unsupported
+versions follow the usual strict/lenient policy. No second reader pass is required.
 
 Track-reference lists for hint, cdsc, hind, dpnd, ipir, mpod and sync are interpreted only inside
 tref. Other reference types remain opaque. Every box class has its own overload on both visitor

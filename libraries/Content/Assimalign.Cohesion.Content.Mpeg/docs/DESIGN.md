@@ -20,9 +20,8 @@ flowchart LR
 ## Extension seam
 
 CreateRegistry copies BmffBoxRegistry defaults and registers explicit factories. LoadDocument
-uses the BMFF reader and re-enters it at validated stsd entry headers because BMFF deliberately
-preserves all stsd children. No header parser or container writer is duplicated. Unrecognized
-sample entries remain UnknownBox. The default registry is unchanged.
+uses the BMFF reader, which resolves stsd entries through the active registry with the enclosing
+depth budget. Unrecognized sample entries remain UnknownBox. The default registry is unchanged.
 
 Sample entries are sealed composites with preserved prefixes. The retained types are avc1, avc3,
 hvc1, hev1, av01, vp09, mp4a, Opus, ac-3, ec-3, wvtt, stpp and tx3g. Visual dimensions and
@@ -36,9 +35,6 @@ payloads, or use LoadDocument for a seekable, editable tree. Codec decoding is o
 
 ## Escalations
 
-- BMFF always bypasses registry dispatch inside stsd. Local workaround: a second bounded
-  reader pass over entry headers, with the remaining nesting budget. A contextual registry
-  seam belongs in BMFF if the owner wants to remove this pass.
 - BMFF's typed visitor rule conflicts with the prohibition on changing its interfaces. New
   profile boxes use inherited Visit(BmffBox) dispatch; no visitor interface is widened.
 - Sealed box classes follow the explicit brief's composite model exception to interface-first.
@@ -189,5 +185,5 @@ No public track implementation or index class was added: consumers use the exist
 
 O-C3 remains the owner's decision: retain HEIF/AVIF in a separate profile package in Stage 5, if
 desired. It must use the BMFF seams independently rather than take a dependency on Mpeg's track
-interpretation. The local seam workarounds above can be removed only through a separately owned
+interpretation. Profile extension is provided through the
 BMFF API change; this package adds no reference back or shipped InternalsVisibleTo grant.

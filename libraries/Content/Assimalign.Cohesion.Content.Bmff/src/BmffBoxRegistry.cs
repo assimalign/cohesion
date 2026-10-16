@@ -9,10 +9,13 @@ public sealed class BmffBoxRegistry
 {
     private readonly FrozenDictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> _factories;
     private readonly FrozenSet<BmffBoxType> _unsupported;
-    internal BmffBoxRegistry(Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> factories, HashSet<BmffBoxType> unsupported)
+    private readonly FrozenDictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> _sampleEntries;
+    internal BmffBoxRegistry(Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> factories, HashSet<BmffBoxType> unsupported,
+        Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> sampleEntries)
     {
         _factories = factories.ToFrozenDictionary();
         _unsupported = unsupported.ToFrozenSet();
+        _sampleEntries = sampleEntries.ToFrozenDictionary();
     }
     /// <summary>Gets the shared registry with every package box class registered.</summary>
     public static BmffBoxRegistry Default { get; } = BuildDefault();
@@ -32,10 +35,11 @@ public sealed class BmffBoxRegistry
         }
         return builder;
     }
-    internal bool CanParse(BmffBoxType type) => _factories.ContainsKey(type) && !_unsupported.Contains(type);
-    internal BmffBox? Create(BmffBoxHeader header)
+    internal bool CanParse(BmffBoxType type, bool sampleEntry = false) => sampleEntry
+        ? _sampleEntries.ContainsKey(type) : _factories.ContainsKey(type) && !_unsupported.Contains(type);
+    internal BmffBox? Create(BmffBoxHeader header, bool sampleEntry = false)
     {
-        if (!_factories.TryGetValue(header.BoxType, out var factory))
+        if (!(sampleEntry ? _sampleEntries : _factories).TryGetValue(header.BoxType, out var factory))
         {
             return null;
         }
