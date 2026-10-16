@@ -528,9 +528,9 @@ Well over a third of the `src` csprojs under `libraries/` and `resources/` are s
 
 `.github/workflows/release-inventory.yml` runs the same guard on every push and pull request that touches a workflow, an installer script, the repository `Directory.Build.props`, or anything under a scanned project root, so a new project or its first source file is checked by the change that creates the drift rather than by a later release. After the pack, `Assert-CohesionPackageMetadata` opens every produced archive and fails unless the central NuGet icon actually landed — the icon is wired through an MSBuild import chain, and a project that falls out of that chain packs cleanly and silently unbranded.
 
-Only per-area release-library matrices participate in the inventory equality check. The exact non-matrix workflow set is `release.yml`, `release-inventory.yml`, `analyzers.yml`, `sdk-smoke.yml`, `credential-guard.yml`, and `ci-packages.yml`. Static project matrices in any workflow, including non-matrix workflows such as `analyzers.yml` and `sdk-smoke.yml`, still count for the repository-wide blind-spot check.
+Only per-area release-library matrices participate in the inventory equality check. The exact non-matrix workflow set is `release.yml`, `release-inventory.yml`, `analyzers.yml`, `sdk-smoke.yml`, `credential-guard.yml`, `ci-packages.yml`, and `ci-packages-prune.yml`. Static project matrices in any workflow, including non-matrix workflows such as `analyzers.yml` and `sdk-smoke.yml`, still count for the repository-wide blind-spot check.
 
-Every external `uses:` in `release.yml`, `ci-packages.yml`, `sdk-smoke.yml`, and `.github/actions/build/action.yml` is pinned to a commit SHA with a **trailing** version comment, because a mutable tag could run attacker-controlled code with a workflow's package or nuget.org OIDC identity. The comment must be trailing: that is the form Dependabot rewrites when it bumps a SHA, and `.github/dependabot.yml` carries an entry for both directories.
+Every external `uses:` in `release.yml`, `ci-packages.yml`, `ci-packages-prune.yml`, `sdk-smoke.yml`, and `.github/actions/build/action.yml` is pinned to a commit SHA with a **trailing** version comment, because a mutable tag could run attacker-controlled code with a workflow's package or nuget.org OIDC identity. The comment must be trailing: that is the form Dependabot rewrites when it bumps a SHA, and `.github/dependabot.yml` carries an entry for both directories.
 
 ### SDK consumer smoke — `.github/workflows/sdk-smoke.yml`
 
@@ -543,6 +543,8 @@ The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, Nat
 ### CI packages — `.github/workflows/ci-packages.yml`
 
 Every push to `main` and every commit to an open same-repository pull request strictly packs the full release set with `Pack-Release.ps1` at the version `Get-CohesionCiPackageVersion` derives (`<predecessor>.ci.<run>` on `main`, `<predecessor>.pr.<pr>.<run>` for a pull request). The same package-only consumer harness then runs against that artifact on Linux, and the set is pushed to GitHub Packages only, SDKs last. It exists so downstream repositories (benchmarks, `cohesion-platforms`, `cohesion-examples`) can pin an exact build ahead of a release. It is not a release: there is no per-package validation matrix, no Windows or macOS consumer leg, no nuget.org path, and no canonical version. Fork pull requests and Dependabot-triggered runs publish nothing, and the workflow must never run on `pull_request_target`. A first attempt fails on an existing version rather than skipping it; only a re-run attempt passes `--skip-duplicate`. A newer pull request commit cancels a pack in progress, never a publish. `installer/scripts/modules/tests/CohesionReleasePolicy.Tests.ps1` pins this wiring and the version ordering. Version shape, consumer setup, and feed growth: [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md), "CI packages".
+
+`.github/workflows/ci-packages-prune.yml` is the only thing that deletes from the feed, and it deletes CI versions only: every build of a pull request the API reports closed, and every `main` build outside the newest 20 of its base. Selection is `Select-CohesionCiPackageVersionToPrune` in `CohesionPackaging.psm1`, which recognizes only the exact shapes `Get-CohesionCiPackageVersion` produces, so a release version is never selected; `CohesionPackageFeed.psm1` lists the release inventory's package ids (`GITHUB_TOKEN` cannot list an organization's packages) and deletes within the token's 1,000-requests-an-hour budget, deferring the rest to the next run. It runs on `pull_request_target` (closed), hourly, and as a default-dry-run dispatch. `pull_request_target` is deliberate there: it runs the default branch's copy, so the deletion logic is never the closing pull request's code, and no step checks out pull request code. That does not relax the rule for `ci-packages.yml`, which builds the code under review. Retention numbers, permissions (the repository's Admin role on each package), and rate-limit sizing are in the policy document, "Feed growth".
 
 ## File layout reference
 
@@ -594,7 +596,8 @@ sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Targets/
 
 installer/scripts/
 ├── modules/
-│   └── CohesionPackaging.psm1             ← THE release inventory + its drift guards
+│   ├── CohesionPackaging.psm1             ← THE release inventory + its drift guards
+│   └── CohesionPackageFeed.psm1           ← GitHub Packages pruning for ci-packages-prune.yml
 ├── Pack-Release.ps1                       ← strict full or -SkipLibraries pack
 ├── Get-ReleaseMatrix.ps1                  ← release validation matrix (JSON) for release.yml
 ├── Install-Local.ps1                      ← dev loop: pack everything locally
@@ -608,6 +611,7 @@ installer/scripts/
 .github/workflows/
 ├── sdk-smoke.yml                          ← publish-less three-OS SDK validation
 ├── ci-packages.yml                        ← CI-channel builds → GitHub Packages only
+├── ci-packages-prune.yml                  ← deletes closed-PR and old main CI builds
 └── release.yml                            ← sole release publisher + consumer gate
 
 build/Targets/

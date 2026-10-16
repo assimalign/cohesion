@@ -419,6 +419,285 @@ Describe 'Cohesion CI package versions' {
     }
 }
 
+Describe 'Cohesion CI package version parsing' {
+    It 'reads back every field of a <Channel> build of <Canonical>' -ForEach @(
+        @{ Canonical = '10.0.0-preview.1'; Channel = 'ci'; PullRequestNumber = $null }
+        @{ Canonical = '10.0.0-preview.1'; Channel = 'pr'; PullRequestNumber = 1558 }
+        @{ Canonical = '10.0.0-preview.10'; Channel = 'pr'; PullRequestNumber = 15 }
+        @{ Canonical = '10.0.0-rc.1'; Channel = 'ci'; PullRequestNumber = $null }
+        @{ Canonical = '10.0.1-beta.2.3'; Channel = 'pr'; PullRequestNumber = 2147483647 }
+    ) {
+        $arguments = @{ Version = $Canonical; BuildNumber = 42 }
+        if ($null -ne $PullRequestNumber) {
+            $arguments.PullRequestNumber = $PullRequestNumber
+        }
+        $derived = Get-CohesionCiPackageVersion @arguments
+
+        $parsed = ConvertFrom-CohesionCiPackageVersion -Version $derived.Version
+
+        $parsed.Version | Should -Be $derived.Version
+        $parsed.BaseVersion | Should -Be $derived.BaseVersion
+        $parsed.VersionPrefix | Should -Be $derived.VersionPrefix
+        $parsed.Channel | Should -Be $Channel
+        $parsed.PullRequestNumber | Should -Be $PullRequestNumber
+        $parsed.BuildNumber | Should -Be 42
+    }
+
+    It 'treats <Version> as no CI build' -ForEach @(
+        @{ Version = '10.0.0-preview.1' }
+        @{ Version = '10.0.0-beta.1' }
+        @{ Version = '10.0.0' }
+        @{ Version = '10.0.0-preview.1.local' }
+        @{ Version = '10.0.0-ci.5' }
+        @{ Version = '10.0.0-pr.15.2' }
+        @{ Version = '10.0.0-preview.0.ci' }
+        @{ Version = '10.0.0-preview.0.ci.0' }
+        @{ Version = '10.0.0-preview.0.ci.05' }
+        @{ Version = '10.0.0-preview.0.ci.2147483648' }
+        @{ Version = '10.0.0-preview.0.ci.5.local' }
+        @{ Version = '10.0.0-preview.0.ci.5+build.7' }
+        @{ Version = '10.0.0-preview.0.pr.15' }
+        @{ Version = '10.0.0-preview.0.pr.015.2' }
+        @{ Version = '10.0.0-preview.0.pr.15.2.1' }
+        @{ Version = '10.0.0-preview.local.ci.5' }
+        @{ Version = '10.0.0-preview.0.ci.4.ci.5' }
+        @{ Version = '10.0.0-preview.ci.5' }
+        @{ Version = '10.0.0-preview.00.ci.5' }
+        @{ Version = '010.0.0-preview.0.ci.5' }
+        @{ Version = '' }
+    ) {
+        ConvertFrom-CohesionCiPackageVersion -Version $Version | Should -BeNullOrEmpty
+    }
+
+    It 'reads the ci and pr labels case-insensitively, as NuGet compares them' {
+        (ConvertFrom-CohesionCiPackageVersion -Version '10.0.0-preview.0.CI.7').Channel | Should -Be 'ci'
+        (ConvertFrom-CohesionCiPackageVersion -Version '10.0.0-preview.0.Pr.15.7').PullRequestNumber | Should -Be 15
+    }
+}
+
+Describe 'Cohesion CI package prune selection' {
+    BeforeAll {
+        $script:nextVersionId = 1000
+        $script:epoch = [System.DateTimeOffset]::new(2026, 10, 1, 0, 0, 0, [System.TimeSpan]::Zero)
+
+        # One feed entry as the pruner lists it. Hours stands in for the publish time.
+        function New-TestPackageVersion {
+            param(
+                [Parameter(Mandatory)]
+                [string] $Version,
+
+                [string] $PackageName = 'Assimalign.Cohesion.Core',
+
+                [double] $Hours = 0
+            )
+
+            $script:nextVersionId++
+            return [pscustomobject]@{
+                PackageName = $PackageName
+                VersionId   = $script:nextVersionId
+                Version     = $Version
+                CreatedAt   = $script:epoch.AddHours($Hours).ToString('o')
+            }
+        }
+    }
+
+    It 'selects only the closed pull request, never one whose number shares its digits' {
+        $feed = @(
+            New-TestPackageVersion -Version '10.0.0-preview.0.pr.15.3'
+            New-TestPackageVersion -Version '10.0.0-preview.0.pr.15.9'
+            New-TestPackageVersion -Version '10.0.0-preview.0.pr.152.4'
+            New-TestPackageVersion -Version '10.0.0-preview.0.pr.151.5'
+            New-TestPackageVersion -Version '10.0.0-preview.0.pr.1.15'
+            New-TestPackageVersion -Version '10.0.0-preview.0.pr.115.6'
+            New-TestPackageVersion -Version '10.0.0-preview.0.ci.15'
+            New-TestPackageVersion -Version '10.0.0-preview.0.pr.15.7' -PackageName 'Assimalign.Cohesion.Sdk'
+        )
+
+        $selected = Select-CohesionCiPackageVersionToPrune -PackageVersion $feed -ClosedPullRequestNumber 15
+
+        @($selected.Version | Sort-Object) | Should -Be @(
+            '10.0.0-preview.0.pr.15.3'
+            '10.0.0-preview.0.pr.15.7'
+            '10.0.0-preview.0.pr.15.9'
+        )
+        $selected.PullRequestNumber | Should -Be @(15, 15, 15)
+        $selected[0].Reason | Should -Be 'pull request #15 is closed'
+    }
+
+    It 'leaves open pull requests and main builds alone when nothing asks for them' {
+        $feed = @(
+            New-TestPackageVersion -Version '10.0.0-preview.0.pr.20.1'
+            New-TestPackageVersion -Version '10.0.0-preview.0.ci.2'
+            New-TestPackageVersion -Version '10.0.0-preview.0.ci.3'
+        )
+
+        $selected = Select-CohesionCiPackageVersionToPrune -PackageVersion $feed -ClosedPullRequestNumber 21
+
+        $selected.Count | Should -Be 0
+    }
+
+    It 'keeps the newest main builds of each base on every package' {
+        $feed = foreach ($package in @('Assimalign.Cohesion.Core', 'Assimalign.Cohesion.Http')) {
+            foreach ($build in 1..5) {
+                New-TestPackageVersion -PackageName $package -Version "10.0.0-preview.0.ci.$build" -Hours $build
+            }
+
+            # The post-tag bump to preview.2 starts a new base; its builds rank on their own.
+            foreach ($build in 6..8) {
+                New-TestPackageVersion -PackageName $package -Version "10.0.0-preview.1.ci.$build" -Hours $build
+            }
+        }
+
+        $selected = Select-CohesionCiPackageVersionToPrune -PackageVersion $feed -MainBuildCount 2
+
+        @($selected | ForEach-Object { "$($_.PackageName) $($_.Version)" } | Sort-Object) | Should -Be @(
+            'Assimalign.Cohesion.Core 10.0.0-preview.0.ci.1'
+            'Assimalign.Cohesion.Core 10.0.0-preview.0.ci.2'
+            'Assimalign.Cohesion.Core 10.0.0-preview.0.ci.3'
+            'Assimalign.Cohesion.Core 10.0.0-preview.1.ci.6'
+            'Assimalign.Cohesion.Http 10.0.0-preview.0.ci.1'
+            'Assimalign.Cohesion.Http 10.0.0-preview.0.ci.2'
+            'Assimalign.Cohesion.Http 10.0.0-preview.0.ci.3'
+            'Assimalign.Cohesion.Http 10.0.0-preview.1.ci.6'
+        )
+        $selected[0].Reason | Should -Be 'main build 1 of 10.0.0-preview.0 is older than the newest 2'
+    }
+
+    It 'ranks whole builds, so a build missing from one package still counts against it' {
+        # Build 3 reached only Core (a partial publish). It is still one of the two newest builds,
+        # so Http's build 1 goes rather than Http keeping three builds.
+        $feed = @(
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Core' -Version '10.0.0-preview.0.ci.1' -Hours 1
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Core' -Version '10.0.0-preview.0.ci.2' -Hours 2
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Core' -Version '10.0.0-preview.0.ci.3' -Hours 3
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Http' -Version '10.0.0-preview.0.ci.1' -Hours 1
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Http' -Version '10.0.0-preview.0.ci.2' -Hours 2
+        )
+
+        $selected = Select-CohesionCiPackageVersionToPrune -PackageVersion $feed -MainBuildCount 2
+
+        @($selected | ForEach-Object { "$($_.PackageName) $($_.Version)" } | Sort-Object) | Should -Be @(
+            'Assimalign.Cohesion.Core 10.0.0-preview.0.ci.1'
+            'Assimalign.Cohesion.Http 10.0.0-preview.0.ci.1'
+        )
+    }
+
+    It 'ranks by publish time, so restarted run numbers keep the fresh builds' {
+        $feed = @(
+            New-TestPackageVersion -Version '10.0.0-preview.0.ci.300' -Hours 1
+            New-TestPackageVersion -Version '10.0.0-preview.0.ci.301' -Hours 2
+            New-TestPackageVersion -Version '10.0.0-preview.0.ci.1' -Hours 10
+            New-TestPackageVersion -Version '10.0.0-preview.0.ci.2' -Hours 11
+        )
+
+        $selected = Select-CohesionCiPackageVersionToPrune -PackageVersion $feed -MainBuildCount 2
+
+        @($selected.Version) | Should -Be @('10.0.0-preview.0.ci.300', '10.0.0-preview.0.ci.301')
+    }
+
+    It 'never selects a release, stable, or local version' {
+        $canonicalVersion = & (Join-Path $repositoryDirectory 'installer/scripts/Get-CohesionVersion.ps1') `
+            -RepoRoot $repositoryDirectory
+        $nonCiVersion = @(
+            $canonicalVersion
+            '10.0.0-beta.1'
+            '10.0.0-preview.1'
+            '10.0.0-preview.2'
+            '10.0.0-rc.1'
+            '10.0.0'
+            '1.0.0'
+            '10.0.0-preview.1.local'
+            '10.0.0-ci.5'
+            '10.0.0-pr.15.2'
+            '10.0.0-preview.0.pr.15'
+        )
+        $feed = @(
+            foreach ($package in @('Assimalign.Cohesion.Sdk', 'Assimalign.Cohesion.Core')) {
+                foreach ($version in $nonCiVersion) {
+                    New-TestPackageVersion -PackageName $package -Version $version -Hours (-100)
+                }
+
+                New-TestPackageVersion -PackageName $package -Version '10.0.0-preview.0.ci.1' -Hours 1
+                New-TestPackageVersion -PackageName $package -Version '10.0.0-preview.0.ci.2' -Hours 2
+                New-TestPackageVersion -PackageName $package -Version '10.0.0-preview.0.pr.15.3' -Hours 3
+            }
+        )
+
+        # The most aggressive call possible: every pull request number closed, one main build kept.
+        $selected = Select-CohesionCiPackageVersionToPrune `
+            -PackageVersion $feed `
+            -ClosedPullRequestNumber @(1, 2, 5, 15) `
+            -MainBuildCount 1
+
+        foreach ($version in $nonCiVersion) {
+            $selected.Version | Should -Not -Contain $version
+        }
+        @($selected.Version | Sort-Object -Unique) | Should -Be @(
+            '10.0.0-preview.0.ci.1'
+            '10.0.0-preview.0.pr.15.3'
+        )
+        foreach ($entry in $selected) {
+            ConvertFrom-CohesionCiPackageVersion -Version $entry.Version | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'orders closed pull requests first, then main builds oldest first, SDKs first within a build' {
+        $feed = @(
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Core' -Version '10.0.0-preview.0.ci.2' -Hours 2
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Sdk.Web' -Version '10.0.0-preview.0.ci.2' -Hours 2
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Core' -Version '10.0.0-preview.0.ci.1' -Hours 1
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Sdk' -Version '10.0.0-preview.0.ci.1' -Hours 1
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Core' -Version '10.0.0-preview.0.ci.3' -Hours 3
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Core' -Version '10.0.0-preview.0.pr.30.9' -Hours 9
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.SdkTools' -Version '10.0.0-preview.0.pr.7.8' -Hours 8
+            New-TestPackageVersion -PackageName 'Assimalign.Cohesion.Sdk' -Version '10.0.0-preview.0.pr.7.8' -Hours 8
+        )
+
+        $selected = Select-CohesionCiPackageVersionToPrune `
+            -PackageVersion $feed `
+            -ClosedPullRequestNumber @(30, 7) `
+            -MainBuildCount 1
+
+        @($selected | ForEach-Object { "$($_.PackageName) $($_.Version)" }) | Should -Be @(
+            'Assimalign.Cohesion.Sdk 10.0.0-preview.0.pr.7.8'
+            'Assimalign.Cohesion.SdkTools 10.0.0-preview.0.pr.7.8'
+            'Assimalign.Cohesion.Core 10.0.0-preview.0.pr.30.9'
+            'Assimalign.Cohesion.Sdk 10.0.0-preview.0.ci.1'
+            'Assimalign.Cohesion.Core 10.0.0-preview.0.ci.1'
+            'Assimalign.Cohesion.Sdk.Web 10.0.0-preview.0.ci.2'
+            'Assimalign.Cohesion.Core 10.0.0-preview.0.ci.2'
+        )
+    }
+
+    It 'requires at least one kept main build' {
+        { Select-CohesionCiPackageVersionToPrune -PackageVersion @() -MainBuildCount 0 } | Should -Throw
+    }
+
+    It 'refuses to rank a main build without a publish time' {
+        $feed = @([pscustomobject]@{
+                PackageName = 'Assimalign.Cohesion.Core'
+                VersionId   = 1
+                Version     = '10.0.0-preview.0.ci.1'
+                CreatedAt   = $null
+            })
+
+        { Select-CohesionCiPackageVersionToPrune -PackageVersion $feed -MainBuildCount 1 } |
+            Should -Throw -ExpectedMessage '*no parseable CreatedAt*'
+    }
+
+    It 'refuses an entry with no version id' {
+        $feed = @([pscustomobject]@{
+                PackageName = 'Assimalign.Cohesion.Core'
+                VersionId   = $null
+                Version     = '10.0.0-preview.0.pr.1.1'
+                CreatedAt   = $null
+            })
+
+        { Select-CohesionCiPackageVersionToPrune -PackageVersion $feed -ClosedPullRequestNumber 1 } |
+            Should -Throw -ExpectedMessage "*missing 'VersionId'*"
+    }
+}
+
 Describe 'Cohesion CI package workflow' {
     BeforeAll {
         $ciWorkflow = Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/ci-packages.yml') -Raw
@@ -495,5 +774,68 @@ Describe 'Cohesion CI package workflow' {
         $packJob | Should -Match 'cancel-in-progress: true'
         $publishJob | Should -Not -Match 'concurrency:'
         $ciWorkflow | Should -Not -Match '(?m)^concurrency:'
+    }
+}
+
+Describe 'Cohesion CI package prune workflow' {
+    BeforeAll {
+        $pruneWorkflow = Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/ci-packages-prune.yml') -Raw
+        $pruneJob = Get-WorkflowJobBody -Workflow $pruneWorkflow -Job 'prune:'
+    }
+
+    It 'runs when a pull request closes, hourly, and on demand as a dry run by default' {
+        $pruneWorkflow | Should -Match '(?m)^  pull_request_target:\r?\n    types: \[closed\]\r?$'
+        # Closing a pull request that ci-packages.yml never published for is not worth a scan.
+        $publishFilter = [System.Text.RegularExpressions.Regex]::Match(
+            (Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/ci-packages.yml') -Raw),
+            "(?ms)^  pull_request:\r?\n    types: \[opened, synchronize, reopened\]\r?\n    paths-ignore:\r?\n(?<paths>(?:      - '[^']+'\r?\n)+)").Groups['paths'].Value
+        $publishFilter | Should -Not -BeNullOrEmpty
+        $pruneWorkflow | Should -Match ('(?ms)^  pull_request_target:\r?\n    types: \[closed\]\r?\n(?:    #.*?\r?\n)*    paths-ignore:\r?\n' + [regex]::Escape($publishFilter))
+        $pruneWorkflow | Should -Match "(?m)^  schedule:\r?\n    - cron: '41 \* \* \* \*'\r?$"
+        $pruneWorkflow | Should -Match '(?ms)^  workflow_dispatch:\r?\n    inputs:\r?\n      dry-run:\r?\n.*?        type: boolean\r?\n        default: true\r?$'
+        $pruneWorkflow | Should -Not -Match '(?m)^  pull_request:'
+        $pruneJob | Should -Match "COHESION_PRUNE_DRY_RUN: \`$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.dry-run \}\}"
+        $pruneJob | Should -Match "WhatIf         = \`$env:COHESION_PRUNE_DRY_RUN -eq 'true'"
+    }
+
+    It 'never checks out or reads pull request code under pull_request_target' {
+        $pruneJob | Should -Match '(?m)^      - name: Checkout pruning tooling\r?\n        uses: actions/checkout@[0-9a-f]{40} # v[0-9.]+\r?\n        with:\r?\n          persist-credentials: false\r?\n          sparse-checkout: installer/scripts/modules\r?$'
+        $pruneWorkflow | Should -Not -Match '(?m)^\s+ref:'
+        # The only payload field read is the head repository, in the job condition.
+        $payloadReference = @([System.Text.RegularExpressions.Regex]::Matches(
+                $pruneWorkflow,
+                'github\.event\.pull_request\.[A-Za-z0-9_.]+') | ForEach-Object Value | Sort-Object -Unique)
+        $payloadReference | Should -Be @('github.event.pull_request.head.repo.full_name')
+        $pruneJob | Should -Match "github\.event_name != 'pull_request_target'"
+        $pruneJob | Should -Match "github\.actor != 'dependabot\[bot\]'"
+    }
+
+    It 'holds package write and pull request read on the prune job only' {
+        $pruneWorkflow | Should -Match '(?m)^permissions:\r?\n  contents: read\r?$'
+        $pruneJob | Should -Match '(?m)^    permissions:\r?\n      contents: read\r?\n(?:\s*#.*\r?\n)*      packages: write\r?\n(?:\s*#.*\r?\n)*      pull-requests: read\r?$'
+        [System.Text.RegularExpressions.Regex]::Matches($pruneWorkflow, 'packages: write').Count | Should -Be 1
+        $pruneWorkflow | Should -Not -Match 'id-token:'
+        $pruneWorkflow | Should -Not -Match 'secrets\.'
+    }
+
+    It 'runs one prune at a time without cancelling one under way' {
+        $pruneWorkflow | Should -Match '(?m)^concurrency:\r?\n  group: cohesion-ci-packages-prune\r?\n  cancel-in-progress: false\r?$'
+    }
+
+    It 'prunes the release inventory with the documented retention' {
+        $pruneJob | Should -Match 'Import-Module \./installer/scripts/modules/CohesionPackaging\.psm1 -Force'
+        $pruneJob | Should -Match 'Import-Module \./installer/scripts/modules/CohesionPackageFeed\.psm1 -Force'
+        $pruneJob | Should -Match 'PackageName    = Get-CohesionReleasePackageId'
+        $pruneJob | Should -Match 'MainBuildCount = 20'
+        $pruneJob | Should -Match 'Invoke-CohesionCiPackagePrune @arguments'
+        $pruneJob | Should -Match 'GITHUB_PACKAGES_TOKEN: \$\{\{ github\.token \}\}'
+    }
+
+    It 'pins every action to a commit SHA with a trailing version comment' {
+        $uses = @([System.Text.RegularExpressions.Regex]::Matches($pruneWorkflow, '(?m)^\s+(?:- )?uses: .+$') | ForEach-Object Value)
+        $uses.Count | Should -BeGreaterThan 0
+        foreach ($line in $uses) {
+            $line | Should -Match 'uses: [^@\s]+@[0-9a-f]{40} # v[0-9.]+\r?$'
+        }
     }
 }

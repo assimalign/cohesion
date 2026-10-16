@@ -527,6 +527,7 @@ $script:CohesionNonMatrixWorkflow = @(
     'sdk-smoke.yml'
     'credential-guard.yml'
     'ci-packages.yml'
+    'ci-packages-prune.yml'
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -1845,6 +1846,320 @@ function Get-CohesionCiPackageVersion {
     }
 }
 
+function ConvertFrom-CohesionCiPackageVersion {
+    <#
+    .SYNOPSIS
+        Parses a version Get-CohesionCiPackageVersion produced back into its parts, and returns
+        nothing for every other version.
+
+    .DESCRIPTION
+        The inverse of Get-CohesionCiPackageVersion, and the gate .github/workflows/ci-packages-prune.yml
+        applies before it deletes anything: a version is a CI build only if it has exactly the shape
+        the derivation emits,
+
+            <base>.ci.<build>                   main
+            <base>.pr.<pull request>.<build>    pull request
+
+        where <base> is MAJOR.MINOR.PATCH-<prerelease>, its last prerelease identifier is a number
+        (the decremented canonical number, so 0 is allowed), no identifier in it is the reserved
+        local, ci, or pr, and <build> and <pull request> are positive Int32 values without a leading
+        zero. Release versions (10.0.0-preview.1), stable versions, local versions
+        (10.0.0-preview.1.local), and near misses (10.0.0-ci.5, 10.0.0-preview.0.ci.05,
+        10.0.0-preview.0.pr.15) all return nothing, so the pruner can never select them.
+
+        The ci and pr labels compare case-insensitively, as NuGet compares prerelease labels.
+
+    .PARAMETER Version
+        A package version as the feed lists it.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string] $Version
+    )
+
+    $coreMatch = [System.Text.RegularExpressions.Regex]::Match(
+        $Version,
+        '^(?<prefix>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))-(?<suffix>.+)$',
+        [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    if (-not $coreMatch.Success) {
+        return
+    }
+
+    $identifier = $coreMatch.Groups['suffix'].Value.Split('.')
+    foreach ($part in $identifier) {
+        if ($part -notmatch '^[0-9A-Za-z-]+$') {
+            return
+        }
+
+        if ($part -match '^[0-9]+$' -and $part -notmatch '^(0|[1-9][0-9]*)$') {
+            return
+        }
+    }
+
+    $pullRequestNumber = $null
+    if ($identifier.Count -ge 4 -and $identifier[-3] -ieq 'pr') {
+        $channel = 'pr'
+        $pullRequestText = $identifier[-2]
+        $buildText = $identifier[-1]
+        $baseIdentifier = @($identifier | Select-Object -SkipLast 3)
+    }
+    elseif ($identifier.Count -ge 3 -and $identifier[-2] -ieq 'ci') {
+        $channel = 'ci'
+        $pullRequestText = $null
+        $buildText = $identifier[-1]
+        $baseIdentifier = @($identifier | Select-Object -SkipLast 2)
+    }
+    else {
+        return
+    }
+
+    $buildNumber = 0
+    if ($buildText -notmatch '^[1-9][0-9]*$' -or -not [int]::TryParse($buildText, [ref] $buildNumber)) {
+        return
+    }
+
+    if ($channel -eq 'pr') {
+        $parsedPullRequest = 0
+        if ($pullRequestText -notmatch '^[1-9][0-9]*$' -or
+            -not [int]::TryParse($pullRequestText, [ref] $parsedPullRequest)) {
+            return
+        }
+
+        $pullRequestNumber = $parsedPullRequest
+    }
+
+    # The base is a canonical version with its last number decremented, so it is never empty, never
+    # carries a reserved identifier, and ends in a number Get-CohesionCiPackageVersion could emit.
+    $baseNumber = 0
+    if ($baseIdentifier.Count -lt 1 -or
+        $baseIdentifier[-1] -notmatch '^(0|[1-9][0-9]*)$' -or
+        -not [int]::TryParse($baseIdentifier[-1], [ref] $baseNumber)) {
+        return
+    }
+
+    foreach ($part in $baseIdentifier) {
+        if (@('local', 'ci', 'pr') -contains $part.ToLowerInvariant()) {
+            return
+        }
+    }
+
+    $versionPrefix = $coreMatch.Groups['prefix'].Value
+    return [pscustomobject]@{
+        Version           = $Version
+        BaseVersion       = "$versionPrefix-$($baseIdentifier -join '.')"
+        VersionPrefix     = $versionPrefix
+        Channel           = $channel
+        PullRequestNumber = $pullRequestNumber
+        BuildNumber       = $buildNumber
+    }
+}
+
+function Select-CohesionCiPackageVersionToPrune {
+    <#
+    .SYNOPSIS
+        Selects the CI package versions .github/workflows/ci-packages-prune.yml deletes from GitHub
+        Packages.
+
+    .DESCRIPTION
+        Takes every version of every package the pruner listed and returns the ones to delete, in
+        the order to delete them. Two rules select a version, and nothing else does:
+
+            pull request   every <base>.pr.<N>.<build> version whose N is in
+                           ClosedPullRequestNumber. N is compared as an integer, so closing pull
+                           request 15 never selects pr.152 or pr.151.
+            main           for each base, the main builds outside the MainBuildCount newest ones.
+                           Omit MainBuildCount to leave main builds alone.
+
+        A version that ConvertFrom-CohesionCiPackageVersion does not recognize - a release, a
+        stable, a local, or any malformed version - is never selected, whatever the parameters say.
+
+        Main builds are ranked as whole builds, not per package: a build's recency is the newest
+        CreatedAt among its versions on any package, ties broken by the higher build number, and a
+        build outside the newest MainBuildCount is selected on every package that carries it. So
+        each kept build stays complete, and a package added or removed by some build does not shift
+        which builds the others keep. Ranking by publish time rather than by build number keeps
+        fresh builds if the workflow's run numbers ever restart, instead of deleting them as old.
+        Each base is ranked on its own, so the post-tag bump to a new prerelease line does not count
+        the previous line's builds against the new one.
+
+        The output is in deletion order: closed pull requests (by number, then build), then main
+        builds oldest first. Within one build the SDK packages come first, so a build the pruner
+        stops partway through no longer resolves from its SDK pin, rather than failing somewhere in
+        the package graph.
+
+    .PARAMETER PackageVersion
+        Every listed version, each with PackageName, VersionId, Version, and CreatedAt. CreatedAt
+        is required on main versions when MainBuildCount is passed.
+
+    .PARAMETER ClosedPullRequestNumber
+        Pull requests whose builds are deleted. Pass only numbers the GitHub API reported closed.
+
+    .PARAMETER MainBuildCount
+        How many main builds to keep per base.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]] $PackageVersion,
+
+        [AllowEmptyCollection()]
+        [int[]] $ClosedPullRequestNumber = @(),
+
+        [ValidateRange(1, 2147483647)]
+        [int] $MainBuildCount
+    )
+
+    $closedPullRequest = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($number in $ClosedPullRequestNumber) {
+        $null = $closedPullRequest.Add($number)
+    }
+
+    $parsed = foreach ($entry in $PackageVersion) {
+        foreach ($property in @('PackageName', 'VersionId', 'Version')) {
+            if ($null -eq $entry.$property -or [string]::IsNullOrWhiteSpace([string] $entry.$property)) {
+                throw "Package version entry is missing '$property'."
+            }
+        }
+
+        $ciVersion = ConvertFrom-CohesionCiPackageVersion -Version ([string] $entry.Version)
+        if ($null -eq $ciVersion) {
+            continue
+        }
+
+        [pscustomobject]@{
+            Entry       = $entry
+            CiVersion   = $ciVersion
+            BaseKey     = $ciVersion.BaseVersion.ToLowerInvariant()
+            IsSdk       = ([string] $entry.PackageName) -match '^Assimalign\.Cohesion\.Sdk(\.|$)'
+            PackageName = [string] $entry.PackageName
+        }
+    }
+    $parsed = @($parsed)
+
+    $selected = [System.Collections.Generic.List[object]]::new()
+
+    $pullRequestCandidate = @(
+        $parsed |
+            Where-Object {
+                $_.CiVersion.Channel -eq 'pr' -and
+                $closedPullRequest.Contains([int] $_.CiVersion.PullRequestNumber)
+            } |
+            Sort-Object `
+                @{ Expression = { $_.CiVersion.PullRequestNumber } },
+                @{ Expression = { $_.CiVersion.BuildNumber } },
+                @{ Expression = { -not $_.IsSdk } },
+                @{ Expression = { $_.PackageName } }
+    )
+    foreach ($candidate in $pullRequestCandidate) {
+        $selected.Add((New-CohesionCiPackagePruneEntry `
+                -Candidate $candidate `
+                -Reason "pull request #$($candidate.CiVersion.PullRequestNumber) is closed"))
+    }
+
+    if ($PSBoundParameters.ContainsKey('MainBuildCount')) {
+        $mainVersion = @($parsed | Where-Object { $_.CiVersion.Channel -eq 'ci' })
+        foreach ($baseGroup in @($mainVersion | Group-Object -Property BaseKey | Sort-Object Name)) {
+            $build = foreach ($buildGroup in @($baseGroup.Group | Group-Object -Property { $_.CiVersion.BuildNumber })) {
+                $publishedAt = foreach ($candidate in $buildGroup.Group) {
+                    ConvertTo-CohesionPackageTimestamp -Value $candidate.Entry.CreatedAt -Version $candidate.Entry.Version
+                }
+
+                [pscustomobject]@{
+                    BuildNumber = [int] $buildGroup.Group[0].CiVersion.BuildNumber
+                    PublishedAt = ($publishedAt | Sort-Object -Descending | Select-Object -First 1)
+                    Candidate   = $buildGroup.Group
+                }
+            }
+
+            $newestFirst = @(
+                $build |
+                    Sort-Object `
+                        @{ Expression = { $_.PublishedAt }; Descending = $true },
+                        @{ Expression = { $_.BuildNumber }; Descending = $true }
+            )
+            if ($newestFirst.Count -le $MainBuildCount) {
+                continue
+            }
+
+            $expired = @($newestFirst | Select-Object -Skip $MainBuildCount)
+            [array]::Reverse($expired)
+            foreach ($expiredBuild in $expired) {
+                $orderedCandidate = @(
+                    $expiredBuild.Candidate |
+                        Sort-Object `
+                            @{ Expression = { -not $_.IsSdk } },
+                            @{ Expression = { $_.PackageName } }
+                )
+                foreach ($candidate in $orderedCandidate) {
+                    $selected.Add((New-CohesionCiPackagePruneEntry `
+                            -Candidate $candidate `
+                            -Reason "main build $($expiredBuild.BuildNumber) of $($candidate.CiVersion.BaseVersion) is older than the newest $MainBuildCount"))
+                }
+            }
+        }
+    }
+
+    return , $selected.ToArray()
+}
+
+function New-CohesionCiPackagePruneEntry {
+    param(
+        [Parameter(Mandatory)]
+        [object] $Candidate,
+
+        [Parameter(Mandatory)]
+        [string] $Reason
+    )
+
+    return [pscustomobject]@{
+        PackageName       = $Candidate.PackageName
+        VersionId         = $Candidate.Entry.VersionId
+        Version           = [string] $Candidate.Entry.Version
+        CreatedAt         = $Candidate.Entry.CreatedAt
+        Channel           = $Candidate.CiVersion.Channel
+        BaseVersion       = $Candidate.CiVersion.BaseVersion
+        PullRequestNumber = $Candidate.CiVersion.PullRequestNumber
+        BuildNumber       = $Candidate.CiVersion.BuildNumber
+        Reason            = $Reason
+    }
+}
+
+function ConvertTo-CohesionPackageTimestamp {
+    param(
+        [AllowNull()]
+        [object] $Value,
+
+        [Parameter(Mandatory)]
+        [string] $Version
+    )
+
+    # ConvertFrom-Json turns the API's ISO 8601 strings into DateTime values on PowerShell 7, so
+    # accept those as well as the raw text. Converting each to UTC keeps the order whatever their
+    # Kind is.
+    if ($Value -is [System.DateTimeOffset]) {
+        return $Value.ToUniversalTime()
+    }
+
+    if ($Value -is [datetime]) {
+        return ([System.DateTimeOffset] $Value.ToUniversalTime())
+    }
+
+    $parsed = [System.DateTimeOffset]::MinValue
+    if ($Value -is [string] -and
+        [System.DateTimeOffset]::TryParse(
+            $Value,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::AssumeUniversal,
+            [ref] $parsed)) {
+        return $parsed.ToUniversalTime()
+    }
+
+    throw "Main build version '$Version' has no parseable CreatedAt, so it cannot be ranked for retention."
+}
+
 function Assert-CohesionReleasePackageSet {
     <#
     .SYNOPSIS
@@ -2118,6 +2433,8 @@ Export-ModuleMember -Function @(
     'Get-CohesionCiMatrixEntry'
     'Assert-CohesionReleaseInventory'
     'Get-CohesionCiPackageVersion'
+    'ConvertFrom-CohesionCiPackageVersion'
+    'Select-CohesionCiPackageVersionToPrune'
     'Assert-CohesionReleasePackageSet'
     'Assert-CohesionPackageMetadata'
     'Invoke-CohesionPackBatch'
