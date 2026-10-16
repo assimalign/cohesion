@@ -1,0 +1,666 @@
+{
+  "schema": "cohesion.database.programs/2",
+  "generated": "2026-10-16",
+  "revised": "2026-10-16: v2 (realign-v2/skill-changes.md 4.2). Every program names its Program field option (boardOption) and its shape: a tree program owns its tracking issue's subtree; a gate program is an open gate issue blocked by its members. The query-language-t1 pseudo-program is deleted (the T1 band and its milestone represent it); Object Mapping is added.",
+  "generatedBy": "programs inventory agent (read-only; no board mutations)",
+  "repo": "assimalign/cohesion",
+  "board": { "project": 13, "name": "Cohesion", "owner": "assimalign" },
+  "integrationBranch": "claude/database-inventory-sql-expansion-aa27d1",
+  "integrationPr": 1168,
+  "statusLegend": {
+    "Done": "closed and merged to main",
+    "In review": "landed on the integration branch (draft PR #1168), issue still OPEN on GitHub",
+    "Ready": "scoped and unblocked, not started",
+    "In progress": "umbrella item with phases in flight",
+    "Backlog": "filed, not scheduled"
+  },
+  "note": "\"In review\" is the board's marker for delivered on the integration branch (draft PR #1168): the issue is still OPEN on GitHub and nothing on that branch has merged to main.",
+  "membershipNote": "Membership is read from the board: the Program field, a tree program's subtree, and a gate program's native blocked-by links plus their descendants. The per-program lists below (phases, features, tasks, openFollowUps) are carried and are used for membership only while no item on the board carries a Program value (warning program-from-carried), and then only for items the carried category mapping does not name. Phases and their dependsOn edges are always used: they are the only record of program-internal ordering.",
+  "epics": [
+    {
+      "issue": 1067,
+      "wbs": "L03.02.00",
+      "kind": "Program",
+      "title": "Cohesion - Data Platform",
+      "status": "Backlog",
+      "priority": "P002",
+      "children": [31, 4, 5, 57, 50, 856, 1006, 1511]
+    },
+    {
+      "issue": 31,
+      "wbs": "L03.02.01",
+      "title": "Data Platform (Core Engine)",
+      "status": "Backlog",
+      "priority": "P002",
+      "counts": { "total": 143, "done": 38, "inReview": 38, "ready": 3, "inProgress": 3, "backlog": 61 }
+    },
+    {
+      "issue": 4,
+      "wbs": "L03.02.02",
+      "title": "Data Platform (SQL)",
+      "status": "Backlog",
+      "priority": "P003",
+      "counts": { "total": 102, "done": 26, "inReview": 22, "ready": 9, "inProgress": 0, "backlog": 45 }
+    },
+    {
+      "issue": 5,
+      "wbs": "L03.02.03",
+      "title": "Data Platform (DocumentDB)",
+      "status": "Backlog",
+      "priority": "P003",
+      "counts": { "total": 33, "done": 13, "inReview": 0, "ready": 5, "inProgress": 0, "backlog": 15 }
+    },
+    {
+      "issue": 57,
+      "wbs": "L03.02.04",
+      "title": "Data Platform (KV, Blob, Cache)",
+      "status": "Backlog",
+      "priority": "P005",
+      "counts": { "total": 26, "done": 6, "inReview": 0, "ready": 0, "inProgress": 0, "backlog": 20 }
+    },
+    {
+      "issue": 50,
+      "wbs": "L03.02.05",
+      "title": "Data Platform (GraphDB)",
+      "status": "Backlog",
+      "priority": "P007",
+      "counts": { "total": 41, "done": 13, "inReview": 3, "ready": 4, "inProgress": 0, "backlog": 21 }
+    },
+    {
+      "issue": 856,
+      "wbs": "L03.02.06",
+      "title": "Data Platform (Developer Tooling: Database Projects and Migrations)",
+      "status": "In progress",
+      "priority": "P003",
+      "counts": { "total": 5, "done": 2, "inReview": 0, "ready": 0, "inProgress": 1, "backlog": 2 }
+    },
+    {
+      "issue": 1006,
+      "wbs": "L03.02.07",
+      "title": "Data Platform (Object Mapping)",
+      "status": "Backlog",
+      "priority": "P004",
+      "counts": { "total": 6, "done": 0, "inReview": 0, "ready": 0, "inProgress": 0, "backlog": 6 },
+      "note": "Nothing started: #1007-#1011 all Backlog."
+    },
+    {
+      "issue": 1511,
+      "wbs": "L03.02.08",
+      "title": "Data Platform (Hardening)",
+      "status": "Backlog",
+      "priority": "P001",
+      "createdAt": "2026-10-16",
+      "counts": { "total": 37, "done": 0, "inReview": 0, "ready": 0, "inProgress": 0, "backlog": 37 },
+      "note": "Filed today from the cohesion-benchmarks engine comparison. Carries its own Priority/Wave/Effort per task in the feature bodies (W01-W04).",
+      "role": "Not an epic in v2: the Hardening program gate (realignment decision 1). It produces a gate node, never a lane or an epic."
+    }
+  ],
+  "programs": [
+    {
+      "id": "engine-extensibility",
+      "name": "Database engine extensibility, model-owned provisioning and builder redesign",
+      "boardOption": "Engine Extensibility",
+      "shape": "tree",
+      "trackingIssue": 1353,
+      "wbs": "L03.02.01.78",
+      "epic": 31,
+      "boardStatus": "In progress",
+      "createdAt": "2026-10-09",
+      "planDoc": "docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md",
+      "planStatus": "approved 2026-10-09 (owner decisions 49-73); 49a accepted 2026-10-11; 74-82 added through E4 (2026-10-15)",
+      "summary": "Three composition levels (application / engine / database), provisioning owned by each model's engine Build, and one public SQL function-and-type abstraction the built-ins themselves run on.",
+      "phases": [
+        {
+          "key": "H",
+          "issue": null,
+          "title": "Hosting item 1: concrete Environment / Configuration / Logging / Services on DatabaseApplicationBuilder",
+          "dependsOn": [],
+          "state": "delivered",
+          "boardStatus": "n/a",
+          "evidence": "PR #1168 row 'Hosting builder (2026-10-08)'; design doc section 7 calls it 'prerequisite track H'",
+          "note": "No separate Database issue; a prerequisite track, not a tracked phase. Worth filing if the roadmap must show it."
+        },
+        {
+          "key": "B1",
+          "issue": 1354,
+          "title": "Provisioning into the model and the three-level builder",
+          "dependsOn": ["H"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "breaking": true,
+          "note": "Root loses CompiledSchema/SchemaMigrationResult/Provision; AddSql(name, sql => sql.AddDatabase(...)). One consumer-facing break, taken once."
+        },
+        {
+          "key": "B2",
+          "issue": 1355,
+          "title": "Provisioning hardening (+ decision 49a deferred migration worker)",
+          "dependsOn": ["B1"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "Catalog format 8->9; O(1) {hash, generation} skip; Q8 reconciliation 0.4 ms -> under 0.01 ms. Spawned follow-ups #1444-#1447."
+        },
+        {
+          "key": "B3",
+          "issue": 1356,
+          "title": "The other four models' composition seams (KeyValuePair, Graph, Documents, Blob)",
+          "dependsOn": ["B1"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "EngineName leaves all five options types; Studio composes all five through CreateBuilder(name). Spawned #1391, #1351."
+        },
+        {
+          "key": "E1",
+          "issue": 1357,
+          "title": "Engine-owned bound expression tree (internal, no API change)",
+          "dependsOn": [],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "Runs beside B1. NativeAOT win-arm64 vs 27db14c7: Q1 -23%, Q2 -31%, Q3 -21%, Q7 -11%. Gate for E2."
+        },
+        {
+          "key": "E2",
+          "issue": 1358,
+          "title": "The SQL function ABI with the built-ins on it",
+          "dependsOn": ["E1", "B1"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "Public SqlScalarFunction / SqlAggregateFunction / SqlAggregateAccumulator over SqlValue / SqlArguments / SqlType. Spawned #1373, #1374."
+        },
+        {
+          "key": "E3",
+          "issue": 1359,
+          "title": "Domains and the cast registry",
+          "dependsOn": ["E2"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "SqlType.CreateDomain + SqlCast; 53 standard casts through one registry; COHSQLE010/011. Spawned #1422."
+        },
+        {
+          "key": "E4",
+          "issue": 1360,
+          "title": "SQL-defined functions, domains and declared scripts",
+          "dependsOn": ["E3", "B2"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "CREATE/DROP FUNCTION and DOMAIN, SqlDatabaseBuilder.Script(name, sql) with statement-granular receipts; catalog format 10. Owner decisions 78-82. Spawned #1504."
+        },
+        {
+          "key": "P7",
+          "issue": 1263,
+          "title": "P7 re-scoped (decision 72): ApplicationModel verification and Studio typed fields",
+          "dependsOn": ["B3"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "Formally a sub-issue of the concrete-first program #1255; decision 72 re-scoped it to follow B3 of this program."
+        }
+      ],
+      "openFollowUps": [
+        {
+          "issue": 1366,
+          "status": "Backlog",
+          "one_liner": "Bind FK and cascade key ordinals once per table version; no FindColumnOrdinal on a per-row path (left over from E1)."
+        },
+        { "issue": 1373, "status": "Backlog", "one_liner": "SqlFunctionContext.TransactionTimestamp (no transaction records its start time) and SELECT without FROM." },
+        { "issue": 1374, "status": "Backlog", "one_liner": "Explain E2's NativeAOT-only ~160 KB allocation growth in engine Build (absent under JIT)." },
+        {
+          "issue": 1391,
+          "status": "Backlog",
+          "one_liner": "A framework-public Listen(Uri) TCP listener for the KeyValuePair, Graph and Blob servers (only Sql has one)."
+        },
+        {
+          "issue": 1393,
+          "status": "Backlog",
+          "one_liner": "Owner decision: do index pages keep physical rollback, or move to PostgreSQL's never-roll-back-index-pages model?"
+        },
+        {
+          "issue": 1419,
+          "status": "In review",
+          "one_liner": "An application function throwing OperationCanceledException escaped uncoded and closed the wire session - delivered."
+        },
+        { "issue": 1422, "status": "Backlog", "one_liner": "Standard text forms for temporal/UUID/floating casts, the JSON identity cast, and string-free cast lookup." }
+      ],
+      "tierRelation": [
+        "E1's bound tree is the execution substrate every SQL T1 family (#1106-#1125) runs on; it landed before any of them.",
+        "E2's function catalog is what SQL T1 #1120 (42 T1 scalar functions with plan-time signature checks) registers into. Without E2 the built-ins were a frozen 10-entry table.",
+        "E3's cast registry and SqlTypeCatalog are what SQL T1 #1119 (CAST across every shared type) and #1108 (ISO multi-word type names) extend; #1422 is the remaining cast gap list.",
+        "B1-B3's typed-schema + provisioning path is where the SQL T1 DDL families land: #1121 (ON DELETE SET NULL/SET DEFAULT/NO ACTION, non-literal defaults), #1122 (ALTER TABLE RENAME, ALTER COLUMN SET/DROP DEFAULT and NOT NULL), #1123 (IDENTITY), #1124 (views).",
+        "E4's CREATE FUNCTION / CREATE DOMAIN is adjacent to but not part of T1: the plan puts triggers, procedures and user functions in T3 'a separate programmability program'. E4 delivered SQL-defined scalar functions ahead of that tier."
+      ]
+    },
+    {
+      "id": "concrete-first",
+      "name": "Database concrete-first public API: replace interfaces with sealed and abstract types",
+      "boardOption": "Concrete-First API",
+      "shape": "tree",
+      "trackingIssue": 1255,
+      "wbs": "L03.02.01.56",
+      "epic": 31,
+      "boardStatus": "In progress",
+      "planDoc": "docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md",
+      "planStatus": "owner approved 2026-10-04 ('approve all recommendations'); decisions 27-48; rules in .claude/rules/database-area.md",
+      "summary": "Collapse 106 public interfaces in resources/Database into sealed and abstract NVI types, one phase at a time, model by model. A sanctioned deviation from the repo-wide interface-first rule, scoped to resources/Database/**.",
+      "linear": true,
+      "phases": [
+        { "key": "P0", "issue": 1256, "title": "Rules, plan of record and owner-decision record", "dependsOn": [], "state": "delivered", "boardStatus": "In review" },
+        {
+          "key": "P1",
+          "issue": 1257,
+          "title": "Delete dead and internal-only seams",
+          "dependsOn": ["P0"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "Deleted the Execution query pipeline, IAuthorizationService, Governance and six Replication projects."
+        },
+        {
+          "key": "P2",
+          "issue": 1258,
+          "title": "Kernel child roots (Storage, Transactions, Indexing, Protocol, Security)",
+          "dependsOn": ["P1", "#1236"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "The one outside prerequisite in the chain: P2 waits for the #1236 journal work as well as P1."
+        },
+        {
+          "key": "P3",
+          "issue": 1259,
+          "title": "Root bridge bases (DatabaseEngine, DatabaseInstance, DatabaseSession, DatabaseTransaction, DatabaseServer, DatabaseServerSession)",
+          "dependsOn": ["P2"],
+          "state": "delivered",
+          "boardStatus": "In review"
+        },
+        {
+          "key": "P4",
+          "issue": 1260,
+          "title": "One PR per model (P4.0 generic builder state, then KeyValuePair, Graph, Documents, Blob, Sql)",
+          "dependsOn": ["P3"],
+          "state": "delivered",
+          "boardStatus": "In review"
+        },
+        { "key": "P5", "issue": 1261, "title": "Clients", "dependsOn": ["P4"], "state": "delivered", "boardStatus": "In review" },
+        {
+          "key": "P6",
+          "issue": 1262,
+          "title": "Composition retype and root interface removal",
+          "dependsOn": ["P5"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "Removed the ten root interfaces. Everything written against the root compiles against the new shape from here on."
+        },
+        {
+          "key": "P7",
+          "issue": 1263,
+          "title": "ApplicationModel, templates, Studio and cohesion-examples (re-scoped by engine-redesign decision 72)",
+          "dependsOn": ["P6", "B3 of #1353"],
+          "state": "delivered",
+          "boardStatus": "In review"
+        },
+        {
+          "key": "P8",
+          "issue": 1264,
+          "title": "Per-row result types and docs sweep",
+          "dependsOn": ["P7"],
+          "state": "open",
+          "boardStatus": "Backlog",
+          "note": "THE ONLY UNDELIVERED PHASE OF THIS PROGRAM. Tightens QueryRow, QueryResultSet, QueryResult, QueryRequest, the parser/analyzer bases; docs/Assembly pages, area README, cohesion-docs mirror."
+        }
+      ],
+      "openFollowUps": [
+        {
+          "issue": 1470,
+          "status": "Backlog",
+          "one_liner": "Apply PR #1094's static-factory / error-message / throw-member conventions to the Database area (deliberately deferred to avoid conflicts with this branch)."
+        }
+      ],
+      "tierRelation": [
+        "Structural prerequisite rather than a tier input: P6 removed the root interfaces every model and client names, so language work lands on the post-P6 shape.",
+        "P8 is the one that touches QueryRow / QueryResultSet / QueryResult / QueryRequest - the same result types SQL T1 #1117 (RETURNING + affected count on SqlResultSet), shared T1 #1104 (EXPLAIN as rows in one shared shape) and the open OQL 'additive QueryRow.IsMissing' question need. Sequencing P8 against those is a real roadmap decision, not a formality."
+      ]
+    },
+    {
+      "id": "eventsource-tracing",
+      "name": "EventSource tracing across the Database area",
+      "boardOption": "EventSource Tracing",
+      "shape": "tree",
+      "trackingIssue": 1343,
+      "wbs": "L03.02.01.77",
+      "epic": 31,
+      "boardStatus": "In progress",
+      "planDoc": "docs/programs/DATABASE_EVENT_SOURCES_PLAN.md",
+      "summary": "147 new events across 16 sources in five parallel batches, plus a batch D that had to wait for the engine redesign. 178 active events over 17 sources when complete.",
+      "parallel": true,
+      "phases": [
+        {
+          "key": "B1",
+          "issue": 1344,
+          "title": "Root engine, sessions, statements and explicit transactions (31 events)",
+          "dependsOn": [],
+          "state": "delivered",
+          "boardStatus": "In review"
+        },
+        { "key": "B2", "issue": 1345, "title": "Storage (17 events)", "dependsOn": [], "state": "delivered", "boardStatus": "In review" },
+        { "key": "B3", "issue": 1346, "title": "Transactions and Indexing (26 events)", "dependsOn": [], "state": "delivered", "boardStatus": "In review" },
+        { "key": "B4", "issue": 1347, "title": "Wire protocol, security and clients (28 events)", "dependsOn": [], "state": "delivered", "boardStatus": "In review" },
+        { "key": "B5", "issue": 1348, "title": "Model servers and index recovery (45 events)", "dependsOn": [], "state": "delivered", "boardStatus": "In review" },
+        {
+          "key": "D",
+          "issue": 1349,
+          "title": "Hosting and Sql statement/provisioning tracing after the redesign (22 active additions)",
+          "dependsOn": ["B1", "B3", "E1 of #1353", "E2 of #1353", "E3 of #1353", "B2 of #1353", "P7"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "Shipped in two parts (2026-10-11 non-provisioning, 2026-10-12 after B2/49a). Sql event 17 retired by B2 and never reused."
+        }
+      ],
+      "openFollowUps": [
+        {
+          "issue": 1350,
+          "status": "Backlog",
+          "one_liner": "Carry a diagnostic Code on DatabaseException so thrown failures report COHSQLE001 vs COHSQLE002 - needs an owner decision, it adds public API to the area root."
+        },
+        {
+          "issue": 1351,
+          "status": "Backlog",
+          "one_liner": "Keep snapshot pins out of the kernel transaction rate counters: Blob/Graph/Documents ReadCommitted reads move transactions-per-second and rollbacks-per-second."
+        }
+      ],
+      "tierRelation": [
+        "Orthogonal to the language tiers - it instruments whatever the engines already do.",
+        "The one coupling is diagnostic codes: shared T1 #1103 ('deliver every rejection as coded diagnostics') defines the codes, and #1350 is what makes a thrown failure carry one into an event. A roadmap should show #1350 after #1103."
+      ]
+    },
+    {
+      "id": "storage-write-amplification",
+      "name": "Storage journal / write amplification (full 8 KiB before-image per first page write)",
+      "boardOption": "Storage Journal",
+      "shape": "tree",
+      "trackingIssue": 1236,
+      "wbs": "L03.02.01.46",
+      "epic": 31,
+      "boardStatus": "Backlog",
+      "planDoc": "docs/programs/DATABASE_PROGRAM_PLAN.md (sequencing); the step design lives in the issue bodies",
+      "summary": "Three ordered steps that took the random-insert benchmark from 22k to 315k-658k rows/s and cut warm journal volume per touched page from 16,460 B to 51 B.",
+      "linear": true,
+      "phases": [
+        {
+          "key": "S1",
+          "issue": 1251,
+          "title": "Storage format 2: hardware CRC-32C, an exact format fence, a persisted LSN floor and a torn-safe header",
+          "dependsOn": [],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "22k -> ~100k rows/s on the #1236 benchmark at the default pool."
+        },
+        {
+          "key": "S2",
+          "issue": 1252,
+          "title": "Buffer journal appends in user space with a tracked end offset",
+          "dependsOn": ["S1"],
+          "state": "delivered",
+          "boardStatus": "In review"
+        },
+        {
+          "key": "S3",
+          "issue": 1253,
+          "title": "A full page image once per checkpoint and byte-range deltas at commit, with ordered redo",
+          "dependsOn": ["S2"],
+          "state": "delivered",
+          "boardStatus": "In review",
+          "note": "22k -> 315k-658k rows/s; 50 MB journal recovery ~1 s -> 0.3 s."
+        }
+      ],
+      "umbrellaStatus": "The three steps are delivered on the branch; the parent #1236 is still Backlog and still open, so the board shows the program as not started.",
+      "relatedDelivered": [
+        { "issue": 1243, "one_liner": "A journal fsync failure takes the database offline (PostgreSQL PANIC model)." },
+        { "issue": 1254, "one_liner": "Buffer pools configurable per engine, 32 MiB default; checkpoints trigger at 256 MiB of journal." },
+        { "issue": 1242, "one_liner": "A checkpoint anchors the in-flight transaction list in page 0 before truncating the journal." },
+        { "issue": 1240, "one_liner": "The Debug-only buffer-pool invariant check was O(resident pages) per page access." },
+        { "issue": 1268, "one_liner": "Engine background workers survive faults per database and report through health and the event source." }
+      ],
+      "dependents": ["P2 (#1258) of the concrete-first program waits on this work."],
+      "tierRelation": ["None directly. It is the throughput floor all three languages execute on; the Hardening epic's storage feature #1518 picks up where it stopped."]
+    },
+    {
+      "id": "hardening-benchmarks",
+      "name": "Data Platform Hardening (from the engine benchmark comparison)",
+      "boardOption": "Hardening",
+      "shape": "gate",
+      "wbs": "L03.02.08",
+      "epic": 1067,
+      "boardStatus": "Backlog",
+      "createdAt": "2026-10-16",
+      "planDoc": "cohesion-benchmarks repo: database/docs/HARDENING.md + database/docs/hardening-inventory.json (against Cohesion bf20be5eb)",
+      "summary": "A program, not an epic: #1511 stays open as its gate and holds the acceptance criteria. Members are the items with Program = Hardening; the links are #1511's native blocked-by items, their descendants and #1511 itself, and the two sets must agree. A measured comparison of the Cohesion SQL, Documents and Graph engines against PostgreSQL, SQL Server, MongoDB, RavenDB and Neo4j, each in a 3 CPU / 6 GB container over ~10 GB of generated data per model.",
+      "features": [
+        { "key": "F01", "issue": 1512, "title": "Shared read transactions and commit concurrency", "tasks": [1520], "state": "open", "boardStatus": "Backlog" },
+        { "key": "F02", "issue": 1513, "title": "SQL access paths and bounded execution", "tasks": [1521, 1522, 1523, 1524], "state": "open", "boardStatus": "Backlog" },
+        { "key": "F03", "issue": 1514, "title": "SQL analytical and transactional language coverage", "tasks": [1525, 1526], "state": "open", "boardStatus": "Backlog" },
+        {
+          "key": "F04",
+          "issue": 1515,
+          "title": "Documents query execution, indexes and APIs",
+          "tasks": [1527, 1528, 1529, 1530, 1531],
+          "state": "open",
+          "boardStatus": "Backlog"
+        },
+        {
+          "key": "F05",
+          "issue": 1516,
+          "title": "Graph query execution and indexing",
+          "tasks": [1532, 1533, 1534, 1535, 1536, 1537],
+          "state": "open",
+          "boardStatus": "Backlog"
+        },
+        { "key": "F06", "issue": 1517, "title": "Query preparation and wire execution", "tasks": [1538, 1539, 1540], "state": "open", "boardStatus": "Backlog" },
+        { "key": "F07", "issue": 1518, "title": "Storage, indexes and MVCC maintenance", "tasks": [1541, 1542, 1543, 1544], "state": "open", "boardStatus": "Backlog" },
+        { "key": "F08", "issue": 1519, "title": "Durable bulk ingest paths", "tasks": [1545, 1546, 1547], "state": "open", "boardStatus": "Backlog" }
+      ],
+      "ownFieldModel": "Priority and Wave are board fields on all 36 items (#1512-#1519 and their 28 tasks) and equal the feature bodies' tables (hardening.md 3.4). Effort (M / L / XL) and the concern class stay in the bodies only.",
+      "tierRelation": [
+        "This program is the de-facto T2 tier for execution quality. #1514's own summary says 'Reuse the T1 tickets for covered syntax; only window execution and remaining outer joins need new scope'.",
+        "Five T2 language families are filed under its features (#1525, #1526, #1530, #1536, #1540): tiers.json binds them to their plan families, and a T2 feature filed later lists them under \"Covered by existing work items\" rather than refiling them.",
+        "Several features reuse existing work items rather than file new ones; those 25 items are members through the gate's blocked-by links and Program = Hardening, not through the tree."
+      ],
+      "gate": {
+        "issue": 1511,
+        "criteriaSource": "#1511 body, Acceptance Criteria",
+        "label": "Hardening gate: SF10, <=2x best engine, load <=1.5x, no native->emulated regression",
+        "completion": "Complete only when #1511 is CLOSED with reason COMPLETED, never because its members closed."
+      }
+    },
+    {
+      "id": "object-mapping",
+      "name": "Object mapping: shared mapping core, compile-time generation and per-model accessors",
+      "boardOption": "Object Mapping",
+      "shape": "tree",
+      "trackingIssue": 1006,
+      "wbs": "L03.02.07",
+      "epic": 1067,
+      "boardStatus": "Backlog",
+      "summary": "Five features (#1007-#1011: shared mapping core and compile-time generation, relational, document, graph, key-value/blob accessors). No task-level decomposition and nothing started. The tracking issue is also the [L03.02.07] epic, so it is a container: members are its subtree.",
+      "tierRelation": ["None. Mapping consumes the model clients; it does not gate any language tier."]
+    }
+  ],
+  "otherEpicsWithWork": [
+    {
+      "epic": 856,
+      "wbs": "L03.02.06",
+      "title": "Developer Tooling: Database Projects and Migrations",
+      "boardStatus": "In progress",
+      "items": [
+        { "issue": 857, "status": "Backlog", "one_liner": "Migration engine: schema diff, script generation, transactional apply - the open heart of this epic." },
+        { "issue": 858, "status": "Done", "one_liner": "Model-specific build-tool loading and per-model targets." },
+        { "issue": 859, "status": "Done", "one_liner": "Database project system: compile the C# AddDatabase schema model to CompiledSchema in Sdk.Database." },
+        {
+          "issue": 1504,
+          "status": "Backlog",
+          "one_liner": "Sdk.Database migrations carry declared scripts through a receipt-aware runner (E4 decision 82; COHDBSDK110 refuses Script(...) today)."
+        }
+      ]
+    },
+    {
+      "epic": 1006,
+      "wbs": "L03.02.07",
+      "title": "Object Mapping",
+      "boardStatus": "Backlog",
+      "note": "Five features (#1007-#1011: shared mapping core and compile-time generation, relational, document, graph, key-value/blob accessors). No task-level decomposition, nothing started.",
+      "items": [1007, 1008, 1009, 1010, 1011]
+    }
+  ],
+  "standaloneFollowUps": {
+    "definition": "Open Database items filed from reviews on this integration branch that are direct children of an area epic, not of any program's tracking issue.",
+    "fromDecision49a_B2_1355": [
+      {
+        "issue": 1444,
+        "wbs": "L03.02.02.56",
+        "status": "Backlog",
+        "one_liner": "Bound memory in constraint validation and unique index builds: validating a constraint materializes the table's rows and a unique index build keeps every key in a set, so the deferred migration worker's memory grows with the table."
+      },
+      {
+        "issue": 1445,
+        "wbs": "L03.02.02.57",
+        "status": "Backlog",
+        "one_liner": "Reclaim index pages abandoned by an unpublished index build - a failed or cancelled deferred build leaves durable pages for a vacuum that does not exist yet."
+      },
+      {
+        "issue": 1446,
+        "wbs": "L03.02.02.58",
+        "status": "Backlog",
+        "one_liner": "An operator can repair or abandon a pending migration whose target is unreachable; today it keeps the database Degraded or offline with no administrative path out."
+      },
+      {
+        "issue": 1447,
+        "wbs": "L03.02.02.59",
+        "status": "Backlog",
+        "one_liner": "ALTER COLUMN changes that need a table rewrite (TYPE ... USING, scale, domain, collation); shares rewrite machinery with #1265 and relates to T1 #1122."
+      }
+    ],
+    "fromLaterReviewRounds": [
+      {
+        "issue": 1508,
+        "wbs": "L03.02.02.60",
+        "status": "Backlog",
+        "from": "#1443 review",
+        "one_liner": "DROP INDEX reclaims the index's B-tree pages; today a published index that is dropped leaks its tree until the table is dropped, so drop/recreate grows the file without bound."
+      },
+      {
+        "issue": 1509,
+        "wbs": "L03.02.02.61",
+        "status": "Backlog",
+        "from": "#1438 review",
+        "one_liner": "Execute TIME(p)/TIMESTAMP(p)/TIMESTAMPTZ(p)/INTERVAL(p) fractional-second precision; #1438 made them fail-closed COHDBL001, so a PostgreSQL schema with TIMESTAMP(3) cannot be created."
+      },
+      {
+        "issue": 1504,
+        "wbs": "L03.02.06.04",
+        "status": "Backlog",
+        "from": "E4 #1360 decision 82",
+        "one_liner": "Sdk.Database migration pipeline cannot write E4's script receipts, so Script(...) is refused in SDK projects with COHDBSDK110."
+      },
+      {
+        "issue": 1470,
+        "wbs": "L03.02.01.79",
+        "status": "Backlog",
+        "from": "PR #1094 / decision 59",
+        "one_liner": "Apply the static-factory, error-message and throw-member conventions to the Database area - held back on purpose while this branch is in flight."
+      },
+      {
+        "issue": 1364,
+        "wbs": "L03.02.02.42",
+        "status": "Backlog",
+        "from": "#1342/#1361 review",
+        "one_liner": "Report storage read failures as coded statement errors and keep the session alive."
+      },
+      {
+        "issue": 1365,
+        "wbs": "L03.02.02.43",
+        "status": "Backlog",
+        "from": "#1362 review",
+        "one_liner": "Probe unlatched storage reads: the two-read ReadRecord path and the allocation window."
+      },
+      {
+        "issue": 1372,
+        "wbs": "L03.02.02.46",
+        "status": "Backlog",
+        "from": "#1362 review",
+        "one_liner": "Confirm failed decodes in Graph, Documents, Blob, catalog loads and the version store (SQL and KeyValuePair done in #1362)."
+      },
+      {
+        "issue": 1394,
+        "wbs": "L03.02.02.49",
+        "status": "Backlog",
+        "from": "review",
+        "one_liner": "SQL LIKE backtracks without a bound and copies the string per step (the follow-up to #1166)."
+      },
+      {
+        "issue": 1420,
+        "wbs": "L03.02.02.51",
+        "status": "Backlog",
+        "from": "#1390 review",
+        "one_liner": "Hot-row cascades: reorder the lock queue on soft deadlocks and decide the cascade lock order."
+      },
+      {
+        "issue": 1421,
+        "wbs": "L03.02.02.52",
+        "status": "Backlog",
+        "from": "#1392 review",
+        "one_liner": "Apply the database-name rule at declaration and in the SDK, and recover interrupted creates."
+      }
+    ],
+    "largeOlderUngroupedBand": {
+      "note": "A further ~60 open defect/hygiene features under epics #31 and #4 in the #1160-#1289 band, filed from the MVP-era audits rather than from any program. They are the biggest reason the Data Platform board reads as an undifferentiated list. Examples below; the full set is every L03.02.01.xx / L03.02.02.xx feature with status Backlog.",
+      "examples": [
+        1160, 1161, 1162, 1163, 1195, 1196, 1197, 1198, 1200, 1219, 1227, 1230, 1233, 1239, 1246, 1247, 1248, 1250, 1265, 1266, 1269, 1270, 1271, 1273, 1274, 1275, 1276,
+        1277, 1279, 1280, 1282, 1283, 1284, 1285, 1286, 1287, 1288, 1313
+      ]
+    },
+    "parkedByOwnerDecision": [
+      {
+        "issue": 1152,
+        "wbs": "L03.02.01.29",
+        "status": "Backlog",
+        "one_liner": "On-disk format upgrades. The owner decided on 2026-10-01 that a pre-release engine refuses any other format version instead of upgrading. Formats have moved from 3 to 10 since; this is the item that pays that debt before GA."
+      },
+      { "issue": 1026, "wbs": "L03.02.01.22", "status": "Backlog", "one_liner": "Full linguistic collation with a versioned index format (follows #1025, delivered)." },
+      {
+        "issue": 1070,
+        "wbs": "L03.02.01.24",
+        "status": "Backlog",
+        "one_liner": "Fold DATABASE_MVP_FEATURES.md and DATABASE_PROGRAM_PLAN.md into the area design docs - the housekeeping that retires two of the plan docs this inventory had to read."
+      }
+    ]
+  },
+  "crossProgramObservations": [
+    "Nothing in this branch has merged to main. 63 L03.02 items sit at 'In review', which on this board means 'landed on the integration branch', and every one of them is still OPEN on GitHub. A waterfall built from issue state alone will show them as not started.",
+    "Four of the five engine programs are effectively complete: engine extensibility (9 of 9 phases), concrete-first (8 of 9, P8 open), EventSource tracing (6 of 6 batches), storage write amplification (3 of 3 steps). Their three umbrella issues are still 'In progress' or 'Backlog'.",
+    "The programs produced 22 open follow-up items between them. Those follow-ups are children of the program issues in three cases (#1353, #1343) and children of an area epic in the rest - the inconsistency the bug-filing rule is meant to fix.",
+    "Dependency arrows that crossed program boundaries and actually gated work: #1236 -> P2 (#1258); H -> B1; B3 + P6 -> P7 (#1263); B1/B3 + E1-E3 + B2 + P7 -> tracing batch D (#1349). A roadmap that draws programs as independent swimlanes will be wrong about all four.",
+    "The Hardening epic #1511 is one day old and already the second-largest Database epic by item count (37). It carries its own Priority/Wave/Effort model inside the feature bodies, which the project board's own Priority and Wave fields do not yet reflect."
+  ],
+  "openOwnerSignOffs": [
+    {
+      "topic": "#1164",
+      "one_liner": "ON DELETE CASCADE has no depth limit (PostgreSQL's model); the proposed guard is a statement and lock timeout (#1231), not a level count."
+    },
+    { "topic": "new diagnostic codes", "one_liner": "COHSQLE005/006, COHDBG007/008/009 treated as accepted unless the owner objects." },
+    {
+      "topic": "#1232",
+      "one_liner": "Should outside ISqlDatabaseEngineBuilder implementations reach AddSql and application composition, or only standalone composition?"
+    },
+    { "topic": "#1226", "one_liner": "A writer whose undo fails keeps its locks until the purge pass - in Graph, Documents and Blob that blocks every writer." },
+    {
+      "topic": "#1443 decision 77",
+      "one_liner": "Reclamation owner, a database-wide reader fence, and DROP of a populated table - implemented as recommended, owner to confirm."
+    },
+    {
+      "topic": "#1438",
+      "one_liner": "VARCHAR/CHAR/binary length cap at 10,485,760 and refusing temporal precision qualifiers as COHDBL001 - owner to confirm (#1509 is the follow-up that undoes the second half)."
+    },
+    {
+      "topic": "#1437",
+      "one_liner": "DatabaseType.Character as a new shared enum member and a per-column max length in the SQL result header at format 2 - owner to confirm."
+    },
+    { "topic": "#1393", "one_liner": "Whether index pages keep physical rollback at all (a written comparison is the deliverable)." },
+    { "topic": "#1350", "one_liner": "Adding a Code property to the area-root DatabaseException (public API in the root)." }
+  ],
+  "inventoryNote": "otherEpicsWithWork, standaloneFollowUps and crossProgramObservations are the 2026-10-16 inventory prose: carried for reading, never used for placement or membership."
+}

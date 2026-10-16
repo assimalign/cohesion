@@ -1,0 +1,128 @@
+{
+  "schema": "cohesion.database.roadmap.overlay/2",
+  "note": "The hand-written structure of roadmap-data.json: lane order (keyed by epic WBS and category code, never by issue number), stage names, the program-gate edges that exist only as prose in programs.json tierRelation, pins, wave-window pins and the extra open calls. Every pin and window pin is echoed in roadmap-data.json overlay.applied, so a reader can tell a decision from a computation.",
+  "lanes": [
+    { "id": "core", "name": "Core engine", "epics": ["L03.02.01"] },
+    { "id": "shared", "name": "Shared language platform", "categories": ["L03.02.01.C07"], "planLanguage": "Shared" },
+    { "id": "sql", "name": "SQL", "epics": ["L03.02.02"], "planLanguage": "SQL" },
+    { "id": "oql", "name": "OQL (Documents)", "epics": ["L03.02.03"], "planLanguage": "OQL" },
+    { "id": "gql", "name": "GQL (Graph)", "epics": ["L03.02.05"], "planLanguage": "GQL" },
+    { "id": "models", "name": "Key-value, blob and cache", "epics": ["L03.02.04"], "collapsedByDefault": true },
+    { "id": "tooling", "name": "Tooling and mapping", "epics": ["L03.02.06", "L03.02.07"], "collapsedByDefault": true },
+    { "id": "plans", "name": "Plans and program gates", "epics": ["L03.02.09"] },
+    { "id": "other", "name": "Other", "epics": [] }
+  ],
+  "lanesNote": "Array order is lane order, so dependency arrows run down and to the right. A tiered item takes the lane of its plan language; everything else takes its category's lane, then its epic's. An epic with no lane raises epic-without-lane and lands in Other: a new epic needs exactly one entry here.",
+  "stages": [
+    {
+      "band": "landed", "localDepth": 0, "id": "landed", "name": "Landed",
+      "entryCondition": "Nothing. This column is what is already true on the integration branch or on main.",
+      "exitCondition": "Nothing open depends on it. Delivered work that still gates open work is drawn in its tier band instead, with the delivered-unmerged hatch."
+    },
+    {
+      "band": "gate", "localDepth": 0, "id": "gate-parse-truth", "name": "Parse truth and the seam's base",
+      "entryCondition": "Nothing: it starts from the landed substrate.",
+      "exitCondition": "No statement is silently accepted or silently wrong, and the execution package no longer depends on the language package (#1577)."
+    },
+    {
+      "band": "gate", "localDepth": 1, "id": "gate-universal-rule", "name": "The universal rule and the seam split",
+      "entryCondition": "#1068 is merged; the seam split starts once #1577 has landed.",
+      "exitCondition": "Every unsupported keyword and stray character is a coded rejection in all three languages, and each model has its own session type (#1578)."
+    },
+    {
+      "band": "gate", "localDepth": 2, "id": "gate-seam-rename", "name": "The execution seam's final names",
+      "entryCondition": "#1578 has split the execute seam.",
+      "exitCondition": "Every Database.Execution type is a Database* type (#1579): the T1 work writes against the final names."
+    },
+    {
+      "band": "gate", "localDepth": 3, "id": "gate-wire-reach", "name": "Wire reach",
+      "entryCondition": "#1579 has renamed the execution types.",
+      "exitCondition": "Documents has a wire server and client (#190), so OQL is testable as a consumer."
+    },
+    {
+      "band": "gate", "localDepth": "*", "id": "gate-step-{n}", "name": "Gate step {n}",
+      "entryCondition": "The previous gate column has landed.",
+      "exitCondition": "This column's prerequisites are delivered."
+    },
+    {
+      "band": "t1", "localDepth": 0, "id": "foundations", "name": "Foundations",
+      "entryCondition": "#1101 is merged and #1579 has given the execution types their final names; OQL also needs #190 delivered (D5, owner decision 2026-10-16).",
+      "exitCondition": "The shared parameter, diagnostic and EXPLAIN contracts exist and each language's entry clauses execute."
+    },
+    {
+      "band": "t1", "localDepth": 1, "id": "composition", "name": "Composition",
+      "entryCondition": "The language's foundation clauses execute.",
+      "exitCondition": "Joins, predicates, projections and patterns compose with each other."
+    },
+    {
+      "band": "t1", "localDepth": 2, "id": "derivation", "name": "Derivation",
+      "entryCondition": "Composition holds.",
+      "exitCondition": "Subqueries, casts, function tables, array operators and RETURN work on composed input."
+    },
+    {
+      "band": "t1", "localDepth": 3, "id": "convergence", "name": "Convergence",
+      "entryCondition": "Derivation holds.",
+      "exitCondition": "CTEs, views, constraint actions, partial updates, ordering and linear composition execute."
+    },
+    {
+      "band": "t1", "localDepth": 4, "id": "t1-close-out", "name": "T1 close-out",
+      "entryCondition": "Convergence holds and SQL #1120 (the T1 function model) is done.",
+      "exitCondition": "T1 is complete in all three languages."
+    },
+    {
+      "band": "t1", "localDepth": "*", "id": "t1-step-{n}", "name": "T1 step {n}",
+      "entryCondition": "The previous T1 column holds.",
+      "exitCondition": "This column's T1 work executes."
+    },
+    {
+      "band": "t2", "localDepth": "*", "id": "t2-step-{n}", "name": "T2 step {n}",
+      "entryCondition": "T1 is complete for that language; families follow the order the plan lists them (D4). The order positions; it does not block.",
+      "exitCondition": "Each family built or explicitly dropped."
+    },
+    {
+      "band": "t3", "localDepth": 0, "id": "t3", "name": "T3 - competitive depth",
+      "entryCondition": "T2 has been reviewed (D4: T3 deferred, revisit after T2).",
+      "exitCondition": "Open."
+    },
+    {
+      "band": "unplaced", "localDepth": 0, "id": "unplaced", "name": "Unplaced",
+      "entryCondition": "No Tier, Wave, Priority or recorded dependency. The board has not said when.",
+      "exitCondition": "Empty: every item has a Tier, a Wave or a Priority, or work that waits on it."
+    }
+  ],
+  "stagesNote": "Keyed by band and localDepth. An entry whose localDepth is \"*\" names every column of that band that has no entry of its own; {n} is localDepth + 1. A computed column with no name at all raises no-stage-name.",
+  "programGateEdges": [
+    { "from": 1096, "to": 1357, "note": "E1's engine-owned bound expression tree is the execution substrate every SQL T1 family (#1106-#1125) runs on; drawn once against the SQL T1 feature rather than twenty times." },
+    { "from": 1120, "to": 1358, "note": "E2's SQL function ABI is the catalog #1120's 42 T1 scalar functions register into." },
+    { "from": 1119, "to": 1359, "note": "E3's cast registry is what #1119 (CAST across every shared type) extends." },
+    { "from": 1108, "to": 1359, "note": "E3's SqlTypeCatalog is what #1108 (ISO multi-word type names) extends." },
+    { "from": 1121, "to": 1354, "note": "B1's typed-schema and provisioning path is where the T1 constraint-action DDL lands." },
+    { "from": 1122, "to": 1354, "note": "B1's typed-schema and provisioning path is where ALTER TABLE / ALTER COLUMN lands." },
+    { "from": 1123, "to": 1354, "note": "B1's typed-schema and provisioning path is where IDENTITY lands." },
+    { "from": 1124, "to": 1354, "note": "B1's typed-schema and provisioning path is where views land." },
+    { "from": 1095, "to": 1262, "note": "P6 removed the root interfaces every model and client names, so the shared language platform lands on the post-P6 shape." },
+    { "from": 1350, "to": 1103, "note": "Shared T1 #1103 defines the diagnostic codes; #1350 is what carries one into a traced failure, so it follows #1103." },
+    { "from": 1518, "to": 1253, "note": "The Hardening storage feature #1518 picks up where storage step S3 stopped." }
+  ],
+  "pins": [],
+  "waveWindows": {},
+  "waveWindowsNote": "Optional pins: \"W03\": { \"bands\": [\"t2\"], \"reason\": \"...\" } sets a window to the full span of the named bands instead of the computed calibration. Every pin is echoed in overlay.applied.",
+  "openCallTargets": {
+    "Add an additive QueryRow.IsMissing.": { "affects": [1264, 1130], "wouldChange": "scope" },
+    "Choose the Couchbase or the PartiQL MISSING truth table.": { "affects": [1130, 1131], "wouldChange": "scope" }
+  },
+  "openCalls": [
+    {
+      "id": "C7",
+      "text": "Priority and Wave for the Unplaced items. Realignment decision 14 approved setting both on 2026-10-16; the values are the owner's, and until they are set the items stay Unplaced.",
+      "affects": "unplaced",
+      "wouldChange": "placement"
+    }
+  ],
+  "openCallsNote": "Open owner calls only. C1 (T2 order per language), C4 (Ready means unblocked), C5 (#190 first) and C6 (#1540, #1522 and #1541 stay flagged, unedited) were decided on 2026-10-16 as realignment decisions 16, 12, 11 and 17; they live in realign-plan.json. C2 and C3 come from bug-policy.json pendingExtensions. \"affects\": \"unplaced\" means every item the run leaves in the Unplaced column.",
+  "programP8Call": {
+    "text": "Sequence concrete-first P8 (#1264, the per-row result types: QueryRow, QueryResultSet and QueryResult, renamed Database* by #1579) against shared T1 #1104 and SQL T1 #1117, which need the same result types.",
+    "affects": [1264, 1104, 1117],
+    "wouldChange": "stage"
+  }
+}

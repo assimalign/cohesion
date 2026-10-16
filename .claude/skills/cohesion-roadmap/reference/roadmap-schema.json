@@ -1,0 +1,728 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/assimalign/cohesion/.claude/skills/cohesion-roadmap/reference/roadmap-schema.json#cohesion.database.roadmap/2",
+  "title": "cohesion.database.roadmap/2",
+  "description": "roadmap-data.json written by scripts/Get-CohesionRoadmapData.ps1. Field-by-field prose, with sources, in data-model.md.",
+  "type": "object",
+  "required": [
+    "schema", "generated", "generatedBy", "asOf", "sources", "legend", "placement", "stages", "lanes", "categories", "nodes", "edges", "programs", "milestones",
+    "criticalPath", "nextUp", "conflicts", "contradictions", "hygiene", "openCalls", "overlay", "taxonomy", "bugPolicy", "counts", "warnings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "cohesion.database.roadmap/2" },
+    "generated": { "type": "string", "description": "yyyy-MM-dd" },
+    "generatedBy": { "type": "string", "description": "" },
+    "asOf": { "type": "string", "description": "the snapshot date" },
+    "snapshotAt": { "type": "string", "description": "the snapshot timestamp" },
+    "sources": {
+      "type": "object",
+      "required": ["inputs", "carried"],
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "description": "" },
+              "schema": { "type": ["string", "null"], "description": "" },
+              "sha256": { "type": ["string", "null"], "description": "" },
+              "generated": { "type": ["string", "null"], "description": "" },
+              "query": { "type": "string", "description": "" }
+            }
+          },
+          "description": ""
+        },
+        "carried": { "type": "object" }
+      },
+      "description": "Inputs with hashes, and what the carried data placed."
+    },
+    "legend": {
+      "type": "object",
+      "required": ["tiers", "statuses", "placements", "decisions"],
+      "properties": {
+        "tiers": { "type": "object" },
+        "statuses": { "type": "object", "description": "", "additionalProperties": { "type": "string" } },
+        "placements": { "type": "object", "description": "", "additionalProperties": { "type": "string" } },
+        "laneModes": { "type": "array", "items": { "type": "string" }, "description": "" },
+        "decisions": { "type": "array", "items": { "type": "object", "required": ["id", "ruling"] }, "description": "tiers.decisions: D1-D6, D4a, D5a" }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "required": ["rule", "windows", "bandSpans", "bandOffsets"],
+      "properties": {
+        "rule": { "type": "string", "description": "" },
+        "windows": {
+          "type": "object",
+          "description": "",
+          "required": ["wave", "priority"],
+          "additionalProperties": false,
+          "properties": {
+            "wave": { "type": "object", "description": "", "additionalProperties": { "$ref": "#/$defs/window" } },
+            "priority": { "type": "object", "description": "", "additionalProperties": { "$ref": "#/$defs/window" } }
+          }
+        },
+        "bandSpans": { "type": "object", "description": "", "additionalProperties": { "type": "integer" } },
+        "bandOffsets": { "type": "object", "description": "", "additionalProperties": { "type": "integer" } }
+      }
+    },
+    "stages": { "type": "array", "items": { "$ref": "#/$defs/stage" }, "description": "" },
+    "lanes": { "type": "array", "items": { "$ref": "#/$defs/lane" }, "description": "" },
+    "categories": { "type": "array", "items": { "$ref": "#/$defs/category" }, "description": "" },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" }, "description": "" },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" }, "description": "" },
+    "programs": { "type": "array", "items": { "$ref": "#/$defs/program" }, "description": "" },
+    "milestones": {
+      "type": "object",
+      "properties": {
+        "t1Complete": { "type": ["object", "null"], "required": ["node", "stage", "status", "remaining", "sinks"] },
+        "gates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "",
+            "required": ["node", "program", "stage", "status"],
+            "additionalProperties": false,
+            "properties": {
+              "node": { "type": "string", "description": "" },
+              "program": { "type": "string", "description": "" },
+              "label": { "type": "string", "description": "" },
+              "stage": { "type": "integer", "description": "" },
+              "status": { "type": "string", "description": "" },
+              "members": { "type": "integer", "description": "" },
+              "openMembers": { "type": "integer", "description": "" },
+              "placedMembers": { "type": "integer", "description": "" }
+            }
+          },
+          "description": ""
+        }
+      }
+    },
+    "criticalPath": {
+      "type": "object",
+      "description": "",
+      "required": ["chains", "length", "sinks", "truncated", "edgeSets", "blockers"],
+      "additionalProperties": false,
+      "properties": {
+        "chains": { "type": "array", "items": { "type": "array", "items": { "type": "string" }, "description": "" }, "description": "every maximal chain, capped at 24" },
+        "length": { "type": "integer", "description": "edges" },
+        "nodeCount": { "type": "integer", "description": "" },
+        "sinks": { "type": "array", "items": { "type": "string" }, "description": "" },
+        "truncated": { "type": "boolean", "description": "" },
+        "edgeSets": { "type": "object" },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "",
+            "required": ["node", "downstreamOpen", "status"],
+            "additionalProperties": false,
+            "properties": {
+              "node": { "type": "string", "description": "" },
+              "downstreamOpen": { "type": "integer", "description": "" },
+              "status": { "type": "string", "description": "" },
+              "note": { "type": "string", "description": "" }
+            }
+          },
+          "description": ""
+        }
+      }
+    },
+    "nextUp": {
+      "type": "object",
+      "description": "",
+      "required": ["rule", "total", "top"],
+      "additionalProperties": false,
+      "properties": {
+        "rule": { "type": "string", "description": "" },
+        "total": { "type": "integer", "description": "" },
+        "top": { "type": "array", "items": { "$ref": "#/$defs/nextUpRow" }, "description": "" }
+      }
+    },
+    "conflicts": { "type": "array", "items": { "$ref": "#/$defs/conflict" }, "description": "" },
+    "contradictions": { "type": "array", "items": { "$ref": "#/$defs/contradiction" }, "description": "" },
+    "hygiene": { "type": "array", "items": { "$ref": "#/$defs/hygieneRow" }, "description": "" },
+    "openCalls": { "type": "array", "items": { "$ref": "#/$defs/openCall" }, "description": "" },
+    "overlay": {
+      "type": "object",
+      "description": "",
+      "required": ["path", "applied", "unmatched"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "description": "" },
+        "applied": { "type": "array", "items": { "type": "object" }, "description": "" },
+        "unmatched": { "type": "array", "items": { "type": "object" }, "description": "" }
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "required": ["state", "categoryCount", "epics", "rules", "retired", "optionCeiling", "treeVersusField", "emptyCategories"],
+      "properties": { "state": { "enum": ["proposed", "live"] } }
+    },
+    "bugPolicy": { "type": "object", "required": ["schema", "rules", "pendingExtensions", "filing", "roadmap", "stats"] },
+    "realign": {
+      "type": "object",
+      "description": "Optional: present when data/realign-plan.json or data/realign-target.json exists.",
+      "required": ["source", "verifiedAsOf", "headline", "summary", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "description": "" },
+        "approvedOn": { "type": ["string", "null"], "description": "" },
+        "approvedBy": { "type": ["string", "null"], "description": "" },
+        "executorState": { "type": ["string", "null"], "description": "" },
+        "verifiedAsOf": { "type": "string", "description": "" },
+        "headline": { "type": "string", "description": "" },
+        "detail": { "type": "array", "items": { "type": "string" }, "description": "" },
+        "summary": { "$ref": "#/$defs/realignSummary" },
+        "windows": { "type": "array", "items": { "type": "object" }, "description": "" },
+        "decisions": { "type": "array", "items": { "type": "object" }, "description": "" },
+        "seam": { "type": ["object", "null"] },
+        "windowsNote": { "type": ["string", "null"], "description": "" },
+        "rows": { "type": "array", "items": { "$ref": "#/$defs/realignRow" }, "description": "" },
+        "journal": { "type": ["object", "null"] }
+      }
+    },
+    "changes": {
+      "type": "object",
+      "description": "Optional: present with -Previous.",
+      "required": ["moved", "added", "removed", "statusChanged", "unexplained"],
+      "additionalProperties": false,
+      "properties": {
+        "previous": { "type": "object" },
+        "moved": { "type": "array", "items": { "$ref": "#/$defs/moved" }, "description": "" },
+        "added": { "type": "array", "items": { "type": "object" }, "description": "" },
+        "removed": { "type": "array", "items": { "type": "object" }, "description": "" },
+        "statusChanged": { "type": "array", "items": { "type": "object" }, "description": "" },
+        "unexplained": { "type": "integer", "description": "" }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": ["boardItems", "containers", "workItems", "open", "byPlacement", "delivered", "deliveredUnmerged", "withdrawn", "unplaced", "t2", "nextUpTotal", "placementSources"],
+      "properties": {
+        "unplaced": {
+          "type": "object",
+          "description": "",
+          "required": ["total", "byReason"],
+          "additionalProperties": false,
+          "properties": {
+            "total": { "type": "integer", "description": "the only Unplaced number" },
+            "byReason": { "type": "object", "description": "", "additionalProperties": { "type": "integer" } },
+            "items": { "type": "array", "items": { "type": "string" }, "description": "" }
+          }
+        }
+      }
+    },
+    "warnings": { "type": "array", "items": { "$ref": "#/$defs/warning" }, "description": "" }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "description": "One work item, gate, untracked phase, slot or milestone.",
+      "required": ["id", "kind", "title", "lane", "band", "placement", "stage", "stageEnd", "stageSource", "stageExplanation", "status", "delivered", "blocked"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "'i<number>', 'slot:<family>:<tier>', 'phase:<program>:<key>' or 'ms:t1-complete'" },
+        "kind": { "enum": ["program", "feature", "task", "slot", "milestone", "gate"] },
+        "number": { "type": ["integer", "null"], "description": "the issue number; null for slots, phases and the milestone" },
+        "url": { "type": ["string", "null"], "description": "" },
+        "wbs": { "type": ["string", "null"], "description": "the title code, any-width serials and Cxx segments" },
+        "title": { "type": "string", "description": "title without the code" },
+        "shortTitle": { "type": "string", "description": "cut at 48 characters on a word boundary" },
+        "lane": { "type": "string", "description": "a lane id from lanes[]" },
+        "band": { "enum": ["landed", "gate", "t1", "t2", "t3", "unplaced", "withdrawn", "out"] },
+        "category": { "type": ["string", "null"], "description": "category code" },
+        "categorySource": { "enum": ["field", "tree", "carried", "inherited", "none", "family", "language-surface", "overlay"] },
+        "epic": { "type": ["string", "null"], "description": "L03.02.NN" },
+        "programs": { "type": "array", "items": { "type": "string" }, "description": "every program the item belongs to" },
+        "program": { "type": ["string", "null"], "description": "the field value, else the carried value, else the first" },
+        "programSource": { "enum": ["field", "carried", "tree", "gate-link", "none"] },
+        "family": { "type": ["string", "null"], "description": "the plan family" },
+        "tier": { "type": ["string", "null"], "description": "T1 T2 T3 Fix first Prerequisite Done Out" },
+        "tierSource": { "enum": ["field", "plan", "family", "family-line", "inherited", "overlay", "none"] },
+        "planLanguage": { "type": ["string", "null"], "description": "SQL OQL GQL Shared" },
+        "planRank": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "description": "T2 plan order (D4a)",
+              "required": ["language", "rank", "of"],
+              "additionalProperties": false,
+              "properties": { "language": { "type": "string", "description": "" }, "rank": { "type": "integer", "description": "" }, "of": { "type": "integer", "description": "" } }
+            }
+          ]
+        },
+        "placement": { "enum": ["tier", "tier-inherited", "prerequisite", "dependency", "wave", "priority", "bars", "unplaced", "landed", "withdrawn", "out", "gate", "milestone"] },
+        "window": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "description": "The window that placed this node.",
+              "required": ["field", "value", "lo", "hi"],
+              "additionalProperties": false,
+              "properties": {
+                "field": { "enum": ["wave", "priority"] },
+                "value": { "type": "string", "description": "" },
+                "lo": { "type": "integer", "description": "" },
+                "hi": { "type": "integer", "description": "" }
+              }
+            }
+          ]
+        },
+        "unplacedReason": { "anyOf": [{ "type": "null" }, { "enum": ["no-tier-wave-priority-or-dependency", "feature-without-placed-children"] }] },
+        "stage": { "type": "integer", "description": "column; -1 for footer nodes" },
+        "stageEnd": { "type": "integer", "description": "right edge of a bar or window" },
+        "stageSource": { "enum": ["dependency", "sequence", "band-floor", "window", "children", "overlay", "none"] },
+        "stageExplanation": { "type": "string", "description": "the position in words; required" },
+        "status": { "enum": ["delivered", "delivered-unmerged", "in-progress", "ready", "backlog", "withdrawn", "unfiled", "out", "awaiting-evidence"] },
+        "state": { "type": ["string", "null"], "description": "OPEN or CLOSED" },
+        "stateReason": { "type": ["string", "null"], "description": "" },
+        "delivered": { "type": "boolean", "description": "delivered or delivered-unmerged; never withdrawn" },
+        "blocked": { "type": "boolean", "description": "derived, never stored" },
+        "untracked": { "type": "boolean", "description": "no issue behind it" },
+        "priority": { "type": ["string", "null"], "description": "" },
+        "wave": { "type": ["string", "null"], "description": "" },
+        "area": { "type": ["string", "null"], "description": "" },
+        "areaSource": { "enum": ["field", "carried", "none"] },
+        "boardKind": { "type": ["string", "null"], "description": "" },
+        "labels": { "type": "array", "items": { "type": "string" }, "description": "" },
+        "issueType": { "type": ["string", "null"], "description": "" },
+        "isBug": { "type": "boolean", "description": "bug label or issue type Bug" },
+        "parent": { "type": ["integer", "null"], "description": "" },
+        "children": { "type": "array", "items": { "type": "integer" }, "description": "non-container sub-issues" },
+        "externalBlockers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A dependency target outside the L03.02 subtree.",
+            "required": ["number", "state"],
+            "additionalProperties": false,
+            "properties": {
+              "number": { "type": "integer", "description": "" },
+              "title": { "type": "string", "description": "" },
+              "state": { "type": "string", "description": "" },
+              "stateReason": { "type": ["string", "null"], "description": "" },
+              "boardStatus": { "type": ["string", "null"], "description": "" },
+              "url": { "type": "string", "description": "" },
+              "form": { "type": "string", "description": "the dependency form that named it" }
+            }
+          },
+          "description": ""
+        },
+        "downstreamOpen": { "type": "integer", "description": "" },
+        "onCriticalPath": { "type": "boolean", "description": "" },
+        "conflict": { "type": ["string", "null"], "description": "" },
+        "pinned": { "type": "boolean", "description": "" },
+        "hasOpenDefect": { "type": "boolean", "description": "a delivered item with an open bug child" },
+        "openDefects": { "type": "integer", "description": "" },
+        "complete": { "type": "boolean", "description": "features: every placed descendant delivered" },
+        "label": { "type": "string", "description": "gate label" },
+        "gateMembers": { "type": "array", "items": { "type": "string" }, "description": "gate nodes: member node ids" },
+        "gateOpenMembers": { "type": "integer", "description": "" },
+        "note": { "type": "string", "description": "" },
+        "evidence": {}
+      }
+    },
+    "edge": {
+      "type": "object",
+      "description": "from waits on to.",
+      "required": ["from", "to", "kind", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string", "description": "waits on to" },
+        "to": { "type": "string", "description": "" },
+        "kind": { "enum": ["depends-on", "plan-order", "plan-sequence", "program-gate", "gate-member", "child-of", "conflict"] },
+        "source": {
+          "type": "string",
+          "description": "body:section body:line body:related native program-phase plan-D4 plan-D5 plan-tier-order owner-* overlay:tierRelation board-tree tiers.conflicts gate-link program-field carried-program, or inherited:<source>"
+        },
+        "alsoFrom": { "type": "array", "items": { "type": "string" }, "description": "other sources of the same edge" },
+        "inheritedFrom": { "type": "string", "description": "the feature the edge was copied from" },
+        "note": { "type": "string", "description": "" },
+        "crossLane": { "type": "boolean", "description": "" },
+        "crossBand": { "type": "boolean", "description": "" },
+        "critical": { "type": "boolean", "description": "" }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "description": "A column: a named entry condition, never a date.",
+      "required": ["id", "index", "name", "band", "localDepth", "nodeCount", "bandFloorCount", "alongsideCount"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "" },
+        "index": { "type": "integer", "description": "" },
+        "name": { "type": "string", "description": "" },
+        "band": { "enum": ["landed", "gate", "t1", "t2", "t3", "unplaced"] },
+        "localDepth": { "type": "integer", "description": "" },
+        "nodeCount": { "type": "integer", "description": "the column's own members" },
+        "bandFloorCount": { "type": "integer", "description": "" },
+        "alongsideCount": { "type": "integer", "description": "window placements covering the column" },
+        "named": { "const": "pattern" },
+        "entryCondition": { "type": "string", "description": "" },
+        "exitCondition": { "type": "string", "description": "" }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "description": "From overlay.lanes, in array order.",
+      "required": ["id", "name", "order", "itemCount"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "" },
+        "name": { "type": "string", "description": "" },
+        "order": { "type": "integer", "description": "" },
+        "epics": { "type": "array", "items": { "type": "string" }, "description": "" },
+        "epicIssues": { "type": "array", "items": { "type": "integer" }, "description": "" },
+        "categories": { "type": "array", "items": { "type": "string" }, "description": "" },
+        "planLanguage": { "type": "string", "description": "" },
+        "collapsedByDefault": { "type": "boolean", "description": "" },
+        "familyCount": { "type": "integer", "description": "" },
+        "itemCount": { "type": "integer", "description": "" }
+      }
+    },
+    "category": {
+      "type": "object",
+      "description": "A category issue on the board, or a proposed one.",
+      "required": ["id", "name", "epic", "source", "itemCount", "slotCount", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "" },
+        "name": { "type": "string", "description": "" },
+        "epic": { "type": "string", "description": "" },
+        "kind": { "type": ["string", "null"], "description": "" },
+        "precedence": { "type": ["integer", "null"], "description": "" },
+        "source": { "enum": ["live", "proposed"] },
+        "issue": { "type": ["integer", "null"], "description": "" },
+        "lane": { "type": ["string", "null"], "description": "" },
+        "itemCount": { "type": "integer", "description": "work items only" },
+        "gateCount": { "type": "integer", "description": "" },
+        "openCount": { "type": "integer", "description": "" },
+        "deliveredCount": { "type": "integer", "description": "" },
+        "withdrawnCount": { "type": "integer", "description": "" },
+        "slotCount": { "type": "integer", "description": "" },
+        "inTreeCount": { "type": "integer", "description": "" },
+        "items": { "type": "array", "items": { "type": "integer" }, "description": "" },
+        "definition": { "type": "string", "description": "" },
+        "boundaries": { "type": "array", "items": { "type": "string" }, "description": "" },
+        "owningCode": { "type": "string", "description": "" },
+        "carriedName": { "type": "string", "description": "" }
+      }
+    },
+    "window": {
+      "type": "object",
+      "description": "A Wave or Priority window, recomputed every run (data-model.md §5).",
+      "required": ["field", "value", "lo", "hi", "basis", "n"],
+      "additionalProperties": false,
+      "properties": {
+        "field": { "enum": ["wave", "priority"] },
+        "value": { "type": "string", "description": "W01..W06 or P001..P007" },
+        "lo": { "type": "integer", "description": "first stage" },
+        "hi": { "type": "integer", "description": "last stage" },
+        "basis": { "type": "string", "description": "the calibration, in words" },
+        "n": { "type": "integer", "description": "open tiered leaves with this value" },
+        "droppedBands": { "type": "array", "items": { "type": "string" }, "description": "bands under 10% of the points, as band:count" },
+        "pinned": { "type": "boolean", "description": "set by overlay.waveWindows" }
+      }
+    },
+    "program": {
+      "type": "object",
+      "description": "A program and its membership.",
+      "required": ["id", "boardOption", "shape", "members", "memberCount"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "" },
+        "name": { "type": "string", "description": "" },
+        "boardOption": { "type": "string", "description": "" },
+        "shape": { "enum": ["tree", "gate"] },
+        "source": { "enum": ["field", "carried"] },
+        "members": { "type": "array", "items": { "type": "integer" }, "description": "" },
+        "memberCount": { "type": "integer", "description": "" },
+        "fieldCount": { "type": "integer", "description": "" },
+        "treeCount": { "type": "integer", "description": "" },
+        "carriedCount": { "type": "integer", "description": "" },
+        "trackingIssue": { "type": "integer", "description": "" },
+        "gate": {
+          "type": "object",
+          "description": "",
+          "required": ["issue", "label", "membershipCheck"],
+          "additionalProperties": false,
+          "properties": {
+            "issue": { "type": "integer", "description": "" },
+            "label": { "type": "string", "description": "" },
+            "linkCount": { "type": "integer", "description": "" },
+            "linkSetCount": { "type": "integer", "description": "" },
+            "membershipCheck": {
+              "type": "object",
+              "description": "field set versus link set",
+              "required": ["checked", "onlyField", "onlyLinks"],
+              "additionalProperties": false,
+              "properties": {
+                "checked": { "type": "boolean", "description": "" },
+                "basis": { "type": "string", "description": "" },
+                "onlyField": { "type": "array", "items": { "type": "integer" }, "description": "" },
+                "onlyLinks": { "type": "array", "items": { "type": "integer" }, "description": "" },
+                "note": { "type": "string", "description": "" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nextUpRow": {
+      "type": "object",
+      "description": "",
+      "required": ["node", "number", "stage", "placement", "why"],
+      "additionalProperties": false,
+      "properties": {
+        "node": { "type": "string", "description": "" },
+        "number": { "type": "integer", "description": "" },
+        "priority": { "type": ["string", "null"], "description": "" },
+        "wave": { "type": ["string", "null"], "description": "" },
+        "stage": { "type": "integer", "description": "" },
+        "placement": { "type": "string", "description": "" },
+        "status": { "type": "string", "description": "" },
+        "why": { "type": "string", "description": "" }
+      }
+    },
+    "contradiction": {
+      "type": "object",
+      "description": "A board fact that contradicts another.",
+      "required": ["code", "node", "detail", "fix"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "enum": ["ready-but-blocked", "wave-tier-conflict", "priority-wave-conflict", "scheduled-after-dependent"] },
+        "node": { "type": "string", "description": "" },
+        "detail": { "type": "string", "description": "" },
+        "fix": { "type": "string", "description": "" }
+      }
+    },
+    "hygieneRow": {
+      "type": "object",
+      "description": "Tooling E15 parity.",
+      "required": ["code", "issue", "detail", "fix"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "direct-under-categorised-epic", "missing-category", "missing-area", "language-surface-without-tier", "parent-near-cap", "duplicate-wbs",
+            "program-membership-mismatch", "no-priority-or-wave"
+          ]
+        },
+        "issue": { "type": "integer", "description": "" },
+        "detail": { "type": "string", "description": "" },
+        "fix": { "type": "string", "description": "the board edit that clears it" }
+      }
+    },
+    "realignSummary": {
+      "type": "object",
+      "description": "",
+      "required": ["byStage", "complete", "verifiedAsOf"],
+      "additionalProperties": false,
+      "properties": {
+        "byStage": {
+          "type": "object",
+          "description": "",
+          "additionalProperties": {
+            "type": "object",
+            "description": "",
+            "required": ["done", "pending", "diverged", "total"],
+            "additionalProperties": false,
+            "properties": {
+              "done": { "type": "integer", "description": "" },
+              "pending": { "type": "integer", "description": "" },
+              "diverged": { "type": "integer", "description": "" },
+              "total": { "type": "integer", "description": "" }
+            }
+          }
+        },
+        "windowsRun": { "type": "integer", "description": "" },
+        "windowsStarted": { "type": "integer", "description": "" },
+        "windowCount": { "type": "integer", "description": "" },
+        "complete": { "type": "boolean", "description": "" },
+        "verifiedAsOf": { "type": "string", "description": "" },
+        "corrections": {
+          "type": "object",
+          "description": "",
+          "required": ["done", "total"],
+          "additionalProperties": false,
+          "properties": { "done": { "type": "integer", "description": "" }, "total": { "type": "integer", "description": "" } }
+        },
+        "seam": {
+          "type": "object",
+          "description": "",
+          "required": ["done", "total"],
+          "additionalProperties": false,
+          "properties": { "done": { "type": "integer", "description": "" }, "total": { "type": "integer", "description": "" } }
+        }
+      }
+    },
+    "realignRow": {
+      "type": "object",
+      "description": "One operation or check, read from the board.",
+      "required": ["stage", "op", "target", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": { "type": "string", "description": "D11..D15, seam, or a window id" },
+        "op": { "type": "string", "description": "" },
+        "issue": { "type": ["integer", "null"], "description": "" },
+        "target": { "type": "string", "description": "" },
+        "current": { "type": ["string", "null"], "description": "" },
+        "state": { "enum": ["done", "pending", "diverged"] },
+        "note": { "type": "string", "description": "" }
+      }
+    },
+    "moved": {
+      "type": "object",
+      "description": "A node whose stage or stageEnd changed since -Previous.",
+      "required": ["id", "from", "to", "reasons"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "" },
+        "from": {
+          "type": "object",
+          "description": "",
+          "required": ["stage", "stageEnd"],
+          "additionalProperties": false,
+          "properties": {
+            "stage": { "type": "integer", "description": "" },
+            "stageEnd": { "type": "integer", "description": "" },
+            "placement": { "type": "string", "description": "" }
+          }
+        },
+        "to": {
+          "type": "object",
+          "description": "",
+          "required": ["stage", "stageEnd"],
+          "additionalProperties": false,
+          "properties": {
+            "stage": { "type": "integer", "description": "" },
+            "stageEnd": { "type": "integer", "description": "" },
+            "placement": { "type": "string", "description": "" }
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "enum": ["tier", "placement", "status", "wave", "priority", "pin", "window-recalibrated", "band-resized", "dependency", "unexplained"] },
+          "description": ""
+        }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "description": "About the model and its inputs; contradictions and hygiene are blocks, not warnings.",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "category-from-carried", "program-from-carried", "category-inherited", "uncategorised", "category-option-unmatched", "category-tree-mismatch",
+            "category-misparented", "tier-field-vs-plan", "tier-inherited", "tier-option-unmatched", "tier-suggested-by-body", "t2-familyless", "unknown-family-line",
+            "program-option-unmatched", "program-membership-mismatch", "epic-without-lane", "epic-from-prefix", "duplicate-epic", "decision-edge-on-board",
+            "critical-path-truncated", "scheduled-after-dependent", "unplaced", "unparented", "gate-missing", "cycle", "unresolved-dependency", "stale-overlay-pin",
+            "no-stage-name", "stale-asOf"
+          ]
+        },
+        "message": { "type": "string", "description": "" },
+        "node": { "type": ["string", "null"], "description": "" },
+        "detail": { "type": ["string", "null"] },
+        "count": { "type": "integer", "description": "" },
+        "nodes": { "type": "array", "items": { "type": "string" }, "description": "" }
+      }
+    },
+    "openCall": {
+      "type": "object",
+      "description": "A decision not made yet.",
+      "required": ["text", "affects", "wouldChange"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": ["string", "null"], "description": "C1..C7 where the realignment named it" },
+        "source": { "type": "string", "description": "" },
+        "text": { "type": "string", "description": "" },
+        "affects": { "type": "array", "items": { "type": "string" }, "description": "node ids" },
+        "wouldChange": { "type": "string", "description": "" }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "description": "An item filed in two homes.",
+      "required": ["id", "tier", "nodes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "" },
+        "family": { "type": ["string", "null"], "description": "" },
+        "tier": { "type": "string", "description": "" },
+        "nodes": { "type": "array", "items": { "type": "string" }, "description": "" },
+        "resolution": { "type": "null" },
+        "note": { "type": "string", "description": "" }
+      }
+    }
+  },
+  "x-worked-example": {
+    "description": "Generated 2026-10-16 from the live board: OQL T1 task #1129 (LIMIT/OFFSET). It is blocked through the plan-D5 edge #1097 -> #190 inherited from its feature, the owner-2026-10-16 edge, and the native link #1097 blocked-by #190 inherited the same way. Not part of the document.",
+    "node": {
+      "id": "i1129",
+      "kind": "task",
+      "number": 1129,
+      "url": "https://github.com/assimalign/cohesion/issues/1129",
+      "wbs": "L03.02.03.03.04",
+      "title": "OQL: execute LIMIT and OFFSET with literals or parameters and one consistent diagnostic",
+      "shortTitle": "OQL: execute LIMIT and OFFSET with literals or…",
+      "lane": "oql",
+      "band": "t1",
+      "category": "L03.02.03.C01",
+      "categorySource": "carried",
+      "epic": "L03.02.03",
+      "programs": ["hardening-benchmarks"],
+      "program": "hardening-benchmarks",
+      "programSource": "carried",
+      "family": "oql-paging",
+      "tier": "T1",
+      "tierSource": "plan",
+      "planLanguage": "OQL",
+      "planRank": null,
+      "placement": "tier",
+      "window": null,
+      "unplacedReason": null,
+      "stage": 5,
+      "stageEnd": 5,
+      "stageSource": "band-floor",
+      "stageExplanation": "t1+0: no same-band dependency is recorded, so it sits at the front of its band. That is unknown ordering, not readiness. Also waits on #1101, #190.",
+      "status": "backlog",
+      "state": "OPEN",
+      "stateReason": null,
+      "delivered": false,
+      "blocked": true,
+      "untracked": false,
+      "priority": "P002",
+      "wave": "W02",
+      "area": "Database.Documents",
+      "areaSource": "carried",
+      "boardKind": "Task",
+      "labels": [],
+      "issueType": "Story",
+      "isBug": false,
+      "parent": 1097,
+      "children": [],
+      "externalBlockers": [],
+      "downstreamOpen": 0,
+      "onCriticalPath": false,
+      "conflict": null,
+      "pinned": false,
+      "hasOpenDefect": false,
+      "openDefects": 0
+    },
+    "edges": [
+      { "from": "i1129", "to": "i1097", "kind": "child-of", "source": "board-tree", "crossLane": false, "crossBand": false },
+      { "from": "i1129", "to": "i1101", "kind": "depends-on", "source": "body:section", "crossLane": true, "crossBand": true },
+      { "from": "i1129", "to": "i190", "kind": "depends-on", "source": "inherited:native", "inheritedFrom": "i1097", "crossLane": false, "crossBand": true },
+      { "from": "i1129", "to": "i190", "kind": "plan-order", "source": "owner-2026-10-16", "alsoFrom": ["inherited:plan-D5"], "crossLane": false, "crossBand": true }
+    ]
+  }
+}
