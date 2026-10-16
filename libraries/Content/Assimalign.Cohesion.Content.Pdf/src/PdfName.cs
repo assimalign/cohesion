@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Content.Pdf;
 
-/// <summary>A case-sensitive byte name with equality after #xx unescaping (§7.3.5).</summary>
+/// <summary>A case-sensitive byte name with equality after #xx unescaping (Â§7.3.5).</summary>
 /// <remarks>Names are byte sequences. Empty names are valid; NUL is forbidden.</remarks>
 public sealed class PdfName : IPdfObject, IEquatable<PdfName>
 {
@@ -49,7 +49,7 @@ public sealed class PdfName : IPdfObject, IEquatable<PdfName>
                 value = (byte)((Hex(token[i + 1]) << 4) | Hex(token[i + 2]));
                 i += 2;
             }
-            else if (value <= 32 || value is (byte)'/' or (byte)'%' or (byte)'(' or (byte)')' or (byte)'<' or (byte)'>' or (byte)'[' or (byte)']')
+            else if (value is 0 or 9 or 10 or 12 or 13 or 32 || value is (byte)'/' or (byte)'%' or (byte)'(' or (byte)')' or (byte)'<' or (byte)'>' or (byte)'[' or (byte)']')
             {
                 throw new ContentFormatException(ErrorMessages.NameInvalid, ContentFormatErrorCode.InvalidValue, i);
             }

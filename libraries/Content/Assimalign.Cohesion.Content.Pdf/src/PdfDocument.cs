@@ -5,7 +5,7 @@ using System.IO;
 
 namespace Assimalign.Cohesion.Content.Pdf;
 
-/// <summary>A random-access PDF model retaining identities, trailer and lazy source data (§7.5).</summary>
+/// <summary>A random-access PDF model retaining identities, trailer and lazy source data (Â§7.5).</summary>
 /// <remarks>Load through PdfReader. Sequential use only; keep the source open and unchanged.</remarks>
 public sealed partial class PdfDocument : IDisposable
 {
@@ -27,7 +27,7 @@ public sealed partial class PdfDocument : IDisposable
     /// <summary>Gets current cross-reference records by object number, including free entries.</summary>
     public IReadOnlyDictionary<int, PdfCrossReferenceEntry> CrossReferences { get; }
     /// <summary>Gets the latest xref offset relative to the PDF origin, or -1 after recovery.</summary>
-    public long StartXref { get; }
+    public long StartXref { get; private set; }
     /// <summary>Gets the PDF origin in source coordinates.</summary>
     public long SourceOffset { get; }
     /// <summary>Gets whether an encryption dictionary was declared.</summary>
