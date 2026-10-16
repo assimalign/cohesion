@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 255 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 733 |
+| Declared project references | 734 |
 | Declared shared-source links | 23 |
 
 ## Ambiguous project names
@@ -311,7 +311,8 @@ flowchart LR
     N5 --> N0
     N5 --> N10
     N6 --> N1
-    N7 --> N2
+    N7 --> N3
+    N7 --> N6
     N9 --> N1
     N10 --> N0
     N11 --> N0
@@ -327,7 +328,7 @@ flowchart LR
 | `Assimalign.Cohesion.Content.Exe` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Markdown` | `Assimalign.Cohesion.Content`<br>`Assimalign.Cohesion.Content.Text` | — | — | — |
 | `Assimalign.Cohesion.Content.Media` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
-| `Assimalign.Cohesion.Content.Mkv` | `Assimalign.Cohesion.Content.Bmff` | — | — | — |
+| `Assimalign.Cohesion.Content.Mkv` | `Assimalign.Cohesion.Content.Ebml`<br>`Assimalign.Cohesion.Content.Media` | — | — | — |
 | `Assimalign.Cohesion.Content.Mpeg` | — | — | — | — |
 | `Assimalign.Cohesion.Content.Pdf` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Text` | `Assimalign.Cohesion.Content` | — | — | — |

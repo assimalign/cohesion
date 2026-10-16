@@ -513,6 +513,9 @@
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Media/tests/Assimalign.Cohesion.Content.Media.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mkv/" />
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mkv/docs/">
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mkv/docs/DESIGN.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mkv/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mkv/src/Assimalign.Cohesion.Content.Mkv.csproj" />
 	</Folder>
