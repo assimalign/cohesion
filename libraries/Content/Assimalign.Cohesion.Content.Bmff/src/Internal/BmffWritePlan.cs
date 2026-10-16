@@ -99,6 +99,20 @@ internal sealed class BmffWritePlan
         }
     }
 
+    internal void AddLayout(BmffLayout layout, long offset)
+    {
+        if (!layout.Entries.TryAdd(_box, new BmffLayoutEntry(offset, Header.HeaderSize, PayloadSize)))
+        {
+            throw new ContentFormatException(ErrorMessages.InvalidTree, ContentFormatErrorCode.InvalidStructure, offset);
+        }
+        var childOffset = offset + Header.HeaderSize + _prefix.Length;
+        foreach (var child in _children)
+        {
+            child.AddLayout(layout, childOffset);
+            childOffset += child.Size;
+        }
+    }
+
     internal void Write(BmffStream output)
     {
         Header.Write(output);

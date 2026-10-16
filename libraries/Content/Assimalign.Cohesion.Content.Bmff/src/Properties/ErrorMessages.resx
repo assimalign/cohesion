@@ -39,4 +39,7 @@
   <data name="EntryLimit" xml:space="preserve"><value>The table entry count exceeds the configured limit.</value></data>
   <data name="EntryBounds" xml:space="preserve"><value>The declared entries do not fit in the payload.</value></data>
   <data name="FieldRange" xml:space="preserve"><value>A box field is outside its permitted range or has an invalid length.</value></data>
+  <data name="RelocationTarget" xml:space="preserve"><value>A referenced media range was removed or shortened.</value></data>
+  <data name="RelocationUnsupported" xml:space="preserve"><value>The changed layout contains an opaque offset box or an unsupported implicit fragment base.</value></data>
+  <data name="RelocationConvergence" xml:space="preserve"><value>The media relocation layout did not converge.</value></data>
 </root>

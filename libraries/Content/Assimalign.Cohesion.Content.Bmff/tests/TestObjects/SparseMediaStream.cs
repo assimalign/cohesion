@@ -11,9 +11,10 @@ internal sealed class SparseMediaStream : Stream
 {
     internal const long MediaSize = 40L * 1024 * 1024 * 1024;
     private readonly byte[] _header = new byte[16];
-    private readonly byte[] _tail = BmffFixtures.Box("free");
-    internal SparseMediaStream()
+    private readonly byte[] _tail;
+    internal SparseMediaStream(byte[]? tail = null)
     {
+        _tail = tail ?? BmffFixtures.Box("free");
         BinaryPrimitives.WriteUInt32BigEndian(_header, 1);
         FourCC.Parse("mdat").WriteTo(_header.AsSpan(4));
         BinaryPrimitives.WriteUInt64BigEndian(_header.AsSpan(8), (ulong)(MediaSize + 16));
@@ -22,7 +23,7 @@ internal sealed class SparseMediaStream : Stream
     public override bool CanRead => true;
     public override bool CanWrite => false;
     public override bool CanSeek => true;
-    public override long Length => MediaSize + 24;
+    public override long Length => MediaSize + 16 + _tail.Length;
     public override long Position { get; set; }
     public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
     public override int Read(Span<byte> buffer)

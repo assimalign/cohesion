@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Content.Bmff;
 public sealed class ChunkOffsetBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
+    internal byte[] PreservedTail { get => _trailing; set => _trailing = value; }
     /// <summary>Creates a ChunkOffsetBox at its original location.</summary>
     /// <param name="offset">The original absolute header offset.</param>
     /// <param name="limit">The original total size.</param>

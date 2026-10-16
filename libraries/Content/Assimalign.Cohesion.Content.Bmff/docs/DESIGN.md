@@ -225,7 +225,44 @@ FileTypeBox.CompatableBrands is renamed CompatibleBrands. TrackBox loses its mis
 Flags, TimeScale, Duration, Rate, Volume, Reserved, Matrix, PreDefined and NextTrackID properties.
 Their applicable wire fields live on mvhd, tkhd or mdhd.
 
-Offset relocation is the next item; field models can now express the references it will update.
+## Relocation and mutation
+
+BmffDocument.RelocateMediaOffsets(outputOffset: 0) measures the edited tree and updates references
+from the last loaded or successfully planned layout. Save and SaveAsync call the operation before
+writing; seekable output uses its current position, and forward-only output starts at zero.
+New documents establish their initial layout without shifting caller-authored references.
+Keep new references in the previous layout's coordinates until relocation runs.
+
+The operation updates:
+
+- stco/co64 addresses inside retained mdat payloads; stco becomes co64 on overflow, carrying its
+  flags and preserved suffix. External/unmapped addresses stay unchanged.
+- iloc method-0 entries with data_reference_index zero: both the base and effective
+  base-plus-extent addresses move. A zero base with absolute extent offsets is supported.
+  Widths grow from zero to four or eight bytes as necessary. Methods 1/2 and external entries
+  stay unchanged.
+- Explicit tfhd base_data_offset values inside moved mdat or at retained moof starts.
+- trun data_offset relative to an explicit tfhd base, default-base-is-moof, or the first traf's
+  implicit moof base. Moving a moof/mdat pair together leaves the relative offset unchanged;
+  rebuilding moof or changing its distance to the data updates the signed offset.
+- tfra moof_offset values matching retained moof starts, promoting version zero to one when
+  necessary; mfro.mfra_size when its enclosing mfra changes size.
+
+Size changes from promotions can move media again. Planning repeats until positions and sizes
+stabilize; all reference calculations use the original checkpoint rather than accumulating deltas.
+Successful calls checkpoint the new layout, so repeated saves do not apply deltas twice.
+Failures restore reference arrays, widths, versions and promoted child replacements. The caller's
+structural edits remain in place. Source segments and original Header/Offset/Limit never change.
+
+Removing or shortening a referenced mdat fails with InvalidStructure. Relative offsets outside
+Int32 fail with InvalidValue. Opaque offset-bearing standard boxes and implicit previous-traf
+bases after the first traf fail with Unsupported if the layout changes. The operation does not
+interpret codec/sample-entry fields, arbitrary unknown references, sidx, saio or profile-specific
+indexes. Such profiles must implement their reference rules before changing those layouts.
+
+Reordering, adding and removing children preserves list order and recomputes every ancestor size.
+The existing writer switches any oversized ancestor to a large-size header without reading media.
+
 
 ## Verification
 
