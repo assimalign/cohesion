@@ -7,7 +7,8 @@ namespace Assimalign.Cohesion.Content.Pdf;
 /// <summary>A stream dictionary and lazy encoded bytes (§7.3.8); the source must remain open.</summary>
 public sealed partial class PdfStream : IPdfObject
 {
-    private readonly BinarySegment _data;
+    private BinarySegment _data;
+    internal bool IsDataReplaced { get; private set; }
     private readonly Func<bool>? _isEncrypted;
     internal long Position { get; }
     internal PdfStream(PdfDictionary dictionary, BinarySegment data, Func<bool>? isEncrypted = null, long position = 0)
@@ -26,6 +27,21 @@ public sealed partial class PdfStream : IPdfObject
     }
     /// <summary>Gets the editable dictionary.</summary>
     public PdfDictionary Dictionary { get; }
+    /// <summary>Replaces the payload with borrowed, unencoded bytes for the next save (§7.3.8).</summary>
+    /// <param name="data">The replacement bytes; keep their backing memory or source open and unchanged.</param>
+    /// <remarks>Removes existing filters and external-file entries. The writer applies Flate by default.
+    /// Data and Decode expose the replacement immediately, without encoding it.</remarks>
+    /// <exception cref="ContentFormatException">Encryption is present (Unsupported).</exception>
+    public void ReplaceData(BinarySegment data)
+    {
+        _ = Data; // Preserve the security guard even for an empty replacement.
+        _data = data; IsDataReplaced = true;
+        foreach (var key in new[] { "Filter", "DecodeParms", "F", "FFilter", "FDecodeParms", "DL" })
+        {
+            Dictionary.Remove(PdfName.Create(System.Text.Encoding.ASCII.GetBytes(key)));
+        }
+        Dictionary[PdfName.Create("Length"u8)] = PdfInteger.Create(data.Length);
+    }
     /// <summary>Gets lazy encoded bytes without decoding filters.</summary>
     /// <exception cref="ContentFormatException">Encryption is present (Unsupported).</exception>
     public BinarySegment Data

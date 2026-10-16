@@ -1,16 +1,18 @@
-# PDF structural reader and object model
+# PDF structural reader, editable model and writer
 
 ## Intent and dependency direction
 
-This is Stage 2 of feature #470: an ISO 32000-2 structural reader for PDF 1.0–1.7 and 2.0,
-and a retained model that Stage 3 can serialize and update. It does not claim PDF rendering,
+Stages 2 and 3 of feature #470 provide an ISO 32000-2 structural reader for PDF 1.0–1.7 and 2.0,
+an editable retained model, and full/incremental saves through IContentWriter<PdfDocument>.
+The package does not claim PDF rendering,
 semantic validation of every dictionary, or preservation of the original whitespace spelling.
 The sole direct dependency is `Assimalign.Cohesion.Content.Binary`; Binary references Content.
 No shipped assembly receives access to another assembly's internals. Tests have a local grant.
 
 The program's common forward-only-reader pattern is specialized here by the PDF brief: cross-reference
 resolution needs random access, so this reader rejects non-seekable sources. It does not spool a
-40 GiB source to memory. The later writer remains a separate Stage 3 concern.
+40 GiB source to memory. The writer is a separate forward-only component and supports non-seekable
+destinations; the retained source still requires random access.
 
 The load flow follows these dependencies; an arrow means that a component uses the target.
 The reader locates the header/trailer, builds the revision-aware xref map, then creates a document.
@@ -135,7 +137,7 @@ Strict mode is the default. Lenient mode enables only these additional behaviors
 Header scanning within the first 1024 bytes is an explicit compatibility rule in both modes. Ordinary
 PDF syntax such as leading zeros, `.5`, `-.002`, escaped newlines and odd-length hex strings is not a
 leniency. Repair does not recover deletion/free-list history and may lose the intent of damaged revisions;
-StartXref becomes -1. A later writer must require a full save for repaired documents instead of assuming
+StartXref becomes -1. The writer requires a full save for repaired documents instead of assuming
 the original incremental chain is safe. Limits and Unsupported failures are never silently recovered.
 
 ## Unsupported semantic scope
@@ -149,27 +151,25 @@ the original incremental chain is safe. Limits and Unsupported failures are neve
 | Forms (§12.7) | Form dictionaries and references are readable. No form evaluation/filling API; their presence alone is not an error. |
 | Signatures (§12.8) | Signature dictionaries and bytes are retained. No signing, cryptographic validation or trust result is exposed; their presence alone is not an error. |
 | Annotation semantics (§12.5) | Annotations are only generic dictionaries/arrays/references. No annotation behavior API; no error solely because an annotation is present. |
-| Writer (Stage 3, #1555) | No save API or writer implementation exists in this stage. There is no runtime stub that silently emits or modifies a file. |
 
 Malformed generic structure and resource limits still apply inside deferred-feature dictionaries.
 External stream F data and unknown/crypt filters are also Unsupported when decode is requested.
 The package performs no external-file or network retrieval.
 
-## Extension into the Stage 3 writer
+## Read/write boundary
 
 Every standard object form has a retained representation: name/string bytes, boolean/integer/real
-values, ordered arrays/dictionaries, object identities, and encoded lazy stream data. A writer can
-serialize already resolved objects without reparsing them. It can resolve previously untouched objects
-once for a full rewrite, or copy unchanged payloads through BinarySegment. Raw comments/whitespace,
-number spelling and string escape spelling are intentionally normalized on serialization; literal versus
-hexadecimal string form is retained.
+values, ordered arrays/dictionaries, object identities, and encoded lazy stream data. The writer
+serializes resolved objects without reparsing them and resolves untouched objects for a full rewrite.
+It copies unchanged stream payloads through BinarySegment. Structural object streams may need decoding
+to extract members, but their original encoded bytes are still copied when retained as live objects.
+Raw comments/whitespace, number spelling and string escape spelling are normalized on serialization.
+Hexadecimal source strings stay hexadecimal; predominantly non-printable literal strings become hex.
 
 The document keeps trailer extension entries, effective version, source origin, latest StartXref,
-current generations and free-list records. Stage 3 can add allocation/replacement/change-tracking and
-save APIs in this assembly, use the current xref map and cached objects for an append, update Size/Prev,
-and select a full rewrite when repair has invalidated the old chain. It must handle transitive edits to
-mutable containers and explicitly define stream replacement. No existing public interface needs a new
-member to implement that work. New fonts, operators, forms and rendering capabilities should interpret
+current generations and free-list records. Mutation and save behavior stays inside this assembly;
+no existing public interface acquired a member and no shipped assembly received an internals grant.
+New fonts, operators, forms and rendering capabilities should interpret
 this model in focused packages instead of extending this parser into a rendering engine.
 
 ## Corpus, provenance and verification
@@ -206,3 +206,160 @@ object-stream and xref requirements. The
 [program plan](../../../../docs/programs/CONTENT_FOUNDATION_PLAN.md) and
 [Binary design](../../Assimalign.Cohesion.Content.Binary/docs/DESIGN.md) define shared limits,
 lazy-source lifetime and malformed-input vocabulary.
+
+## Serialization and mutation decision
+
+The internal serializer emits invariant integers and shortest round-trip IEEE 754 binary64 decimals
+(at most 17 significant digits before expansion). It expands exponents without further rounding;
+integral reals retain a decimal point and negative zero retains its sign.
+Names use uppercase #xx escapes outside ASCII 33–126 and for delimiters and #. Literal strings
+escape every parenthesis, backslash, standard control and other non-printable byte (three octal digits).
+Hexadecimal syntax is used when requested by the source or when more than half the bytes fall outside
+ASCII 32–126. Ordered containers preserve insertion order. Streams retain encoded bytes and receive
+a Length matching the emitted extent. Valid indirect Length references are retained; missing or
+incorrect lengths are written directly. Direct cycles and excessive nesting fail loudly.
+
+Add allocates above Size and every known identity, without reusing free numbers; Replace preserves
+the current generation; Free increments it up to 65535. Trailer remains directly editable. Automatic
+tracking records the revisions of all direct mutable containers at resolution, including stream
+dictionaries; references are leaves. Save examines these snapshots without reading payloads. A nested
+in-place edit marks every containing resolved indirect object. Explicit replacement also marks dirty.
+Rejected: an explicit-only Replace contract would silently discard existing in-place container edits
+in incremental saves unless it also compared every direct graph. Revisions avoid that duplicate work
+and event subscriptions. Changed-back containers may conservatively remain dirty. Read-side recovery
+is disabled once edits exist, because rebuilding the cache would lose them.
+
+ReplaceData borrows unencoded BinarySegment bytes, removes old filters/external-file entries, updates
+Length and exposes the replacement immediately. Its memory/source must stay unchanged and open.
+The existing interfaces and immutable object types need no new public members. Array and dictionary
+mutation methods now increment internal revisions; Resolve captures these revisions when caching.
+The public additions are PdfDocument.Add/Replace/Free, PdfStream.ReplaceData, PdfWriter and its options.
+Trailer already supplies the editing surface; its edits are included in both save modes. CrossReferences
+reflects pending additions and deletions, but offsets/free links describe the original source until
+reload; a new object's offset is zero while it is retained only in the document cache.
+
+## Save flows
+
+The writer depends on preflight validation and one save mode; both modes depend on object serialization
+and cross-reference emission. Incremental saving also depends on a byte-for-byte source copy before
+append. Serialization uses lazy copy-through for unchanged streams, and xref emission uses bounded
+Flate/PNG Up encoding. The arrows below denote these dependencies.
+
+```mermaid
+flowchart TD
+    Writer["PdfWriter"] --> Validate["Validate destination, encryption and limits"]
+    Writer --> Full["Full save: header and every live object"]
+    Writer --> Incremental["Incremental: changed and new objects"]
+    Full --> Objects["Canonical object serialization"]
+    Full --> Xref["Cross-reference section and trailer"]
+    Incremental --> Copy["Content.Binary CopyExactlyTo"]
+    Incremental --> Objects
+    Incremental --> Xref
+    Objects --> Copy
+    Xref --> Encode["Bounded Flate and PNG Up encoding"]
+```
+
+## Full save
+
+PdfWriter implements IContentWriter<PdfDocument> and borrows the destination. Full saves emit the
+current effective version, a binary marker, every live object in number order (or deterministic
+bounded packing batches), a fresh table or xref stream, and EOF. No output seek is required. Stream
+xref/packing options require version 1.5 or later; the writer does not silently change the version.
+Full-save Size is capped before filling gaps; free entries are linked in ascending order. Packing
+uses at most 100 generation-zero non-stream objects per group and excludes indirect-reference
+values, the catalog, and indirect stream Length identities. Encryption is rejected before output,
+even if the caller removed Encrypt from a document originally loaded as encrypted.
+
+Unchanged payloads use BinarySegment and CopyExactlyTo with original Filter/DecodeParms. Replaced
+payloads are Flate encoded by default, or stored unfiltered by option. A counting compression pass
+computes a direct Length, then a second pass emits to the forward-only destination. These passes
+use fixed pooled copy buffers, not payload-sized allocations. Object-stream units and encoded xref
+units are capped by MaxBufferedBytes; xref rows are emitted through Content.Binary's writer with
+PNG Up predictor 12 and Flate. The xref layout uses W [1 8 4], including offsets above 4 GiB.
+Classic table offsets exceeding ten digits fail with LimitExceeded; choose xref streams for them.
+
+Existing ID array entries are kept, including both identifiers. When ID is absent, both entries are
+the first 16 bytes of SHA-256 over the emitted header/body, accumulated during writing. No clock,
+randomness, destination name, current culture, or process hash ordering affects the bytes. This is
+reproducibility for identical model/order, options and compression runtime, not a cross-runtime zlib
+bitstream promise. Save does not change the model's trailer, stream dictionaries or dirty baseline;
+reload the output to make it the source of a subsequent revision. Partial output after I/O failure
+or cancellation must be discarded. WriteAsync currently follows the synchronous I/O path with
+cancellation checks between bounded reads/writes, matching the reader's execution model. No background
+work is scheduled. Unchanged payload copying needs one pass; replacement Flate encoding needs two
+passes over the borrowed replacement. Length, and Filter/DecodeParms for replacements, are managed
+serialization fields; writer options select their emitted values.
+
+## Incremental save
+
+Incremental=true copies the PDF source range, from its recorded SourceOffset to its recorded end,
+with Content.Binary CopyExactlyTo, then appends changed/new objects, a rebuilt free list and a
+trailer with Prev pointing to the original StartXref. A source length change is rejected. Prefix
+bytes before the caller-supplied PDF origin are outside the document. The original PDF range is
+byte-identical in the output. Objects are never packed during an incremental save. Replaced
+compressed members receive ordinary uncompressed entries, which supersede their old stream entries.
+
+The loader retains the last section's actual style separately from the merged trailer: table follows
+table, stream follows stream, hybrid writes a supplemental stream plus a companion table whose
+XRefStm points to it. Prev belongs to the companion table in a hybrid update. Older inherited Type
+or XRefStm keys cannot change the new revision's style. Freed entries increment generations and the
+free head and links are emitted together. Removed trailer keys receive null tombstones so Prev
+merging cannot resurrect Info or extension metadata. Structural keys are always regenerated.
+
+Recovered sources (StartXref=-1) require a full save first. Changing an object-stream container while
+unchanged compressed members still depend on it is rejected loudly: edit the individual members,
+or replace/free all dependent members before changing the container. This prevents stale decoded
+member caches from silently losing an edit. In-place append is deliberately omitted: separate
+storage is the contract, and rollback cannot make shared/wrapped source aliases or concurrent
+readers safe. Exact stream-object identity aliases are rejected; callers must also avoid distinct
+wrappers/handles over the same storage. Successful saves retain their original baseline, so repeated
+saves are deterministic; reload a saved file to build a new Prev revision.
+
+The generated and checked-in reader corpora round-trip incrementally with nested in-place edits.
+Four successive updates are tested in all three styles, including free-entry shadowing and links.
+An instrumented source measures the save after metadata resolution, rejects payload-sized reads,
+and proves a 2 MiB unsupported-codec payload is copied once without decode or materialization in
+both save modes. Parser setup can read ahead into a payload; that is separate from the measured
+copy operation. Cancellation and I/O failures leave the source untouched and the destination partial.
+
+## Writer limits and tradeoffs
+
+MaxObjects bounds the full-save Size before allocating records for gaps, retained revision records,
+and direct nodes per serialized object (keys included). Add also obeys the document's reader object
+limit. MaxDepth bounds direct nesting and cycles are rejected. MaxBufferedBytes bounds each object
+stream's header/body, each encoded structural stream and the predicted xref row count before encoding.
+MemoryStream capacity and copies may create bounded overhead above a unit's logical length; these
+are per-unit limits, not an aggregate memory quota. Reals use at most the finite Double decimal range;
+ordinary stream lengths remain 64-bit and do not cause payload-sized allocations.
+
+Writer misuse uses argument exceptions. Format/version, unsupported object implementation/placement,
+identity, cycle and limit failures use ContentFormatException with a code and known position.
+All authored error messages are resources. No reflection, runtime generation, extra dependencies or
+new public interfaces are needed. The first-identifier and encryption checks precede every output byte;
+later encoding, source or destination I/O failures may leave partial output, which callers discard.
+
+Incremental saves preserve original bytes but do not validate signatures or certify their continued
+validity. Full saves normalize structure and are not signature-preserving or linearized output. Existing
+unreachable structural streams remain live objects when their current xref entries are live; there is
+no garbage collector, content-operator transformation, or semantic page-tree repair in this writer.
+
+## Writer compliance and golden provenance
+
+Six writer-produced files in tests/TestObjects/Golden cover full tables, xref streams, object
+streams, and incremental table/stream/hybrid updates. PdfWriterGoldenBuilder.Build names the
+exact setup; every file includes a PdfWriter comment naming its save layout. Tests only read
+these goldens. Regeneration explicitly invokes that helper and reviews the resulting binary diff.
+Compliance tests name ISO 32000-2 clauses and cover exact table records, binary markers, predictor
+12, self-indexed xref streams, batching, nonzero/free generations, encrypted rejection before any
+output (including removal of Encrypt), deterministic repeated saves, source origins, and failures.
+
+Saving validates ID as two strings and retains the loaded first identifier. Attempting to change
+or remove that identifier fails with InvalidValue before output instead of silently discarding
+the caller's edit or changing document identity. The second identifier is kept as supplied. Direct
+stream dictionaries occupy the same depth in mutation snapshots as in the parser, so tracking
+does not tighten an existing reader depth limit. Serializer node limits include dictionary keys.
+
+Incremental xref-stream objects count toward MaxObjects along with existing retained entries.
+Removing or lowering a catalog Version that upgraded the unchanged source header would reduce the
+effective version; incremental saving rejects that edit with InvalidValue. A full save still writes
+the document's effective version in its new header, so removing the redundant catalog entry is safe.

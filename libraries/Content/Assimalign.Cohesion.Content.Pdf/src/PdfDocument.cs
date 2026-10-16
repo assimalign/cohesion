@@ -19,10 +19,11 @@ public sealed partial class PdfDocument : IDisposable
         _source = source; SourceOffset = sourceOffset; Version = version; Trailer = trailer;
         _entries = entries; CrossReferences = new ReadOnlyDictionary<int, PdfCrossReferenceEntry>(entries);
         StartXref = startXref; _leaveOpen = leaveOpen;
+        SourceLength = source.Length; HeaderVersion = version;
     }
     /// <summary>Gets the effective version (header, upgraded by the catalog when present).</summary>
     public Version Version { get; internal set; }
-    /// <summary>Gets the merged trailer, newest revision winning.</summary>
+    /// <summary>Gets the editable merged trailer. Saves retain edits, including Info; structural xref keys are regenerated.</summary>
     public PdfDictionary Trailer { get; }
     /// <summary>Gets current cross-reference records by object number, including free entries.</summary>
     public IReadOnlyDictionary<int, PdfCrossReferenceEntry> CrossReferences { get; }

@@ -1,8 +1,9 @@
 # Assimalign.Cohesion.Content.Pdf
 
-A byte-preserving PDF object model and bounded structural reader for PDF 1.0–1.7 and 2.0,
+A PDF object model, bounded structural reader and forward-only writer for PDF 1.0–1.7 and 2.0,
 governed by ISO 32000-2. It reads classic, stream and hybrid cross-references, incremental
-revisions, object streams and inherited page attributes. Stream payloads stay lazy until decoded.
+revisions, object streams and inherited page attributes. Full and incremental saves retain tracked
+container edits and copy unchanged encoded stream payloads without decoding or materializing them.
 
 PDF needs random access: supply a readable, seekable stream and keep it open while using the
 document or its lazy data. Sources are borrowed by default. The package targets .NET 10 and
@@ -16,9 +17,10 @@ Console.WriteLine($"PDF {document.Version}: {document.PageCount} pages");
 ```
 
 See [usage and limits](docs/OVERVIEW.md) and the [clause-by-clause design](docs/DESIGN.md).
-Encryption, content operators, text extraction, rendering and saving are outside this stage.
+Encryption, content operators, text extraction and rendering are outside this stage.
 An encrypted trailer still loads; accessing string bytes or stream data reports `Unsupported`.
-Stage 3 adds full save and incremental update on this model.
+Saving encrypted documents reports Unsupported before writing any output. Save to distinct storage;
+in-place append is not supported. Reload a saved result before beginning another incremental revision.
 
 ## Build and tests
 
@@ -31,5 +33,5 @@ dotnet test libraries/Content/Assimalign.Cohesion.Content.Pdf/tests/Assimalign.C
 
 A fresh worktree requires the existing build tasks:
 `dotnet build build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj` if MSBuild reports MSB4062.
-Tests generate their own PDFs with calculated offsets and also load four checked-in golden PDFs.
+Tests generate their own PDFs with calculated offsets and load four reader and six writer golden PDFs.
 No network, local media files, installed PDF viewer, or packed local feed is required.

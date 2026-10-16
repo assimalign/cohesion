@@ -15,6 +15,8 @@ internal sealed class PdfFileLoader
     private readonly PdfReaderOptions _options;
     private readonly CancellationToken _cancellationToken;
     private readonly PdfSecurityState _security;
+    private PdfCrossReferenceStyle _sectionStyle;
+    private PdfCrossReferenceStyle _lastStyle;
     internal PdfFileLoader(Stream source, long origin, PdfReaderOptions options, CancellationToken cancellationToken = default, PdfSecurityState? security = null)
     {
         _source = source; _origin = origin; _options = options; _cancellationToken = cancellationToken;
@@ -42,6 +44,7 @@ internal sealed class PdfFileLoader
         }
         _security.IsEncrypted = trailer.Get("Encrypt") is not (null or PdfNull);
         var document = new PdfDocument(_source, _origin, version, trailer, entries, startXref, leaveOpen);
+        document.LastCrossReferenceStyle = _lastStyle;
         document.Initialize(_options, _security, _cancellationToken);
         return document;
     }
@@ -98,6 +101,10 @@ internal sealed class PdfFileLoader
             _cancellationToken.ThrowIfCancellationRequested();
             Visit(offset.Value, visited);
             var (section, dictionary) = ReadSection(offset.Value, false);
+            if (offset.Value == start)
+            {
+                _lastStyle = dictionary.Get("XRefStm") is PdfInteger ? PdfCrossReferenceStyle.Hybrid : _sectionStyle;
+            }
             // In a hybrid revision the supplemental stream wins over its companion table.
             if (OptionalOffset(dictionary, "XRefStm") is long hybrid)
             {
@@ -152,7 +159,8 @@ internal sealed class PdfFileLoader
         var parser = new PdfParser(input, _options, isEncrypted: () => _security.IsEncrypted);
         try
         {
-            if (!streamOnly && parser.TryKeyword("xref")) { return ReadTable(parser); }
+            if (!streamOnly && parser.TryKeyword("xref")) { _sectionStyle = PdfCrossReferenceStyle.Table; return ReadTable(parser); }
+            _sectionStyle = PdfCrossReferenceStyle.Stream;
             var (_, value) = parser.ReadIndirect();
             if (value is not PdfStream stream || !IsName(stream.Dictionary.Get("Type"), "XRef"))
             {

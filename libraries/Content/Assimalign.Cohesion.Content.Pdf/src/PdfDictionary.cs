@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Content.Pdf;
 public sealed class PdfDictionary : IPdfObject, IReadOnlyDictionary<PdfName, IPdfObject>
 {
     private readonly OrderedDictionary<PdfName, IPdfObject> _items = new();
+    internal long Revision { get; private set; }
     /// <summary>Creates an empty dictionary.</summary>
     public PdfDictionary() { }
     /// <inheritdoc/>
@@ -26,7 +27,7 @@ public sealed class PdfDictionary : IPdfObject, IReadOnlyDictionary<PdfName, IPd
     public IPdfObject this[PdfName key]
     {
         get => _items[key];
-        set { ArgumentNullException.ThrowIfNull(value); _items[key] = value; }
+        set { ArgumentNullException.ThrowIfNull(value); _items[key] = value; Revision++; }
     }
     /// <inheritdoc/>
     public bool ContainsKey(PdfName key) => _items.ContainsKey(key);
@@ -36,7 +37,11 @@ public sealed class PdfDictionary : IPdfObject, IReadOnlyDictionary<PdfName, IPd
     /// <param name="key">The decoded name.</param>
     /// <returns>Whether an entry was removed.</returns>
     /// <exception cref="ArgumentNullException">The key is null.</exception>
-    public bool Remove(PdfName key) => _items.Remove(key);
+    public bool Remove(PdfName key)
+    {
+        if (!_items.Remove(key)) { return false; }
+        Revision++; return true;
+    }
     /// <inheritdoc/>
     public IEnumerator<KeyValuePair<PdfName, IPdfObject>> GetEnumerator() => _items.GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
