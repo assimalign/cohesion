@@ -292,7 +292,8 @@ internal sealed class MarkdownBlockParser
 
         // Content line: remove up to the opening fence's indentation.
         cursor.SkipWhitespace(maxColumns: _fenceIndent);
-        _fenceRaw!.Append(cursor.Remaining).Append('\n');
+        cursor.AppendRemaining(_fenceRaw!);
+        _fenceRaw!.Append('\n');
     }
 
     private static bool TryReadThematicBreak(LineCursor probe)
@@ -627,12 +628,12 @@ internal sealed class MarkdownBlockParser
 
     /// <summary>
     /// A tab-aware cursor over one line: columns advance to the next multiple-of-four stop on tabs.
-    /// A tab that straddles a requested column budget is consumed whole — the subset's documented
-    /// simplification of the spec's partial-tab expansion.
+    /// Tabs crossing a container boundary retain their remaining virtual spaces.
     /// </summary>
     private ref struct LineCursor
     {
         private readonly ReadOnlySpan<char> _line;
+        private int _tabRemaining;
 
         /// <summary>Initializes a new instance of the <see cref="LineCursor"/> structure.</summary>
         /// <param name="line">The line the cursor scans.</param>
@@ -645,9 +646,9 @@ internal sealed class MarkdownBlockParser
 
         public int Column { get; private set; }
 
-        public readonly bool AtEnd => Index >= _line.Length;
+        public readonly bool AtEnd => _tabRemaining == 0 && Index >= _line.Length;
 
-        public readonly char Current => _line[Index];
+        public readonly char Current => _tabRemaining > 0 ? ' ' : _line[Index];
 
         public readonly ReadOnlySpan<char> Remaining => _line[Index..];
 
@@ -655,6 +656,13 @@ internal sealed class MarkdownBlockParser
 
         public void Advance()
         {
+            if (_tabRemaining > 0)
+            {
+                _tabRemaining--;
+                Column++;
+                return;
+            }
+
             Column += _line[Index] == '\t' ? 4 - (Column % 4) : 1;
             Index++;
         }
@@ -665,19 +673,34 @@ internal sealed class MarkdownBlockParser
             var startColumn = Column;
             while (!AtEnd && Column - startColumn < maxColumns && Current is ' ' or '\t')
             {
+                var width = Current == '\t' ? 4 - (Column % 4) : 1;
+                var available = maxColumns - (Column - startColumn);
+                if (width > available)
+                {
+                    _tabRemaining = width - available;
+                    Column += available;
+                    Index++;
+                    break;
+                }
+
                 Advance();
             }
 
             return Column - startColumn;
         }
 
-        /// <summary>Consumes a single optional space (or a whole tab) after a container marker.</summary>
+        /// <summary>Consumes one optional whitespace column after a container marker.</summary>
         public void SkipOneSpace()
         {
             if (!AtEnd && Current is ' ' or '\t')
             {
-                Advance();
+                SkipWhitespace(1);
             }
+        }
+
+        internal readonly void AppendRemaining(StringBuilder builder)
+        {
+            builder.Append(' ', _tabRemaining).Append(Remaining);
         }
 
         /// <summary>Consumes marker characters until the given column is reached (for re-scanning).</summary>

@@ -106,6 +106,9 @@ column on the opening line. Quotes may vary their leading spaces without moving 
 Blank lines loosen their immediate list item. A child quote or an interior blank in a nested list
 does not loosen the outer list; a trailing blank propagates when the nested list closes.
 
+Tabs expand at four-column stops even when a container consumes only part of one. Unconsumed
+columns remain available to nested markers and become literal spaces in fenced code payloads.
+
 ## Renderers
 
 **HTML** (`MarkdownHtmlRenderer`) emits the shapes the spec's examples use — tight list items

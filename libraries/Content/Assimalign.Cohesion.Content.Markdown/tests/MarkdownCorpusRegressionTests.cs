@@ -54,4 +54,19 @@ public class MarkdownCorpusRegressionTests
         list.IsTight.ShouldBe(tight);
         MarkdownModelComparison.ShouldEqual(document, MarkdownText.Parse(MarkdownText.Write(document)), source);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Tabs: retain virtual columns across container prefixes")]
+    [InlineData(" - foo\n   - bar\n\t - baz\n", "<ul>\n<li>foo\n<ul>\n<li>bar\n<ul>\n<li>baz</li>\n</ul>\n</li>\n</ul>\n</li>\n</ul>\n")]
+    [InlineData("- ```\n \tcode\n  ```\n", "<ul>\n<li>\n<pre><code>  code\n</code></pre>\n</li>\n</ul>\n")]
+    public void Parse_PartialTab_PreservesRemainingColumns(string source, string expected)
+    {
+        // Arrange. CommonMark 9 and an authored partial-tab fenced-code boundary.
+        var document = MarkdownText.Parse(source);
+
+        // Act
+        var actual = MarkdownText.ToHtml(document);
+
+        // Assert
+        actual.ShouldBe(expected);
+        MarkdownModelComparison.ShouldEqual(document, MarkdownText.Parse(MarkdownText.Write(document)), source);
+    }
 }
