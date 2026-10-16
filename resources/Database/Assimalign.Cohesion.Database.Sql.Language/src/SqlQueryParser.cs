@@ -150,7 +150,8 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             else if (keyword.Equals("BEGIN", StringComparison.OrdinalIgnoreCase) ||
                      keyword.Equals("COMMIT", StringComparison.OrdinalIgnoreCase) ||
-                     keyword.Equals("ROLLBACK", StringComparison.OrdinalIgnoreCase))
+                     keyword.Equals("ROLLBACK", StringComparison.OrdinalIgnoreCase) ||
+                     keyword.Equals("END", StringComparison.OrdinalIgnoreCase))
             {
                 expression = ParseTransaction(ref lexer);
             }
@@ -161,6 +162,11 @@ public sealed partial class SqlQueryParser : QueryParser
                 // consume remaining tokens so we track semicolons
                 ConsumeRemaining(ref lexer);
             }
+        }
+        else if (IsWord(ref lexer, "START"))
+        {
+            // START is contextual so an ordinary column named start remains an identifier.
+            expression = ParseTransaction(ref lexer);
         }
         else
         {
@@ -271,14 +277,19 @@ public sealed partial class SqlQueryParser : QueryParser
     private SqlTransactionExpression ParseTransaction(ref TokenLexer lexer)
     {
         int start = lexer.Current.Position;
-        var command = CurrentText(ref lexer).ToUpperInvariant() switch
-        {
-            "BEGIN" => SqlQueryCommandType.Begin,
-            "COMMIT" => SqlQueryCommandType.Commit,
-            _ => SqlQueryCommandType.Rollback,
-        };
+        bool isStart = IsWord(ref lexer, "START");
+        bool isEnd = IsKeyword(ref lexer, "END");
+        var command = isStart || IsKeyword(ref lexer, "BEGIN")
+            ? SqlQueryCommandType.Begin
+            : isEnd || IsKeyword(ref lexer, "COMMIT")
+                ? SqlQueryCommandType.Commit
+                : SqlQueryCommandType.Rollback;
         Advance(ref lexer);
-        if (IsKeyword(ref lexer, "TRANSACTION"))
+        if (isStart)
+        {
+            ExpectKeyword(ref lexer, "TRANSACTION", "TRANSACTION after START");
+        }
+        else if (!isEnd && (IsKeyword(ref lexer, "TRANSACTION") || IsWord(ref lexer, "WORK")))
         {
             Advance(ref lexer);
         }

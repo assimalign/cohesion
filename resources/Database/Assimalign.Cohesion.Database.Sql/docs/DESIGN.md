@@ -3184,8 +3184,11 @@ drivers, while the server owns bind-through-release lifecycle.
 
 ## SQL transaction control and the B7 seam
 
-`BEGIN [TRANSACTION]`, `COMMIT [TRANSACTION]`, and `ROLLBACK [TRANSACTION]`
-are ordinary SQL requests over the existing wire `Execute` message. The session
+`START TRANSACTION`, `BEGIN [WORK|TRANSACTION]`, `COMMIT [WORK|TRANSACTION]`,
+`END`, and `ROLLBACK [WORK|TRANSACTION]` are ordinary SQL requests over the
+existing wire `Execute` message. The parser maps these spellings onto the existing
+Begin/Commit/Rollback commands (#1125), so END without a transaction reports the
+canonical `COHSQLT002` message, "COMMIT requires an open transaction." The session
 dispatches their parsed AST before creating an auto-commit transaction. `BEGIN`
 opens a coordinator context; subsequent queries and DML share that context and
 its visibility snapshot. `COMMIT` awaits the coordinator's durable commit;
