@@ -191,3 +191,10 @@ No public track implementation or index class was added: consumers use the exist
 
 Content.Heif uses these BMFF seams independently of Mpeg's track interpretation. Neither profile
 adds a reverse reference or a shipped InternalsVisibleTo grant.
+
+## Source coordinates and shape
+
+Profile boxes inherit Offset, Limit, IsLeaf and IsComposite from BmffBox. Offset is the original
+absolute read position; Limit is the original total size. Edits, relocation and saving leave both
+unchanged. A new profile box has zero coordinates until loaded; the writer computes its output
+layout separately. Even an empty sample-entry or item container is a composite.

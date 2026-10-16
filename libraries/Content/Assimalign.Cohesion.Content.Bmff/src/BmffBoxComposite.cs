@@ -30,10 +30,6 @@ public abstract class BmffBoxComposite : BmffBox
         }
     }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => false;
-    /// <inheritdoc/>
-    public override bool IsComposite => true;
     /// <summary>Gets the mutable ordered child list.</summary>
     public virtual IList<BmffBox> Children { get; } = new List<BmffBox>();
 

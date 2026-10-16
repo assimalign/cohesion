@@ -11,10 +11,6 @@ public sealed class ItemDataBox : BmffBoxLazyLeaf
     /// <summary>Creates an empty ItemDataBox model.</summary>
     public ItemDataBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x69646174;
     internal HeifReaderOptions Options { get; set; } = new();
 }

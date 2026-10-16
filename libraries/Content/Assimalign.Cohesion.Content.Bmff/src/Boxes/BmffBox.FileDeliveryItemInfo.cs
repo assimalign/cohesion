@@ -20,17 +20,12 @@ public sealed class FileDeliveryItemInfoBox : BmffBoxComposite
     /// <param name="limit">The original total byte size.</param>
     public FileDeliveryItemInfoBox(long offset, long limit)
     {
-        this.Offset = offset;
-        this.Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
     /// <inheritdoc/>
     public override IList<BmffBox> Children => _children;
 
-    /// <inheritdoc/>
-    public override long Limit { get; }
 
-    /// <inheritdoc/>
-    public override long Offset { get; }
 
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.FileDeliveryItemInfo;

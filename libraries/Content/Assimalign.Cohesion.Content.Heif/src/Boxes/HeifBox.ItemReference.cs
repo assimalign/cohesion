@@ -14,10 +14,6 @@ public sealed class ItemReferenceBox : BmffBoxComposite
     /// <summary>Creates an empty ItemReferenceBox model.</summary>
     public ItemReferenceBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x69726566;
     internal HeifReaderOptions Options { get; set; } = new();
     /// <summary>Gets or sets the full-box version.</summary>

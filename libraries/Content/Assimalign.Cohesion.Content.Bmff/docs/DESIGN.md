@@ -23,8 +23,12 @@ Read/Write behavior, and lets visitors inspect or transform models without mergi
 field layouts into a generic box.
 
 BmffBoxComposite.Children is an editable IList rather than the former read-only enumeration.
-IsLeaf/IsComposite report the structural role. Offset and Limit describe the original header position
-and total size; they do not change when a model is edited. Header preserves the parsed wire header.
+BmffBox derives IsLeaf/IsComposite from the composite base type, including empty containers.
+Offset keeps its existing name and means the absolute source header position; Limit is the original
+total byte count, not an end position. Both come from Header after loading and never track edits,
+relocation or saving. Before loading they retain the constructor-supplied values (zero when omitted).
+The writer computes a separate output layout and does not initialize or replace Header. The base
+properties stay virtual for existing custom subclasses; package box classes inherit the defaults.
 GetPayloadSize and the writer's size plan determine the new serialized size.
 
 The dependencies between access modes and the shared primitives are:

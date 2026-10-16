@@ -13,8 +13,6 @@ public sealed class Av01SampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     public Av01SampleEntryBox() : this(default, 16 * 1024 * 1024) { }
     internal Av01SampleEntryBox(BmffBoxHeader header, int limit)
     {
-        Offset = header.Offset;
-        Limit = header.TotalSize ?? 0;
         _fields = new Mp4SampleEntryFields("Visual", 78, limit);
     }
     Mp4SampleEntryFields IMp4SampleEntry.Fields => _fields;
@@ -29,10 +27,6 @@ public sealed class Av01SampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     /// <exception cref="System.ArgumentNullException">The new compressor name is null.</exception>
     /// <exception cref="System.ArgumentOutOfRangeException">The compressor name contains more than 31 characters.</exception>
     public string CompressorName { get => _fields.CompressorName; set => _fields.CompressorName = value; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
-    /// <inheritdoc/>
-    public override long Limit { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x61763031;
     /// <inheritdoc/>

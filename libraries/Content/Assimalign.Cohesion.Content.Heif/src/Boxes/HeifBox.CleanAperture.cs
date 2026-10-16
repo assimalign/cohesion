@@ -14,16 +14,8 @@ public sealed class CleanApertureBox : BmffBox
     /// <summary>Creates an empty CleanApertureBox model.</summary>
     public CleanApertureBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x636c6170;
     internal HeifReaderOptions Options { get; set; } = new();
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
     /// <summary>Gets or sets bytes following the defined fields, preserved verbatim.</summary>
     public byte[] TrailingData { get; set; } = Array.Empty<byte>();
     /// <summary>Gets or sets the raw WidthNumerator field.</summary>

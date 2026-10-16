@@ -6,14 +6,28 @@ namespace Assimalign.Cohesion.Content.Bmff;
 // Deviates from the repo interface-first rule per the owner's Stage 2 composite-design requirement.
 public abstract class BmffBox
 {
-    /// <summary>Gets whether the box has no child boxes.</summary>
-    public abstract bool IsLeaf { get; }
-    /// <summary>Gets whether the box contains child boxes.</summary>
-    public abstract bool IsComposite { get; }
-    /// <summary>Gets the original total size supplied at creation, not the recomputed serialized size.</summary>
-    public abstract long Limit { get; }
-    /// <summary>Gets the original absolute header offset.</summary>
-    public abstract long Offset { get; }
+    private long _initialOffset;
+    private long _initialLimit;
+
+    /// <summary>Gets whether this node is a leaf rather than a composite, even when a composite is empty.</summary>
+    public virtual bool IsLeaf => this is not BmffBoxComposite;
+    /// <summary>Gets whether this node derives from <see cref="BmffBoxComposite"/>.</summary>
+    public virtual bool IsComposite => this is BmffBoxComposite;
+    /// <summary>Gets the original total size from the header, or the constructor-supplied size before loading.</summary>
+    /// <remarks>This is a byte count, not an end offset. It does not track edits. New boxes retain
+    /// their constructor value (zero if omitted); writing computes a separate size without changing it.</remarks>
+    public virtual long Limit => Header.HeaderSize == 0 ? _initialLimit : Header.TotalSize ?? 0;
+    /// <summary>Gets the absolute source position at which this box's header was read.</summary>
+    /// <remarks>This position does not track edits, reordering, relocation or saving. Before loading,
+    /// it is the constructor-supplied position, or zero if omitted. The writer's output layout is separate.</remarks>
+    public virtual long Offset => Header.HeaderSize == 0 ? _initialOffset : Header.Offset;
+
+    internal void SetOriginalLocation(long offset, long limit = 0)
+    {
+        _initialOffset = offset;
+        _initialLimit = limit;
+    }
+
     /// <summary>Gets the raw FourCC, including unregistered types.</summary>
     public abstract BmffBoxType BoxType { get; }
     /// <summary>Gets the original header, or default for a newly constructed model.</summary>

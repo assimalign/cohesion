@@ -11,10 +11,6 @@ public sealed class ColourInformationBox : BmffBoxLazyLeaf
     /// <summary>Creates an empty ColourInformationBox model.</summary>
     public ColourInformationBox() { }
     /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize ?? 0;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x636f6c72;
     internal HeifReaderOptions Options { get; set; } = new();
 

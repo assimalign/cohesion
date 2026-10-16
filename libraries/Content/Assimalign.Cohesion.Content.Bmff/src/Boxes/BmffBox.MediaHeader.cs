@@ -13,16 +13,8 @@ public sealed class MediaHeaderBox : BmffFullBox
     /// <summary>Creates a MediaHeaderBox at its original location.</summary>
     /// <param name="offset">The original absolute header offset.</param>
     /// <param name="limit">The original total size.</param>
-    public MediaHeaderBox(long offset, long limit) { Offset = offset; Limit = limit;  }
+    public MediaHeaderBox(long offset, long limit) { SetOriginalLocation(offset, limit);  }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.MediaHeader;
 

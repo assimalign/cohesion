@@ -19,20 +19,11 @@ public sealed class TrackSelectionBox : BmffFullBox
     /// <param name="limit">The original total byte size.</param>
     public TrackSelectionBox(long offset, long limit)
     {
-        this.Offset = offset;
-        this.Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
 
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
 
-    /// <inheritdoc/>
-    public override long Limit { get;}
 
-    /// <inheritdoc/>
-    public override long Offset { get; }
 
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.TrackSelection;

@@ -13,16 +13,8 @@ public sealed class MovieHeaderBox : BmffFullBox
     /// <summary>Creates a MovieHeaderBox at its original location.</summary>
     /// <param name="offset">The original absolute header offset.</param>
     /// <param name="size">The original total size.</param>
-    public MovieHeaderBox(long size, long offset) { Offset = offset; Limit = size; }
+    public MovieHeaderBox(long size, long offset) { SetOriginalLocation(offset, size); }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.MovieHeader;
 

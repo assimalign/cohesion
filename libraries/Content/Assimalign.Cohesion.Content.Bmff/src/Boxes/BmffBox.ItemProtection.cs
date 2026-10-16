@@ -14,14 +14,9 @@ public sealed class ItemProtectionBox : BmffBoxComposite
     /// <param name="limit">The original total size.</param>
     public ItemProtectionBox(long offset, long limit)
     {
-        Offset = offset;
-        Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
 
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.ItemProtection;
     private uint _flags;

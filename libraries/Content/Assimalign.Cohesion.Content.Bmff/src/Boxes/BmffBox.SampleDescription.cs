@@ -12,11 +12,7 @@ public sealed class SampleDescriptionBox : BmffBoxComposite
     /// <summary>Creates an empty container at its original location.</summary>
     /// <param name="offset">The original absolute header offset.</param>
     /// <param name="limit">The original total size.</param>
-    public SampleDescriptionBox(long offset, long limit) { Offset = offset; Limit = limit; }
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
+    public SampleDescriptionBox(long offset, long limit) { SetOriginalLocation(offset, limit); }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.SampleDescription;
     /// <summary>Gets or sets the encoded full-box version.</summary>

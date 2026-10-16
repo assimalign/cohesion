@@ -13,14 +13,9 @@ public sealed class AdditionalMetaBox : BmffBoxComposite
     /// <param name="limit">The original total size.</param>
     public AdditionalMetaBox(long offset, long limit)
     {
-        Offset = offset;
-        Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
 
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.AdditionalMeta;
     /// <inheritdoc/>

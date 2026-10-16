@@ -12,19 +12,11 @@ public sealed class FileTypeBox : BmffBox
     private uint[] _compatibleBrands = Array.Empty<uint>();
     /// <summary>Creates a file-type box at an original offset.</summary>
     /// <param name="offset">The original header offset.</param>
-    public FileTypeBox(long offset) { Offset = offset; }
+    public FileTypeBox(long offset) { SetOriginalLocation(offset); }
     /// <summary>Creates a file-type box with its original location.</summary>
     /// <param name="offset">The original header offset.</param>
     /// <param name="limit">The original total size.</param>
-    public FileTypeBox(long offset, long limit) { Offset = offset; Limit = limit; }
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
+    public FileTypeBox(long offset, long limit) { SetOriginalLocation(offset, limit); }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.FileType;
     /// <summary>Gets or sets the major brand FourCC.</summary>

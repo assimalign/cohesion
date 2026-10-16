@@ -34,14 +34,6 @@ public sealed class UnknownBox : BmffBox
     /// <summary>Gets why the reader preserved this box.</summary>
     public ContentFormatErrorCode PreservationReason { get; }
     /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit => Header.TotalSize!.Value;
-    /// <inheritdoc/>
-    public override long Offset => Header.Offset;
-    /// <inheritdoc/>
     public override BmffBoxType BoxType => Header.BoxType;
     /// <inheritdoc/>
     public override void Read(BmffStream stream) => Payload = stream.GetSegment(0, stream.Length);

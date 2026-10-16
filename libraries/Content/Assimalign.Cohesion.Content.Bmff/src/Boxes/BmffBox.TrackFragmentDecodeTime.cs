@@ -12,16 +12,8 @@ public sealed class TrackFragmentDecodeTimeBox : BmffFullBox
     private byte[] _trailing = Array.Empty<byte>();
     /// <summary>Creates an empty TrackFragmentDecodeTimeBox.</summary>
     public TrackFragmentDecodeTimeBox() { }
-    internal TrackFragmentDecodeTimeBox(long offset, long limit) { Offset = offset; Limit = limit; }
+    internal TrackFragmentDecodeTimeBox(long offset, long limit) { SetOriginalLocation(offset, limit); }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.TrackFragmentDecodeTime;
 

@@ -12,20 +12,12 @@ public sealed class TrackReferenceTypeBox : BmffBox
     private byte[] _trailing = Array.Empty<byte>();
     private readonly BmffBoxType _type;
     private TrackReferenceTypeBox(BmffBoxType type) { _type = type; }
-    internal TrackReferenceTypeBox(BmffBoxHeader header) { _type = header.BoxType; Header = header; Offset = header.Offset; Limit = header.TotalSize ?? 0; }
+    internal TrackReferenceTypeBox(BmffBoxHeader header) { _type = header.BoxType; Header = header; }
     /// <summary>Creates a track-reference type box for use inside tref.</summary>
     /// <param name="type">The track-reference FourCC.</param>
     /// <returns>The empty reference list.</returns>
     public static TrackReferenceTypeBox Create(FourCC type) => new TrackReferenceTypeBox(type.ToBmffBoxType());
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => _type;
 

@@ -140,3 +140,10 @@ after saving. They compare every retained image, exercise mdat and idat, multipl
 fragmented and zero-length extents, partial/complete sharing, replacement and repeated removal,
 saio references and failed-planning retry. A sparse 40 GiB idat is compacted without reading its
 image bytes. Shared marker bytes intentionally remain when a retained image references them.
+
+## Source coordinates and shape
+
+Profile boxes inherit Offset, Limit, IsLeaf and IsComposite from BmffBox. Offset is the original
+absolute read position; Limit is the original total size. Edits, relocation and saving leave both
+unchanged. A new profile box has zero coordinates until loaded; the writer computes its output
+layout separately. Even an empty sample-entry or item container is a composite.

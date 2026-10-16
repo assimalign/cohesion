@@ -12,16 +12,8 @@ public sealed class ItemInfoEntryBox : BmffFullBox
     private byte[] _trailing = Array.Empty<byte>();
     /// <summary>Creates an empty ItemInfoEntryBox.</summary>
     public ItemInfoEntryBox() { Version = 2; }
-    internal ItemInfoEntryBox(long offset, long limit) { Offset = offset; Limit = limit; }
+    internal ItemInfoEntryBox(long offset, long limit) { SetOriginalLocation(offset, limit); }
 
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.ItemInfoEntry;
 

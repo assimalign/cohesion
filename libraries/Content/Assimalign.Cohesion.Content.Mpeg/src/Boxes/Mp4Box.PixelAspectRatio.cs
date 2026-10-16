@@ -11,13 +11,9 @@ public sealed class PixelAspectRatioBox : BmffBoxLazyLeaf, IMp4OpaqueBox
 {
     /// <summary>Creates an empty configuration box.</summary>
     public PixelAspectRatioBox() { }
-    internal PixelAspectRatioBox(BmffBoxHeader header) { Offset = header.Offset; Limit = header.TotalSize ?? 0; }
+    internal PixelAspectRatioBox(BmffBoxHeader header) { }
     /// <summary>Gets or sets the complete opaque payload, excluding the box header.</summary>
     public BinarySegment Data { get => Payload; set => Payload = value; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
-    /// <inheritdoc/>
-    public override long Limit { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x70617370;
 }

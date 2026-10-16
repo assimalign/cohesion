@@ -11,13 +11,9 @@ public sealed class ElementaryStreamDescriptorBox : BmffBoxLazyLeaf, IMp4OpaqueB
 {
     /// <summary>Creates an empty configuration box.</summary>
     public ElementaryStreamDescriptorBox() { }
-    internal ElementaryStreamDescriptorBox(BmffBoxHeader header) { Offset = header.Offset; Limit = header.TotalSize ?? 0; }
+    internal ElementaryStreamDescriptorBox(BmffBoxHeader header) { }
     /// <summary>Gets or sets the complete opaque payload, excluding the box header.</summary>
     public BinarySegment Data { get => Payload; set => Payload = value; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
-    /// <inheritdoc/>
-    public override long Limit { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x65736473;
 }

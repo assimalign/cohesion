@@ -12,19 +12,10 @@ public sealed class MediaDataBox : BmffBox
     /// <param name="limit">The original total size.</param>
     public MediaDataBox(long offset, long limit)
     {
-        Offset = offset;
-        Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
     /// <summary>Gets or sets the payload without forcing materialization.</summary>
     public BinarySegment Payload { get; set; }
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    /// <inheritdoc/>
-    public override long Limit { get; }
-    /// <inheritdoc/>
-    public override long Offset { get; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.MediaData;
     /// <inheritdoc/>
