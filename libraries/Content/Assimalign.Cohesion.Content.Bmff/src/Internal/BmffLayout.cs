@@ -11,6 +11,7 @@ internal readonly record struct BmffLayoutEntry(long Offset, int HeaderSize, lon
 
 internal sealed class BmffLayout
 {
+    internal Func<BmffBox, long, bool, long>? PayloadOffsetMap { get; set; }
     internal Dictionary<BmffBox, BmffLayoutEntry> Entries { get; } = new(ReferenceEqualityComparer.Instance);
 
     internal static BmffLayout Original(IList<BmffBox> boxes)
@@ -87,12 +88,12 @@ internal sealed class BmffLayout
                 continue;
             }
 
-            if (!target.Entries.TryGetValue(pair.Key, out var destination) || address - start >= (ulong)destination.PayloadSize)
+            if (!target.Entries.TryGetValue(pair.Key, out var destination))
             {
                 throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, pair.Value.Offset);
             }
 
-            return (ulong)destination.PayloadOffset + address - start;
+            return (ulong)destination.PayloadOffset + MapPayload(pair.Key, address - start, target);
         }
         return address;
     }
@@ -124,11 +125,7 @@ internal sealed class BmffLayout
         }
         if (address >= (ulong)source.PayloadOffset)
         {
-            var relative = address - (ulong)source.PayloadOffset;
-            if (relative >= (ulong)destination.PayloadSize)
-            {
-                throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, source.Offset);
-            }
+            var relative = MapPayload(selected, address - (ulong)source.PayloadOffset, target, end);
             return (ulong)destination.PayloadOffset + relative;
         }
         var headerRelative = address - (ulong)source.Offset;
@@ -137,6 +134,20 @@ internal sealed class BmffLayout
             throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, source.Offset);
         }
         return (ulong)destination.Offset + headerRelative;
+    }
+
+    internal ulong MapPayload(BmffBox box, ulong offset, BmffLayout target, bool end = false)
+    {
+        if (offset > long.MaxValue || !target.Entries.TryGetValue(box, out var destination))
+        {
+            throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, box.Offset);
+        }
+        var mapped = PayloadOffsetMap?.Invoke(box, (long)offset, end) ?? (long)offset;
+        if (mapped < 0 || mapped > destination.PayloadSize || (!end && mapped == destination.PayloadSize))
+        {
+            throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, box.Offset);
+        }
+        return (ulong)mapped;
     }
 
     internal ulong MapMoof(ulong address, BmffLayout target)

@@ -321,7 +321,12 @@ Successful calls checkpoint the new layout, so repeated saves do not apply delta
 Failures restore reference arrays, widths, versions and promoted child replacements. The caller's
 structural edits remain in place. Source segments and original Header/Offset/Limit never change.
 
-Removing or shortening a referenced mdat fails with InvalidStructure. Relative offsets outside
+Removing or shortening a referenced mdat without a payload map fails with InvalidStructure.
+A profile that compacts data first replaces the payload and calls the RelocateMediaOffsets overload
+with a pure payload-relative mapping callback. The callback distinguishes byte addresses from
+exclusive end boundaries and returns a negative value for erased targets. All supported reference
+rules share this map; method-1 iloc offsets also use their sibling idat map. The caller restores
+payloads if planning fails; BMFF restores reference fields. HEIF uses this seam for physical erasure. Relative offsets outside
 Int32 fail with InvalidValue. Opaque offset-bearing standard boxes and implicit previous-traf
 bases after the first traf fail with Unsupported if the layout changes. The operation does not
 interpret codec/sample-entry fields or arbitrary unknown references. Unregistered profile-specific

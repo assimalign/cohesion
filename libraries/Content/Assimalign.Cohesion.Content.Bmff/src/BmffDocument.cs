@@ -128,6 +128,26 @@ public sealed class BmffDocument : IDisposable
         RelocateCore(outputOffset, 64);
     }
 
+    /// <summary>Relocates references after a profile has compacted payload bytes.</summary>
+    /// <param name="mapPayloadOffset">Maps a box's checkpoint payload-relative offset to its edited payload.
+    /// The Boolean is true for an exclusive end boundary. Return a negative value for a deleted target;
+    /// return the input offset for unaffected boxes. The callback must be pure across planning retries.</param>
+    /// <param name="outputOffset">The absolute start of the planned output.</param>
+    /// <remarks>The caller replaces payloads before calling and restores them if planning fails.
+    /// Reference changes remain transactional. Local method-1 iloc extents also use the enclosing idat map.</remarks>
+    /// <exception cref="ArgumentNullException">The mapper is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The output offset is negative.</exception>
+    /// <exception cref="ContentFormatException">A reference cannot be mapped or represented.</exception>
+    /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
+    public void RelocateMediaOffsets(Func<BmffBox, long, bool, long> mapPayloadOffset, long outputOffset = 0)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(mapPayloadOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(outputOffset);
+        _layout = _layout is null ? BmffLayout.Measure(Boxes, outputOffset, 64) :
+            BmffOffsetRelocator.Relocate(Boxes, _layout, outputOffset, 64, _registry, mapPayloadOffset);
+    }
+
     private void RelocateCore(long outputOffset, int maxDepth)
     {
         _layout = _layout is null

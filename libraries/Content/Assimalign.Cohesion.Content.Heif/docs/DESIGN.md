@@ -77,10 +77,24 @@ Exif, XMP and ICC payload contents are not parsed.
 Rotation/mirror edits append a new property and replace only the selected item association;
 they do not mutate another image sharing the original property. Replacements and thumbnails
 append borrowed segments to idat through a seekable concatenation view. No unchanged image data
-is copied into managed buffers. Metadata removal deletes descriptors, locations, associations
-and understood references. Unreferenced bytes in shared mdat/idat remain: these operations are
-logical metadata removal, not a secure-erasure or byte-scrubbing API. Applications requiring
-physical removal of residual metadata need a future data-compaction feature.
+is copied into managed buffers. RemoveItem, RemoveExif, RemoveXmp and RemoveThumbnail delete
+descriptors, locations, associations and understood references. Save physically compacts the
+deleted extents out of mdat/idat. Replacement also retires the previous payload. There is no
+structural-only removal mode.
+
+Compaction removes the union of deleted ranges minus the union of retained item ranges. A byte
+shared with any retained item is kept, including partial overlaps; the remaining unshared bytes
+of the deleted extent are removed. Unrelated unreferenced bytes are preserved. This is a saved-file
+contract, not an overwrite of the original source or a guarantee about copies elsewhere.
+
+Surviving slices are concatenated without buffering image data. Every retained iloc extent is
+relocated; zero lengths are resolved before compaction and base-relative entries are normalized.
+BMFF's payload-map relocation overload also updates supported chunk, auxiliary, fragment and
+index references into moved data. References into erased bytes fail before output. Failed planning
+restores payloads and location fields; successful planning checkpoints once, even if output later
+fails. Subsequent saves and edits use that checkpoint while item data retains borrowed source slices.
+Unresolved, external or method-2 extents prevent removal because their sharing cannot be established.
+Primary items and inputs still needed by derived images cannot be removed.
 
 Save delegates to BmffDocument.Save/SaveAsync, which relocates method-0 mdat references when meta
 grows or shrinks. Resolved item segments retain original source coordinates across repeated saves.

@@ -155,6 +155,7 @@ public sealed partial class HeifDocument
             var available = location.ConstructionMethod == 0 ? Document.Source!.Length : _idat!.Payload.Length;
             var segments = new List<BinarySegment>(location.Extents.Length);
             var positions = new List<long>(location.Extents.Length);
+            var ranges = new List<HeifDataRange>(location.Extents.Length);
             foreach (var extent in location.Extents)
             {
                 // Compare by subtraction before adding untrusted 64-bit fields.
@@ -180,6 +181,8 @@ public sealed partial class HeifDocument
                         if (start >= dataStart && start - dataStart <= media.Payload.Length && length <= media.Payload.Length - (start - dataStart))
                         {
                             contained = true;
+                            ranges.Add(new HeifDataRange(media, start - dataStart, length));
+                            break;
                         }
                     }
                     if (!contained)
@@ -191,11 +194,12 @@ public sealed partial class HeifDocument
                 {
                     segments.Add(_idat!.Payload.Slice(start, length));
                     positions.Add(_idat.Offset + _idat.Header.HeaderSize + start);
+                    ranges.Add(new HeifDataRange(_idat, start, length));
                 }
             }
             // Invalid extents must never leave a partial payload looking usable.
             if (segments.Count == location.Extents.Length)
-            { item.Data = segments.AsReadOnly(); item.DataPositions = positions.ToArray(); }
+            { item.Data = segments.AsReadOnly(); item.DataPositions = positions.ToArray(); _itemRanges[item.Id] = ranges; }
         }
         foreach (var item in _items)
         {

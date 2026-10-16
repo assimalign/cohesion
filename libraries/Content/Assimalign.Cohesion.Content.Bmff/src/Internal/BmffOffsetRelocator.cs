@@ -14,15 +14,17 @@ internal sealed class BmffOffsetRelocator
 
     private BmffOffsetRelocator(BmffLayout original, BmffBoxRegistry registry) { _original = original; _registry = registry; }
 
-    internal static BmffLayout Relocate(IList<BmffBox> boxes, BmffLayout original, long outputOffset, int maxDepth, BmffBoxRegistry registry)
+    internal static BmffLayout Relocate(IList<BmffBox> boxes, BmffLayout original, long outputOffset, int maxDepth, BmffBoxRegistry registry,
+        Func<BmffBox, long, bool, long>? mapPayloadOffset = null)
     {
         var current = BmffLayout.Measure(boxes, outputOffset, maxDepth);
-        if (current.SamePositions(original))
+        if (current.SamePositions(original) && mapPayloadOffset is null)
         {
             return current;
         }
 
         var relocator = new BmffOffsetRelocator(original, registry);
+        original.PayloadOffsetMap = mapPayloadOffset;
         try
         {
             relocator.Collect(boxes, null, null, true, null);
@@ -52,6 +54,7 @@ internal sealed class BmffOffsetRelocator
 
             throw;
         }
+        finally { original.PayloadOffsetMap = null; }
     }
 
     private void Collect(IList<BmffBox> boxes, MovieFragmentBox? moof, TrackFragmentHeaderBox? tfhd, bool knownBase, MovieFragmentRandomAccessBox? mfra)
@@ -78,7 +81,7 @@ internal sealed class BmffOffsetRelocator
                     case BmffAuxiliaryOffsetsBox saio: AddAuxiliaryOffsets(saio, moof, tfhd, knownBase); break;
                     case ChunkOffsetBox stco: AddChunk32(boxes, index, stco); break;
                     case ChunkOffset64BitBox co64: AddChunk64(co64); break;
-                    case ItemLocationBox iloc: AddItems(iloc); break;
+                    case ItemLocationBox iloc: AddItems(iloc, boxes); break;
                     case TrackFragmentHeaderBox header: AddBase(header); break;
                     case TrackFragmentRunBox run when moof is not null: AddRun(run, moof, tfhd, knownBase); break;
                     case TrackFragmentRandomAccessBox tfra: AddRandomAccess(tfra); break;
@@ -93,7 +96,7 @@ internal sealed class BmffOffsetRelocator
                         });
                         break;
                 }
-                }
+            }
             if (box is MovieFragmentBox fragment)
             {
                 Collect(fragment.Children, fragment, null, true, null);
@@ -262,8 +265,13 @@ internal sealed class BmffOffsetRelocator
         _updates.Add(layout => box.BaseDataOffset = _original.MapBase(value.Value, layout));
     }
 
-    private void AddItems(ItemLocationBox box)
+    private void AddItems(ItemLocationBox box, IList<BmffBox> siblings)
     {
+        BmffBox? idat = null;
+        foreach (var sibling in siblings)
+        {
+            if ((uint)sibling.BoxType == 0x69646174) { idat = sibling; break; }
+        }
         var entries = box.Entries;
         var baseSize = box.BaseOffsetSize;
         var offsetSize = box.OffsetSize;
@@ -274,6 +282,17 @@ internal sealed class BmffOffsetRelocator
             for (var i = 0; i < values.Length; i++)
             {
                 var old = entries[i];
+                if (old.DataReferenceIndex == 0 && old.ConstructionMethod == 1 && idat is not null && _original.PayloadOffsetMap is not null)
+                {
+                    values[i].BaseOffset = 0;
+                    values[i].Extents = (ItemLocationBox.Extent[])old.Extents.Clone();
+                    for (var j = 0; j < old.Extents.Length; j++)
+                    {
+                        values[i].Extents[j].Offset = _original.MapPayload(idat, Add(old.BaseOffset, old.Extents[j].Offset, box.Offset), layout);
+                        box.OffsetSize = Grow(box.OffsetSize, values[i].Extents[j].Offset);
+                    }
+                    continue;
+                }
                 if (old.DataReferenceIndex != 0 || old.ConstructionMethod != 0)
                 {
                     continue;
