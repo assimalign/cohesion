@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="BufferLimit" xml:space="preserve"><value>The MP4 prefix exceeds the configured buffer limit.</value></data>
+  <data name="EntryInvalid" xml:space="preserve"><value>The MP4 sample entry is invalid.</value></data>
+  <data name="CompressorNameInvalid" xml:space="preserve"><value>The compressor name must contain at most 31 ISO-8859-1 bytes.</value></data>
+  <data name="AudioVersionUnsupported" xml:space="preserve"><value>QuickTime audio sample-entry versions are not supported.</value></data>
+</root>
+

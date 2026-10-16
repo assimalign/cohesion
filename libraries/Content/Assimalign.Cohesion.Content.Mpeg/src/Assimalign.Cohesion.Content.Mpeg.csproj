@@ -4,4 +4,8 @@
 	</PropertyGroup>
 
 
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Bmff" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Media" />
+	</ItemGroup>
 </Project>

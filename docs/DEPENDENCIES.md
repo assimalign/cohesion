@@ -29,11 +29,11 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 691 |
+| Projects indexed | 692 |
 | Shipped library/resource projects | 255 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 733 |
+| Declared project references | 735 |
 | Declared shared-source links | 23 |
 
 ## Ambiguous project names
@@ -312,6 +312,8 @@ flowchart LR
     N5 --> N10
     N6 --> N1
     N7 --> N2
+    N8 --> N2
+    N8 --> N6
     N9 --> N1
     N10 --> N0
     N11 --> N0
@@ -328,7 +330,7 @@ flowchart LR
 | `Assimalign.Cohesion.Content.Markdown` | `Assimalign.Cohesion.Content`<br>`Assimalign.Cohesion.Content.Text` | — | — | — |
 | `Assimalign.Cohesion.Content.Media` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Mkv` | `Assimalign.Cohesion.Content.Bmff` | — | — | — |
-| `Assimalign.Cohesion.Content.Mpeg` | — | — | — | — |
+| `Assimalign.Cohesion.Content.Mpeg` | `Assimalign.Cohesion.Content.Bmff`<br>`Assimalign.Cohesion.Content.Media` | — | — | — |
 | `Assimalign.Cohesion.Content.Pdf` | `Assimalign.Cohesion.Content.Binary` | — | — | — |
 | `Assimalign.Cohesion.Content.Text` | `Assimalign.Cohesion.Content` | — | — | — |
 | `Assimalign.Cohesion.Content.Yaml` | `Assimalign.Cohesion.Content`<br>`Assimalign.Cohesion.Content.Text` | — | — | — |
@@ -1128,7 +1130,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-325 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+326 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1143,7 +1145,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | `examples/` | 5 |
 | `fixtures/` | 9 |
 | `samples/` | 10 |
-| `tests/` | 301 |
+| `tests/` | 302 |
 
 Samples, which live in the repository-root `samples/` tree:
 
