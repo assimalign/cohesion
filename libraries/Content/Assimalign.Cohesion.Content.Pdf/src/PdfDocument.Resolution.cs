@@ -27,6 +27,7 @@ public sealed partial class PdfDocument
         {
             // Encrypted object streams may contain the catalog; xrefs/trailer must still load.
             if (!IsEncrypted) { UpdateVersion(); }
+            _trailerState = new PdfObjectState(Trailer, _options.MaxDepth, _options.MaxObjects);
         }
         finally { _loadCancellationToken = default; }
     }
@@ -72,14 +73,14 @@ public sealed partial class PdfDocument
         // Exception filters run before ResolveCore finally unwinds its recursion guard.
         var isOutermost = _resolving.Count == 0;
         try { return ResolveCore(identifier); }
-        catch (ContentFormatException error) when (_options.IsLenient && !_recovered && isOutermost && error.ErrorCode == ContentFormatErrorCode.InvalidStructure)
+        catch (ContentFormatException error) when (_options.IsLenient && !_recovered && isOutermost && !HasEdits && error.ErrorCode == ContentFormatErrorCode.InvalidStructure)
         {
             _recovered = true;
             var (entries, trailer) = new PdfFileLoader(_source, SourceOffset, _options, _loadCancellationToken, _security).Rebuild();
             _entries.Clear();
             foreach (var pair in entries) { _entries.Add(pair.Key, pair.Value); }
             foreach (var pair in trailer) { Trailer[pair.Key] = pair.Value; }
-            _cache.Clear(); _objectStream = null; StartXref = -1;
+            _cache.Clear(); _originalStates.Clear(); _objectStream = null; StartXref = -1;
             _security.IsEncrypted = IsEncrypted;
             return ResolveCore(identifier);
         }
@@ -115,6 +116,7 @@ public sealed partial class PdfDocument
                 value = _objectStream.Extract(entry.ObjectStreamIndex, identifier.Number, _options, () => _security.IsEncrypted);
             }
             _cache.Add(identifier, value);
+            _originalStates.Add(identifier, new PdfObjectState(value, _options.MaxDepth, _options.MaxObjects));
             return value;
         }
         finally { _resolving.Remove(identifier); }

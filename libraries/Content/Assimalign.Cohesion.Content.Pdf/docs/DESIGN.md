@@ -206,3 +206,27 @@ object-stream and xref requirements. The
 [program plan](../../../../docs/programs/CONTENT_FOUNDATION_PLAN.md) and
 [Binary design](../../Assimalign.Cohesion.Content.Binary/docs/DESIGN.md) define shared limits,
 lazy-source lifetime and malformed-input vocabulary.
+
+## Stage 3 serialization and mutation decision
+
+The internal serializer emits invariant integers and shortest round-trip Double decimals, expanding
+exponents without rounding; integral reals retain a decimal point and negative zero retains its sign.
+Names use uppercase #xx escapes outside ASCII 33–126 and for delimiters and #. Literal strings
+escape every parenthesis, backslash, standard control and other non-printable byte (three octal digits).
+Hexadecimal syntax is used when requested by the source or when more than half the bytes fall outside
+ASCII 32–126. Ordered containers preserve insertion order. Streams retain encoded bytes and receive
+a direct Length matching the emitted extent. Direct cycles and excessive nesting fail loudly.
+
+Add allocates above Size and every known identity, without reusing free numbers; Replace preserves
+the current generation; Free increments it up to 65535. Trailer remains directly editable. Automatic
+tracking records the revisions of all direct mutable containers at resolution, including stream
+dictionaries; references are leaves. Save examines these snapshots without reading payloads. A nested
+in-place edit marks every containing resolved indirect object. Explicit replacement also marks dirty.
+Rejected: an explicit-only Replace contract would silently discard existing in-place container edits
+in incremental saves unless it also compared every direct graph. Revisions avoid that duplicate work
+and event subscriptions. Changed-back containers may conservatively remain dirty. Read-side recovery
+is disabled once edits exist, because rebuilding the cache would lose them.
+
+ReplaceData borrows unencoded BinarySegment bytes, removes old filters/external-file entries, updates
+Length and exposes the replacement immediately. Its memory/source must stay unchanged and open.
+The existing interfaces and immutable object types need no new public members.
