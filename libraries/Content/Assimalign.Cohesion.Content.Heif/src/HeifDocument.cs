@@ -129,6 +129,7 @@ public sealed partial class HeifDocument : IDisposable
     /// <param name="cancellationToken">Cancellation for the save.</param>
     /// <returns>A task completing after the save.</returns>
     /// <exception cref="ContentFormatException">The edit cannot be relocated safely.</exception>
+    /// <exception cref="InvalidOperationException">The output is the original source.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
     public ValueTask SaveAsync(Stream output, CancellationToken cancellationToken = default)

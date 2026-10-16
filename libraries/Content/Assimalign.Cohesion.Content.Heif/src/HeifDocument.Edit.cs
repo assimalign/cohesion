@@ -187,6 +187,7 @@ public sealed partial class HeifDocument
     /// <param name="quarterTurns">Zero through three counter-clockwise quarter turns.</param>
     /// <exception cref="ArgumentOutOfRangeException">The rotation is outside zero through three.</exception>
     /// <exception cref="ContentFormatException">The item is not editable or a property limit is exceeded.</exception>
+    /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
     public void SetRotation(uint itemId, byte quarterTurns)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThan(quarterTurns, (byte)3);
@@ -204,6 +205,7 @@ public sealed partial class HeifDocument
     /// <param name="axis">Zero for vertical, one for horizontal, or null to remove mirroring.</param>
     /// <exception cref="ArgumentOutOfRangeException">The axis exceeds one.</exception>
     /// <exception cref="ContentFormatException">The item is not editable or a property limit is exceeded.</exception>
+    /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
     public void SetMirror(uint itemId, byte? axis)
     {
         if (axis.HasValue)

@@ -94,6 +94,7 @@
 	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Heif/tests/">
 		<Project Path="Assimalign.Cohesion.Content.Heif/tests/Assimalign.Cohesion.Content.Heif.Tests.csproj" />
+		<File Path="Assimalign.Cohesion.Content.Heif/tests/TestObjects/Corpus/PROVENANCE.md" />
 	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Markdown/">
 		<File Path="Assimalign.Cohesion.Content.Markdown/README.md" />

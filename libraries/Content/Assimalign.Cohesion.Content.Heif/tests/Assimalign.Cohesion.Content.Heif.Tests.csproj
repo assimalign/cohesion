@@ -11,4 +11,7 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Content.Heif" />
     <Compile Include="$(CohesionRepositoryDirectory)libraries/Content/Assimalign.Cohesion.Content.Binary/tests/Shared/*.cs" Link="Shared/Binary/%(Filename)%(Extension)" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="TestObjects/Corpus/*.bin" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

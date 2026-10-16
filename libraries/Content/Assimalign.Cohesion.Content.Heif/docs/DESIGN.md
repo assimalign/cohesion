@@ -96,3 +96,22 @@ view edits thereafter. No concurrent source reads or document operations are sup
 The implementation permits nine requested brands: mif1, msf1, heic, heix, heim, heis, avif, avis,
 avio. Sequence-only brands report Unsupported; a mixed file exposes its items in lenient mode
 and reports unhandled tracks. Full brand-profile, pixel/bitstream and MIAF conformance is not claimed.
+
+## Compliance evidence
+
+The checked-in HEIC-shaped, AVIF-shaped, grid/thumbnail and Exif/XMP files are reproduced exactly
+by HeifFixtures.Create and checked by HeifCorpusTests. Their [provenance](../tests/TestObjects/Corpus/PROVENANCE.md)
+records the original writer recipe and specification clauses. Codec payloads are placeholders.
+Every new test names an ISO/IEC 23008-12 clause title, ISO/IEC 14496-12 clause or AVIF section.
+
+Coverage includes both ipma widths and item-ID versions, all requested boxes, reserved and
+trailing bytes, unknown children/properties, strict and lenient structural failures, hidden or
+missing primary items, grid counts and cycles, extent bounds/overflow, Exif offsets, signed
+16/32-bit overlays, identity images, fragmented metadata, resource caps and header truncation.
+The linked Content.Binary TruncationCorpus supplies every-header-prefix checks.
+Absolute errors in fragmented descriptors map back to the original extent coordinates.
+
+Streaming tests reject seeking on network-style input/output and prove a 40 GiB idat is loaded
+without reading its payload. Metadata edits before mdat preserve image bytes after reload, and
+repeated saves do not apply relocation twice. No codec conformance or complete HEIF/AVIF profile
+certification is implied by these structural tests.

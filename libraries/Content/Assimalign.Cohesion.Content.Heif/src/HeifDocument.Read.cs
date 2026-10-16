@@ -309,9 +309,14 @@ public sealed partial class HeifDocument
     {
         if (item.Data.Count == 0 && item.Type.Value != 0x6964656e)
         {
+            if (item.IsImage || item.Type.Value == 0x45786966)
+            {
+                Report(ErrorMessages.Truncated, ContentFormatErrorCode.Truncated, item.Info.Offset, item);
+            }
             return;
         }
 
+        var readingDescriptor = false;
         try
         {
             if (item.Type.Value == 0x45786966) { ReadExif(item); return; }
@@ -360,10 +365,11 @@ public sealed partial class HeifDocument
 
             var bytes = new byte[(int)stream.Length];
             stream.ReadContentExactly(bytes);
-            var reader = new BinaryContentReader(bytes, item.DataPositions[0]);
+            var reader = new BinaryContentReader(bytes);
+            readingDescriptor = true;
             var version = reader.ReadByte();
             var flags = reader.ReadByte();
-            HeifFields.Version(version, flags, 0, 1, reader.Position - 2);
+            HeifFields.Version(version, flags, 0, 1, MapDataPosition(item, reader.Position - 2));
             var large = (flags & 1) != 0;
             if (item.Type.Value == 0x67726964)
             {
@@ -373,11 +379,11 @@ public sealed partial class HeifDocument
                 var height = large ? reader.ReadUInt32BigEndian() : reader.ReadUInt16BigEndian();
                 if (rows * columns > _options.MaxGridTileCount)
                 {
-                    Report(ErrorMessages.LimitExceeded, ContentFormatErrorCode.LimitExceeded, reader.Position, item);
+                    Report(ErrorMessages.LimitExceeded, ContentFormatErrorCode.LimitExceeded, MapDataPosition(item, reader.Position), item);
                 }
 
                 if (rows * columns != inputs.Count || !ValidSize(width, height) || !reader.IsEnd)
-                { Report(ErrorMessages.InvalidGrid, ContentFormatErrorCode.InvalidStructure, reader.Position, item); return; }
+                { Report(ErrorMessages.InvalidGrid, ContentFormatErrorCode.InvalidStructure, MapDataPosition(item, reader.Position), item); return; }
                 item.Grid = new HeifGridImage(rows, columns, width, height, inputs.AsReadOnly());
             }
             else
@@ -391,7 +397,7 @@ public sealed partial class HeifDocument
                 var width = large ? reader.ReadUInt32BigEndian() : reader.ReadUInt16BigEndian();
                 var height = large ? reader.ReadUInt32BigEndian() : reader.ReadUInt16BigEndian();
                 if (!ValidSize(width, height) || reader.Remaining != (long)inputs.Count * (large ? 8 : 4))
-                { Report(ErrorMessages.InvalidGrid, ContentFormatErrorCode.InvalidStructure, reader.Position, item); return; }
+                { Report(ErrorMessages.InvalidGrid, ContentFormatErrorCode.InvalidStructure, MapDataPosition(item, reader.Position), item); return; }
                 var layers = new HeifOverlayImage.Layer[inputs.Count];
                 for (var i = 0; i < layers.Length; i++)
                 {
@@ -402,8 +408,32 @@ public sealed partial class HeifDocument
                 item.Overlay = new HeifOverlayImage(width, height, Array.AsReadOnly(fill), Array.AsReadOnly(layers));
             }
         }
-        catch (ContentFormatException error) when (!_options.Strict && error.ErrorCode != ContentFormatErrorCode.LimitExceeded)
-        { item.IsSupported = false; _diagnostics.Add(error); }
+        catch (ContentFormatException error)
+        {
+            var mapped = readingDescriptor && error.ErrorCode == ContentFormatErrorCode.Truncated
+                ? new ContentFormatException(error.Message, error.ErrorCode, MapDataPosition(item, error.Position ?? 0))
+                : error;
+            if (_options.Strict || error.ErrorCode == ContentFormatErrorCode.LimitExceeded)
+            {
+                if (ReferenceEquals(mapped, error)) { throw; }
+                throw mapped;
+            }
+            item.IsSupported = false;
+            _diagnostics.Add(mapped);
+        }
+    }
+
+    private static long MapDataPosition(HeifItem item, long logicalPosition)
+    {
+        for (var i = 0; i < item.Data.Count; i++)
+        {
+            if (logicalPosition < item.Data[i].Length || i == item.Data.Count - 1)
+            {
+                return item.DataPositions[i] + Math.Min(logicalPosition, item.Data[i].Length);
+            }
+            logicalPosition -= item.Data[i].Length;
+        }
+        return item.Info.Offset;
     }
 
     private bool ValidSize(uint width, uint height) => width != 0 && height != 0 && width <= _options.MaxImageDimension && height <= _options.MaxImageDimension;
@@ -461,6 +491,7 @@ public sealed partial class HeifDocument
                         if (GetItem(id) is { } child)
                         {
                             Visit(child, depth + 1);
+                            item.IsSupported &= child.IsSupported;
                         }
                     }
                 }

@@ -30,20 +30,18 @@ public sealed class ItemPropertyAssociationBox : BmffFullBox
     /// <summary>An ordered property index and its essential flag.</summary>
     public struct Association
     {
-    /// <summary>Gets or sets the one-based property index; zero means no property.</summary>
-    public ushort PropertyIndex { get; set; }
-    /// <summary>Gets or sets whether the property is required to interpret the item.</summary>
-    public bool Essential { get; set; }
-
+        /// <summary>Gets or sets the one-based property index; zero means no property.</summary>
+        public ushort PropertyIndex { get; set; }
+        /// <summary>Gets or sets whether the property is required to interpret the item.</summary>
+        public bool Essential { get; set; }
     }
     /// <summary>An item's ordered associations.</summary>
     public struct Entry
     {
-    /// <summary>Gets or sets the item identifier.</summary>
-    public uint ItemId { get; set; }
-    /// <summary>Gets or sets the associations in encoded order.</summary>
-    public Association[] Associations { get; set; }
-
+        /// <summary>Gets or sets the item identifier.</summary>
+        public uint ItemId { get; set; }
+        /// <summary>Gets or sets the associations in encoded order.</summary>
+        public Association[] Associations { get; set; }
     }
     /// <summary>Gets or sets the ordered item associations.</summary>
     public Entry[] Entries { get; set; } = Array.Empty<Entry>();
