@@ -28,6 +28,7 @@ public sealed partial class PdfDocument
             // Encrypted object streams may contain the catalog; xrefs/trailer must still load.
             if (!IsEncrypted) { UpdateVersion(); }
             _trailerState = new PdfObjectState(Trailer, _options.MaxDepth, _options.MaxObjects);
+            foreach (var key in Trailer.Keys) { _originalTrailerKeys.Add(key); }
         }
         finally { _loadCancellationToken = default; }
     }

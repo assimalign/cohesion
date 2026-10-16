@@ -257,3 +257,34 @@ bitstream promise. Save does not change the model's trailer, stream dictionaries
 reload the output to make it the source of a subsequent revision. Partial output after I/O failure
 or cancellation must be discarded. WriteAsync currently follows the synchronous I/O path with
 cancellation checks between bounded reads/writes, matching the reader's execution model.
+## Stage 3 incremental save
+
+Incremental=true copies the PDF source range, from its recorded SourceOffset to its recorded end,
+with Content.Binary CopyExactlyTo, then appends changed/new objects, a rebuilt free list and a
+trailer with Prev pointing to the original StartXref. A source length change is rejected. Prefix
+bytes before the caller-supplied PDF origin are outside the document. The original PDF range is
+byte-identical in the output. Objects are never packed during an incremental save. Replaced
+compressed members receive ordinary uncompressed entries, which supersede their old stream entries.
+
+The loader retains the last section's actual style separately from the merged trailer: table follows
+table, stream follows stream, hybrid writes a supplemental stream plus a companion table whose
+XRefStm points to it. Prev belongs to the companion table in a hybrid update. Older inherited Type
+or XRefStm keys cannot change the new revision's style. Freed entries increment generations and the
+free head and links are emitted together. Removed trailer keys receive null tombstones so Prev
+merging cannot resurrect Info or extension metadata. Structural keys are always regenerated.
+
+Recovered sources (StartXref=-1) require a full save first. Changing an object-stream container while
+unchanged compressed members still depend on it is rejected loudly: edit the individual members,
+or replace/free all dependent members before changing the container. This prevents stale decoded
+member caches from silently losing an edit. In-place append is deliberately omitted: separate
+storage is the contract, and rollback cannot make shared/wrapped source aliases or concurrent
+readers safe. Exact stream-object identity aliases are rejected; callers must also avoid distinct
+wrappers/handles over the same storage. Successful saves retain their original baseline, so repeated
+saves are deterministic; reload a saved file to build a new Prev revision.
+
+The generated and checked-in reader corpora round-trip incrementally with nested in-place edits.
+Four successive updates are tested in all three styles, including free-entry shadowing and links.
+An instrumented source measures the save after metadata resolution, rejects payload-sized reads,
+and proves a 2 MiB unsupported-codec payload is copied once without decode or materialization in
+both save modes. Parser setup can read ahead into a payload; that is separate from the measured
+copy operation. Cancellation and I/O failures leave the source untouched and the destination partial.

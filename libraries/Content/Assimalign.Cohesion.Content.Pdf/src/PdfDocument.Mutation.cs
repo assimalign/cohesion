@@ -10,6 +10,8 @@ public sealed partial class PdfDocument
     private readonly Dictionary<PdfObjectIdentifier, PdfObjectState> _originalStates = new();
     private readonly HashSet<int> _changed = new();
     private PdfObjectState? _trailerState;
+    private readonly HashSet<PdfName> _originalTrailerKeys = new();
+    internal IEnumerable<PdfName> OriginalTrailerKeys => _originalTrailerKeys;
 
     /// <summary>Allocates a new generation-zero indirect object, without reusing free numbers (§7.3.10).</summary>
     /// <param name="value">The object to retain.</param>

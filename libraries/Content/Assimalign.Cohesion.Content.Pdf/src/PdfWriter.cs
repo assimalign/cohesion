@@ -50,6 +50,7 @@ public sealed class PdfWriter : IContentWriter<PdfDocument>
         cancellationToken.ThrowIfCancellationRequested();
         document.ValidateSaveDestination(stream);
         using var session = new PdfSaveSession(document, stream, _options, cancellationToken);
-        session.WriteFull();
+        if (_options.Incremental) { session.WriteIncremental(); }
+        else { session.WriteFull(); }
     }
 }

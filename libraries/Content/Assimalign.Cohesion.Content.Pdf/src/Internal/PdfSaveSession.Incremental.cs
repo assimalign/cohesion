@@ -1,0 +1,62 @@
+using System.Collections.Generic;
+
+using Assimalign.Cohesion.Content.Binary;
+
+namespace Assimalign.Cohesion.Content.Pdf.Internal;
+
+internal sealed partial class PdfSaveSession
+{
+    internal void WriteIncremental()
+    {
+        if (_document.StartXref < 0)
+        {
+            throw new ContentFormatException(ErrorMessages.RepairedIncremental, ContentFormatErrorCode.Unsupported, _document.SourceOffset);
+        }
+        _next = _document.NextObjectNumber;
+        if (_next > (long)int.MaxValue + 1 || _document.CrossReferences.Count > _options.MaxObjects) { Limit(); }
+        _ = _document.Catalog;
+        var originalStart = _document.StartXref;
+        foreach (var entry in new List<PdfCrossReferenceEntry>(_document.CrossReferences.Values))
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (entry.Kind == PdfCrossReferenceKind.Free)
+            {
+                // Rebuild a complete, deterministic free chain without trusting old links.
+                _entries[entry.Identifier.Number] = entry; continue;
+            }
+            if (!_document.IsChanged(entry.Identifier)) { continue; }
+            _entries.Add(entry.Identifier.Number, entry);
+            _objects.Add(entry.Identifier.Number, _document.Resolve(entry.Identifier));
+        }
+        ValidateObjects();
+        if (originalStart < 0 || originalStart != _document.StartXref)
+        {
+            throw new ContentFormatException(ErrorMessages.RepairedIncremental, ContentFormatErrorCode.Unsupported, _document.SourceOffset);
+        }
+        using (var source = ContentSliceStream.Create(_document.Source, _document.SourceOffset, _document.SourceLength - _document.SourceOffset))
+        {
+            source.CopyExactlyTo(_output, source.Length);
+        }
+        _output.Text("\n");
+        WriteObjects(pack: false);
+        LinkFreeEntries();
+        var trailer = Trailer();
+        trailer[PdfName.Create("Prev"u8)] = PdfInteger.Create(originalStart);
+        long start;
+        if (_document.LastCrossReferenceStyle == PdfCrossReferenceStyle.Stream)
+        {
+            start = WriteCrossReferenceStream(trailer);
+        }
+        else
+        {
+            if (_document.LastCrossReferenceStyle == PdfCrossReferenceStyle.Hybrid)
+            {
+                var supplement = PdfObjectSerializer.CopyDictionary(trailer);
+                supplement.Remove(PdfName.Create("Prev"u8));
+                trailer[PdfName.Create("XRefStm"u8)] = PdfInteger.Create(WriteCrossReferenceStream(supplement));
+            }
+            start = WriteTable(trailer);
+        }
+        Finish(start);
+    }
+}

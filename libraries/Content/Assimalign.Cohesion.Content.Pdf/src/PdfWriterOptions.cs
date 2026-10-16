@@ -7,6 +7,8 @@ public sealed class PdfWriterOptions
 {
     /// <summary>Creates options for a full save with a classic cross-reference table.</summary>
     public PdfWriterOptions() { }
+    /// <summary>Gets whether to copy the original PDF and append edits in its last xref style; default false.</summary>
+    public bool Incremental { get; init; }
     /// <summary>Gets whether full saves use a cross-reference stream; requires PDF 1.5 or later.</summary>
     public bool UseCrossReferenceStream { get; init; }
     /// <summary>Gets whether full saves pack eligible objects; requires UseCrossReferenceStream.</summary>
@@ -26,6 +28,6 @@ public sealed class PdfWriterOptions
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxObjects);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxDepth);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxDepth, 512);
-        if (PackObjects && !UseCrossReferenceStream) { throw new ArgumentException(ErrorMessages.PackingNeedsStream); }
+        if (!Incremental && PackObjects && !UseCrossReferenceStream) { throw new ArgumentException(ErrorMessages.PackingNeedsStream); }
     }
 }

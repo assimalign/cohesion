@@ -28,4 +28,6 @@
   <data name="SourceChanged" xml:space="preserve"><value>The PDF backing source has changed since loading.</value></data>
   <data name="VersionUnsupported" xml:space="preserve"><value>PDF cross-reference and object streams require version 1.5 or later.</value></data>
   <data name="TableOffsetLimit" xml:space="preserve"><value>The PDF offset cannot fit a classic cross-reference table; use cross-reference streams.</value></data>
+  <data name="RepairedIncremental" xml:space="preserve"><value>A recovered PDF requires a full save before incremental updates.</value></data>
+  <data name="ObjectStreamEdited" xml:space="preserve"><value>Edit compressed members individually before replacing or freeing their object stream container.</value></data>
 </root>

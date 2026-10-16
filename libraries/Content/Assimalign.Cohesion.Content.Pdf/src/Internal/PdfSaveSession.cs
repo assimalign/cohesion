@@ -82,6 +82,15 @@ internal sealed partial class PdfSaveSession : IDisposable
     }
     private void ValidateObjects()
     {
+        foreach (var entry in _document.CrossReferences.Values)
+        {
+            if (entry.Kind != PdfCrossReferenceKind.Compressed || _document.IsChanged(entry.Identifier)) { continue; }
+            if (!_document.CrossReferences.TryGetValue(entry.ObjectStreamNumber, out var container) ||
+                container.Kind != PdfCrossReferenceKind.Uncompressed || _document.IsChanged(container.Identifier))
+            {
+                throw new ContentFormatException(ErrorMessages.ObjectStreamEdited, ContentFormatErrorCode.Unsupported, _document.SourceOffset);
+            }
+        }
         if (_document.Trailer.Get("Root") is not PdfIndirectReference root ||
             !_document.CrossReferences.TryGetValue(root.Identifier.Number, out var catalogEntry) ||
             catalogEntry.Kind == PdfCrossReferenceKind.Free || catalogEntry.Identifier != root.Identifier)
@@ -131,6 +140,11 @@ internal sealed partial class PdfSaveSession : IDisposable
     private PdfDictionary Trailer()
     {
         var trailer = PdfObjectSerializer.CopyDictionary(_document.Trailer);
+        if (_options.Incremental)
+        {
+            // An omitted key would inherit the older value when trailers are merged. Emit a null tombstone.
+            foreach (var key in _document.OriginalTrailerKeys) { if (!trailer.ContainsKey(key)) { trailer[key] = new PdfNull(); } }
+        }
         foreach (var key in new[] { "Type", "W", "Index", "Length", "Filter", "DecodeParms", "Prev", "XRefStm", "F", "FFilter", "FDecodeParms", "DL" })
         {
             trailer.Remove(PdfName.Create(Encoding.ASCII.GetBytes(key)));
