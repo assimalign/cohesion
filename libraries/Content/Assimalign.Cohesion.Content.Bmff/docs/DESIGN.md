@@ -4,7 +4,9 @@
 
 This package implements the ISO BMFF container layer: box identity and headers, bounded payloads,
 forward-only reading and writing, and an editable document whose opaque payloads remain lazy.
-The baseline is [ISO/IEC 14496-12](https://www.iso.org/standard/83102.html); known FourCCs are
+The baseline is [ISO/IEC 14496-12](https://www.iso.org/standard/83102.html); clause numbers below
+use its established box-definition numbering. The [MPEG reference implementation](https://github.com/MPEGGroup/isobmff)
+provides an additional cross-check for field grammar. Known FourCCs are
 identified by the [MP4 Registration Authority](https://mp4ra.org/registered-types/boxes).
 These references define the wire format, not a claim that every media profile is implemented.
 
@@ -105,7 +107,7 @@ Readers, writers and BmffStream windows never dispose their supplied stream. Dis
 not drain it. A lazy BinarySegment also borrows its source: keep that source open and byte-stable
 through save. Sequential segment reads reposition it; concurrent reads are not supported.
 
-Save copies lazy ranges through and leaves the output open. Use a separate destination; saving to
+Save relocates supported references as described below, copies lazy ranges through and leaves the output open. Use a separate destination; saving to
 the document's own Source is rejected. Other aliases of the source are also unsuitable and remain
 the caller's responsibility. The writer does not flush or close caller-owned outputs.
 
@@ -129,8 +131,8 @@ and sinf child types. The strategic field models below use the same version/flag
 
 ## Registry and profile extension
 
-BmffBoxRegistry.Default is immutable and built once from explicit delegates, with a factory for
-every existing concrete box class. UnknownBox is selected for arbitrary unregistered FourCCs.
+BmffBoxRegistry.Default is immutable and built once from explicit delegates for package boxes.
+Track-reference type children use their enclosing tref context; they are not global registrations. UnknownBox is selected for arbitrary unregistered FourCCs.
 BmffBoxRegistry.CreateBuilder copies the defaults; new BmffBoxRegistryBuilder starts empty.
 Register adds or replaces a factory; Build freezes a snapshot unaffected by later builder changes.
 Registering a default deferred type opts into the replacement parser.
@@ -167,11 +169,12 @@ are correctly composites. fiin has its own counted field grammar, so it remains 
 
 ## Limits and error codes
 
-The reader defaults to a 16 MiB buffered-leaf limit and depth 64 (top-level depth zero).
+The reader defaults to a 16 MiB buffered-leaf limit, 1,000,000 table entries and depth 64
+(top-level depth zero).
 The writer defaults to the same buffer and depth limits. Declared payload lengths are checked
 before rentals or arrays; media and opaque segments do not consume the materialization budget.
-Transfer buffers are fixed-size pooled buffers, independent of payload length. A document still
-allocates one node per box and a supported ftyp allocates its validated compatible-brand array.
+Transfer buffers are fixed-size pooled buffers, independent of payload length. A document allocates one node per box, and supported metadata allocates bounded field arrays.
+Media and opaque segments remain lazy. Limits are per leaf/table rather than a total document cap.
 
 | Code | Meaning in this layer |
 | --- | --- |
@@ -226,6 +229,50 @@ FileTypeBox.CompatableBrands is renamed CompatibleBrands. TrackBox loses its mis
 Flags, TimeScale, Duration, Rate, Volume, Reserved, Matrix, PreDefined and NextTrackID properties.
 Their applicable wire fields live on mvhd, tkhd or mdhd.
 
+## Field encodings and validation
+
+The encoded Version is retained and selected explicitly by callers; writers never silently
+downgrade it. Values that do not fit the selected width fail with InvalidValue. Relocation alone
+can widen a location encoding, because preserving a now-overflowing reference would corrupt it.
+
+| Models | Version / field rules |
+| --- | --- |
+| mvhd, tkhd, mdhd | v0 creation/modification/duration fields are 32 bits; v1 uses 64 bits. Timescales and track IDs remain 32 bits. Nonzero timescales/track IDs are required. |
+| mehd, tfdt | v0 duration/decode time is 32 bits; v1 is 64 bits. |
+| elst | v0 duration/media time is unsigned/signed 32 bits; v1 is unsigned/signed 64 bits. Only -1 is a legal negative media time. Rate halves retain their signed 16-bit representation. |
+| ctts, trun | v0 composition offsets are unsigned 32 bits; v1 offsets are signed 32 bits, exposed as long to cover both domains without loss. |
+| stsz | A nonzero SampleSize uses SampleCount without an entry array. With SampleSize zero, Entries supplies the emitted count and individual sizes. The declared wire count is checked even for a constant-size table. |
+| stz2 | FieldSize is 4, 8 or 16 bits. Sizes must fit, and an odd four-bit table retains its final padding nibble. |
+| stsc, stss | One-based chunk/sample indices are ordered; stsc requires positive samples-per-chunk and description indices. |
+| tfhd | Flags 0x1, 0x2, 0x8, 0x10 and 0x20 control nullable base, description, duration, size and sample-flags fields. 0x010000 and 0x020000 retain duration-is-empty/default-base-is-moof semantics. Explicit base and default-base-is-moof cannot coexist. |
+| trun | 0x1 and 0x4 control nullable data offset and first-sample flags; 0x100/0x200/0x400/0x800 control per-sample duration/size/flags/composition offset. First-sample flags and per-sample flags are mutually exclusive. Absent per-sample fields are ignored by the writer. |
+| tfra | v0 time/moof offset is 32 bits; v1 is 64 bits. Traf, trun and sample number widths remain explicitly 1-4 bytes. |
+| sbgp, sgpd | sbgp v1 adds GroupingTypeParameter. sgpd v1/v2 adds DefaultLength (zero means each entry has a length); v2 also adds DefaultSampleDescriptionIndex. v0 requires a known fixed-size group grammar. |
+| subs | v0 subsample sizes are 16 bits; v1 uses 32 bits. All 24 flags and codec-specific parameter bits are retained. Nested arrays share the leaf allocation budget. |
+| iloc | v0/v1 item IDs/counts are 16 bits; v2 uses 32 bits. v1/v2 carry construction methods and optional extent indices. Numeric widths are 0/4/8 bytes. v0's reserved index-size nibble is retained. |
+| pitm, iinf, infe | pitm v0 has a 16-bit item ID and v1 a 32-bit ID. iinf v0 has a 16-bit count and v1 a 32-bit count. infe v2/v3 IDs are 16/32 bits; item types, names, mime content fields and uri type strings are exposed. |
+| dref, stsd, iinf | EntryCount reflects Children. Declared counts are checked before creating entries; the suffix after the final counted child is preserved. |
+| url / urn, schm | Flag 1 controls self-contained data references or a scheme URI respectively. External url stores a location; urn stores name and location. |
+| meta, cprt, hdlr, XML and protection | Full-box prefixes are retained. mdhd/cprt expose both packed language bits and decoded ISO-639-2/T text. hdlr, xml, cprt and optional URI/MIME fields retain raw null-terminated UTF-8 bytes until assigned. bxml remains binary data. frma stores the original FourCC; sinf/schi retain ordered child structure. |
+
+Other first-wave full boxes use version zero. Unknown versions or flag bits produce Unsupported,
+which lenient loading preserves as UnknownBox. Only documented flag bits are accepted
+(tkhd: 0xf, vmhd: 1, infe: 1, and the masks above). Reserved/predefined bytes and matrix words
+are editable and re-emitted verbatim. UTF-8 getters decode text without changing its original bytes;
+this layer does not validate XML, codecs, MIME semantics, language registry membership or encryption.
+
+## Parsed-byte preservation
+
+An unmodified parsed model emits the original bytes: header width, version, optional-field flags,
+reserved fields, length widths, raw strings, array order, padding and the suffix after defined fields.
+There is no dirty flag or opaque replacement for understood fields: the model writes the encoded
+values directly. Reading a property does not canonicalize it. Assigning a text property intentionally
+re-encodes that value as UTF-8. Unknown boxes and sample-entry payloads copy through lazily.
+
+Uncounted composites have children through the end of their payload, so an incomplete child header
+is malformed, not a suffix. Unsupported versions preserve the whole box instead of guessing a field
+boundary. Byte identity does not imply codec validity; the MP4/HEIF profiles own those constraints.
+
 ## Relocation and mutation
 
 BmffDocument.RelocateMediaOffsets(outputOffset: 0) measures the edited tree and updates references
@@ -237,7 +284,8 @@ Keep new references in the previous layout's coordinates until relocation runs.
 The operation updates:
 
 - stco/co64 addresses inside retained mdat payloads; stco becomes co64 on overflow, carrying its
-  flags and preserved suffix. External/unmapped addresses stay unchanged.
+  flags and preserved suffix. Addresses outside those mdat ranges stay unchanged. Chunk data references are assumed local;
+  codec sample-entry parsing is needed to distinguish external track data references.
 - iloc method-0 entries with data_reference_index zero: both the base and effective
   base-plus-extent addresses move. A zero base with absolute extent offsets is supported.
   Widths grow from zero to four or eight bytes as necessary. Methods 1/2 and external entries
