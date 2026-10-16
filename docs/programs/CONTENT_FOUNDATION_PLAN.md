@@ -200,3 +200,4 @@ Filed 2026-10-16 as Backlog features under #14 (G7 as a task under #16):
 | 2026-10-16 | Stage 1 integrated: s1-docs (`7b1b52985`) and s1-binary (`ca5729b0b`) merged; follow-ups `dc315ca81` (stale MPEG inventory exclusion) and `ac9cb6328` (absolute slice error positions). |
 | 2026-10-16 | Draft PR #1557 opened. Stage 2 (s2-bmff-core, s2-ebml-core, s2-pdf, s2-exe) and s3-text-corpus started on `d452c5fe4`. |
 | 2026-10-16 | s3-text-corpus integrated (`d18e7d64d`): full CommonMark 0.31.2 harness (406 retained, 246 pinned degradations), Unicode/UTF-8 corpus, decoding errors as `ContentFormatException` (#1556), 13 Markdown parser/writer defects fixed. |
+| 2026-10-16 | s2-pdf integrated (`b2bcd4f61`): PDF object model, lexer/parser, xref tables and streams, object streams, structural filters with predictors, page tree, opt-in recovery; 152 tests; Pdf joins CI and the release inventory. #1555 (writer) is next for PDF. |
