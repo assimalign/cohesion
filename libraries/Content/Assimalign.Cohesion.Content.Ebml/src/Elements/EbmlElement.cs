@@ -24,14 +24,14 @@ public sealed class EbmlElement
     }
 
     /// <summary>Creates a typed leaf or an empty master.</summary>
-    /// <param name="identifier">The encoded ID.</param>
+    /// <param name="identifier">An initialized encoded VINT; schema validation and writing check ID eligibility.</param>
     /// <param name="type">The payload type.</param>
     /// <param name="value">The typed leaf value; null for masters.</param>
     /// <returns>The editable element.</returns>
     /// <exception cref="ArgumentException">The ID or value type is invalid.</exception>
     public static EbmlElement Create(VInt identifier, EbmlElementType type, object? value = null)
     {
-        if (!identifier.IsValidIdentifier)
+        if (identifier.Length == 0)
         {
             throw new ArgumentException(ErrorMessages.InvalidVInt, nameof(identifier));
         }

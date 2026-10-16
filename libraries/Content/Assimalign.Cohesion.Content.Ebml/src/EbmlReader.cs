@@ -135,7 +135,7 @@ public sealed partial class EbmlReader : IDisposable
                 return false;
             }
             var id = ReadVInt(0, _options.MaxIdLength);
-            if (!id.IsValidIdentifier)
+            if (!id.IsValidIdentifier && _schema.Find(id) is null)
             {
                 throw new EbmlDataFormatException(ErrorMessages.InvalidVInt, ContentFormatErrorCode.InvalidStructure, start);
             }

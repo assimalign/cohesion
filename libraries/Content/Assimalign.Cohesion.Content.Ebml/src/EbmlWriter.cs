@@ -355,7 +355,7 @@ public sealed partial class EbmlWriter : IDisposable
     private void WriteHeader(VInt identifier, long? size, int sizeLength)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!identifier.IsValidIdentifier)
+        if (!identifier.IsValidIdentifier && _schema.Find(identifier) is null)
         {
             throw new ArgumentException(ErrorMessages.InvalidVInt, nameof(identifier));
         }

@@ -48,7 +48,7 @@ public sealed partial class EbmlReader
                 return false;
             }
             var id = await ReadVIntAsync(0, _options.MaxIdLength, cancellationToken).ConfigureAwait(false);
-            if (!id.IsValidIdentifier)
+            if (!id.IsValidIdentifier && _schema.Find(id) is null)
             {
                 throw new EbmlDataFormatException(ErrorMessages.InvalidVInt, ContentFormatErrorCode.InvalidStructure, start);
             }
