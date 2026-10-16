@@ -60,6 +60,8 @@ Use the ordinary output path for the fixed run. TRX files are
 All regressions were run and observed failing before their corresponding production fix.
 The final matrix uses the same final test DLL against both sets of production assemblies:
 
+`2351BFC25E999B10CD3375B7860B49F33E80F30CAB8B636E652E03E9127F587B` (SHA-256).
+
 | Finding / test method in SqlCharacterBoundaryTests (unless stated) | Cases | Baseline P/F/S | Fixed P/F/S | Baseline failure |
 | --- | ---: | --- | --- | --- |
 | 1: Join_AccentInsensitiveCharacterKeys_ShouldReturnSameRowsAfterIndexing | 1 | 0/1/0 | 1/0/0 | Seek loses the scan's matching row |
@@ -223,7 +225,8 @@ The untouched original Release assemblies **and original test DLL** pass 2747/0/
 expanded test DLL and the same original production assemblies, the full suite is **2749/34/0**:
 the 33 proven CHAR regression failures plus this same rollback/checkpoint failure. The rollback
 test also passed three isolated baseline runs (1/0/0 each), confirming that the failing schedule
-is not deterministic. The expanded baseline and fixed Release test DLLs have identical SHA-256
+is not deterministic. The initial expanded full-suite baseline and fixed Release runs used
+identical test DLLs with SHA-256
 `B0BF40C1D3F593C6A1ABA108603EA555BE1175AFF151A910F0EC998F8BBEEEEE`.
 
 The test's `QuietOptions` (`tests/SqlTransactionRollbackTests.cs:212`) sets maintenance and
