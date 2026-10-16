@@ -150,6 +150,7 @@ public sealed class Mp4File : IMediaFile
     /// <param name="leaveOpen">Whether the source is borrowed.</param>
     /// <param name="cancellationToken">Cancellation for parsing and validation.</param>
     /// <returns>A synchronously completed media-view task.</returns>
+    /// <exception cref="ArgumentException">The source or limits are invalid.</exception>
     /// <exception cref="ContentFormatException">The input is malformed, unsupported or exceeds limits.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public static ValueTask<Mp4File> LoadAsync(Stream source, Mp4ReaderOptions? options = null, bool leaveOpen = true, CancellationToken cancellationToken = default) =>
@@ -217,4 +218,3 @@ public sealed class Mp4File : IMediaFile
         return references.Children[index - 1] is DataEntryUrlBox url && (url.Flags & 1) != 0;
     }
 }
-

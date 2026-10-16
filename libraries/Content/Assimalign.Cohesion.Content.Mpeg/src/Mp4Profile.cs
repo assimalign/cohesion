@@ -14,6 +14,7 @@ public static partial class Mp4Profile
     /// <summary>Builds an independent BMFF registry extended with the retained MP4 boxes.</summary>
     /// <param name="options">Limits for sample-entry prefixes, or defaults. Pass the same limits to the BMFF reader.</param>
     /// <returns>An immutable profile registry; BMFF defaults are never changed.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The prefix buffer limit is negative.</exception>
     public static BmffBoxRegistry CreateRegistry(BmffReaderOptions? options = null)
     {
         var limits = options ?? new BmffReaderOptions();
@@ -71,6 +72,7 @@ public static partial class Mp4Profile
     /// <param name="leaveOpen">Whether the document borrows the source.</param>
     /// <param name="cancellationToken">Cancellation between boxes and sample entries.</param>
     /// <returns>The caller-owned editable document.</returns>
+    /// <exception cref="ArgumentException">The source is not readable and seekable, or a limit is invalid.</exception>
     /// <exception cref="ContentFormatException">The container or entry is malformed or exceeds limits.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public static BmffDocument LoadDocument(Stream source, BmffReaderOptions? options = null, bool leaveOpen = true, CancellationToken cancellationToken = default)
@@ -122,4 +124,3 @@ public static partial class Mp4Profile
         }
     }
 }
-

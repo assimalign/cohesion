@@ -519,16 +519,19 @@
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mkv/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mkv/tests/Assimalign.Cohesion.Content.Mkv.Tests.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/" />
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/">
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/README.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/DESIGN.md" />
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/tests/">
-		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/tests/Assimalign.Cohesion.Content.Mpeg.Tests.csproj" />
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/PUBLIC_SURFACE.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/Assimalign.Cohesion.Content.Mpeg.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/tests/">
+		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/tests/Assimalign.Cohesion.Content.Mpeg.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Pdf/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Pdf/README.md" />
