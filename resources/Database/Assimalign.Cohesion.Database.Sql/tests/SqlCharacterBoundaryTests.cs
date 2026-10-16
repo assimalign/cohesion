@@ -133,12 +133,21 @@ public sealed class SqlCharacterBoundaryTests
         rows.ShouldBe([[expected, expected, !expected]]);
     }
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - IN chooses TEXT for a mixed CHAR and TEXT list before coercing its operand")]
-    [InlineData("CAST('b' AS CHAR(3)), CAST('a' AS TEXT)")]
-    [InlineData("CAST('a' AS TEXT), CAST('b' AS CHAR(3))")]
-    [InlineData("CAST('a' AS CHAR(3)), CAST('b' AS TEXT)")]
-    [InlineData("CAST('b' AS TEXT), CAST('a' AS CHAR(3))")]
-    public async Task In_MixedCharacterCandidates_ShouldKeepSignificantTextSpaces(string candidates)
+    // PostgreSQL parse_expr.c:1173-1190 puts the left operand first; parse_coerce.c:1397-1456
+    // skips unknowns and keeps the first known string type: pg_cast.dat:313-325 is implicit
+    // in both directions. bpchareq (varchar.c:746-776) ignores trailing spaces on both sides;
+    // texteq (varlena.c:1429-1480) retains them. Parameters here use the dialect's unknown-string rule.
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - IN uses the first known character type among non-column candidates")]
+    [InlineData("CAST('b' AS CHAR(3)), CAST('a' AS TEXT)", true)]
+    [InlineData("CAST('a' AS TEXT), CAST('b' AS CHAR(3))", false)]
+    [InlineData("CAST('a' AS CHAR(3)), CAST('b' AS TEXT)", true)]
+    [InlineData("CAST('b' AS TEXT), CAST('a' AS CHAR(3))", false)]
+    [InlineData("CAST('a' AS CHAR(3)), CAST('b' AS VARCHAR(3))", true)]
+    [InlineData("CAST('b' AS VARCHAR(3)), CAST('a' AS CHAR(3))", false)]
+    [InlineData("CAST('a' AS VARCHAR(3)), CAST('b' AS CHAR(3))", false)]
+    [InlineData("CAST('b' AS CHAR(3)), CAST('a ' AS TEXT)", true)]
+    [InlineData("'b', CAST('a' AS CHAR(3)), CAST('d' AS TEXT)", true)]
+    public async Task In_MixedCharacterCandidates_ShouldUseFirstKnownType(string candidates, bool expected)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("char-in", new SqlDatabaseEngineOptions());
@@ -153,7 +162,136 @@ public sealed class SqlCharacterBoundaryTests
             new Dictionary<string, object?> { ["p"] = "a " });
 
         // Assert
-        rows.ShouldBe([[false, true, false]]);
+        rows.ShouldBe([[expected, !expected, expected]]);
+    }
+
+    // PostgreSQL parse_expr.c:1182-1190 includes the left operand before the candidates.
+    // parse_coerce.c:1428-1456 and pg_cast.dat:313-325 keep CHAR/TEXT/VARCHAR whichever is first.
+    // Common coercion uses typmod -1 (parse_coerce.c:1583-1585), not a candidate's declared width.
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - IN considers a typed left operand before non-column candidates")]
+    [InlineData("CAST('a' AS CHAR(3))", "'a ', CAST('b' AS TEXT)", true)]
+    [InlineData("CAST('a' AS CHAR(3))", "'a ', CAST('b' AS VARCHAR(3))", true)]
+    [InlineData("CAST('a ' AS TEXT)", "CAST('a' AS CHAR(3)), 'b'", false)]
+    [InlineData("CAST('a ' AS VARCHAR(3))", "CAST('a' AS CHAR(3)), 'b'", false)]
+    [InlineData("CAST('a' AS CHAR(3))", "CAST('a ' AS TEXT), CAST('b' AS TEXT)", true)]
+    [InlineData("CAST('abc' AS CHAR(3))", "CAST('abc ' AS TEXT), 'other'", true)]
+    [InlineData("CAST('abc' AS CHAR(3))", "CAST('abcd' AS TEXT), 'other'", false)]
+    public async Task In_TypedCharacterOperand_ShouldUseFirstKnownType(string operand, string candidates, bool expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("char-in-operand", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("chars");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1)");
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT {operand} IN ({candidates}), {operand} NOT IN ({candidates}) FROM t");
+
+        // Assert
+        rows.ShouldBe([[expected, !expected]]);
+    }
+
+    // PostgreSQL parse_expr.c:1163-1176 excludes every expression containing a level-0 Var;
+    // :1273-1279 binds each such comparison with make_op. parse_oper.c:272-286 gives an
+    // unknown literal its CHAR partner's type; varchar.c:746-776 then ignores trailing spaces.
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - IN binds column-reference candidates like separate equalities")]
+    [InlineData("c")]
+    [InlineData("CAST(c AS CHAR(3))")]
+    [InlineData("char_echo(c)")]
+    [InlineData("c COLLATE binary")]
+    [InlineData("CASE WHEN TRUE THEN c ELSE CAST('b' AS CHAR(3)) END")]
+    public async Task In_ColumnReferenceCandidate_ShouldMatchSeparateComparisons(string candidate)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("char-in-column", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("chars");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (c CHAR(3))");
+        await session.ExecuteAsync("INSERT INTO t VALUES ('a')");
+        await session.ExecuteAsync("CREATE FUNCTION char_echo(p CHAR(3)) RETURNS CHAR(3) IMMUTABLE RETURN p");
+
+        // Act
+        var rows = await RowsAsync(session,
+            $"SELECT 'a ' IN ({candidate}, CAST('b' AS TEXT)), 'a ' = {candidate} OR 'a ' = CAST('b' AS TEXT), " +
+            $"'a ' IN (CAST('b' AS TEXT), {candidate}), 'a ' NOT IN ({candidate}, CAST('b' AS TEXT)), " +
+            $"@p IN ({candidate}, CAST('b' AS TEXT)) FROM t", new Dictionary<string, object?> { ["p"] = "a " });
+
+        // Assert
+        rows.ShouldBe([[true, true, true, false, true]]);
+    }
+
+    // PostgreSQL parse_expr.c:1173-1176 requires two non-Var candidates for common typing;
+    // :1248-1279 leaves Var comparisons independent even alongside that group.
+    // Type/space expectations follow parse_coerce.c:1397-1456, pg_cast.dat:313-325,
+    // varchar.c:746-776 and varlena.c:1429-1480, as in the ordering tests above.
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - IN keeps the common-type group separate from column comparisons")]
+    [InlineData("'a '", "c, CAST('b' AS TEXT), CAST('d' AS TEXT)", true)]
+    [InlineData("'a '", "CAST(c AS TEXT), CAST('a' AS CHAR(3)), CAST('b' AS TEXT)", true)]
+    [InlineData("CAST('a' AS CHAR(3))", "CAST('a ' AS TEXT)", false)]
+    [InlineData("CAST('b' AS CHAR(3))", "c, CAST('b ' AS TEXT)", false)]
+    public async Task In_SeparatedCandidateGroups_ShouldResolveComparisonsIndependently(string operand, string candidates, bool expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("char-in-groups", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("chars");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (c CHAR(3))");
+        await session.ExecuteAsync("INSERT INTO t VALUES ('a')");
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT {operand} IN ({candidates}), {operand} NOT IN ({candidates}) FROM t");
+
+        // Assert
+        rows.ShouldBe([[expected, !expected]]);
+    }
+
+    // PostgreSQL parse_coerce.c:1444-1456 resolves all-unknown lists to TEXT; texteq at
+    // varlena.c:1429-1480 retains spaces. execExprInterp.c's ExecEvalScalarArrayOp preserves
+    // NULL for nonmatches and returns the deciding result for a match (:4054-4074,4165-4185).
+    // Mixed column/non-column cases combine these results with OR/AND (parse_expr.c:1282-1295).
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - IN all-unknown lists keep text spaces and SQL NULL results")]
+    public async Task In_AllUnknownCandidates_ShouldUseTextAndPreserveNulls()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("char-in-unknown", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("chars");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (c CHAR(3))");
+        await session.ExecuteAsync("INSERT INTO t VALUES ('a')");
+
+        // Act
+        var rows = await RowsAsync(session,
+            "SELECT 'a ' IN ('a', 'b'), 'a ' IN ('a ', 'b'), 'a ' IN ('a', NULL), " +
+            "'a ' NOT IN ('a', NULL), NULL IN ('a', 'b'), 'a ' IN (c, 'b', NULL), " +
+            "'a ' NOT IN (c, 'b', NULL), 'b' IN (c, 'd', NULL), 'b' NOT IN (c, 'd', NULL) FROM t");
+
+        // Assert
+        rows.ShouldBe([[false, true, null, null, null, true, false, null, null]]);
+    }
+
+    // Cohesion's validation-only ALTER policy (#1447), not PostgreSQL behavior:
+    // PostgreSQL performs the rewrite in tablecmds.c:5897 (ATRewriteTables).
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - ALTER rewrite refusals name the column and explicit migration remedy")]
+    [InlineData("CHAR(4) NOT NULL DEFAULT 'b'")]
+    [InlineData("CHAR(4)")]
+    public async Task AlterColumn_CharacterRewrite_ShouldNameColumnAndMigration(string definition)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("char-alter-diagnostic", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("chars");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE populated (c CHAR(3))");
+        await session.ExecuteAsync("INSERT INTO populated VALUES ('a')");
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync($"ALTER TABLE populated ALTER COLUMN c {definition}"));
+
+        // Assert
+        failure.Message.ShouldContain("ALTER COLUMN 'c'", Case.Sensitive);
+        failure.Message.ShouldContain("explicit table-copy migration", Case.Sensitive);
+        failure.Message.ShouldContain("#1447", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Predicate controls: VARCHAR, domain and decimal bounds do not coerce a shared operand")]

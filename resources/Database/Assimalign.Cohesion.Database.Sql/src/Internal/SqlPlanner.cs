@@ -559,7 +559,7 @@ internal sealed partial class SqlPlanner
         _ => false,
     };
 
-    private static bool ReferencesAnyColumn(SqlExpression expression)
+    internal static bool ReferencesAnyColumn(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlColumnReferenceExpression)

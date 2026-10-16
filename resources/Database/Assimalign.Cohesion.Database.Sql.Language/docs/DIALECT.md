@@ -1423,15 +1423,27 @@ lengths can compare equal under the index's collation.
   length, including after reopen. This differs from PostgreSQL function signatures, which discard
   typmods when resolving parameter/result type OIDs (functioncmds.c:114, :250, :276).
   Mixed CHAR and TEXT/VARCHAR CASE or COALESCE results use TEXT and strip CHAR branches.
-  BETWEEN resolves each comparison independently. IN chooses its character comparison type across
-  the whole list first: a typed TEXT/VARCHAR operand or candidate selects TEXT; otherwise untyped
-  literals/parameters take a CHAR list's identity. Thus `'a ' BETWEEN CAST('a' AS CHAR(3)) AND
-  CAST('a' AS TEXT)` and `'a ' IN (CAST('b' AS CHAR(3)), CAST('a' AS TEXT))` both return FALSE
-  (`src/backend/parser/parse_expr.c:1325-1333`, `:1182-1190`).
+  BETWEEN resolves each comparison independently (`src/backend/parser/parse_expr.c:1325-1341`),
+  so `'a ' BETWEEN CAST('a' AS CHAR(3)) AND CAST('a' AS TEXT)` returns FALSE.
+  IN binds candidates containing column references as independent comparisons, including references
+  inside calls, casts and other expressions (`parse_expr.c:1163-1176,1253-1295`). For a table column
+  `c CHAR(3)` containing `'a'`, `'a ' IN (c, CAST('b' AS TEXT))` therefore returns TRUE, like its
+  `= OR =` expansion. Only when more than one remaining candidate has no column reference does IN
+  choose a common character type, considering the left operand first (`:1182-1190`). The first
+  non-unknown CHAR/TEXT/VARCHAR type wins: the one-way implicit-cast replacement rule in
+  `parse_coerce.c:1397-1440` cannot replace any of these with another, because
+  `src/include/catalog/pg_cast.dat:313-325` permits implicit casts in both directions. Untyped string
+  literals/parameters do not set the type; all-unknown inputs use TEXT (`parse_coerce.c:1444-1456`).
+  Thus `'a ' IN (CAST('b' AS CHAR(3)), CAST('a' AS TEXT))` returns TRUE; reversing those candidates
+  returns FALSE. VARCHAR first preserves significant text spaces too. A CHAR left operand wins
+  before either: `CAST('a' AS CHAR(3)) IN ('a ', CAST('b' AS TEXT))` returns TRUE. Common coercion
+  applies no operand's declared length (`parse_coerce.c:1583-1585`); CHAR equality ignores trailing
+  spaces on both sides (`varchar.c:746-776`), while TEXT equality retains them (`varlena.c:1429-1480`).
   ALTER COLUMN validates every CHAR length change, widening included, and refuses changes that
   would repad existing non-null values. An unchanged length can change nullability when existing
   values satisfy it. Empty or all-null columns can change length. Table rewrites remain deferred
-  to #1447; code-first validation on populated tables runs on the provisioning worker.
+  to #1447; both rewrite refusals name the column and direct callers to an explicit table-copy
+  migration. Code-first validation on populated tables runs on the provisioning worker.
   Branch string literals retain this dialect's TEXT identity, unlike PostgreSQL's unknown literals.
   CHARACTER VARYING, bpchar, :: casts and typed string prefixes are not accepted spellings; use
   VARCHAR and CAST.

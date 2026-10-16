@@ -25,7 +25,7 @@ internal sealed partial class SqlPlanExecutor
             !string.Equals(SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral),
                 SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral), StringComparison.Ordinal))
         {
-            throw new DatabaseException("ALTER COLUMN requiring a storage-type, domain, collation, scale or default rewrite is not supported.");
+            throw new DatabaseException($"ALTER COLUMN '{column.Name}' requiring a storage-type, domain, collation, scale or default rewrite is not supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");
         }
         if (column.IsNullable && plan.Table.PrimaryKeyColumns.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
         {
@@ -55,7 +55,7 @@ internal sealed partial class SqlPlanExecutor
                 // their padding differs. New wrappers around the same padded string do not.
                 if (!Equals(SqlCharacter.Output(value), SqlCharacter.Output(converted)))
                 {
-                    throw new DatabaseException($"ALTER COLUMN '{column.Name}' would rewrite existing values; only validation-only changes are supported.");
+                    throw new DatabaseException($"ALTER COLUMN '{column.Name}' would rewrite existing values; only validation-only changes are supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");
                 }
                 statement.ProvisioningProgress?.Invoke(++processed, total);
             }

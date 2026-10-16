@@ -1,7 +1,8 @@
-# CHAR review round 1 (#1437)
+# CHAR review rounds 1 and 2 (#1437)
 
-This audit follows `a7ee6b499`. Paths and line anchors below refer to the round-1 fixes, not
-the earlier feature commits. It covers production `src` and `shared` code in every SQL child
+Round 1 follows `a7ee6b499`; round 2 follows `4d45d8dd5`. The round-1 evidence is historical:
+its IN expectations were partly incorrect, as corrected below. The dispatch inventory includes
+the three safe sites added by the second review. It covers production `src` and `shared` code in every SQL child
 root, plus the Types codecs, Indexing and shared Database code reached by SQL. Searches included
 `is string`, `is not string`, `as string`, `typeof(string)`, string pattern arms and casts,
 `ReferenceEquals`, object equality, `GetType`, all switches and storage-type equality fast paths.
@@ -29,21 +30,130 @@ boundaries. No public member, interface, assembly friendship or project referenc
 ## Decisions and reference behavior
 
 - BETWEEN binds its two comparisons independently, following the local PostgreSQL clone's
-  `src/backend/parser/parse_expr.c:1325-1333`. IN selects the common character type over its entire
-  list before converting the shared operand (`:1182-1190`). Typed TEXT/VARCHAR selects TEXT;
-  untyped literals/parameters do not force a CHAR-only list to TEXT. The existing once-per-row
-  evaluation of a shared BETWEEN operand is preserved.
+  `src/backend/parser/parse_expr.c:1325-1341`. This was correct in round 1 and needs no change.
+  IN separates column-reference candidates for independent comparisons (`:1163-1176,1253-1295`).
+  Only more than one non-column candidate gets a common type with the left operand first
+  (`:1182-1190`). The first non-unknown CHAR/TEXT/VARCHAR wins, not TEXT unconditionally:
+  `parse_coerce.c:1397-1440` replaces the running candidate only for a one-way implicit cast,
+  but `src/include/catalog/pg_cast.dat:313-325` makes all these pairs implicit both ways.
+  All-unknown inputs select TEXT (`parse_coerce.c:1444-1456`). Common coercion applies typmod -1
+  (`:1583-1585`), so no operand's declared width pads or truncates other comparands. VARCHAR and
+  TEXT share String identity here; untyped string parameters follow the literal rule. The IN
+  common group evaluates its left operand once; independent comparisons evaluate it separately.
+  The existing once-per-row evaluation of a shared BETWEEN operand is preserved.
 - ALTER COLUMN remains validation-only. Every CHAR length change is validated, and any change
   to existing padding is rejected before catalog publication. Empty/all-null columns can change
   width. Code-first validation of populated tables uses the existing deferred provisioning worker.
   This respects #1447, which owns table rewrites using #1265's machinery; silently changing only
   metadata or introducing a second rewrite implementation would not respect that contract.
+  Both rejection paths now name the column and recommend an explicit table-copy migration,
+  with #1447 identified as the in-place rewrite work. This remedy is a Cohesion policy, not a
+  PostgreSQL diagnostic: PostgreSQL implements `ATRewriteTables` in `tablecmds.c:5897`.
 - Physical equality in ALTER compares the full padded strings with ordinal equality. SQL equality,
   which ignores trailing spaces, cannot establish that a rewrite is unnecessary.
 - Formats stay at record-space 12, schema v6, result-header 2. They are unreleased, and no additional
   format change is needed for these fixes. Historical signature decoding now admits Character (19).
 
-## Baseline proof
+## Round-2 expectation sources
+
+All PostgreSQL paths in this section are relative to the read-only clone
+`C:\Source\repos\postgres\postgres`. These sources establish the expectations independently
+of the baseline/fixed results. The user-supplied rule is implemented without changing the
+separate, documented CASE/COALESCE dialect behavior.
+
+| Key | Source and established rule |
+| --- | --- |
+| A | `src/backend/parser/parse_expr.c:1163-1176,1182-1190,1248-1295`: exclude expressions containing level-0 column references; only more than one remaining candidate shares a common type, with the left operand first; bind other candidates with separate operators and OR/AND. |
+| B | `src/backend/parser/parse_coerce.c:1397-1440` and `src/include/catalog/pg_cast.dat:313-325`: ignore unknowns, and retain the first known string type because replacement requires a one-way implicit cast and each CHAR/TEXT/VARCHAR pair permits both directions. `parse_coerce.c:1444-1456` selects TEXT for all-unknown inputs. |
+| C | `src/backend/utils/adt/varchar.c:673-690,746-776` strips trailing U+0020 for CHAR equality; `src/backend/utils/adt/varlena.c:1429-1480` compares full TEXT lengths/bytes under deterministic collation. `pg_cast.dat:318-325` converts CHAR to TEXT/VARCHAR through trimming text conversion. |
+| D | `src/backend/parser/parse_oper.c:272-286`: an unknown operand takes its known comparison partner's type. Cohesion's untyped string parameters follow this literal rule, as before this round. |
+| E | `src/backend/parser/parse_coerce.c:1583-1585`: common coercion supplies typmod -1, so no candidate's declared width truncates or pads another value. |
+| F | `src/backend/executor/execExprInterp.c:4054-4074,4165-4185`: strict NULL input and nonmatching NULL candidates preserve UNKNOWN; a deciding match overrides UNKNOWN. `parse_expr.c:1282-1295` combines independent terms with OR for IN and AND for NOT IN. |
+| G | `src/backend/parser/parse_expr.c:1325-1341`: BETWEEN and NOT BETWEEN expand to separately bound comparisons. Round 1 already matches this; no code or expectation changes. |
+
+`SqlCharacterBoundaryTests` cites these sources beside the expectations. For the compact matrix
+below, `C(s)` means `CAST(s AS CHAR(3))`, `T(s)` means `CAST(s AS TEXT)`, and `V(s)` means
+`CAST(s AS VARCHAR(3))`; quotes and trailing spaces are significant. Every non-null IN expectation
+also asserts its opposite for NOT IN. The mixed-candidate test repeats the literal operand with
+the existing untyped string parameter rule (D).
+
+| Test / left operand | Candidates | Expected IN | Source keys |
+| --- | --- | --- | --- |
+| Mixed / `'a '` | `C('b'), T('a')` | **TRUE, corrected from FALSE** | A, B, C, D |
+| Mixed / `'a '` | `T('a'), C('b')` | FALSE, retained | A, B, C, D |
+| Mixed / `'a '` | `C('a'), T('b')` | **TRUE, corrected from FALSE** | A, B, C, D |
+| Mixed / `'a '` | `T('b'), C('a')` | FALSE, retained | A, B, C, D |
+| Mixed / `'a '` | `C('a'), V('b')` | TRUE | A, B, C, D |
+| Mixed / `'a '` | `V('b'), C('a')` | FALSE | A, B, C, D |
+| Mixed / `'a '` | `V('a'), C('b')` | FALSE | A, B, C, D |
+| Mixed / `'a '` | `C('b'), T('a ')` | TRUE | A, B, C, D |
+| Mixed / `'a '` | `'b', C('a'), T('d')` | TRUE; initial unknown is skipped | A, B, C, D |
+| Typed / `C('a')` | `'a ', T('b')` | TRUE | A, B, C |
+| Typed / `C('a')` | `'a ', V('b')` | TRUE | A, B, C |
+| Typed / `T('a ')` | `C('a'), 'b'` | FALSE | A, B, C |
+| Typed / `V('a ')` | `C('a'), 'b'` | FALSE | A, B, C |
+| Typed / `C('a')` | `T('a '), T('b')` | TRUE; typed TEXT also acquires CHAR comparison identity | A, B, C, E |
+| Typed / `C('abc')` | `T('abc '), 'other'` | TRUE | A, B, C, E |
+| Typed / `C('abc')` | `T('abcd'), 'other'` | FALSE; no inherited CHAR(3) truncation | A, B, C, E |
+| Separate groups / `'a '` | `c, T('b'), T('d')` | TRUE; `c = C('a')` stays independent | A, C, D |
+| Separate groups / `'a '` | `CAST(c AS TEXT), C('a'), T('b')` | TRUE; the column expression cannot select the non-column group's type | A, B, C |
+| Singleton / `C('a')` | `T('a ')` | FALSE; only one non-column candidate | A, C |
+| One non-column / `C('b')` | `c, T('b ')` | FALSE; `c = C('a')`, both comparisons independent | A, C |
+
+The five column-candidate cases use `c`, `CAST(c AS CHAR(3))`, `char_echo(c)`, `c COLLATE binary`
+and `CASE WHEN TRUE THEN c ELSE C('b') END`, where `c` contains `'a'`. Each expects
+`[TRUE, TRUE, TRUE, FALSE, TRUE]` for IN, the explicit OR expansion, reversed candidate order,
+NOT IN and parameter IN. A, C and D establish each result; a nested reference is still a Var
+candidate and the TEXT candidate never changes that comparison's operator.
+
+The all-unknown/NULL test expects, in query order, `[FALSE, TRUE, NULL, NULL, NULL, TRUE, FALSE,
+NULL, NULL]`: `'a ' IN ('a','b')`, `'a ' IN ('a ','b')`, IN and NOT IN against `('a',NULL)`,
+`NULL IN ('a','b')`, IN and NOT IN for `'a '` against `(c,'b',NULL)`, and IN and NOT IN for
+`'b'` against `(c,'d',NULL)`. B and C establish text-space significance, A and D establish the
+independent CHAR match, and F establishes every NULL/negation result.
+
+The two ALTER diagnostics test the definition-rewrite path (`CHAR(4) NOT NULL DEFAULT 'b'`)
+and changed-padding path (`CHAR(4)`) on populated `c CHAR(3)`. Both must name `ALTER COLUMN 'c'`,
+recommend an `explicit table-copy migration`, and identify `#1447`. These three assertions come
+from finding 3 and the owner's rewrite scope, not PostgreSQL: PostgreSQL performs table rewrites
+in `src/backend/commands/tablecmds.c:5897` (`ATRewriteTables`). Existing data-preservation and
+nullability tests remain unchanged.
+
+### Round-2 baseline matrix
+
+The original round-1 Release output was rebuilt at `4d45d8dd5` before editing source and saved
+under `_out/char-review-r2/baseline-original/net10.0`; `baseline-original/SHA256.json` records
+every DLL hash. `baseline-run/net10.0` contains a copy with only the SQL test DLL replaced by
+the expanded test assembly. Production DLL hashes are checked against that saved inventory.
+Logs and TRX files are under `_out/char-review-r2`, with the same 35-case filter for both runs.
+Both runs use Release and `DOTNET_TieredCompilation=0`; baseline additionally passes
+`--no-build --no-restore -p:OutputPath=C:\cw\1437\_out\char-review-r2\baseline-run\net10.0`.
+
+| Test method in SqlCharacterBoundaryTests | Cases | Baseline P/F/S | Fixed P/F/S |
+| --- | ---: | --- | --- |
+| In_MixedCharacterCandidates_ShouldUseFirstKnownType | 9 | 5/4/0 | 9/0/0 |
+| In_TypedCharacterOperand_ShouldUseFirstKnownType | 7 | 3/4/0 | 7/0/0 |
+| In_ColumnReferenceCandidate_ShouldMatchSeparateComparisons | 5 | 0/5/0 | 5/0/0 |
+| In_SeparatedCandidateGroups_ShouldResolveComparisonsIndependently | 4 | 2/2/0 | 4/0/0 |
+| In_AllUnknownCandidates_ShouldUseTextAndPreserveNulls | 1 | 1/0/0 | 1/0/0 |
+| AlterColumn_CharacterRewrite_ShouldNameColumnAndMigration | 2 | 0/2/0 | 2/0/0 |
+| Between_MixedCharacterBounds_ShouldMatchSeparateComparisons (unchanged) | 4 | 4/0/0 | 4/0/0 |
+| PredicateControl_NonCharacterBounds_ShouldMatchSeparateComparisons (unchanged) | 3 | 3/0/0 | 3/0/0 |
+| **Total** | **35** | **18/17/0** | **35/0/0** |
+
+The passing baseline cases deliberately retain correct behavior. In particular, passing the
+old CHAR-first tests could not establish conformance: their expectations were wrong. The two
+corrected rows above change IN and parameter IN from FALSE to TRUE, and NOT IN from TRUE to FALSE,
+because CHAR appears before TEXT among the non-unknown inputs. DESIGN and DIALECT now say this too.
+
+## Round-1 baseline evidence (superseded IN expectations)
+
+A failing pre-fix baseline demonstrates test sensitivity, not correctness of its expectations.
+The two CHAR-first cases in the old `In_MixedCharacterCandidates_ShouldKeepSignificantTextSpaces`
+test incorrectly expected `[FALSE, TRUE, FALSE]`; they now expect `[TRUE, FALSE, TRUE]`.
+The TEXT-first cases still expect `[FALSE, TRUE, FALSE]`. The historical IN row and totals below
+record what was run, not a valid PostgreSQL-conformance result. The round-2 matrix replaces that
+claim with source-cited expectations.
 
 Before source changes, the existing Release SQL test output was copied to
 `_out/char-review-r1/baseline-current/net10.0`; `baseline-current/SHA256.json` records the DLL hashes.
@@ -66,7 +176,7 @@ The final matrix uses the same final test DLL against both sets of production as
 | --- | ---: | --- | --- | --- |
 | 1: Join_AccentInsensitiveCharacterKeys_ShouldReturnSameRowsAfterIndexing | 1 | 0/1/0 | 1/0/0 | Seek loses the scan's matching row |
 | 2: Between_MixedCharacterBounds_ShouldMatchSeparateComparisons | 4 | 0/4/0 | 4/0/0 | Shared CHAR coercion changes the TEXT comparison; literal and parameter, either bound |
-| 2: In_MixedCharacterCandidates_ShouldKeepSignificantTextSpaces | 4 | 0/4/0 | 4/0/0 | Significant TEXT space disappears, either candidate order |
+| 2: In_MixedCharacterCandidates_ShouldKeepSignificantTextSpaces | 4 | 0/4/0 | 4/0/0 | Historical assertions selected TEXT in either order; the two CHAR-first expectations were wrong and are superseded above |
 | 3: AlterColumn_CharacterWideningWithValues_ShouldRejectRewriteAndPreserveDefinition | 1 | 0/1/0 | 1/0/0 | Widening succeeds without repadding old values |
 | 3: SqlDeferredProvisioningTests.BuildAsync_CharacterWidening_ShouldDeferValidationAndRejectRewrite | 1 | 0/1/0 | 1/0/0 | Widening bypasses deferred value validation |
 | 4: BuildAsync_DroppedCharacterDomainScript_ShouldValidateHistoricalSignature | 2 | 0/2/0 | 2/0/0 | COHSQLS001 on cold Apply/Verify reopen after catalog generation changes |
@@ -109,10 +219,13 @@ claim about every unrelated behavior in the method.
 | Site | Disposition and reason |
 | --- | --- |
 | Internal/SqlCharacter.cs:25 | Safe: Input wraps CLR strings only when the accompanying type is Character; existing wrappers pass through. Output unwraps padded Value; ToString deliberately returns trimmed Text. |
+| Internal/Expressions/SqlBoundExpression.In.cs:53 | Safe: common CHAR groups wrap constant/parameter strings once when bound; this does not apply a length modifier or change the operand used by independent comparisons. Computed strings acquire the same identity in EvaluateIn. |
 | Internal/SqlPlanExecutor.Joins.cs:114 | **Fixed**: retain both string and SqlCharacter as complete probe comparands. Assignment overflow must not suppress collation-equivalent matches. |
 | Internal/SqlPlanExecutor.AlterColumn.cs:56 | **Fixed**: object Equals receives unwrapped padded values, not wrapper references. Length-change detection at :39 and deferred classification in Internal/SqlSchemaProvisioner.Deferred.cs:90 include widening. |
 | Internal/SqlCastConverter.cs:52,54,110,115,136,138,194 | Safe: numeric parsing accepts string or wrapper and uses trimmed text; ApplyModifiers unwraps before its string cast/pattern, then applies Character first; StorageTypeOf has a Character arm. |
 | Internal/SqlPlanExecutor.cs:1476,1480,1489,1492,1497,1500,1504,1507,1510,1513,1516,1519,1522,1525,1528,1531 | Safe: CoerceForColumn unwraps first, preserving Value for CHAR assignment and Text for other targets. Its storage-type switch, numeric string test, `as string` and temporal/UUID string arms therefore receive CLR strings. |
+| Internal/SqlPlanExecutor.cs:254 | Safe: ORDER BY's tuple-pattern switch handles null placement only; every non-null pair, including Character, delegates to SqlValueComparer with the resolved collation. Added in round 2. |
+| Internal/SqlPlanExecutor.Defaults.cs:251 | Safe: only binary and decimal defaults take special parsing paths; Character defaults pass through CoerceForColumn, which applies padding and length. Added in round 2. |
 | Internal/SqlValueComparer.cs:25,73,77,123 | Safe: comparison unwraps CHAR to Text before string/GetType/IComparable dispatch; hashing has an explicit SqlCharacter arm using the same collation. |
 | ValueObjects/SqlValue.cs:254,258,271,274,278,291,295 | Safe: Character equality/hash use trimmed text and its own type tag; formatting uses padded Value. String casts apply only to String references. Object Equals delegates to the typed value comparison. |
 | ValueObjects/SqlValue.cs:343,392,417,467 | Safe: numeric Compare dispatch falls back to SqlValueComparer for Character; the string fast path falls through to an explicit SqlCharacter arm; Box handles only non-reference values (ToObject already returns the Character reference). |
@@ -120,9 +233,9 @@ claim about every unrelated behavior in the method.
 | Internal/SqlMaterializedRow.cs:27,35,38,40 | Safe: byte accessor rejects non-binary values; string accessor has an explicit padded Character arm. GetValue and numeric accessors unwrap via Output. |
 | Internal/SqlRowCodec.cs:238,240,255,278,289,318 | Safe: CHAR index normalization trims wrapper Text or raw string; row write/read switches explicitly encode padded Character as a physical string and restore its wrapper. Temporal key-identity default preserves other values. |
 | Internal/SqlScriptDataReceipt.cs:45 | Safe: casts read the private receipt table's fixed TEXT/TEXT/INT schema (:15-18), never a user-defined column. |
-| Internal/SqlExpressionEvaluator.Binding.cs:172,182,197,444,586 | **Fixed** BETWEEN/IN and shared argument binding. String constant/parameter pattern arms at :172 deliberately create full CHAR comparands without assignment bounds. CharacterToText converts typed CHAR branches; CASE/COALESCE do not mutate a shared operand per alternative. |
-| Internal/SqlExpressionEvaluator.cs:642,652,666,668,692,811,812,1032,1085,1121 | **Fixed** OperandTypeName's string-only type naming at :692. Other sites safe: comparisons use SqlValueComparer; concatenation uses Character.ToString's trimmed text; LIKE unwraps the padded input and converts its pattern to text; unary/arithmetic dispatch rejects character operands. |
-| Functions/SqlScalarFunction.cs:156; Functions/SqlAggregateAccumulator.cs:111; Internal/SqlExpressionEvaluator.cs:991; Internal/SqlPlanExecutor.Grouping.cs:217 | **Fixed**: same storage type no longer bypasses a declared CHAR width, on single, inline and pooled argument paths. Public Invoke/Add require already-declared argument types; engine resolved paths do the coercion. |
+| Internal/SqlExpressionEvaluator.Binding.cs:173,183,198,408,616 | **Fixed** BETWEEN/IN and shared argument binding. String constant/parameter pattern arms at :173 deliberately create full CHAR comparands without assignment bounds. Round 2 separates IN candidates and resolves the non-column group's identity before evaluation. CharacterToText converts typed CHAR branches; CASE/COALESCE do not mutate a shared operand per alternative. |
+| Internal/SqlExpressionEvaluator.cs:642,652,666,668,692,739,749,813,814,1034,1087,1123 | **Fixed** OperandTypeName's string-only type naming at :692. Common IN groups at :739 and :749 apply their selected CHAR identity to every string comparand through SqlCharacter.Input. Other sites safe: comparisons use SqlValueComparer; concatenation uses Character.ToString's trimmed text; LIKE unwraps the padded input and converts its pattern to text; unary/arithmetic dispatch rejects character operands. |
+| Functions/SqlScalarFunction.cs:156; Functions/SqlAggregateAccumulator.cs:111; Internal/SqlExpressionEvaluator.cs:993; Internal/SqlPlanExecutor.Grouping.cs:217 | **Fixed**: same storage type no longer bypasses a declared CHAR width, on single, inline and pooled argument paths. Public Invoke/Add require already-declared argument types; engine resolved paths do the coercion. |
 | Internal/Functions/SqlFunctionResolver.cs:263,283,292,204,338 | **Fixed** Coerce applies Character modifiers before the equal-storage early return. Integer conversion switches are numeric-only; result-type rules preserve nonnumeric type identity; TryWiden already applies CHAR return modifiers. |
 | Functions/SqlFunction.cs:219,240,265 | Safe: declared Character results deliberately bypass the fast result check and apply their return width. JSON/JSONB representation shortcuts cannot absorb Character. ANYELEMENT preserves the supplied type without inventing a length. |
 | Internal/Functions/SqlAbsFunction.cs:31; SqlSumFunction.cs:54; SqlLengthFunction.cs:27 | Safe: ABS/SUM require numeric signatures; LENGTH explicitly branches on Character and counts trimmed Unicode scalars before its String/fallback paths. |
@@ -181,6 +294,7 @@ Paths below are relative to `resources/Database`; no edits were necessary at the
 | Sql.Catalog/src/SqlCatalog.cs:1291,2605,2617 | Catalog object-kind switch and identifier tuple comparers; no runtime SQL values. |
 | Sql.Language/shared/SqlTypeModifiers.cs:26 | Type-name metadata resolution explicitly includes CHAR/Character and shares the maximum-length rule. Language source switches handle syntax, token kinds and literal rendering. |
 | Sql.Client/src/Internal/SqlExecuteExchange.cs:46; Exceptions/SqlClientException.cs:71 | Frame and error-code dispatch. Payloads are public CLR values plus metadata, not SqlCharacter. |
+| Sql.Client/src/SqlRow.cs:219 | Field<T> consumes the public wire values: Character arrives as a padded CLR string plus column metadata, so its generic `is T` and numeric-conversion paths never receive SqlCharacter. Added in round 2. |
 | Sql.Storage/src | No matching string/object-identity/value-type dispatch. Model values are encoded by SqlRowCodec before storage. |
 | Types/src/DatabaseValueCodec.cs:34,66 | Physical tuple writer/reader intentionally use CLR strings and physical String tags. SQL's public row boundary unwraps CHAR; its column header carries Character. |
 | Types/src/DatabaseKeyReader.cs:50 | Physical-tag switch: CHAR uses String key encoding after SQL normalizes its text, so a separate Character physical tag is neither emitted nor needed. |
@@ -193,7 +307,10 @@ Paths below are relative to `resources/Database`; no edits were necessary at the
 The prefixes `Sql`, `Sql.Schema`, `Types`, etc. abbreviate `Assimalign.Cohesion.Database.<suffix>`;
 `Database/shared` is the `Assimalign.Cohesion.Database/shared` directory.
 
-## Full gates and pre-existing checkpoint race
+## Round-1 gates and historical checkpoint race
+
+The second-review handoff confirms the main session already fixed this checkpoint race on the
+integration branch. It is not a round-2 follow-up; the evidence below records the original run.
 
 Build tasks succeeded in Debug and Release. All builds used `MSBUILDDISABLENODEREUSE=1`;
 the Release SQL runs used `DOTNET_TieredCompilation=0`. Results below are Passed/Failed/Skipped.

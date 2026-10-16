@@ -734,7 +734,9 @@ internal sealed partial class SqlExpressionEvaluator
             return Box(expression.IsNegated);
         }
 
-        object? value = EvaluateCore(expression.Operand, row);
+        // Common coercion has no typmod (PostgreSQL parse_coerce.c:1583-1585).
+        // CHAR identity applies to typed TEXT/VARCHAR candidates too; no column width applies.
+        object? value = SqlCharacter.Input(EvaluateCore(expression.Operand, row), expression.ComparisonType);
 
         if (value is null)
         {
@@ -744,7 +746,7 @@ internal sealed partial class SqlExpressionEvaluator
         bool hasUnknown = false;
         for (int index = 0; index < candidates.Length; index++)
         {
-            object? candidateValue = EvaluateCore(candidates[index], row);
+            object? candidateValue = SqlCharacter.Input(EvaluateCore(candidates[index], row), expression.ComparisonType);
 
             if (candidateValue is null)
             {

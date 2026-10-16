@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 
@@ -441,27 +442,56 @@ internal sealed partial class SqlExpressionEvaluator
 
         var candidates = new SqlBoundExpression[values.Count];
         var comparisons = new SqlBoundCollation[values.Count];
-        // PostgreSQL parse_expr.c:1190 selects a common type before coercing the
-        // shared operand. Untyped literals/parameters do not force a CHAR list to TEXT.
+        var referencesColumn = new bool[values.Count];
+        int nonColumnCount = 0;
         DatabaseType comparisonType = InComparisonType(membership.Operand);
-        foreach (var value in values)
-        {
-            comparisonType = AlternativeType(comparisonType, InComparisonType(value));
-        }
-        operand = comparisonType == DatabaseType.String
-            ? CharacterToText(membership.Operand, operand)
-            : BindCharacterComparand(membership.Operand, operand, comparisonType);
         for (int index = 0; index < candidates.Length; index++)
         {
             candidates[index] = Bind(values[index], out collations[index + 1]);
-            candidates[index] = comparisonType == DatabaseType.String
-                ? CharacterToText(values[index], candidates[index])
-                : BindCharacterComparand(values[index], candidates[index], comparisonType);
             comparisons[index] = SqlBoundCollation.Of(operandCollation, collations[index + 1], _defaultCollation);
+            referencesColumn[index] = SqlPlanner.ReferencesAnyColumn(values[index]);
+            if (!referencesColumn[index])
+            {
+                nonColumnCount++;
+                // PostgreSQL parse_coerce.c:1397-1456, pg_cast.dat:313-325: the string
+                // casts are implicit both ways, so the first non-unknown type wins.
+                if (comparisonType == DatabaseType.Null) { comparisonType = InComparisonType(values[index]); }
+            }
         }
 
         collation = CollationOf(membership, collations);
-        return new SqlBoundIn(operand, candidates, comparisons, membership.IsNegated);
+        if (comparisonType == DatabaseType.Null) { comparisonType = DatabaseType.String; }
+        if (nonColumnCount == candidates.Length && nonColumnCount != 1)
+        {
+            return new SqlBoundIn(operand, candidates, comparisons, comparisonType, membership.IsNegated);
+        }
+
+        // PostgreSQL parse_expr.c:1163-1176 groups only non-Var candidates, and only
+        // when there are at least two. Each remaining comparison binds independently
+        // (:1273-1279), just as the corresponding = OR = / <> AND <> expression does.
+        var terms = new List<SqlBoundExpression>();
+        if (nonColumnCount > 1)
+        {
+            var commonCandidates = new SqlBoundExpression[nonColumnCount];
+            var commonCollations = new SqlBoundCollation[nonColumnCount];
+            int commonIndex = 0;
+            for (int index = 0; index < candidates.Length; index++)
+            {
+                if (referencesColumn[index]) { continue; }
+                commonCandidates[commonIndex] = candidates[index];
+                commonCollations[commonIndex++] = comparisons[index];
+            }
+            terms.Add(new SqlBoundIn(operand, commonCandidates, commonCollations, comparisonType, membership.IsNegated));
+        }
+        for (int index = 0; index < candidates.Length; index++)
+        {
+            if (nonColumnCount > 1 && !referencesColumn[index]) { continue; }
+            var left = BindCharacterComparand(membership.Operand, operand, values[index]);
+            var right = BindCharacterComparand(values[index], candidates[index], membership.Operand);
+            terms.Add(new SqlBoundBinary(membership.IsNegated ? SqlBinaryOperator.NotEqual : SqlBinaryOperator.Equal,
+                left, right, comparisons[index]));
+        }
+        return terms.Count == 1 ? terms[0] : new SqlBoundLogical(!membership.IsNegated, terms.ToArray());
     }
 
     private DatabaseType InComparisonType(SqlExpression expression)

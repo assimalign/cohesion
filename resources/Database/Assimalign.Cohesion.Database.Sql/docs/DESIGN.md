@@ -49,14 +49,29 @@ trailing-space-insensitive equality. Every CHAR length change requires validatio
 non-null values that would be repadded cause refusal before metadata publication. Empty or all-null
 columns may change length. Code-first changes on populated tables defer that validation to the existing
 provisioning worker. Rewriting remains #1447's responsibility, sharing #1265's machinery; this change
-does not invent a metadata-only repadding behavior or a separate rewrite implementation.
+does not invent a metadata-only repadding behavior or a separate rewrite implementation. Both the
+definition-rewrite and changed-padding refusals name the column and direct callers to an explicit
+table-copy migration, identifying #1447 as the in-place rewrite work.
 
-BETWEEN binds independent comparands for its lower and upper comparisons. IN resolves the character
-comparison type across the operand and its entire list before coercion: typed TEXT/VARCHAR selects
-TEXT, while untyped string literals and parameters take a CHAR-only list's identity without length
-coercion. PostgreSQL's corresponding binding decisions are `src/backend/parser/parse_expr.c:1325-1333`
-and `:1182-1190`. The shared operand is still evaluated once. VARCHAR/TEXT, domain/base and differing
-DECIMAL-scale control probes do not reproduce the CHAR shared-operand defect.
+BETWEEN binds independent comparands for its lower and upper comparisons, matching PostgreSQL
+`src/backend/parser/parse_expr.c:1325-1341`; round 2 leaves that implementation unchanged. IN separates
+candidates containing column references, including references nested inside expressions. They bind
+as independent equality comparisons (inequalities joined by AND for NOT IN), matching
+`parse_expr.c:1163-1176,1253-1295`. Only a group with more than one non-column candidate uses a common
+character type, considering the left operand first (`:1182-1190`). Among CHAR, TEXT and VARCHAR the
+first non-unknown type wins: `parse_coerce.c:1397-1440` replaces it only for a one-way implicit cast,
+and `src/include/catalog/pg_cast.dat:313-325` makes these string casts implicit in both directions.
+All-unknown inputs select TEXT (`parse_coerce.c:1444-1456`). VARCHAR shares String identity with TEXT
+here. Untyped string literals and parameters do not set the running type.
+
+The bound IN group carries that comparison identity, so CHAR-selected groups convert even typed
+TEXT/VARCHAR values to CHAR comparands without padding or truncating to any operand's declared width
+(`parse_coerce.c:1583-1585`, typmod -1). Constant and parameter comparands acquire that identity once
+during binding; computed values acquire it during evaluation. Each independent comparison retains
+its own coercions and collation. The common group evaluates its left operand once; the boolean-tree
+path evaluates it per comparison, as the equivalent explicit comparisons do. BETWEEN still evaluates
+its shared operand once. VARCHAR/TEXT, domain/base and differing DECIMAL-scale control probes remain
+unchanged.
 
 Historical script function signatures accept storage code 19 (Character) when recovering a dropped
 domain's signature from its receipt. A later catalog generation must not make the same declaration
