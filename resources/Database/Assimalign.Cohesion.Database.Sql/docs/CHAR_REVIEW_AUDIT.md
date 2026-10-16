@@ -119,8 +119,8 @@ claim about every unrelated behavior in the method.
 | Internal/SqlRowCodec.cs:238,240,255,278,289,318 | Safe: CHAR index normalization trims wrapper Text or raw string; row write/read switches explicitly encode padded Character as a physical string and restore its wrapper. Temporal key-identity default preserves other values. |
 | Internal/SqlScriptDataReceipt.cs:45 | Safe: casts read the private receipt table's fixed TEXT/TEXT/INT schema (:15-18), never a user-defined column. |
 | Internal/SqlExpressionEvaluator.Binding.cs:172,182,197,444,586 | **Fixed** BETWEEN/IN and shared argument binding. String constant/parameter pattern arms at :172 deliberately create full CHAR comparands without assignment bounds. CharacterToText converts typed CHAR branches; CASE/COALESCE do not mutate a shared operand per alternative. |
-| Internal/SqlExpressionEvaluator.cs:642,652,666,668,692,809,810,1032,1085,1121 | **Fixed** OperandTypeName's string-only type naming at :692. Other sites safe: comparisons use SqlValueComparer; concatenation uses Character.ToString's trimmed text; LIKE unwraps the padded input and converts its pattern to text; unary/arithmetic dispatch rejects character operands. |
-| Functions/SqlScalarFunction.cs:156; Functions/SqlAggregateAccumulator.cs:110; Internal/SqlExpressionEvaluator.cs:991; Internal/SqlPlanExecutor.Grouping.cs:217 | **Fixed**: same storage type no longer bypasses a declared CHAR width, on single, inline and pooled argument paths. Public Invoke/Add require already-declared argument types; engine resolved paths do the coercion. |
+| Internal/SqlExpressionEvaluator.cs:642,652,666,668,692,811,812,1032,1085,1121 | **Fixed** OperandTypeName's string-only type naming at :692. Other sites safe: comparisons use SqlValueComparer; concatenation uses Character.ToString's trimmed text; LIKE unwraps the padded input and converts its pattern to text; unary/arithmetic dispatch rejects character operands. |
+| Functions/SqlScalarFunction.cs:156; Functions/SqlAggregateAccumulator.cs:111; Internal/SqlExpressionEvaluator.cs:991; Internal/SqlPlanExecutor.Grouping.cs:217 | **Fixed**: same storage type no longer bypasses a declared CHAR width, on single, inline and pooled argument paths. Public Invoke/Add require already-declared argument types; engine resolved paths do the coercion. |
 | Internal/Functions/SqlFunctionResolver.cs:263,283,292,204,338 | **Fixed** Coerce applies Character modifiers before the equal-storage early return. Integer conversion switches are numeric-only; result-type rules preserve nonnumeric type identity; TryWiden already applies CHAR return modifiers. |
 | Functions/SqlFunction.cs:219,240,265 | Safe: declared Character results deliberately bypass the fast result check and apply their return width. JSON/JSONB representation shortcuts cannot absorb Character. ANYELEMENT preserves the supplied type without inventing a length. |
 | Internal/Functions/SqlAbsFunction.cs:31; SqlSumFunction.cs:54; SqlLengthFunction.cs:27 | Safe: ABS/SUM require numeric signatures; LENGTH explicitly branches on Character and counts trimmed Unicode scalars before its String/fallback paths. |
@@ -190,3 +190,52 @@ Paths below are relative to `resources/Database`; no edits were necessary at the
 
 The prefixes `Sql`, `Sql.Schema`, `Types`, etc. abbreviate `Assimalign.Cohesion.Database.<suffix>`;
 `Database/shared` is the `Assimalign.Cohesion.Database/shared` directory.
+
+## Full gates and pre-existing checkpoint race
+
+Build tasks succeeded in Debug and Release. All builds used `MSBUILDDISABLENODEREUSE=1`;
+the Release SQL runs used `DOTNET_TieredCompilation=0`. Results below are Passed/Failed/Skipped.
+Each test invocation names its test csproj. Logs and TRX files are under `_out/char-review-r1`.
+
+| Suite | Debug | Release |
+| --- | --- | --- |
+| Database.Sql | 2783/0/0 | 2783/0/0 |
+| Database.Sql.Language | 1722/0/0 | 1722/0/0 |
+| Database.Sql.Schema | 362/0/0 | 362/0/0 |
+| Database.Sql.Catalog | 120/0/0 | 120/0/0 |
+| Database.Sql.Storage | 14/0/0 | 14/0/0 |
+| Database.Indexing | 90/0/0 | 90/0/0 |
+| Database.Sql.Client | 1120/0/0 | 1120/0/0 |
+| Database.Client | 69/0/0 | 69/0/0 |
+| Database.Hosting | 130/0/0 | 130/0/0 |
+| Database (root) | 186/0/0 | 186/0/0 |
+| Database.Types | 93/0/0 | 93/0/0 |
+| Sdk.Database | 342/0/0 | 342/0/0 |
+
+The final full SQL runs pass in both configurations. The initial SQL Debug run, before adding
+the two diagnostic regressions, was 2780/1/0; the initial Release run was 2782/1/0.
+The only failing original test in either initial full SQL run was
+`SqlTransactionRollbackTests.RollbackAsync_UndoDeferred_ShouldHoldLocksUntilThePurgePassAndKeepCheckpointsRunning`.
+Its final checkpoint raises `StorageTransactionException: Checkpoint requires no active transactions`.
+No test was removed, skipped, weakened or altered to conceal that failure.
+
+The untouched original Release assemblies **and original test DLL** pass 2747/0/0. With the
+expanded test DLL and the same original production assemblies, the full suite is **2749/34/0**:
+the 33 proven CHAR regression failures plus this same rollback/checkpoint failure. The rollback
+test also passed three isolated baseline runs (1/0/0 each), confirming that the failing schedule
+is not deterministic. The expanded baseline and fixed Release test DLLs have identical SHA-256
+`B0BF40C1D3F593C6A1ABA108603EA555BE1175AFF151A910F0EC998F8BBEEEEE`.
+
+The test's `QuietOptions` (`tests/SqlTransactionRollbackTests.cs:212`) sets maintenance and
+checkpoint intervals to one hour, but `src/Internal/SqlVersionPurgeWorker.cs:115` caps its wait
+at 25 ms when table reclamation has work. Reclamation opens storage transactions outside the
+coordinator apply gate (`src/Internal/SqlTableReclamation.cs:90-97`). After DROP completes, the
+test's checkpoint at `tests/SqlTransactionRollbackTests.cs:170` can overlap that work;
+`Database.Storage/src/Storage.cs:1570` explicitly refuses an active storage transaction.
+This unchanged INT-only path is outside the CHAR fixes. Follow-up recommendation: coordinate
+or quiesce table reclamation in this rollback test before asserting an idle-storage checkpoint;
+do not weaken the storage checkpoint invariant.
+
+The SQL NativeAOT harness published for Release/win-arm64 and passed **23/0/0** smoke checks,
+in process and over the wire, with **zero IL2xxx/IL3xxx diagnostics**. No installer,
+Database.Testing suite or benchmarks were run.
