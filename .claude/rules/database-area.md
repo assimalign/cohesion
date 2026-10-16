@@ -191,7 +191,7 @@ step 4). The plan lists them:
 ```
 
 Every other sealed leaf needs no marker of its own, because this file covers it. An existing
-public abstract type that keeps no interface twin and is only tightened (`QueryRow`)
+public abstract type that keeps no interface twin and is only tightened (`DatabaseRow`)
 carries none. Every PR in the series carries the line
 `Deviates from interface-first (database-area.md)` in its change summary.
 

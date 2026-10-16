@@ -134,12 +134,12 @@ The owner approved every recommendation on 2026-10-04, after giving the directio
 | D4 | `IDatabase` becomes `DatabaseInstance`, never `Database`. [Certain, probe] Code in a namespace such as `Acme.Database` that names the type fails with CS0118. | P3 |
 | D5 | Builders become sealed with internal constructors. This supersedes the 2026-10-02 ruling ("meant to be implemented elsewhere", `Database.Sql/docs/DESIGN.md:627-631`), its 2026-10-03 narrowing, and #1232. | P4 |
 | D6 | Deleted: the unused Execution query pipeline, `Database.Governance`, and the Replication placeholders. | P1 |
-| D7 | The existing per-row result types (`QueryRow`, `QueryResultSet`, …) are tightened too. | P8 |
+| D7 | The existing per-row result types (`DatabaseRow`, `DatabaseResultSet`, …) are tightened too. | P8 |
 | D8 | Blob and Documents sessions use option B: the typed session exposes the operations, and `session.Database` returns the unbound database. | P4 |
 | D9 | All five storage strategies become `internal abstract` (critique correction, §4). | P4 |
 | D10 | #1236 lands before phase 2. | Gate on P2 |
 | D11 | Breaking the preview.1 surface is accepted, with a release-notes line. | Release |
-| D12 | Diagnostics and other result collections are never null. `QueryResult.Diagnostics` returns an empty list instead of `null`, which matches #1228's `GraphSchemaResult<T>.Diagnostics` (§6.8). A member where `null` means "absent" keeps it. | P8 |
+| D12 | Diagnostics and other result collections are never null. `DatabaseResult.Diagnostics` returns an empty list instead of `null`, which matches #1228's `GraphSchemaResult<T>.Diagnostics` (§6.8). A member where `null` means "absent" keeps it. | P8 |
 
 **Not decided:** whether an analyzer (`COHDB0xx` under `analyzers/`) should reject deriving from
 the root bases outside `resources/Database`. The review made no recommendation, so the approval
@@ -439,10 +439,10 @@ decision.
 | `StorageJournal` (`Storage/src/Journal/StorageJournal.cs:21`) | After P1 it is the type the coordinator and recovery name. It has one shipped leaf, the sealed `StreamJournal` in the same assembly (`StreamJournal.cs:16`), so as it stands it meets none of rule 2's cases, and its constructor is `protected` (`:32`). P2's Storage commit, after #1236 settles the journal format, either collapses `StreamJournal` into one public sealed `StorageJournal`, keeping the file factories (`StreamJournal.cs:75`, `:86`), or records the second variant that justifies the base and narrows the constructor to `private protected` (rule 3). **Decided at P2: collapsed.** No second variant exists: no test or other assembly derives from `StorageJournal`, and #1236 settled the format with one medium. `StreamJournal` is deleted; its medium operations became private members of `public sealed class StorageJournal`, and its three public constructors (over a `Stream`, a `StorageStream`, an `IFileSystemFileHandle`) and two `FromFile` factories became the journal's own. The constructors stay public rather than internal behind new factories: they were already public API on the former leaf, and Transactions.Tests, which no grant reaches, builds journals over memory streams for `TransactionRecovery`. The deviation marker goes with the base (§8). **Landed per the 2026-10-06 decision (27):** the three public constructors became `public static StorageJournal Create(...)` overloads over a `Stream`, a `StorageStream` and an `IFileSystemFileHandle`, behind one private constructor; each refuses a null medium (and the stream overloads a stream that cannot read, write and seek) before it builds anything. `FromFile` keeps its name, as a named factory that says what it opens, like `StorageStream.FromFile`. Transactions.Tests reaches the public factories, so it needs no grant; `Storage` and every test caller (Storage.Tests, Transactions.Tests) call `Create`, and `JournalTests` pins the factory surface. | P2 |
 | `CompiledSchema` (`Database/src/Provisioning/CompiledSchema.cs:12`) | A public abstract class whose leaf (`SqlCompiledSchema`) lives in Sql.Schema. It keeps a protected constructor. Audit its members for NVI when `DatabaseInstance.ApplySchemaAsync` starts taking it. **Audited at P3: conforms, unchanged.** `Format`, `Name`, `Model` and `AllowsDestructiveChanges` are set by the protected constructor and non-virtual (rule 6); `CanonicalDocument` is its one abstract public member, state the leaf computes (rule 4); `Hash` is non-virtual over it; nothing is virtual otherwise, and its one leaf lives in another shipped assembly, so the constructor stays `protected` (rule 3). It keeps no interface twin and is not newly tightened, so it carries no marker (§8). | P3 |
 | `DatabaseEngineWorker` (`Database/src/DatabaseEngineWorker.cs:64`) | Public abstract `Name`, `Kind` and `Interval`, and a virtual `WaitForTrigger`. `Run`, `RunIteration` and the per-database reporting members are non-virtual already (#1268 and its review), over `protected abstract void RunIterationCore`; P3 finishes the NVI conversion (row 7). #1264's body lists it, but P3 is where the root bases are written, so it moves there. **At P3:** converted (row 7) and marked (§8). | P3 |
-| `QueryRow` (`Execution/src/QueryRow.cs:8`) | Nine public abstract getters (`:13-69`). `GetValue` returns `object?` and boxes. It has four leaves in four assemblies (`SqlMaterializedRow`, `KeyValueMaterializedRow`, `GraphQueryRow`, `DocumentQueryRow`), so it is megamorphic in a multi-model host. It gets NVI with the ordinal checks in the base, and typed accessors on the hot path. | P8 |
-| `QueryResultSet` (`QueryResultSet.cs:15`) | `GetRowsAsync` returns `IAsyncEnumerable<QueryRow>` (`:27`), which costs one interface dispatch per row. [Guessing] Replace it with a non-virtual pull shape only if a per-row benchmark shows the dispatch matters. | P8 |
-| `QueryResult` (`QueryResult.cs:10`) | `Diagnostics` is `IReadOnlyList<Diagnostic>?` (`:33`). It becomes non-null (§6.8). | P8 |
-| `QueryRequest` (`QueryRequest.cs:10`, `:36`) | Audit for NVI and constructor visibility. `Parameters` (`:29`, overridden in four model requests) stays nullable: `null` means the request carries none, which rule 9 leaves alone. | P8 |
+| `DatabaseRow` (`Execution/src/DatabaseRow.cs:8`) | Nine public abstract getters (`:13-69`). `GetValue` returns `object?` and boxes. It has four leaves in four assemblies (`SqlMaterializedRow`, `KeyValueMaterializedRow`, `GraphQueryRow`, `DocumentQueryRow`), so it is megamorphic in a multi-model host. It gets NVI with the ordinal checks in the base, and typed accessors on the hot path. | P8 |
+| `DatabaseResultSet` (`DatabaseResultSet.cs:15`) | `GetRowsAsync` returns `IAsyncEnumerable<DatabaseRow>` (`:27`), which costs one interface dispatch per row. [Guessing] Replace it with a non-virtual pull shape only if a per-row benchmark shows the dispatch matters. | P8 |
+| `DatabaseResult` (`DatabaseResult.cs:11`) | `Diagnostics` is `IReadOnlyList<Diagnostic>?` (`:35`). It becomes non-null (§6.8). | P8 |
+| `DatabaseRequest` (`DatabaseRequest.cs:25`) | **Request-root audit superseded by the seam split (#1576–#1579).** The deleted request root was replaced by the memberless `DatabaseRequest` and model-owned `Parameters` on `SqlQueryRequest`, `DocumentQueryRequest` and `GraphRequest`. Those properties stay nullable: `null` means the request carries none, which rule 9 leaves alone. | P8 |
 | `QueryParser` and `QueryAnalyzer` (`Language/src/QueryParser.cs:12`, `QueryAnalyzer.cs:12`) | Audit for NVI. `QueryAnalyzer` is declared in a block-scoped namespace (`QueryAnalyzer.cs:7`, a forbidden pattern) with empty `<summary>` docs. `QueryParserOptions.Analyzers` exposes a mutable `List<QueryAnalyzer>` (`QueryParserOptions.cs:12`). | P8 |
 
 ## 6. Design notes for the corrected rows
@@ -1786,20 +1786,20 @@ that option B left are gone:
 
 ### 6.8 One Diagnostics convention: never null (D12)
 
-`QueryResult.Diagnostics` is nullable (`Execution/src/QueryResult.cs:33`), and its ten overrides
+`DatabaseResult.Diagnostics` is nullable (`Execution/src/DatabaseResult.cs:35`), and its ten overrides
 return `null` when they have nothing to report. #1228 made `GraphSchemaResult<T>.Diagnostics`
 non-null and empty instead (`Graph/src/GraphSchemaResult.cs:28`; commit `9eee083d` cites the .NET
 design guideline against null collection properties). The area adopts the #1228 form:
 
 - Diagnostics and other result collections return an empty collection, never `null` (rule 9 in
   `database-area.md`). A member where `null` means "absent" is outside the rule and keeps its
-  meaning: `QueryRequest.Parameters` and its four overrides, `SqlInsertExpression.Columns`
+  meaning: the model-owned `SqlQueryRequest.Parameters`, `DocumentQueryRequest.Parameters` and `GraphRequest.Parameters`, `SqlInsertExpression.Columns`
   (`Sql.Language/src/Expressions/SqlInsertExpression.cs:44`, "the column list, if specified"),
   `SqlInExpression.Values` (`SqlInExpression.cs:38`) and
   `BTreeIndexManagerOptions.ExistingIndexes` (`Indexing/src/BTreeIndexManagerOptions.cs:36`);
 - P1 deletes one override, `QueryStatementResult` (`Execution/src/QueryStatementResult.cs:36`),
   with the pipeline (row 15);
-- P8 changes `QueryResult.Diagnostics` to `IReadOnlyList<Diagnostic>` and updates the remaining
+- P8 changes `DatabaseResult.Diagnostics` to `IReadOnlyList<Diagnostic>` and updates the remaining
   nine overrides, plus the seven test files that assert `null` (Graph `GqlUnknownTokenWarningTests`,
   `GqlLabelDirectionExecutionTests`, `GraphPathsQueryTests`; Sql `SqlExpressionDepthExecutionTests`,
   `SqlTransactionControlTests`, `SqlStatementCompletenessExecutionTests`,
@@ -4389,7 +4389,7 @@ the guard check, which is a small gain.
 
 **What they do not support.** They do not show that "anything at three or fewer types
 devirtualizes whatever the type shape": the benchmark has no abstract case with three or fewer
-types. They also do not show any effect at row level. `QueryRow` and `QueryResultSet` are the
+types. They also do not show any effect at row level. `DatabaseRow` and `DatabaseResultSet` are the
 per-row sites, and P8 measures them before changing their shape.
 
 ## 10. Size estimate
