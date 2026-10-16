@@ -58,7 +58,7 @@ holds the primitive contracts and trade-offs.
 
 The diagram shows the **target** direct dependencies from plan D5; every arrow means "depends on".
 Text depends on Content, and YAML and Markdown each depend on both Content and Text; that unchanged
-text branch is recorded in the table rather than adding nodes to this nine-node graph.
+text branch is recorded in the table rather than adding nodes to this ten-node graph.
 
 ```mermaid
 flowchart LR
@@ -67,6 +67,7 @@ flowchart LR
     Media["Content.Media"]
     Bmff["Content.Bmff"]
     Mpeg["Content.Mpeg"]
+    Heif["Content.Heif"]
     Ebml["Content.Ebml"]
     Mkv["Content.Mkv"]
     Pdf["Content.Pdf"]
@@ -75,6 +76,7 @@ flowchart LR
     Media --> Binary
     Bmff --> Media
     Mpeg --> Bmff
+    Heif --> Bmff
     Ebml --> Binary
     Mkv --> Ebml
     Mkv --> Media
@@ -95,6 +97,7 @@ All package names below have the `Assimalign.Cohesion.` prefix. "Today" means th
 | `Content.Media` | Shared media descriptions; track/sample/timeline model planned | Content.Binary | Content.Binary | Strategic |
 | `Content.Bmff` | ISO BMFF box reader, writer and composite document tree | Content.Media | Content.Media | Strategic |
 | `Content.Mpeg` | MP4 profile over BMFF | None | Content.Bmff | Strategic |
+| `Content.Heif` | HEIF/AVIF still-image items, properties, references and metadata edits | Content.Bmff (Stage 5) | Content.Bmff | Strategic |
 | `Content.Ebml` | Generic EBML container, VInt and element model | None | Content.Binary | Strategic |
 | `Content.Mkv` | Matroska profile over EBML, with shared media descriptions | Content.Bmff | Content.Ebml, Content.Media | Strategic |
 | `Content.Pdf` | PDF object, document and cross-reference structure | None | Content.Binary | Strategic |
@@ -105,6 +108,25 @@ reference nothing. The program replaces MKV's dependency with EBML and Media and
 EBML and PDF and BMFF to MPEG. EBML stays on Binary because it is a generic container; the Matroska
 profile adds media semantics. Dependencies point toward shared contracts and primitives, never
 back from the root into a format or into another package's internals.
+
+## BMFF-derived format retention — O-C3
+
+Owner decision O-C3 (2026-10-16): "Retain HEIF/AVIF as Content.Heif (still images:
+ftyp/meta/iloc/iprp model), and keep CMAF as a profile inside Content.Mpeg."
+
+A BMFF-derived format gets its own package when its data model materially diverges from the MP4
+track model. HEIF represents still images as metadata items with locations, properties and item
+references, so `Assimalign.Cohesion.Content.Heif` is retained as a separate strategic package.
+A constrained subset of the MP4 track model, such as CMAF, remains a profile inside Content.Mpeg.
+A brand alone does not justify a package. Other derived formats require an explicit retention
+decision before scaffolding.
+
+Content.Heif references Content.Bmff only. Both HEIF and MPEG reuse BMFF's registry, composite
+tree, streaming reader/writer, unknown preservation and offset relocation; neither profile
+references the other. HEIF image sequences (`msf1` and AVIF sequence brands) are outside this
+first wave. A future sequence implementation should reuse the MP4 profile's track interpretation
+rather than treating tracks as HEIF items; that dependency decision belongs to the future scope.
+Pixel codecs, TIFF/Exif parsing (gap #1553), and CMAF implementation are outside this package.
 
 ## Classification
 
@@ -126,6 +148,7 @@ settled its scope. These classifications follow the program plan's survey, secti
 | `Content.Ebml` | Strategic | Tested VInt is a useful base for the generic container; reader, writer and document work remain. |
 | `Content.Mkv` | Strategic | Retained Matroska profile, currently a placeholder with the wrong dependency. |
 | `Content.Mpeg` | Strategic | Retained MP4 profile over BMFF, currently an empty project. |
+| `Content.Heif` | Strategic | O-C3 retains HEIF/AVIF still images because their item model diverges from tracks. |
 | `Content.Pdf` | Strategic | Retained document-structure reader and manipulation surface, currently an empty project. |
 | `Content.Exe` | Strategic | Owner decision O-C1 keeps both concerns here, separated: format inspection and process invocation. |
 
@@ -148,6 +171,7 @@ retrieval date; the online references below were reviewed on 2026-10-16.
 | `Content`, `Content.Binary`, `Content.Media` | No independent file-format standard; family contracts and format-specific consumers govern these layers. | Root contracts implemented; Binary and the shared media model planned. |
 | `Content.Bmff` | [ISO/IEC 14496-12:2026, edition 8](https://www.iso.org/standard/85596.html), with the [MP4RA registry](https://mp4ra.org/). | Composite box model and incomplete reader/writer; compliant parsing, emission and unknown-box preservation remain in progress. |
 | `Content.Mpeg` | [ISO/IEC 14496-14:2020, edition 3](https://www.iso.org/standard/79110.html). | **Planned:** MP4 brands, tracks and samples over BMFF; MPEG-2 transport streams are separate scope. |
+| `Content.Heif` | [ISO/IEC 23008-12:2025, edition 3](https://www.iso.org/standard/89035.html) over ISO/IEC 14496-12; [AVIF v1.2.0](https://aomediacodec.github.io/av1-avif/v1.2.0.html); [MP4RA](https://mp4ra.org/) brands, items and properties (reviewed 2026-10-16). | Retained still-image item model, derived images and metadata editing; sequence tracks and pixel decoding excluded. |
 | `Content.Ebml` | [RFC 8794 (2020)](https://www.rfc-editor.org/rfc/rfc8794). | VInt encoding/decoding implemented and tested; full elements, schema, reader/writer and document model planned. |
 | `Content.Mkv` | [RFC 9559 (2024)](https://datatracker.ietf.org/doc/html/rfc9559) and the [Matroska element specification, version 4 table](https://www.matroska.org/technical/elements.html). | **Planned:** segment, track, cluster, tag and cue structure over EBML; no codec decoding. |
 | `Content.Pdf` | [ISO 32000-2:2020, edition 2 (PDF 2.0)](https://www.iso.org/standard/75839.html). | **Planned:** objects, document structure, tokenizer/parser and cross-reference handling, including reading PDF 1.x files; no rendering. |

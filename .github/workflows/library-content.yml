@@ -53,6 +53,7 @@ jobs:
             'Assimalign.Cohesion.Content',
             'Assimalign.Cohesion.Content.Binary',
             'Assimalign.Cohesion.Content.Bmff',
+            'Assimalign.Cohesion.Content.Heif',
             'Assimalign.Cohesion.Content.Media',
             'Assimalign.Cohesion.Content.Mkv',
             'Assimalign.Cohesion.Content.Text',

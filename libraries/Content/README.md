@@ -7,38 +7,35 @@ orchestration and storage adapters belong at the service boundary.
 
 ## Project map
 
-The diagram and table show direct csproj references after Stage 3 of the program; an arrow means
+The diagram and table show direct csproj references in this worktree; an arrow means
 "depends on". Package names in the diagram omit the `Assimalign.Cohesion.` prefix.
 
 ```mermaid
 flowchart LR
     Root["Content"]
     Binary["Content.Binary"]
-    Text["Content.Text"]
+    Text["Content.Text / Yaml / Markdown"]
     Media["Content.Media"]
     Bmff["Content.Bmff"]
     Mpeg["Content.Mpeg"]
+    Heif["Content.Heif"]
     Ebml["Content.Ebml"]
     Mkv["Content.Mkv"]
     Pdf["Content.Pdf"]
     Exe["Content.Exe"]
-    Markdown["Content.Markdown"]
-    Yaml["Content.Yaml"]
     Binary --> Root
     Text --> Root
     Media --> Binary
     Bmff --> Media
+    Heif --> Bmff
     Ebml --> Binary
     Pdf --> Binary
     Exe --> Binary
     Mkv --> Bmff
-    Markdown --> Root
-    Markdown --> Text
-    Yaml --> Root
-    Yaml --> Text
 ```
 
-Binary references the root; Media, EBML, PDF and Exe reference Binary; BMFF references Media; Text
+The text node groups Text, Yaml and Markdown to keep this map within twelve nodes.
+HEIF references BMFF only. Binary references the root; Media, EBML, PDF and Exe reference Binary; BMFF references Media; Text
 references the root, and YAML and Markdown reference both the root and Text. MPEG references nothing
 yet and MKV still references BMFF: Stage 4 moves MKV onto EBML and Media and puts MPEG on BMFF and
 Media. The target direction is in the [area architecture record](../../docs/libraries/Content/DESIGN.md#family-map).
@@ -52,6 +49,7 @@ Media. The target direction is in the [area architecture record](../../docs/libr
 | [`Assimalign.Cohesion.Content.Markdown`](./Assimalign.Cohesion.Content.Markdown/) | CommonMark subset, canonical writer and HTML renderer | Content, Content.Text | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Media`](./Assimalign.Cohesion.Content.Media/) | Shared tracks, rational timestamps, lazy sample indexes and seek ranges | Content.Binary | Strategic | Implemented (profile adapters in Stage 4) |
 | [`Assimalign.Cohesion.Content.Bmff`](./Assimalign.Cohesion.Content.Bmff/) | ISO BMFF composite box model, registry, reader, writer and document with lazy `mdat` | Content.Media | Strategic | Implemented (strategic box field models in progress) |
+| [`Assimalign.Cohesion.Content.Heif`](./Assimalign.Cohesion.Content.Heif/) | HEIF/AVIF still-image items, derived images, lazy payloads and metadata editing | Content.Bmff | Strategic | Implemented (still-image container scope) |
 | [`Assimalign.Cohesion.Content.Mpeg`](./Assimalign.Cohesion.Content.Mpeg/) | Planned MP4 profile over BMFF | None | Strategic | Placeholder |
 | [`Assimalign.Cohesion.Content.Ebml`](./Assimalign.Cohesion.Content.Ebml/) | EBML reader, writer, document, schema and DocType registry | Content.Binary | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Mkv`](./Assimalign.Cohesion.Content.Mkv/) | Planned Matroska profile over EBML | Content.Bmff | Strategic | Placeholder |

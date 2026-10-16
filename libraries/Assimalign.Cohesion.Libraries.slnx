@@ -499,6 +499,22 @@
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/tests/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Exe/tests/Assimalign.Cohesion.Content.Exe.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Heif/">
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Heif/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/docs/OVERVIEW.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/docs/PUBLIC_SURFACE.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/docs/VERIFICATION.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Heif/src/">
+		<Project Path="Content/Assimalign.Cohesion.Content.Heif/src/Assimalign.Cohesion.Content.Heif.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Heif/tests/">
+		<Project Path="Content/Assimalign.Cohesion.Content.Heif/tests/Assimalign.Cohesion.Content.Heif.Tests.csproj" />
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/tests/TestObjects/Corpus/PROVENANCE.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Markdown/">
 		<File Path="Content/Assimalign.Cohesion.Content.Markdown/README.md" />
 	</Folder>
