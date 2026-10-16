@@ -8,8 +8,15 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>A parsed, database-scoped OQL statement and its named parameter values.</summary>
-public sealed class DocumentQueryRequest : QueryRequest<OqlQueryStatement>
+/// <remarks>
+/// The document model's member of the shared <see cref="DatabaseRequest"/> family, and the request
+/// root of <see cref="DocumentDatabaseSession"/> (<c>DatabaseLanguageSession&lt;DocumentQueryRequest&gt;</c>):
+/// the session's typed execute member takes this type, so a request of another model does not
+/// compile. The request owns its typed statement.
+/// </remarks>
+public sealed class DocumentQueryRequest : DatabaseRequest
 {
+    private readonly OqlQueryStatement _statement;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>Creates a request from a parsed OQL statement.</summary>
@@ -17,13 +24,16 @@ public sealed class DocumentQueryRequest : QueryRequest<OqlQueryStatement>
     /// <param name="parameters">Named parameter values, without their @ or $ prefix.</param>
     /// <exception cref="ArgumentNullException">The statement is null.</exception>
     public DocumentQueryRequest(OqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters = null)
-        : base(statement ?? throw new ArgumentNullException(nameof(statement)))
     {
+        _statement = statement ?? throw new ArgumentNullException(nameof(statement));
         _parameters = parameters;
     }
 
-    /// <inheritdoc />
-    public override IReadOnlyDictionary<string, object?>? Parameters => _parameters;
+    /// <summary>Gets the parsed OQL statement.</summary>
+    public OqlQueryStatement Statement => _statement;
+
+    /// <summary>Gets the named parameter values, without their @ or $ prefix; null when the request binds none.</summary>
+    public IReadOnlyDictionary<string, object?>? Parameters => _parameters;
 
     /// <summary>Parses OQL text into an executable document statement request.</summary>
     /// <param name="oql">The OQL statement text.</param>

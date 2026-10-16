@@ -171,7 +171,7 @@ public class DatabaseSessionTests
         source.Cancel();
 
         // Act / Assert
-        await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((Execution.QueryRequest)null!));
+        await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((TestRequest)null!));
         await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" "));
         await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(new TestRequest(), source.Token));
         await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("SELECT 1", null, source.Token));

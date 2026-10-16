@@ -469,18 +469,12 @@ public sealed class BlobTransactionFailureTests
             await Should.ThrowAsync<ArgumentException>(async () => await files.OpenReadAsync("")),
             await Should.ThrowAsync<ArgumentException>(async () => await files.DeleteAsync(" ")),
             await Should.ThrowAsync<ArgumentException>(async () => await session.GetContainerAsync(" ")),
-            await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" ")),
-            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("LIST files")),
-            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new BlobRequest())),
         };
         var state = transaction.State;
         await transaction.CommitAsync();
 
-        // Assert: a blob session has no query or statement language. Option B (concrete-types plan
-        // §6.6) names the session's own container operations, where the request seam named the
-        // former IBlobDatabase of session.Database.
-        rejections[5].Message.ShouldBe("Blob sessions have no statement language or server-scoped commands.");
-        rejections[6].Message.ShouldBe("Blob sessions have no query language. Use the session's container operations.");
+        // Assert: a blob session has no execute member, so only its container and blob operations
+        // validate here.
         rejections.ShouldAllBe(error => !error.Message.StartsWith("COHDBB001", StringComparison.Ordinal));
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
@@ -678,9 +672,9 @@ public sealed class BlobTransactionFailureTests
     }
 
     /// <summary>
-    /// A closed session refuses BEGIN, both execute seams, its own container operations and the
-    /// operations of a container bound to it with the root base's message (concrete-types plan
-    /// §6.4), for the model's former "The blob session is closed.".
+    /// A closed session refuses BEGIN, its own container operations and the operations of a
+    /// container bound to it with the root base's message (concrete-types plan §6.4), for the
+    /// model's former "The blob session is closed.". A blob session has no execute member.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a closed session refuses every operation with one message")]
     public async Task Operations_OnClosedSession_ShouldRefuseWithOneMessage()
@@ -698,8 +692,6 @@ public sealed class BlobTransactionFailureTests
         var refusals = new List<DatabaseException>
         {
             await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
-            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("LIST files")),
-            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new BlobRequest())),
             await Should.ThrowAsync<DatabaseException>(async () => await session.CreateContainerAsync("late")),
             await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("files")),
             await Should.ThrowAsync<DatabaseException>(async () => await session.DropContainerAsync("files")),
@@ -726,14 +718,14 @@ public sealed class BlobTransactionFailureTests
 
     /// <summary>
     /// A transaction the kernel ended under its caller (its database was dropped while the session
-    /// held it) reports <c>Faulted</c>, and the root bases order its refusal against the database's
+    /// held it) reports <c>Faulted</c>, and the root base orders its refusal against the database's
     /// disposal and a canceled token (concrete-types plan §6.4): BEGIN refuses the open transaction
-    /// with <c>COHDBB001</c> before it checks anything of the model, where the model reported the
-    /// disposed database; both execute seams check a canceled token before the model reports the
-    /// disposed database, which they still report for a live token, and so does BEGIN once the
-    /// caller rolled the ended transaction back.
+    /// with <c>COHDBB001</c> before it checks the token or anything of the model, where the model
+    /// reported the disposed database; once the caller rolled the ended transaction back, BEGIN
+    /// reports the disposed database. A blob session has no execute member; the token-before-model
+    /// order of the execute members is pinned by the Graph and Documents suites.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a transaction the kernel ended refuses BEGIN with COHDBB001; the execute seams check a canceled token first")]
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a transaction the kernel ended refuses BEGIN with COHDBB001 before the token and the disposed database")]
     public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
     {
         // Arrange
@@ -751,33 +743,26 @@ public sealed class BlobTransactionFailureTests
         // Act
         var state = transaction.State;
         var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(canceled.Token));
-        var canceledText = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("LIST files", null, canceled.Token));
-        var text = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync("LIST files"));
-        var canceledRequest = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(new BlobRequest(), canceled.Token));
-        var request = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync(new BlobRequest()));
         await transaction.RollbackAsync();
         var beginAfterRollback = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.BeginTransactionAsync());
 
         // Assert
         state.ShouldBe(TransactionState.Faulted);
         begin.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
-        canceledText.CancellationToken.ShouldBe(canceled.Token);
-        text.ShouldNotBeNull();
-        canceledRequest.CancellationToken.ShouldBe(canceled.Token);
-        request.ShouldNotBeNull();
         beginAfterRollback.ShouldNotBeNull();
         session.CurrentTransaction.ShouldBeNull();
     }
 
     /// <summary>
-    /// A closed session is refused as closed before its database's disposal is checked, by BEGIN
-    /// and both execute seams, which run the root base's checks first (concrete-types plan §6.4):
-    /// the model checked the disposed database first and reported <see cref="ObjectDisposedException"/>.
-    /// The session's container operations and the operations of a container bound to it, which
-    /// check the database before the session, still report the disposed database.
+    /// A closed session is refused as closed before its database's disposal is checked, by BEGIN,
+    /// which runs the root base's checks first (concrete-types plan §6.4): the model checked the
+    /// disposed database first and reported <see cref="ObjectDisposedException"/>. The session's
+    /// container operations and the operations of a container bound to it, which check the
+    /// database before the session, still report the disposed database. A blob session has no
+    /// execute member.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a closed session of a dropped database is refused as closed by BEGIN and the execute seams")]
-    public async Task ExecuteAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a closed session of a dropped database is refused as closed by BEGIN")]
+    public async Task BeginTransactionAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
@@ -792,8 +777,6 @@ public sealed class BlobTransactionFailureTests
         var refusals = new List<DatabaseException>
         {
             await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
-            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("LIST files")),
-            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new BlobRequest())),
         };
         var sessionContainer = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.CreateContainerAsync("late"));
         var blob = await Should.ThrowAsync<ObjectDisposedException>(async () => await bound.GetPropertiesAsync("late"));

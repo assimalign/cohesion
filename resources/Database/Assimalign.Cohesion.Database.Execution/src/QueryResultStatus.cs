@@ -1,16 +1,16 @@
 namespace Assimalign.Cohesion.Database.Execution;
 
 /// <summary>
-/// Represents the outcome status of a query execution.
+/// Represents the outcome status of executing a request.
 /// </summary>
 public enum QueryResultStatus : byte
 {
-    /// <summary>The query completed successfully.</summary>
+    /// <summary>The request completed successfully.</summary>
     Success = 0,
-    /// <summary>The query encountered an error during execution.</summary>
+    /// <summary>The request failed during execution.</summary>
     Error,
-    /// <summary>The query was cancelled before completion.</summary>
+    /// <summary>The request was cancelled before completion.</summary>
     Cancelled,
-    /// <summary>The query exceeded its timeout.</summary>
+    /// <summary>The request exceeded its timeout.</summary>
     Timeout
 }

@@ -3,7 +3,8 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Execution</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Language" />
+		<!-- Types only: the request and result roots name no query language
+		     (ExecutionAssemblyTests pins that this assembly references no Database.Language). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 </Project>

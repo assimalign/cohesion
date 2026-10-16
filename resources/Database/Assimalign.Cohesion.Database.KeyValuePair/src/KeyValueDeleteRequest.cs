@@ -18,7 +18,7 @@ public sealed class KeyValueDeleteRequest : KeyValueRequest
     /// <param name="expectedETag">The etag the key's current entry must carry for the delete to apply, or null for an unconditional delete.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="key"/> is empty.</exception>
     public KeyValueDeleteRequest(ReadOnlyMemory<byte> key, long? expectedETag = null)
-        : base(new KeyValueStatement(KeyValueOperation.Delete))
+        : base(KeyValueOperation.Delete)
     {
         if (key.IsEmpty)
         {

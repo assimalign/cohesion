@@ -572,7 +572,7 @@ internal sealed class DatabaseEventSource : EventSource
     /// <param name="request">The typed request, or null for statement text.</param>
     /// <returns>Whether the start was written: only then does the statement's end write its <c>StatementStop</c>.</returns>
     [NonEvent]
-    public bool StatementStart(DatabaseSession session, QueryRequest? request)
+    public bool StatementStart(DatabaseSession session, DatabaseRequest? request)
     {
         if (!IsEnabled(EventLevel.Verbose, Keywords.Statements))
         {
@@ -591,10 +591,10 @@ internal sealed class DatabaseEventSource : EventSource
     /// <param name="session">The session.</param>
     /// <param name="request">The typed request, or null for statement text.</param>
     /// <param name="result">The result the core returned.</param>
-    /// <param name="startWritten">What <see cref="StatementStart(DatabaseSession, QueryRequest?)"/> returned.</param>
+    /// <param name="startWritten">What <see cref="StatementStart(DatabaseSession, DatabaseRequest?)"/> returned.</param>
     /// <param name="startTimestamp">When the statement started.</param>
     [NonEvent]
-    public void StatementCompleted(DatabaseSession session, QueryRequest? request, QueryResult? result, bool startWritten, long startTimestamp)
+    public void StatementCompleted(DatabaseSession session, DatabaseRequest? request, QueryResult? result, bool startWritten, long startTimestamp)
     {
         // A null result is the leaf's contract violation; its caller receives it as it is, and the
         // trace reads it as a success with no count.
@@ -625,10 +625,10 @@ internal sealed class DatabaseEventSource : EventSource
     /// <param name="session">The session.</param>
     /// <param name="request">The typed request, or null for statement text.</param>
     /// <param name="exception">What the core threw.</param>
-    /// <param name="startWritten">What <see cref="StatementStart(DatabaseSession, QueryRequest?)"/> returned.</param>
+    /// <param name="startWritten">What <see cref="StatementStart(DatabaseSession, DatabaseRequest?)"/> returned.</param>
     /// <param name="startTimestamp">When the statement started.</param>
     [NonEvent]
-    public void StatementThrew(DatabaseSession session, QueryRequest? request, Exception exception, bool startWritten, long startTimestamp)
+    public void StatementThrew(DatabaseSession session, DatabaseRequest? request, Exception exception, bool startWritten, long startTimestamp)
     {
         double duration = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
         var status = QueryResultStatus.Cancelled;
@@ -909,7 +909,7 @@ internal sealed class DatabaseEventSource : EventSource
     }
 
     [NonEvent]
-    private void WriteStatementEnd(DatabaseSession session, QueryRequest? request, QueryResultStatus status, long affectedCount, double duration, bool startWritten)
+    private void WriteStatementEnd(DatabaseSession session, DatabaseRequest? request, QueryResultStatus status, long affectedCount, double duration, bool startWritten)
     {
         double threshold = Volatile.Read(ref _slowStatementThresholdMilliseconds);
         if (duration >= threshold && IsEnabled(EventLevel.Warning, EventKeywords.None))
@@ -956,7 +956,7 @@ internal sealed class DatabaseEventSource : EventSource
         return diagnostics[0];
     }
 
-    private static string GetRequestKind(QueryRequest? request)
+    private static string GetRequestKind(DatabaseRequest? request)
         => request is null ? TextRequestKind : request.GetType().Name;
 
     private static string GetServerType(DatabaseServer server) => server.GetType().Name;

@@ -63,7 +63,7 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
 
     protected override async Task ExecuteStatementAsync(StatementOutcome outcome, ExecuteOptions options, CancellationToken cancellationToken)
     {
-        QueryResult result = await RequireSession().ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
+        QueryResult result = await DocumentSession.ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
         await FillFromQueryResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
     }
 

@@ -32,13 +32,21 @@ using Assimalign.Cohesion.Database.Transactions;
 /// command and a BEGIN may run side by side, as before the bases.
 /// </para>
 /// <para>
-/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root base with
-/// an internal constructor; <see cref="KeyValueDatabase.CreateSessionAsync"/> creates it. The
-/// database and the transaction are re-exposed typed with <c>new</c> members over the base's
-/// public members.
+/// <b>Typed requests only.</b> The key-value model has no query language. Its one execute member
+/// is the typed one it inherits from <see cref="DatabaseExecutionSession{TRequest}"/>, and it takes
+/// only a <see cref="KeyValueRequest"/>, so a request of another model does not compile. The
+/// command grammar (<c>docs/COMMANDS.md</c>) is the wire encoding of the typed requests: the
+/// model's wire server parses each command through the session's internal command entry, which
+/// runs the parsed request through the typed member.
+/// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root's typed
+/// execution base with an internal constructor; <see cref="KeyValueDatabase.CreateSessionAsync"/>
+/// creates it. The database and the transaction are re-exposed typed with <c>new</c> members over
+/// the base's public members.
 /// </para>
 /// </remarks>
-public sealed class KeyValueDatabaseSession : DatabaseSession
+public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueRequest>
 {
     private readonly KeyValueDatabase _database;
     private readonly TransactionCoordinator _coordinator;
@@ -129,28 +137,49 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
         return new KeyValueDatabaseTransaction(_coordinator, context, _database);
     }
 
-    /// <inheritdoc />
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
-        => ExecuteRequestAsync(request, cancellationToken);
-
-    /// <inheritdoc />
+    /// <summary>
+    /// Runs one command of the key-value command grammar (<c>docs/COMMANDS.md</c>:
+    /// <c>GET</c>/<c>PUT</c>/<c>DELETE</c>/<c>EXISTS</c>/<c>SCAN</c> with parameter operands, and
+    /// <c>KEYSPACES</c>), the wire encoding of the typed requests: the wire server's entry, which
+    /// lets it carry key-value commands in the protocol's existing Execute message.
+    /// </summary>
+    /// <param name="commandText">The command text.</param>
+    /// <param name="parameters">Parameter values keyed by bare parameter name, or null when the command binds none.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The command's result.</returns>
     /// <remarks>
-    /// The model-agnostic text-execute seam: key-value sessions parse the command grammar
-    /// (<c>docs/COMMANDS.md</c>: <c>GET</c>/<c>PUT</c>/<c>DELETE</c>/<c>EXISTS</c>/<c>SCAN</c> with
-    /// parameter operands, and <c>KEYSPACES</c>) into the same typed requests the typed seam
-    /// executes. This is what lets the wire-protocol server execute key-value commands through the
-    /// existing Execute message with zero protocol changes.
+    /// The checks run in the order the text seam ran them before the capability split: the closed
+    /// session, blank text, the canceled token, the offline database, and a transaction that
+    /// refuses commands, which refuses the text before it is parsed. A command that fails to parse
+    /// throws <see cref="DatabaseParseException"/> and changes nothing. The parsed request runs
+    /// through the typed execute member, never the core, so the root traces it under its request
+    /// type's name.
     /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    /// <exception cref="ArgumentException"><paramref name="commandText"/> is null, empty or white space.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the command was parsed.</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseParseException">The text violates the grammar, references a missing parameter, or binds an operand of the wrong type.</exception>
+    /// <exception cref="DatabaseException">
+    /// The session is closed; its transaction refuses commands (<c>COHDBK001</c>); or the command
+    /// failed.
+    /// </exception>
+    internal ValueTask<QueryResult> ExecuteCommandTextAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
+        ThrowIfClosed();
+        ArgumentException.ThrowIfNullOrWhiteSpace(commandText);
+        cancellationToken.ThrowIfCancellationRequested();
         _database.ThrowIfOffline();
 
         // A transaction that refuses commands refuses the text before it is parsed.
         ThrowIfTransactionRefuses();
-        return ExecuteRequestAsync(KeyValueCommandParser.Parse(statement, parameters), cancellationToken);
+        return ExecuteAsync(KeyValueCommandParser.Parse(commandText, parameters), cancellationToken);
     }
 
-    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    protected override ValueTask<QueryResult> ExecuteCoreAsync(KeyValueRequest request, CancellationToken cancellationToken)
+        => ExecuteRequestAsync(request, cancellationToken);
+
+    private async ValueTask<QueryResult> ExecuteRequestAsync(KeyValueRequest request, CancellationToken cancellationToken)
     {
         _database.ThrowIfOffline();
 
@@ -168,14 +197,8 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
         }
     }
 
-    private async ValueTask<QueryResult> ExecuteCommandAsync(QueryRequest request, CancellationToken cancellationToken)
+    private async ValueTask<QueryResult> ExecuteCommandAsync(KeyValueRequest request, CancellationToken cancellationToken)
     {
-        if (request is not KeyValueRequest command)
-        {
-            throw new DatabaseException(
-                $"The key-value session executes {nameof(KeyValueRequest)} commands; {request.GetType().Name} is not one.");
-        }
-
         // Inside an explicit transaction, the command rides its context. A command is
         // statement-atomic: its writes share one physical bracket that a failure rolls back, so a
         // failed command writes nothing and the transaction stays active, as a failed SQL
@@ -202,7 +225,7 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
                 // is at or below the command's (#1363). It runs under the transaction's own context,
                 // as the Sql session's statements do.
                 var scope = new KeyValueStatementContext(transaction.Context, _coordinator);
-                return await _executor.ExecuteAsync(command, scope, cancellationToken).ConfigureAwait(false);
+                return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             }
             catch (TransactionDeadlockException exception)
             {
@@ -234,7 +257,7 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
         try
         {
             var scope = new KeyValueStatementContext(context, _coordinator);
-            var result = await _executor.ExecuteAsync(command, scope, cancellationToken).ConfigureAwait(false);
+            var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             return result;
         }

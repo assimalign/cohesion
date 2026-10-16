@@ -13,17 +13,26 @@ using Assimalign.Cohesion.Database.Types;
 /// Represents a SQL query request: a parsed SQL statement plus optional named
 /// parameter values (bound to <c>@name</c> / <c>$n</c> parameters in the statement).
 /// </summary>
-public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
+/// <remarks>
+/// The SQL model's member of the shared <see cref="DatabaseRequest"/> family, and the request
+/// root of <see cref="SqlDatabaseSession"/> (<c>DatabaseLanguageSession&lt;SqlQueryRequest&gt;</c>):
+/// the session's typed execute member takes this type, so a request of another model does not
+/// compile. The request owns its typed statement; the execution package names no statement type.
+/// </remarks>
+public sealed class SqlQueryRequest : DatabaseRequest
 {
+    private readonly SqlQueryStatement _statement;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>
     /// Initializes a new <see cref="SqlQueryRequest"/> with the specified statement.
     /// </summary>
     /// <param name="statement">The parsed SQL statement.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="statement"/> is null.</exception>
     public SqlQueryRequest(SqlQueryStatement statement)
-        : base(statement)
     {
+        ArgumentNullException.ThrowIfNull(statement);
+        _statement = statement;
     }
 
     /// <summary>
@@ -31,14 +40,23 @@ public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
     /// </summary>
     /// <param name="statement">The parsed SQL statement.</param>
     /// <param name="parameters">The parameter values to bind, keyed by parameter name.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="statement"/> is null.</exception>
     public SqlQueryRequest(SqlQueryStatement statement, IReadOnlyDictionary<string, object?> parameters)
-        : base(statement)
     {
+        ArgumentNullException.ThrowIfNull(statement);
+        _statement = statement;
         _parameters = parameters;
     }
 
-    /// <inheritdoc />
-    public override IReadOnlyDictionary<string, object?>? Parameters => _parameters;
+    /// <summary>
+    /// Gets the parsed SQL statement.
+    /// </summary>
+    public SqlQueryStatement Statement => _statement;
+
+    /// <summary>
+    /// Gets the parameter values to bind, keyed by parameter name; null when the request binds none.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? Parameters => _parameters;
 
     /// <summary>
     /// Parses SQL text into a request, with the dialect's default expression nesting limit

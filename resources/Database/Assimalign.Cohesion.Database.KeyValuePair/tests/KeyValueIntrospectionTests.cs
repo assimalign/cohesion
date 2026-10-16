@@ -25,7 +25,7 @@ public sealed class KeyValueIntrospectionTests
         await using var ownedEngine = engine;
         await using var session = await database.CreateSessionAsync();
 
-        var result = (await session.ExecuteAsync("keyspaces", cancellationToken: TestTimeout.Token()))
+        var result = (await session.ExecuteCommandTextAsync("keyspaces", cancellationToken: TestTimeout.Token()))
             .ShouldBeAssignableTo<QueryResultSet>();
         result.Columns.Select(column => column.Name).ShouldBe(new[]
         {
@@ -41,7 +41,7 @@ public sealed class KeyValueIntrospectionTests
             .ShouldHaveSingleItem().ShouldBe(expected);
 
         // Discovery never creates an entry in the ordinary record space.
-        (await MaterializeAsync(await session.ExecuteAsync("SCAN", cancellationToken: TestTimeout.Token())))
+        (await MaterializeAsync(await session.ExecuteCommandTextAsync("SCAN", cancellationToken: TestTimeout.Token())))
             .ShouldBeEmpty();
     }
 
@@ -54,13 +54,13 @@ public sealed class KeyValueIntrospectionTests
         await using var ownedEngine = engine;
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
-        var previous = await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token());
+        var previous = await session.ExecuteCommandTextAsync("KEYSPACES", cancellationToken: TestTimeout.Token());
 
         // A metadata publication after execution cannot alter its returned rows.
         var catalog = database.Catalog;
         await catalog.SetEntrySpaceFormatVersionAsync(3, TestTimeout.Token());
         (await MaterializeAsync(previous)).ShouldHaveSingleItem()[2].ShouldBe(2);
-        (await MaterializeAsync(await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
+        (await MaterializeAsync(await session.ExecuteCommandTextAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
             .ShouldHaveSingleItem()[2].ShouldBe(3);
         await catalog.SetEntrySpaceFormatVersionAsync(2, TestTimeout.Token());
     }
@@ -77,13 +77,13 @@ public sealed class KeyValueIntrospectionTests
         await using var other = await second.CreateSessionAsync();
         await second.Catalog.SetEntrySpaceFormatVersionAsync(3, TestTimeout.Token());
 
-        (await MaterializeAsync(await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
+        (await MaterializeAsync(await session.ExecuteCommandTextAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { "first", 1L, 2, "key", "BTree", true });
         (await MaterializeAsync(await other.ExecuteAsync(new KeyValueKeySpacesRequest(), TestTimeout.Token())))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { "second", 1L, 3, "key", "BTree", true });
 
         await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await session.ExecuteAsync("KEYSPACES FROM second", cancellationToken: TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("KEYSPACES FROM second", cancellationToken: TestTimeout.Token()));
         session.Database.ShouldBeSameAs(first);
     }
 
@@ -100,9 +100,9 @@ public sealed class KeyValueIntrospectionTests
         await using var session = await database.CreateSessionAsync();
 
         var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await session.ExecuteAsync(command, cancellationToken: TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync(command, cancellationToken: TestTimeout.Token()));
         error.Message.ShouldBe("The KEYSPACES catalog surface is read-only.");
-        (await MaterializeAsync(await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
+        (await MaterializeAsync(await session.ExecuteCommandTextAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { "kv", 1L, 2, "key", "BTree", true });
 
         var key = KeyValueTestHarness.Bytes("KEYSPACES");
@@ -124,7 +124,7 @@ public sealed class KeyValueIntrospectionTests
         await using var session = await database.CreateSessionAsync();
 
         var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await session.ExecuteAsync(command, cancellationToken: TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync(command, cancellationToken: TestTimeout.Token()));
         error.Message.ShouldBe("KEYSPACES takes the form: KEYSPACES.");
     }
 

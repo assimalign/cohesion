@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// One server-side session pump: drives the protocol state machine
 /// (connected → startup → authenticating → ready ⇄ executing → terminated)
 /// over a single connection and delegates statement execution to the bound
-/// engine session's text-execute seam.
+/// engine session's internal ExecuteStatementAsync entry.
 /// </summary>
 /// <remarks>
 /// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,

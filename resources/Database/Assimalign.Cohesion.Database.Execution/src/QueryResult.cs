@@ -5,30 +5,32 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Execution;
 
 /// <summary>
-/// Represents the result of a query execution.
+/// Represents the result of executing a request: its status, the records it changed, and the
+/// diagnostics the model reported.
 /// </summary>
 public abstract class QueryResult
 {
     /// <summary>
-    /// Gets the outcome status of the query execution.
+    /// Gets the outcome status of the execution.
     /// </summary>
     public abstract QueryResultStatus Status { get; }
 
     /// <summary>
-    /// Gets the number of records affected by the operation.
+    /// Gets the number of records the request changed, or -1 when the model reports no count.
     /// </summary>
     /// <remarks>
-    /// For DML statements (INSERT, UPDATE, DELETE) this reflects the number of modified records.
-    /// For queries that return rows, this value may be -1 when the count is not known upfront.
+    /// A request that writes or deletes records reports how many it changed. A request that
+    /// returns rows may report -1 when the count is not known up front.
     /// </remarks>
     public abstract long AffectedCount { get; }
 
     /// <summary>
-    /// Gets any diagnostic messages produced during parsing or execution.
+    /// Gets any diagnostics the model reported while it parsed or executed the request.
     /// </summary>
     /// <remarks>
-    /// Uses the <see cref="Diagnostic"/> type from <c>Database.Types</c> which carries
-    /// source location information (start, end, line) in addition to code, message, and severity.
+    /// Uses the <see cref="Diagnostic"/> type from <c>Database.Types</c>: a code, a message and a
+    /// severity, and, for a diagnostic a language model found in statement text, its position in
+    /// that text (start, end, line). A model that executes typed requests sets no position.
     /// </remarks>
     public abstract IReadOnlyList<Diagnostic>? Diagnostics { get; }
 }

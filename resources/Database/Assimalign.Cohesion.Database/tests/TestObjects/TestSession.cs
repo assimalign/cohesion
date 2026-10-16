@@ -10,9 +10,12 @@ namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
 /// A session whose cores begin <see cref="TestTransaction"/>s and record the requests they
-/// execute; it exposes the base's protected operation hold and refusal check.
+/// execute; it exposes the base's protected operation hold and refusal check. It derives the
+/// language base, so the suite covers both capability levels: the typed member declared on
+/// <see cref="DatabaseExecutionSession{TRequest}"/> and the text member declared on
+/// <see cref="DatabaseLanguageSession{TRequest}"/>.
 /// </summary>
-internal sealed class TestSession : DatabaseSession
+internal sealed class TestSession : DatabaseLanguageSession<TestRequest>
 {
     private readonly List<TestTransaction> _begun = [];
     private int _executions;
@@ -44,7 +47,7 @@ internal sealed class TestSession : DatabaseSession
 
     public IsolationLevel? LastIsolationLevel { get; private set; }
 
-    public QueryRequest? LastRequest { get; private set; }
+    public TestRequest? LastRequest { get; private set; }
 
     public string? LastStatement { get; private set; }
 
@@ -94,8 +97,15 @@ internal sealed class TestSession : DatabaseSession
     /// Calls the typed execute core directly, past the base's public member: the baseline the
     /// event source's allocation check compares the public member with.
     /// </summary>
-    public ValueTask<QueryResult> ExecuteCoreDirectly(QueryRequest request, CancellationToken cancellationToken = default)
+    public ValueTask<QueryResult> ExecuteCoreDirectly(TestRequest request, CancellationToken cancellationToken = default)
         => ExecuteCoreAsync(request, cancellationToken);
+
+    /// <summary>
+    /// Calls the text execute core directly, past the language base's public member: the baseline
+    /// the event source's allocation check compares the text member with.
+    /// </summary>
+    public ValueTask<QueryResult> ExecuteTextCoreDirectly(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
+        => ExecuteCoreAsync(statement, parameters, cancellationToken);
 
     public bool EnterOperation() => TryEnterOperation();
 
@@ -124,7 +134,7 @@ internal sealed class TestSession : DatabaseSession
         return transaction;
     }
 
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<QueryResult> ExecuteCoreAsync(TestRequest request, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _executions);
         LastRequest = request;

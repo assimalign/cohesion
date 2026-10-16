@@ -17,7 +17,6 @@ using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Internal;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Types;
@@ -454,7 +453,7 @@ public sealed class DatabaseEventSourceTests
         string engineName = "event-source-sql-" + Guid.NewGuid().ToString("N");
         using var recorder = new DatabaseEventRecorder(EventLevel.Verbose, slowStatementThreshold: "0");
         await using var engine = SqlDatabaseEngine.Create(engineName, new SqlDatabaseEngineOptions());
-        DatabaseInstance database = await engine.CreateDatabaseAsync("statements");
+        var database = await engine.CreateDatabaseAsync("statements");
         var session = await database.CreateSessionAsync();
         long sessionNumber = session.SessionNumber;
 
@@ -1293,8 +1292,10 @@ public sealed class DatabaseEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: The statement path should allocate nothing more than its core while nobody listens")]
     public async Task ExecuteAsync_NoListener_ShouldAllocateNothingMoreThanTheCore()
     {
-        // Arrange: the core completes synchronously and allocates nothing, so the public member's
-        // own cost is the whole difference.
+        // Arrange: the cores complete synchronously and allocate nothing, so each public member's
+        // own cost is the whole difference. The typed member (DatabaseExecutionSession<TRequest>) and
+        // the text member (DatabaseLanguageSession<TRequest>) each carry their own copy of the trace
+        // prologue, so each is compared with its own core.
         DatabaseEventSource.Log.IsEnabled().ShouldBeFalse("A listener left the Database event source enabled.");
         await using var engine = new TestEngine("event-source-" + Guid.NewGuid().ToString("N"));
         await using var session = new TestSession(new TestDatabase("hot", engine));
@@ -1303,16 +1304,19 @@ public sealed class DatabaseEventSourceTests
         Measure(() => session.ExecuteAsync(request), 100);
         Measure(() => session.ExecuteCoreDirectly(request), 100);
         Measure(() => session.ExecuteAsync("SELECT 1"), 100);
+        Measure(() => session.ExecuteTextCoreDirectly("SELECT 1"), 100);
 
         // Act
         long core = FewestBytes(() => session.ExecuteCoreDirectly(request), iterations);
         long typed = FewestBytes(() => session.ExecuteAsync(request), iterations);
+        long textCore = FewestBytes(() => session.ExecuteTextCoreDirectly("SELECT 1"), iterations);
         long text = FewestBytes(() => session.ExecuteAsync("SELECT 1"), iterations);
 
         // Assert
         core.ShouldBe(0);
         typed.ShouldBe(core);
-        text.ShouldBe(core);
+        textCore.ShouldBe(0);
+        text.ShouldBe(textCore);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: The statement path should allocate nothing for a synchronous core under a Warning listener")]
@@ -1329,14 +1333,17 @@ public sealed class DatabaseEventSourceTests
         using var recorder = new DatabaseEventRecorder(EventLevel.Warning);
         Measure(() => session.ExecuteAsync(request), 100);
         Measure(() => session.ExecuteAsync("SELECT 1"), 100);
+        Measure(() => session.ExecuteTextCoreDirectly("SELECT 1"), 100);
 
-        // Act
+        // Act: the text prologue is a copy of the typed one, so it is pinned against its own core.
         long typed = FewestBytes(() => session.ExecuteAsync(request), iterations);
+        long textCore = FewestBytes(() => session.ExecuteTextCoreDirectly("SELECT 1"), iterations);
         long text = FewestBytes(() => session.ExecuteAsync("SELECT 1"), iterations);
 
         // Assert
         typed.ShouldBe(0);
-        text.ShouldBe(0);
+        textCore.ShouldBe(0);
+        text.ShouldBe(textCore);
         recorder.Events.Where(e => Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ShouldBeEmpty();
     }
 

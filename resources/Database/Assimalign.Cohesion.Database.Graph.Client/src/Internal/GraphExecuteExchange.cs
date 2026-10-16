@@ -22,7 +22,7 @@ internal sealed class GraphExecuteExchange
     public GraphExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
         : base(GraphProtocol.Family)
     {
-        _request = GraphRequest.Create(statement, parameters);
+        _request = GraphRequestEncoder.Create(statement, parameters);
     }
 
     protected override async ValueTask<GraphResultSet> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,

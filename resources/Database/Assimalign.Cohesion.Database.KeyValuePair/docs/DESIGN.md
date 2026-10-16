@@ -979,6 +979,16 @@ bounded peer-sent names) are in the area's
 | 7 | `SessionFaulted` | Error | — | `sessionId`, `exceptionType` (full name), `exceptionMessage` |
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
+| 10 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code`, `exceptionType`, `suppressedCount` (int) |
+
+Event 10 reports a wire command that failed to parse before the typed execution member ran.
+It writes only the exception type and code, never command text or the parse message. It is
+throttled across all sessions to at most one event per second, with the count suppressed since
+the preceding report (saturated at `int.MaxValue`, as Tcp's `AcceptBackoff` payload is).
+The `total-statement-parse-failures` counter is exact: every occurrence increments it, including
+suppressed reports and failures while nobody listens. A parse failure returns `ParseFailure`
+and leaves the connection ready. Offline and transaction refusals happen before parsing and
+produce no parse-failure event or root statement event.
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
@@ -1007,10 +1017,10 @@ and completes the session with the server in the `finally`, so a disposal that t
 still propagates, neither leaves `current-server-sessions` raised nor skips `SessionClosed`, and
 its `MaxSessions` slot is freed.
 
-Counters, maintained whether or not anyone listens and updated on accept, rejection and close
-only, never per frame or row: `current-server-sessions` (gauge: up when the accept loop
+Counters are maintained whether or not anyone listens, on accept, rejection, close and command
+parse failure, never per row: `current-server-sessions` (gauge: up when the accept loop
 registers a session, down when the session's completion removes it), `total-server-sessions`,
-`total-rejected-sessions`.
+`total-rejected-sessions`, and `total-statement-parse-failures`.
 
 Every write sits behind `IsEnabled(level, keywords)`, and a session reads its start timestamp
 only while `SessionClosed` is on. No payload carries command text, keys, values or

@@ -2,34 +2,31 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Assimalign.Cohesion.Database.Graph.Language;
-using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
-/// <summary>A parsed, database-scoped GQL statement.</summary>
-/// <remarks>The current executable subset uses literals; parameter expressions report COHDBL001.</remarks>
-public sealed class GraphQueryRequest : QueryRequest<GqlQueryStatement>
+/// <summary>A parsed, database-scoped GQL statement whose result is rows.</summary>
+/// <remarks>
+/// The current executable subset uses literals; parameter expressions report COHDBL001. The
+/// statement and the parameters live on <see cref="GraphRequest"/>, which a graph session's typed
+/// execute member takes.
+/// </remarks>
+public sealed class GraphQueryRequest : GraphRequest
 {
-    private readonly IReadOnlyDictionary<string, object?>? _parameters;
-
     /// <summary>Creates a request from a parsed GQL statement.</summary>
     /// <param name="statement">The parsed statement.</param>
-    /// <param name="parameters">Reserved parameter values; the current subset has no parameter expressions.</param>
+    /// <param name="parameters">The parameter values; the current subset has no parameter expressions.</param>
     /// <exception cref="ArgumentNullException">The statement is null.</exception>
     public GraphQueryRequest(GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters = null)
-        : base(statement ?? throw new ArgumentNullException(nameof(statement)))
+        : base(statement, parameters)
     {
-        _parameters = parameters;
     }
-
-    /// <inheritdoc />
-    public override IReadOnlyDictionary<string, object?>? Parameters => _parameters;
 
     /// <summary>Parses GQL text into an executable graph statement request.</summary>
     /// <param name="gql">The GQL statement text.</param>
-    /// <param name="parameters">Reserved parameter values; the current subset has no parameter expressions.</param>
+    /// <param name="parameters">The parameter values; the current subset has no parameter expressions.</param>
     /// <returns>The parsed request.</returns>
     /// <exception cref="ArgumentException">The statement text is empty.</exception>
     /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>

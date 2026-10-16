@@ -403,7 +403,6 @@ public sealed class DocumentTransactionFailureTests
             await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" ")),
             await Should.ThrowAsync<DatabaseException>(async () => await session.CreateCollectionAsync("COHESION_SCHEMA.INDEXES")),
             await Should.ThrowAsync<DatabaseException>(async () => await collection.PutAsync(foreign, "x", Doc("x"))),
-            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new ForeignRequest())),
         };
         var state = transaction.State;
         await transaction.CommitAsync();
@@ -1234,14 +1233,5 @@ public sealed class DocumentTransactionFailureTests
             await foreach (var row in set.GetRowsAsync()) { ids.Add(row.GetString(0) ?? "<null>"); }
         }
         return ids;
-    }
-
-    // A request that carries no OQL statement: the session refuses it before any statement starts.
-    private sealed class ForeignRequest : QueryRequest
-    {
-        public ForeignRequest()
-            : base(null!)
-        {
-        }
     }
 }

@@ -42,7 +42,7 @@ internal sealed class SqlStatementAllocationBaseline
 
     // Mirrors SqlDatabaseSession.ExecuteRequestAsync without its tracing: the same checks and the
     // same receipt parameter and async locals, so Debug's hoisted state machine is the same size.
-    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
+    private async ValueTask<QueryResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
         _session.Database.ThrowIfOffline();
         var previousMetrics = _session.LastStatementMetrics;
@@ -80,14 +80,14 @@ internal sealed class SqlStatementAllocationBaseline
     private static extern ref SqlQueryParserOptions ParserOptions(SqlDatabaseSession session);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ExecuteStatementAsync")]
-    private static extern ValueTask<QueryResult> ExecuteStatementAsync(SqlDatabaseSession session, QueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt);
+    private static extern ValueTask<QueryResult> ExecuteStatementAsync(SqlDatabaseSession session, SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "SelfCommitted")]
-    private static extern bool SelfCommitted(SqlDatabaseSession session, QueryRequest request, SqlStatementMetrics? previousMetrics);
+    private static extern bool SelfCommitted(SqlDatabaseSession session, SqlQueryRequest request, SqlStatementMetrics? previousMetrics);
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_provisioningSchema")]
     private static extern ref string? ProvisioningSchema(SqlDatabaseSession session);
 
     [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "IsSelfCommitting")]
-    private static extern bool IsSelfCommitting(SqlDatabaseSession? session, QueryRequest request);
+    private static extern bool IsSelfCommitting(SqlDatabaseSession? session, SqlQueryRequest request);
 }

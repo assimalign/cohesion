@@ -111,7 +111,7 @@ public sealed class GraphStorageOperationsTests
 
         // The execute seams' argument checks are the base's too, ahead of the offline refusal the
         // model made first.
-        var nullRequest = await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((QueryRequest)null!, token));
+        var nullRequest = await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((GraphRequest)null!, token));
         var blankStatement = await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" ", null, token));
 
         // Over the wire: a statement on a session opened before the failure, and a new session.

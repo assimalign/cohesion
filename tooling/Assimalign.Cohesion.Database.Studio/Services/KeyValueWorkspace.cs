@@ -62,6 +62,10 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
 
     public override KeyValueDatabaseSession? Session => _session;
 
+    // The typed embedded session: key-value requests execute on the session's typed member, which
+    // the lifecycle-only ModelWorkspace.RequireSession() does not reach.
+    private KeyValueDatabaseSession KeyValueSession => _session ?? throw new InvalidOperationException("Select a database first.");
+
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {
         KeyValueDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
@@ -153,7 +157,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
                     _ => null,
                 };
 
-                QueryResult result = await RequireSession().ExecuteAsync(new KeyValuePutRequest(key, value, options), token).ConfigureAwait(false);
+                QueryResult result = await KeyValueSession.ExecuteAsync(new KeyValuePutRequest(key, value, options), token).ConfigureAwait(false);
                 ThrowIfError(result);
                 if (result is QueryResultSet set)
                 {
@@ -188,7 +192,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
         {
             if (Mode == ConnectionMode.Embedded)
             {
-                QueryResult result = await RequireSession().ExecuteAsync(new KeyValueDeleteRequest(key, expectedETag), token).ConfigureAwait(false);
+                QueryResult result = await KeyValueSession.ExecuteAsync(new KeyValueDeleteRequest(key, expectedETag), token).ConfigureAwait(false);
                 ThrowIfError(result);
                 if (result is QueryResultSet set)
                 {
@@ -209,7 +213,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
         {
             if (Mode == ConnectionMode.Embedded)
             {
-                QueryResult result = await RequireSession().ExecuteAsync(new KeyValueExistsRequest(key), token).ConfigureAwait(false);
+                QueryResult result = await KeyValueSession.ExecuteAsync(new KeyValueExistsRequest(key), token).ConfigureAwait(false);
                 ThrowIfError(result);
                 if (result is QueryResultSet set)
                 {
@@ -261,8 +265,8 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
             KeyValueDatabaseSession? admin = null;
             try
             {
-                DatabaseSession session = Mode == ConnectionMode.Embedded
-                    ? RequireSession()
+                KeyValueDatabaseSession session = Mode == ConnectionMode.Embedded
+                    ? KeyValueSession
                     : admin = await OpenAdminSessionAsync(token).ConfigureAwait(false);
                 QueryResult result = await session.ExecuteAsync(new KeyValueKeySpacesRequest(), token).ConfigureAwait(false);
                 var outcome = new StatementOutcome { Statement = "KEYSPACES" };
@@ -280,7 +284,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
 
     private async Task<List<KeyValueItem>> ReadEntriesAsync(KeyValueRequest request, CancellationToken cancellationToken)
     {
-        QueryResult result = await RequireSession().ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+        QueryResult result = await KeyValueSession.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
         ThrowIfError(result);
         var items = new List<KeyValueItem>();
         if (result is QueryResultSet set)

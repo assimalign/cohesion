@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.Tracing;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,10 +11,20 @@ using Assimalign.Cohesion.Database.Transactions;
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// The base of every session: a lightweight, scoped execution context within a database, the entry
-/// point for statement execution and explicit transactions.
+/// The base of every session: a lightweight, scoped context within a database that owns the
+/// session's lifecycle and its explicit transaction.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>Execution is a capability, not a member of this base.</b> A model that executes typed
+/// requests derives <see cref="DatabaseExecutionSession{TRequest}"/>, whose type argument is the
+/// model's request root, so a request of another model does not compile. A model with a statement
+/// language derives <see cref="DatabaseLanguageSession{TRequest}"/>, which adds statement text. A
+/// model with neither (blob) derives this base directly and declares its own operations. Code that
+/// holds only a <see cref="DatabaseSession"/> executes nothing; it manages the session's lifecycle
+/// and transaction. The statement trace's shared tail stays here, assembly-private and
+/// non-generic, so both capability bases write the same events through one pooled async box.
+/// </para>
 /// <para>
 /// <b>The session owns its explicit transaction.</b> <see cref="BeginTransactionAsync(IsolationLevel, CancellationToken)"/>
 /// registers the transaction the leaf begins, and <see cref="CurrentTransaction"/> returns it until
@@ -75,8 +83,10 @@ public abstract class DatabaseSession : IAsyncDisposable
 
     // Whether a traced statement runs on the session: a statement a model's text overload parses and
     // runs again through the typed overload (Graph, Documents) is written once, for the outermost
-    // call. A session runs one operation at a time, so the field needs no synchronization.
-    private bool _tracingStatement;
+    // call. A session runs one operation at a time, so the field needs no synchronization. The two
+    // capability bases' fast paths and prologues read and set it, and the shared tail below clears
+    // it, so it is visible to the root assembly's derived types only.
+    private protected bool _tracingStatement;
 
     /// <summary>
     /// Initializes a new session scoped to a database.
@@ -224,56 +234,6 @@ public abstract class DatabaseSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Executes a typed request against the database.
-    /// </summary>
-    /// <param name="request">The request to execute.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The query result.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
-    /// <exception cref="DatabaseException">The session is closed, or the statement failed.</exception>
-    public ValueTask<QueryResult> ExecuteAsync(QueryRequest request, CancellationToken cancellationToken = default)
-    {
-        ThrowIfClosed();
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        // The statement path's fast path (event-sources plan, D5 a): the core is returned as it is
-        // while nobody listens, and while an outer statement of this session is already traced.
-        if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None) || _tracingStatement)
-        {
-            return ExecuteCoreAsync(request, cancellationToken);
-        }
-
-        return ExecuteTraced(request, statement: null, parameters: null, cancellationToken);
-    }
-
-    /// <summary>
-    /// Executes statement text in the session's own language, binding the given named parameter
-    /// values: the model-agnostic text seam the wire servers use.
-    /// </summary>
-    /// <param name="statement">The statement text to parse and execute.</param>
-    /// <param name="parameters">Parameter values keyed by bare parameter name, or null when the statement takes none.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The query result.</returns>
-    /// <exception cref="ArgumentException"><paramref name="statement"/> is null, empty or white space.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
-    /// <exception cref="DatabaseParseException">The statement text failed to parse in the session's language.</exception>
-    /// <exception cref="DatabaseException">The session is closed, or the statement failed.</exception>
-    public ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
-    {
-        ThrowIfClosed();
-        ArgumentException.ThrowIfNullOrWhiteSpace(statement);
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None) || _tracingStatement)
-        {
-            return ExecuteCoreAsync(statement, parameters, cancellationToken);
-        }
-
-        return ExecuteTraced(request: null, statement, parameters, cancellationToken);
-    }
-
-    /// <summary>
     /// Closes the session: the leaf ends its running operations (<see cref="DisposeAsyncCore"/>),
     /// then the open transaction is rolled back as the session's teardown. Idempotent.
     /// </summary>
@@ -410,69 +370,23 @@ public abstract class DatabaseSession : IAsyncDisposable
     protected abstract ValueTask<DatabaseTransaction> BeginTransactionCoreAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Executes a typed request on an open session.
-    /// </summary>
-    /// <param name="request">The request; never null.</param>
-    /// <param name="cancellationToken">Not canceled when the call starts.</param>
-    /// <returns>The query result.</returns>
-    protected abstract ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Parses and executes statement text on an open session.
-    /// </summary>
-    /// <param name="statement">The statement text; never null, empty or white space.</param>
-    /// <param name="parameters">Parameter values keyed by bare parameter name, or null.</param>
-    /// <param name="cancellationToken">Not canceled when the call starts.</param>
-    /// <returns>The query result.</returns>
-    protected abstract ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken);
-
-    /// <summary>
     /// Ends the leaf's running operations once the session is closed, before the base ends the
     /// session's transaction. Called once. The default does nothing.
     /// </summary>
     /// <returns>A task that completes once the leaf's operations ended.</returns>
     protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
 
-    // The traced statement (event-sources plan, D5 a and §4.1 "Re-entry"): entered only while the
-    // source is enabled, for the outermost statement on the session; its timestamp costs nothing
-    // while nobody listens. It calls the core exactly as the untraced path does, so a core that
-    // throws synchronously throws from the call whether or not anyone listens (event-source.md,
-    // rule 12), and a core that completed returns without a wrapper; only a core that has not
-    // completed successfully is awaited, in a pooled wrapper. A failure is captured by the filter,
-    // which catches nothing, and written from the finally, once the core's own finally blocks
-    // released what they held. The events of a core that returned are written once the flag is
-    // cleared.
-    private ValueTask<QueryResult> ExecuteTraced(
-        QueryRequest? request,
-        string? statement,
-        IReadOnlyDictionary<string, object?>? parameters,
-        CancellationToken cancellationToken)
+    // The traced statement's shared tail (event-sources plan, D5 a and §4.1 "Re-entry"). Each
+    // capability base runs its own synchronous prologue around its own core: the timestamp, the
+    // flag, StatementStart, the core call inside the capture filter, and StatementThrew from the
+    // finally (DatabaseExecutionSession<TRequest> for a typed request, DatabaseLanguageSession<TRequest>
+    // for statement text, with a null request). The prologue then hands the core's task here. A
+    // core that completed returns without a wrapper; only a core that has not completed
+    // successfully is awaited, in a pooled wrapper. The events of a core that returned are written
+    // once the flag is cleared. The tail is non-generic, so every model shares one pooled async box
+    // type, as before the capability split.
+    private protected ValueTask<QueryResult> CompleteTraced(ValueTask<QueryResult> pending, DatabaseRequest? request, bool startWritten, long started)
     {
-        long started = Stopwatch.GetTimestamp();
-        _tracingStatement = true;
-        ValueTask<QueryResult> pending;
-        Exception? thrown = null;
-        bool startWritten = false;
-        try
-        {
-            startWritten = DatabaseEventSource.Log.StatementStart(this, request);
-            pending = request is not null
-                ? ExecuteCoreAsync(request, cancellationToken)
-                : ExecuteCoreAsync(statement!, parameters, cancellationToken);
-        }
-        catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
-        {
-            throw;
-        }
-        finally
-        {
-            if (thrown is not null)
-            {
-                _tracingStatement = false;
-                DatabaseEventSource.Log.StatementThrew(this, request, thrown, startWritten, started);
-            }
-        }
-
         if (!pending.IsCompletedSuccessfully)
         {
             // Still running, or already faulted or canceled: the wrapper observes the outcome and
@@ -488,7 +402,7 @@ public abstract class DatabaseSession : IAsyncDisposable
 
     // The rest of a traced statement whose core did not complete successfully at once.
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    private async ValueTask<QueryResult> AwaitTracedAsync(ValueTask<QueryResult> pending, QueryRequest? request, bool startWritten, long started)
+    private async ValueTask<QueryResult> AwaitTracedAsync(ValueTask<QueryResult> pending, DatabaseRequest? request, bool startWritten, long started)
     {
         QueryResult result;
         Exception? thrown = null;

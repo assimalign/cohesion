@@ -4,7 +4,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
-using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -52,13 +51,15 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// view whose disposal closed the session, so <c>Dispose</c> meant two things on one type.
 /// </para>
 /// <para>
-/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root base with
-/// an internal constructor; <see cref="DocumentDatabase.CreateSessionAsync"/> creates it. The
-/// database and the transaction are re-exposed typed with <c>new</c> members over the base's
-/// public members.
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root's language
+/// base, <see cref="DatabaseLanguageSession{TRequest}"/> over <see cref="DocumentQueryRequest"/>,
+/// with an internal constructor; <see cref="DocumentDatabase.CreateSessionAsync"/> creates it. The
+/// session inherits both execute members: OQL text, and the typed
+/// <see cref="DocumentQueryRequest"/>, which is the only request type it takes. The database and
+/// the transaction are re-exposed typed with <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
-public sealed class DocumentDatabaseSession : DatabaseSession
+public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQueryRequest>
 {
     private readonly DocumentDatabase _database;
     private readonly object _sync = new();
@@ -224,12 +225,12 @@ public sealed class DocumentDatabaseSession : DatabaseSession
     /// <param name="parse">Parses the statement text into its request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The statement's result.</returns>
-    private async ValueTask<QueryResult> ExecuteStatementAsync(Func<QueryRequest> parse, CancellationToken cancellationToken)
+    private async ValueTask<QueryResult> ExecuteStatementAsync(Func<DocumentQueryRequest> parse, CancellationToken cancellationToken)
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();
         ThrowIfTransactionRefuses();
-        QueryRequest request;
+        DocumentQueryRequest request;
         try
         {
             request = parse();
@@ -385,24 +386,19 @@ public sealed class DocumentDatabaseSession : DatabaseSession
     }
 
     /// <inheritdoc />
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<QueryResult> ExecuteCoreAsync(DocumentQueryRequest request, CancellationToken cancellationToken)
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
-        if (request.Statement is not OqlQueryStatement statement)
-        {
-            throw new DatabaseException("A Documents session accepts only OQL statements.");
-        }
-
-        return _database.RunAsync(this, operation => DocumentPlanExecutor.ExecuteAsync(_database, operation, statement,
+        return _database.RunAsync(this, operation => DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
             request.Parameters, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// The model-agnostic text seam Studio uses: the statement is parsed as OQL
-    /// (<see cref="DocumentQueryRequest.FromOql"/>), and a statement that fails to parse aborts an
-    /// explicit transaction as an execution failure does.
+    /// The document session's text seam: the statement is parsed as OQL
+    /// (<see cref="DocumentQueryRequest.FromOql"/>) into the request the typed member takes, and a
+    /// statement that fails to parse aborts an explicit transaction as an execution failure does.
     /// </remarks>
     protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
         => ExecuteStatementAsync(() => DocumentQueryRequest.FromOql(statement, parameters), cancellationToken);

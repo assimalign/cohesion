@@ -33,6 +33,10 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
 
     public override GraphDatabaseSession? Session => _session;
 
+    // The typed embedded session: GQL text and path requests execute on the graph session's
+    // members, which the lifecycle-only ModelWorkspace.RequireSession() does not reach.
+    private GraphDatabaseSession GraphSession => _session ?? throw new InvalidOperationException("Select a database first.");
+
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {
         GraphDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
@@ -111,7 +115,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
 
         if (Mode == ConnectionMode.Embedded)
         {
-            DatabaseSession session = RequireSession();
+            GraphDatabaseSession session = GraphSession;
             if (paths)
             {
                 QueryResult result = await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(outcome.Statement), cancellationToken).ConfigureAwait(false);
@@ -127,7 +131,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
                     await FillFromQueryResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
                 }
 
-                outcome.Note = "DatabaseSession.ExecuteAsync(GraphPathsQueryRequest)";
+                outcome.Note = "GraphDatabaseSession.ExecuteAsync(GraphPathsQueryRequest)";
                 return;
             }
 

@@ -39,22 +39,17 @@ internal sealed class SqlQueryExecutor
     /// context (write stamps, visibility snapshot) and the paired storage bracket
     /// the mutations ride.
     /// </summary>
-    internal Task<QueryResult> ExecuteAsync(QueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default)
+    internal Task<QueryResult> ExecuteAsync(SqlQueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (request is not SqlQueryRequest sqlRequest)
-        {
-            throw new DatabaseException($"Expected SqlQueryRequest but received {request.GetType().Name}.");
-        }
-
         _definitions.EnsureDefinitions(cancellationToken);
-        var planner = new SqlPlanner(_catalog, sqlRequest.Parameters, _definitions.Functions, cancellationToken);
+        var planner = new SqlPlanner(_catalog, request.Parameters, _definitions.Functions, cancellationToken);
         SqlPlan plan;
         try
         {
-            plan = planner.Plan(sqlRequest.Statement.SqlExpression);
+            plan = planner.Plan(request.Statement.SqlExpression);
         }
         catch (SqlUnsupportedQueryException exception)
         {

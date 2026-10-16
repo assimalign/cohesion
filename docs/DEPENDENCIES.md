@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 249 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 735 |
+| Declared project references | 734 |
 | Declared shared-source links | 31 |
 
 ## Ambiguous project names
@@ -681,7 +681,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Documents.Security` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Documents.Storage` | `Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | — | — |
 | `Assimalign.Cohesion.Database.Embedded` | `Assimalign.Cohesion.Database` | — | — | — |
-| `Assimalign.Cohesion.Database.Execution` | `Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
+| `Assimalign.Cohesion.Database.Execution` | `Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Graph` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Graph.Catalog`<br>`Assimalign.Cohesion.Database.Graph.Language`<br>`Assimalign.Cohesion.Database.Graph.Storage` | — | `Assimalign.Cohesion.Database` | — |
 | `Assimalign.Cohesion.Database.Graph.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Graph.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Graph.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.Graph`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |

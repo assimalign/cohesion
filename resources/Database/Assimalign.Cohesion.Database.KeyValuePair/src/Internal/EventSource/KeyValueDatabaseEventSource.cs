@@ -10,7 +10,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// <summary>
 /// The key-value model's diagnostics: its wire server's accept loop and the lifecycle of each
 /// server session (accepted, rejected, refused at the handshake, timed out, closed, terminated by a
-/// protocol violation or an unexpected fault, aborted at shutdown), and the server-session counters.
+/// protocol violation or an unexpected fault, aborted at shutdown), the wire commands that fail to
+/// parse, and the server-session counters.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,10 +23,12 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// </para>
 /// <para>
 /// A command's own outcome is the root source's (<c>Assimalign.Cohesion.Database</c>), so the
-/// server does not repeat it. Every write sits
-/// behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, and every argument that
+/// server does not repeat it; a wire command that fails to parse never reaches the session's typed
+/// member, and so never the root, which is why this source writes <c>StatementParseFailed</c>
+/// (event 10) for it, with a suppressed-count payload and at most one report per second.
+/// Every write sits behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, and every argument that
 /// allocates is computed inside that check. The counters' backing fields are maintained whether or
-/// not anyone listens, on the accept and close transitions only, never per frame or per row.
+/// not anyone listens, on accept, rejection, close and command parse failure, never per row.
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.KeyValuePair")]
@@ -45,6 +48,12 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
     private long _currentSessions;
     private long _totalSessions;
     private long _rejectedSessions;
+    private readonly KeyValueParseFailureThrottle _parseFailureThrottle = new();
+    private PollingCounter? _statementParseFailuresCounter;
+    private long _statementParseFailures;
+
+    /// <summary>Every wire command parse failure, including suppressed and disabled events.</summary>
+    internal long TotalStatementParseFailures => Volatile.Read(ref _statementParseFailures);
 
     private KeyValueDatabaseEventSource()
     {
@@ -271,6 +280,34 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
         }
     }
 
+    /// <summary>
+    /// Writes that a command received over the wire failed to parse into its typed request, before
+    /// the session's typed execute member saw it.
+    /// </summary>
+    /// <param name="session">The server session that received the command.</param>
+    /// <param name="database">The session's database.</param>
+    /// <param name="exception">
+    /// The parse failure; it propagates unchanged. Written by its code (an offline refusal's; empty
+    /// otherwise) and its type only: a parse error can quote the command (the area's failure rule).
+    /// </param>
+    [NonEvent]
+    public void StatementParseFailed(DatabaseServerSession session, DatabaseName database, Exception exception)
+    {
+        // Parse failures happen before the typed NVI and therefore belong to this server source.
+        // Count every occurrence even with no listener; repeated enabled reports carry their count.
+        Interlocked.Increment(ref _statementParseFailures);
+        if (IsEnabled(EventLevel.Error, EventKeywords.None) &&
+            _parseFailureThrottle.TryReport(Stopwatch.GetTimestamp(), out int suppressedCount))
+        {
+            StatementParseFailed(
+                session.Id,
+                database.ToString(),
+                exception is DatabaseOfflineException offline ? offline.Code : string.Empty,
+                exception.GetType().FullName ?? exception.GetType().Name,
+                suppressedCount);
+        }
+    }
+
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
         => WriteEvent(1, engineName, sessionId, activeSessions);
@@ -307,6 +344,10 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
     private void SessionsAborted(string engineName, int sessions, double drainTimeoutMilliseconds)
         => WriteEvent(9, engineName, sessions, drainTimeoutMilliseconds);
 
+    [Event(10, Level = EventLevel.Error, Message = "A command session {0} received for database '{1}' failed to parse: code '{2}', exception '{3}'; {4} repeat(s) suppressed.")]
+    private void StatementParseFailed(Guid sessionId, string database, string code, string exceptionType, int suppressedCount)
+        => WriteEvent(10, sessionId, database, code, exceptionType, suppressedCount);
+
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
@@ -318,6 +359,10 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
         // Created on the first enable command and kept for the source's lifetime. The backing
         // fields are maintained whether or not anyone listens, so a tool that attaches late still
         // reads exact values.
+        _statementParseFailuresCounter ??= new PollingCounter("total-statement-parse-failures", this, () => Volatile.Read(ref _statementParseFailures))
+        {
+            DisplayName = "Total Statement Parse Failures",
+        };
         _currentSessionsCounter ??= new PollingCounter("current-server-sessions", this, () => Volatile.Read(ref _currentSessions))
         {
             DisplayName = "Current Server Sessions",
