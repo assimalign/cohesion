@@ -54,6 +54,7 @@ jobs:
             'Assimalign.Cohesion.Content.Binary',
             'Assimalign.Cohesion.Content.Bmff',
             'Assimalign.Cohesion.Content.Media',
+            'Assimalign.Cohesion.Content.Mpeg',
             'Assimalign.Cohesion.Content.Text',
             'Assimalign.Cohesion.Content.Ebml',
             'Assimalign.Cohesion.Content.Exe',

@@ -526,6 +526,7 @@
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/DESIGN.md" />
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/OVERVIEW.md" />
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/PUBLIC_SURFACE.md" />
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/VERIFICATION.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/Assimalign.Cohesion.Content.Mpeg.csproj" />

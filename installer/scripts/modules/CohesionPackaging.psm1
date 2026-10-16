@@ -97,6 +97,7 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Content/Assimalign.Cohesion.Content.Binary'
     'libraries/Content/Assimalign.Cohesion.Content.Bmff'
     'libraries/Content/Assimalign.Cohesion.Content.Media'
+    'libraries/Content/Assimalign.Cohesion.Content.Mpeg'
     'libraries/Content/Assimalign.Cohesion.Content.Text'
     'libraries/Content/Assimalign.Cohesion.Content.Ebml'
     'libraries/Content/Assimalign.Cohesion.Content.Exe'
