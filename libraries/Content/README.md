@@ -1,21 +1,18 @@
 # Content
 
-The Content area is the low-level content and format library family (L1): retained parsers,
-serializers, document models, and the format-neutral contracts they share. It exists to give later
-services — a static content engine, MediaHub — and sibling foundations (for example OpenApi's YAML
-serialization) standards-driven format machinery without service or storage coupling.
-
-Tracked by area epic [L01.01.05] Foundation - Content (#14).
+Content is the L1 foundation for reading, streaming and manipulating content: format-neutral
+contracts, shared primitives, readers, writers and document models. A static content engine,
+MediaHub and OpenApi YAML serialization build on this family; hosting, media workflows, job
+orchestration and storage adapters belong at the service boundary.
 
 ## Project map
 
-An arrow means "references": `Content.Text --> Content` reads "`Assimalign.Cohesion.Content.Text`
-references `Assimalign.Cohesion.Content`". The family layers rather than fans out — a format
-package sits on the *kind* of content it is (binary, text, media), not on the root directly.
+The diagram and table show direct csproj references at base commit `f7197e97f`; an arrow means
+"depends on". Package names in the diagram omit the `Assimalign.Cohesion.` prefix.
 
 ```mermaid
 flowchart LR
-    Root["Content — area root"]
+    Root["Content"]
     Binary["Content.Binary"]
     Text["Content.Text"]
     Media["Content.Media"]
@@ -24,7 +21,7 @@ flowchart LR
     Exe["Content.Exe"]
     Markdown["Content.Markdown"]
     Yaml["Content.Yaml"]
-    Standalone["Content.Ebml · Content.Mpeg · Content.Pdf"]
+    Standalone["Content.Ebml / Content.Mpeg / Content.Pdf"]
     Binary --> Root
     Text --> Root
     Media --> Binary
@@ -37,43 +34,30 @@ flowchart LR
     Yaml --> Text
 ```
 
-The three packages in the collapsed node currently reference nothing — `Content.Ebml`,
-`Content.Mpeg`, and `Content.Pdf` are self-contained today and are expected to take the root
-contract as they fill in. Every package in the family depends only on packages *below* it: the
-root never references a format, and a format never references a sibling at its own level. The full
-reference graph for every Cohesion assembly is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+EBML, MPEG and PDF in the combined node reference nothing; MKV currently references BMFF.
+The target direction is in the [area architecture record](../../docs/libraries/Content/DESIGN.md#family-map).
 
-## Layering
+| Package | Role | Depends on today | Classification | State |
+| --- | --- | --- | --- | --- |
+| [`Assimalign.Cohesion.Content`](./Assimalign.Cohesion.Content/) | Identity, ownership, composition and reader/writer contracts | None | Strategic | Implemented |
+| [`Assimalign.Cohesion.Content.Binary`](./Assimalign.Cohesion.Content.Binary/) | Shared binary primitives | Content | Strategic | Placeholder |
+| [`Assimalign.Cohesion.Content.Text`](./Assimalign.Cohesion.Content.Text/) | Encoding detection, lines and tokens | Content | Strategic | Implemented |
+| [`Assimalign.Cohesion.Content.Yaml`](./Assimalign.Cohesion.Content.Yaml/) | YAML 1.2.2 model, parser and emitter | Content, Content.Text | Strategic | Implemented |
+| [`Assimalign.Cohesion.Content.Markdown`](./Assimalign.Cohesion.Content.Markdown/) | CommonMark subset, canonical writer and HTML renderer | Content, Content.Text | Strategic | Implemented |
+| [`Assimalign.Cohesion.Content.Media`](./Assimalign.Cohesion.Content.Media/) | Shared media descriptions | Content.Binary | Strategic | Placeholder |
+| [`Assimalign.Cohesion.Content.Bmff`](./Assimalign.Cohesion.Content.Bmff/) | ISO BMFF composite box model and reader/writer | Content.Media | Strategic | In progress |
+| [`Assimalign.Cohesion.Content.Mpeg`](./Assimalign.Cohesion.Content.Mpeg/) | Planned MP4 profile over BMFF | None | Strategic | Placeholder |
+| [`Assimalign.Cohesion.Content.Ebml`](./Assimalign.Cohesion.Content.Ebml/) | Tested VInt; container reader/writer/model incomplete | None | Strategic | In progress |
+| [`Assimalign.Cohesion.Content.Mkv`](./Assimalign.Cohesion.Content.Mkv/) | Planned Matroska profile over EBML | Content.Bmff | Strategic | Placeholder |
+| [`Assimalign.Cohesion.Content.Pdf`](./Assimalign.Cohesion.Content.Pdf/) | Planned PDF document structure and parser | None | Strategic | Placeholder |
+| [`Assimalign.Cohesion.Content.Exe`](./Assimalign.Cohesion.Content.Exe/) | Executable inspection candidate; invocation scope awaits O-C1 | Content.Binary | Experimental | Placeholder |
 
-- **L1 (this area):** content contracts and format packages — pure description and parsing machinery,
-  no hosting or service runtime concerns.
-- **L2/L3 (future):** services compose these packages through the root contracts; media workflow and
-  job orchestration explicitly live at the service layer, not here.
+BMFF builds but is incomplete; EBML builds with 60 passing VInt tests. State describes the delivered
+surface, not stabilization approval. No package is archive today; classification definitions,
+standards, O-C1 and the gates live in the [area architecture record](../../docs/libraries/Content/DESIGN.md).
 
-## Project family
+## Dependency rule
 
-Dependency direction is one-way and root-anchored: format packages depend on the shared intermediate
-layers, never on each other's internals.
-
-| Package | Responsibility | Depends on | Status |
-|---|---|---|---|
-| [`Assimalign.Cohesion.Content`](./Assimalign.Cohesion.Content/) | Root contracts: identity, format metadata, stream ownership, composition, reader/writer seam, exceptions | — | Implemented |
-| `Assimalign.Cohesion.Content.Binary` | Shared binary parsing surface (exact reads, bounded slices) | Content | Placeholder |
-| [`Assimalign.Cohesion.Content.Text`](./Assimalign.Cohesion.Content.Text/) | Encoding detection and text reading surface | Content | Implemented |
-| [`Assimalign.Cohesion.Content.Yaml`](./Assimalign.Cohesion.Content.Yaml/) | YAML 1.2 document model, parser, emitter | Content, Content.Text | Implemented |
-| [`Assimalign.Cohesion.Content.Markdown`](./Assimalign.Cohesion.Content.Markdown/) | Markdown document model, parser, HTML renderer, canonical writer (CommonMark 0.31.2 subset) | Content, Content.Text | Implemented |
-| `Assimalign.Cohesion.Content.Media` | Shared media abstractions | Content.Binary | Placeholder |
-| `Assimalign.Cohesion.Content.Bmff` | ISO BMFF box model and reader/writer | Content.Media | Broken — repair tracked (#442) |
-| `Assimalign.Cohesion.Content.Mpeg` | MP4/MPEG-4 profile over BMFF | Content.Bmff | Placeholder |
-| `Assimalign.Cohesion.Content.Ebml` | EBML (RFC 8794) element model | Content | Broken — repair tracked (#458) |
-| `Assimalign.Cohesion.Content.Mkv` | Matroska over EBML | Content.Ebml | Placeholder |
-| `Assimalign.Cohesion.Content.Pdf` | PDF document structure and parser | Content | Placeholder |
-| `Assimalign.Cohesion.Content.Exe` | Executable inspection and invocation | Content.Binary | Placeholder |
-
-## Standards
-
-Each retained format names its governing specification (BMFF: ISO/IEC 14496-12; EBML: RFC 8794;
-YAML: yaml.org/spec/1.2.2; Markdown: CommonMark baseline) and is validated with unit plus corpus or
-compliance coverage where a formal specification exists.
-
-See each package's `docs/OVERVIEW.md` and `docs/DESIGN.md` for detail.
+References point toward shared contracts and primitives. The root never references a format, and
+packages never consume each other's internals. Services compose these L1 libraries without making
+them depend on hosting, workflow or storage implementations.

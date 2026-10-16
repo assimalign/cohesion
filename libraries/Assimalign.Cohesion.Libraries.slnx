@@ -422,6 +422,7 @@
 		<Project Path="Connections/Assimalign.Cohesion.Connections.Udp/tests/Assimalign.Cohesion.Connections.Udp.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Content/">
+		<File Path="../docs/libraries/Content/DESIGN.md" />
 		<File Path="Content/Directory.Build.props" />
 		<File Path="Content/Directory.Build.targets" />
 		<File Path="Content/README.md" />
