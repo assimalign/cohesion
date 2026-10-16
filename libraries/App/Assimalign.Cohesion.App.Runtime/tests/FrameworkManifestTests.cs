@@ -78,6 +78,29 @@ public sealed class FrameworkManifestTests
         actualClosure.ShouldBe(expectedClosure);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Framework] - App manifest carries the package assemblies its kernel references")]
+    public void AppManifest_KernelPackageReferences_AreCarriedAsPrivateAssemblies()
+    {
+        // Arrange
+        IReadOnlyDictionary<string, ProjectNode> graph = LoadProjectGraph();
+        XElement appGroup = LoadFrameworkGroups()[AppFramework];
+        string[] roots = ReadItems(appGroup, "CohesionAppKernelRoot");
+        string[] privateAssemblies = ReadItems(appGroup, "CohesionFrameworkPrivateAssembly")
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        // Hosting.Resources decrypts Windows mounts with ProtectedData, an implementation detail.
+        string[] expectedPackages = ["System.Security.Cryptography.ProtectedData"];
+
+        // Act
+        string[] actualPackages = ComputePackageClosure(graph, ComputeClosure(graph, roots));
+
+        // Assert
+        actualPackages.ShouldBe(expectedPackages);
+        privateAssemblies.ShouldBe(
+            expectedPackages,
+            $"App must carry exactly its kernel's package assemblies as private members; the kernel references: {string.Join(", ", actualPackages)}");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Framework] - every area framework covers its shipped project closure")]
     public void AreaManifests_ShippedSurfaceClosures_AreCoveredByAppAndAreaFramework()
     {
@@ -88,11 +111,7 @@ public sealed class FrameworkManifestTests
         var kernel = ComputeClosure(graph, kernelRoots)
             .Append(AppFramework)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        string[] actualAreas = groups.Keys
-            .Where(name => name.StartsWith(AppFramework + ".", StringComparison.Ordinal))
-            .Select(name => name[(AppFramework.Length + 1)..])
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        string[] actualAreas = ReadAreas(groups);
 
         // Act / Assert
         actualAreas.ShouldBe(_expectedAreas);
@@ -100,35 +119,9 @@ public sealed class FrameworkManifestTests
         {
             string frameworkName = $"{AppFramework}.{area}";
             XElement group = groups[frameworkName];
-            var publicAssemblies = ReadItems(group, "CohesionFrameworkAssembly")
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var privateAssemblies = ReadItems(group, "CohesionFrameworkPrivateAssembly")
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            string hostingAssembly = $"Assimalign.Cohesion.{area}.Hosting";
-            string hostingPrefix = hostingAssembly + ".";
-            string[] hostingRoots = graph.Values
-                .Where(project => IsSourceProject(project.ProjectPath))
-                .Select(project => project.AssemblyName)
-                .Where(name =>
-                    string.Equals(name, hostingAssembly, StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith(hostingPrefix, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-
-            // The hosting family is mandatory. The area list's own entries are roots too, so
-            // feature assemblies such as Web.Caching cannot rely on an App eviction.
-            string[] publicRoots = publicAssemblies
-                .Where(graph.ContainsKey)
-                .Concat(hostingRoots)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            string[] privateRoots = privateAssemblies.Where(graph.ContainsKey).ToArray();
-            IReadOnlyDictionary<string, bool> closure = ComputeVisibilityClosure(
-                graph,
-                publicRoots,
-                privateRoots);
+            IReadOnlyDictionary<string, bool> closure = ComputeAreaClosure(graph, area, group);
             var covered = kernel
-                .Concat(publicAssemblies)
-                .Concat(privateAssemblies)
+                .Concat(ReadMembers(group))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             string[] missing = closure.Keys
                 .Where(name => !covered.Contains(name))
@@ -137,6 +130,48 @@ public sealed class FrameworkManifestTests
             missing.ShouldBeEmpty(
                 $"{frameworkName} is missing project-graph dependencies: {string.Join(", ", missing)}");
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Framework] - every area framework carries the package assemblies its closure references")]
+    public void AreaManifests_ShippedSurfacePackageReferences_AreCarriedByAppOrAreaFramework()
+    {
+        // Arrange
+        IReadOnlyDictionary<string, ProjectNode> graph = LoadProjectGraph();
+        IReadOnlyDictionary<string, XElement> groups = LoadFrameworkGroups();
+        string[] appPackages = ReadMembers(groups[AppFramework]).Where(IsPackageAssembly).ToArray();
+        var failures = new List<string>();
+
+        // Act
+        foreach (string area in ReadAreas(groups))
+        {
+            string frameworkName = $"{AppFramework}.{area}";
+            XElement group = groups[frameworkName];
+            string[] packages = ComputePackageClosure(graph, ComputeAreaClosure(graph, area, group).Keys);
+            string[] areaPackages = ReadMembers(group).Where(IsPackageAssembly).ToArray();
+            var covered = appPackages
+                .Concat(areaPackages)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            string[] missing = packages
+                .Where(name => !covered.Contains(name))
+                .ToArray();
+            string[] unreferenced = areaPackages
+                .Where(name => !packages.Contains(name, StringComparer.OrdinalIgnoreCase))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (missing.Length != 0)
+            {
+                failures.Add($"{frameworkName} is missing package assemblies its closure references: {string.Join(", ", missing)}");
+            }
+
+            if (unreferenced.Length != 0)
+            {
+                failures.Add($"{frameworkName} lists package assemblies no member references: {string.Join(", ", unreferenced)}");
+            }
+        }
+
+        // Assert - every area is reported in one run.
+        failures.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Framework] - each area list lives in its Runtime producer's Directory.Build.props")]
@@ -248,10 +283,36 @@ public sealed class FrameworkManifestTests
                 }
             }
 
-            graph[assemblyName] = new ProjectNode(assemblyName, projectPath, references);
+            graph[assemblyName] = new ProjectNode(assemblyName, projectPath, references, ReadPackageReferences(document));
         }
 
         return graph;
+    }
+
+    private static string[] ReadPackageReferences(XDocument document)
+    {
+        // A package reference puts its runtime assembly in the Runtime producer's bin, and the
+        // framework ships it only when its list names it. A reference that excludes runtime assets
+        // ships nothing. Each package here names its assembly by its package id.
+        return document.Descendants()
+            .Where(element => element.Name.LocalName is "CohesionPackageReference" or "PackageReference")
+            .Where(element => !ExcludesRuntimeAssets(element))
+            .SelectMany(element => ((string?)element.Attribute("Include") ?? string.Empty)
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(name => !name.Contains("$(", StringComparison.Ordinal) && !name.Contains("@(", StringComparison.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool ExcludesRuntimeAssets(XElement packageReference)
+    {
+        string excludeAssets = (string?)packageReference.Attribute("ExcludeAssets")
+            ?? packageReference.Elements().FirstOrDefault(element => element.Name.LocalName == "ExcludeAssets")?.Value
+            ?? string.Empty;
+        return excludeAssets
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(asset => asset.Equals("runtime", StringComparison.OrdinalIgnoreCase) ||
+                          asset.Equals("all", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void AddNamedReferences(
@@ -330,6 +391,68 @@ public sealed class FrameworkManifestTests
         }
 
         return visibility;
+    }
+
+    private static IReadOnlyDictionary<string, bool> ComputeAreaClosure(
+        IReadOnlyDictionary<string, ProjectNode> graph,
+        string area,
+        XElement group)
+    {
+        string hostingAssembly = $"Assimalign.Cohesion.{area}.Hosting";
+        string hostingPrefix = hostingAssembly + ".";
+        string[] hostingRoots = graph.Values
+            .Where(project => IsSourceProject(project.ProjectPath))
+            .Select(project => project.AssemblyName)
+            .Where(name =>
+                string.Equals(name, hostingAssembly, StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith(hostingPrefix, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        // The hosting family is mandatory. The area list's own entries are roots too, so
+        // feature assemblies such as Web.Caching cannot rely on an App eviction.
+        string[] publicRoots = ReadItems(group, "CohesionFrameworkAssembly")
+            .Where(graph.ContainsKey)
+            .Concat(hostingRoots)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        string[] privateRoots = ReadItems(group, "CohesionFrameworkPrivateAssembly")
+            .Where(graph.ContainsKey)
+            .ToArray();
+        return ComputeVisibilityClosure(graph, publicRoots, privateRoots);
+    }
+
+    private static string[] ComputePackageClosure(
+        IReadOnlyDictionary<string, ProjectNode> graph,
+        IEnumerable<string> assemblies)
+    {
+        // Direct package references of every closure member. A package's own dependencies are not
+        // read: none of the packages a shipped library references has one on net10.0.
+        return assemblies
+            .SelectMany(name => graph[name].Packages)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string[] ReadAreas(IReadOnlyDictionary<string, XElement> groups)
+    {
+        return groups.Keys
+            .Where(name => name.StartsWith(AppFramework + ".", StringComparison.Ordinal))
+            .Select(name => name[(AppFramework.Length + 1)..])
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string[] ReadMembers(XElement group)
+    {
+        return ReadItems(group, "CohesionFrameworkAssembly")
+            .Concat(ReadItems(group, "CohesionFrameworkPrivateAssembly"))
+            .ToArray();
+    }
+
+    private static bool IsPackageAssembly(string assemblyName)
+    {
+        return !assemblyName.StartsWith(CohesionAssemblyPrefix, StringComparison.Ordinal);
     }
 
     private static IReadOnlyDictionary<string, XElement> LoadFrameworkGroups()
@@ -446,7 +569,8 @@ public sealed class FrameworkManifestTests
     private sealed record ProjectNode(
         string AssemblyName,
         string ProjectPath,
-        IReadOnlyList<ProjectEdge> References);
+        IReadOnlyList<ProjectEdge> References,
+        IReadOnlyList<string> Packages);
 
     private sealed record ProjectEdge(string AssemblyName, bool IsPrivate);
 

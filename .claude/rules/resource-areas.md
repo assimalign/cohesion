@@ -496,7 +496,8 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   membership").
 - Framework delivery: `Sdk.<Area>` defaults to executable output and includes both the App
   hosting kernel and `App.<Area>` under `CohesionAutoIncludeAppFramework`. Shippable area
-  assemblies (and their outside-area transitive closure that App does not carry) belong in the
+  assemblies (and their outside-area transitive closure that App does not carry, including the
+  assemblies of packages outside `Microsoft.NETCore.App`) belong in the
   `App.<Area>` public/private items of
   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`, so applications
   get the family without project wiring. The framework closure tests guard every

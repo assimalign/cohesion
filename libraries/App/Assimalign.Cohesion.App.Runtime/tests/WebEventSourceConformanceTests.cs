@@ -121,10 +121,13 @@ public sealed class WebEventSourceConformanceTests
     {
         XDocument manifest = XDocument.Load(Path.Combine(repositoryRoot, "resources", "Web",
             "Assimalign.Cohesion.Web.Runtime", "Directory.Build.props"));
+        // Package-delivered members such as System.Threading.RateLimiting have no source project
+        // here, and the event-source policy covers Cohesion assemblies only.
         string[] members = manifest.Descendants()
             .Where(element => element.Name.LocalName is "CohesionFrameworkAssembly" or "CohesionFrameworkPrivateAssembly")
             .SelectMany(element => ((string?)element.Attribute("Include") ?? string.Empty)
                 .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(name => name.StartsWith("Assimalign.Cohesion.", StringComparison.Ordinal))
             .ToArray();
         members.ShouldNotBeEmpty();
         members.Distinct(StringComparer.Ordinal).Count().ShouldBe(members.Length);

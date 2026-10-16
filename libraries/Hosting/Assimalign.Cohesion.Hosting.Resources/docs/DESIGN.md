@@ -10,7 +10,9 @@ observes the public run transitions defined by `Assimalign.Cohesion.Hosting`.
 
 The assembly directly references Core, Hosting, and Hosting.Health. Hosting owns lifecycle;
 Hosting.Health owns the shared health vocabulary; Resources owns ambient resource state and process
-policy. The Windows ProtectedData reference is a BCL facade used only for protected mount files.
+policy. The Windows ProtectedData reference is used only for protected mount files. It is an
+out-of-band package, not part of `Microsoft.NETCore.App`, so the `Assimalign.Cohesion.App`
+framework ships it as a private (runtime-only) member for `Sdk.<Area>` applications.
 
 This direction keeps plain hosts free of resource environment parsing, signals, process output,
 exit codes, and protected mount behavior. It also lets non-host health consumers use the Health
