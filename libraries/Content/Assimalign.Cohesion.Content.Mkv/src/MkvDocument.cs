@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Content.Mkv;
 /// <remarks>Keep the seekable source open and stable. Operations sharing its cursor are sequential.
 /// Save to separate storage, then load that storage for relocated sample coordinates. OpenRead always
 /// returns the original source snapshot; edits affect Save. Use EbmlReader and MkvSchema.Registry for
-/// non-seekable header/skip streaming, and EbmlWriter with MkvSchema.Matroska for forward-only emission.</remarks>
+/// non-seekable streaming with MkvBlockReader, and EbmlWriter with MkvSchema.Matroska for forward-only emission.</remarks>
 public sealed class MkvDocument : IMediaFile
 {
     private readonly Stream _source;
@@ -42,6 +42,9 @@ public sealed class MkvDocument : IMediaFile
         Ebml = document; Options = options;
         Segment = MkvElements.FindBody(document, 0x18538067) ??
             throw new ContentFormatException(ErrorMessages.SegmentRequired, ContentFormatErrorCode.InvalidStructure, start + _origin);
+        Chapters = new MkvChildList<MkvChapterEdition>(GetChapters, 0x45B9,
+            element => new MkvChapterEdition(element), edition => edition.Element,
+            () => { if (GetChapters(false) is { } chapters) { Segment.Children.Remove(chapters); } });
         _layout = new MkvLayout(document.Schema, options.Ebml.MaxDepth);
         _layout.Capture(document.Header.Element, source, _origin);
         foreach (var root in document.Body.Elements) { _layout.Capture(root, source, _origin); }
@@ -53,6 +56,10 @@ public sealed class MkvDocument : IMediaFile
     public EbmlDocument Ebml { get; }
     /// <summary>Gets the Segment's ordered metadata and lazy cluster tree.</summary>
     public EbmlElement Segment { get; }
+    /// <summary>Gets the editable chapter editions in wire order, empty when Chapters is absent.</summary>
+    /// <remarks>Adding the first edition creates Chapters. Removing the last edition removes that
+    /// whole container. Collections are live views over Ebml; reading does not materialize defaults.</remarks>
+    public IList<MkvChapterEdition> Chapters { get; }
     /// <summary>Gets profile diagnostics, including ignored deprecated TrackTimestampScale fields.</summary>
     public IReadOnlyList<ContentFormatException> Diagnostics => _diagnostics.AsReadOnly();
     /// <inheritdoc/>
@@ -299,6 +306,31 @@ public sealed class MkvDocument : IMediaFile
         return false;
     }
 
+    private EbmlElement? GetChapters(bool create)
+    {
+        EnsureOpen();
+        var chapters = MkvElements.Find(Segment, 0x1043A770);
+        if (chapters is null && create)
+        {
+            chapters = EbmlElement.Create(VInt.FromEncoded(0x1043A770), EbmlElementType.MasterElement);
+            Segment.Children.Add(chapters);
+        }
+        return chapters;
+    }
+
+    private static void ValidateChapterTimes(EbmlElement parent, bool ordered)
+    {
+        foreach (var chapter in MkvElements.All(parent, 0xB6))
+        {
+            var end = MkvElements.Find(chapter, 0x92);
+            if (end?.Value is ulong timestamp && timestamp < MkvElements.Number(chapter, 0x91))
+            { throw new ContentFormatException(ErrorMessages.ChapterTimeInvalid, ContentFormatErrorCode.InvalidValue, end.Offset); }
+            if (ordered && end is null && MkvElements.Find(chapter, 0xB6) is null)
+            { throw new ContentFormatException(ErrorMessages.ChapterEndRequired, ContentFormatErrorCode.InvalidStructure, chapter.Offset); }
+            ValidateChapterTimes(chapter, ordered);
+        }
+    }
+
     private void ValidateMetadata()
     {
         // EBML's direct-parent schema applies recursive MinOccurs to the recursive parent too.
@@ -315,6 +347,7 @@ public sealed class MkvDocument : IMediaFile
         {
             if (MkvElements.Find(edition, 0xB6) is null)
             { throw new ContentFormatException(ErrorMessages.ChapterRequired, ContentFormatErrorCode.InvalidStructure, edition.Offset); }
+            ValidateChapterTimes(edition, MkvElements.Number(edition, 0x45DD) != 0);
         }
     }
 

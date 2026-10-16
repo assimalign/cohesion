@@ -51,9 +51,8 @@ internal static class MkvFixtures
             writer.WriteUnsignedInteger(Id(0x46AE), 1);
             writer.WriteBinary(Id(0x465C), BinarySegment.Create(new byte[] { 10, 20, 30, 40 }));
             writer.EndMaster(); writer.EndMaster();
-            // RFC 9559 section 4.2: the old EBML core cannot construct ID 0x80 as an element.
-            // Build just that header with its VInt encoder; all child values use EbmlWriter.
-            writer.WriteBinary(Id(0x1043A770), BinarySegment.Create(Chapters()));
+            // The typed tree retains the exact encoding of the original writer-generated golden.
+            writer.WriteElement(Chapters());
         }
         var clusterPositions = new List<ulong>();
         for (var cluster = 0; cluster < clusterCount; cluster++)
@@ -140,18 +139,17 @@ internal static class MkvFixtures
         MkvLacing.Ebml => Block(2, 0, 0x86, new byte[] { 2, 0x82, 0xC0, 1, 2, 3, 4, 5, 6 }),
         _ => throw new InvalidOperationException()
     };
-    private static byte[] Chapters()
+    private static EbmlElement Chapters()
     {
-        using var display = new MemoryStream();
-        using (var strings = EbmlWriter.Create(display)) { strings.WriteUtf8String(Id(0x85), "Introduction"); }
-        using var atom = new MemoryStream();
-        using (var writer = EbmlWriter.Create(atom)) { writer.WriteUnsignedInteger(Id(0x73C4), 1); writer.WriteUnsignedInteger(Id(0x91), 0); }
-        Id(0x80).Write(atom); VInt.EncodeSize((ulong)display.Length).Write(atom); display.Position = 0; display.CopyTo(atom);
-        using var edition = new MemoryStream();
-        using (var writer = EbmlWriter.Create(edition)) { writer.WriteBinary(Id(0xB6), BinarySegment.Create(atom.ToArray())); }
-        using var chapters = new MemoryStream();
-        using (var writer = EbmlWriter.Create(chapters)) { writer.WriteBinary(Id(0x45B9), BinarySegment.Create(edition.ToArray())); }
-        return chapters.ToArray();
+        var chapters = EbmlElement.Create(Id(0x1043A770), EbmlElementType.MasterElement);
+        var edition = EbmlElement.Create(Id(0x45B9), EbmlElementType.MasterElement);
+        var atom = EbmlElement.Create(Id(0xB6), EbmlElementType.MasterElement);
+        var display = EbmlElement.Create(Id(0x80), EbmlElementType.MasterElement);
+        atom.Children.Add(EbmlElement.Create(Id(0x73C4), EbmlElementType.UnsignedInteger, 1UL));
+        atom.Children.Add(EbmlElement.Create(Id(0x91), EbmlElementType.UnsignedInteger, 0UL));
+        display.Children.Add(EbmlElement.Create(Id(0x85), EbmlElementType.Utf8String, "Introduction"));
+        atom.Children.Add(display); edition.Children.Add(atom); chapters.Children.Add(edition);
+        return chapters;
     }
     internal static VInt Id(ulong value) => VInt.FromEncoded(value);
     internal static EbmlElement Find(EbmlElement parent, ulong id)

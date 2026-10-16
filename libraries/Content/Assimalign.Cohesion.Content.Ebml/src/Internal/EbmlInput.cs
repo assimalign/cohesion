@@ -22,6 +22,7 @@ internal sealed class EbmlInput : Stream
     }
 
     internal long? End { get; set; }
+    internal bool RequireData { get; set; }
     internal BytesRead? Observe { get; set; }
     internal bool SuppressObservation { get; set; }
     internal void Advance(long count) => _position += count;
@@ -38,6 +39,10 @@ internal sealed class EbmlInput : Stream
         }
 
         var read = _source.Read(buffer);
+        if (RequireData && read == 0 && buffer.Length != 0)
+        {
+            throw new EbmlDataFormatException(ErrorMessages.TruncatedInput, ContentFormatErrorCode.Truncated, _position);
+        }
         if (read > long.MaxValue - _position)
         {
             throw new EbmlDataFormatException(ErrorMessages.LengthLimit, ContentFormatErrorCode.LimitExceeded, _position);
@@ -60,6 +65,10 @@ internal sealed class EbmlInput : Stream
         }
 
         var read = await _source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        if (RequireData && read == 0 && buffer.Length != 0)
+        {
+            throw new EbmlDataFormatException(ErrorMessages.TruncatedInput, ContentFormatErrorCode.Truncated, _position);
+        }
         if (read > long.MaxValue - _position)
         {
             throw new EbmlDataFormatException(ErrorMessages.LengthLimit, ContentFormatErrorCode.LimitExceeded, _position);

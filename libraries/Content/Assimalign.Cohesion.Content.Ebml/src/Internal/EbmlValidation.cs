@@ -37,6 +37,11 @@ internal sealed class EbmlValidation
     internal void Header(EbmlElementHeader header, ulong? parent, Dictionary<ulong, long> counts, long childIndex)
     {
         var definition = Schema.Find(header.Identifier);
+        if (definition is null && !header.Identifier.IsValidIdentifier)
+        {
+            // Invalid framing remains fatal in lenient mode as well.
+            throw new EbmlDataFormatException(ErrorMessages.InvalidVInt, ContentFormatErrorCode.InvalidStructure, header.Offset);
+        }
         if (definition is null)
         {
             return;
@@ -96,6 +101,11 @@ internal sealed class EbmlValidation
     internal void Value(EbmlElementHeader header, object value)
     {
         var definition = Schema.Find(header.Identifier);
+        if (definition is null && !header.Identifier.IsValidIdentifier)
+        {
+            // Invalid framing remains fatal in lenient mode as well.
+            throw new EbmlDataFormatException(ErrorMessages.InvalidVInt, ContentFormatErrorCode.InvalidStructure, header.Offset);
+        }
         if (definition is not null && !definition.Contains(value))
         {
             Report(ErrorMessages.SchemaViolation, ContentFormatErrorCode.InvalidValue, header.DataOffset);

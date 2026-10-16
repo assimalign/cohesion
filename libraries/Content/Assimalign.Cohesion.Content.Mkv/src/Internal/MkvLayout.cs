@@ -7,9 +7,8 @@ using Assimalign.Cohesion.Content.Ebml;
 
 namespace Assimalign.Cohesion.Content.Mkv.Internal;
 
-// EBML does not expose encoded lengths, original raw elements, or a raw-element write seam.
-// Keep the workaround local: snapshot ranges, measure scalar leaves with its writer, and copy
-// unchanged trees verbatim. No EBML headers are hand-parsed and binary payloads are never measured by reading.
+// Retain native identities for Matroska position repair. Generic measurement and original-byte
+// copying belong to EBML; this layer selects Matroska's explicit numeric widths and tracks edits.
 internal sealed class MkvLayout
 {
     private readonly Dictionary<EbmlElement, Snapshot> _original = new();
@@ -37,10 +36,7 @@ internal sealed class MkvLayout
         { length = Add(binary.Length, element.Identifier.Length + element.SizeLength, element.Offset); }
         else
         {
-            using var count = new MkvCountingStream();
-            using var writer = EbmlWriter.Create(count, _schema, maxDepth: _maxDepth);
-            writer.WriteElement(element); // Uses EBML's preserved raw scalar, including padding/width.
-            length = count.Length;
+            length = EbmlWriter.GetEncodedLength(element, _schema, _maxDepth);
         }
         _original.Add(element, new Snapshot(element.Value, children, element.SizeLength, element.IsUnknownSize,
             BinarySegment.Create(source, element.Offset - origin, length)));
@@ -87,10 +83,12 @@ internal sealed class MkvLayout
             return Add(payload, element.Identifier.Length + Width(element, payload), element.Offset);
         }
         if (element.Value is BinarySegment binary)
-        { return Add(binary.Length, element.Identifier.Length + Width(element, binary.Length), element.Offset); }
-        using var count = new MkvCountingStream();
-        WriteScalar(count, element);
-        return count.Length;
+        {
+            return EbmlWriter.GetEncodedLength(element.Identifier, element.Type, binary, _schema,
+                sizeLength: Width(element, binary.Length));
+        }
+        var widths = ScalarWidths(element);
+        return EbmlWriter.GetEncodedLength(element.Identifier, element.Type, element.Value!, _schema, widths.Value, widths.Size);
     }
 
     private long PayloadLength(EbmlElement element, int depth)
@@ -100,55 +98,62 @@ internal sealed class MkvLayout
         return length;
     }
 
-    internal void Write(Stream destination, EbmlElement element, int depth = 0)
+    internal void Write(Stream destination, EbmlElement element)
     {
-        if (Unchanged(element)) { _original[element].Bytes.CopyTo(destination); return; }
+        using var writer = EbmlWriter.Create(destination, _schema, maxDepth: _maxDepth);
+        Write(writer, element, 0);
+    }
+
+    private void Write(EbmlWriter writer, EbmlElement element, int depth)
+    {
+        if (Unchanged(element)) { writer.WriteRawElement(_original[element].Bytes); return; }
         if (element.Type == EbmlElementType.MasterElement)
         {
             var payload = PayloadLength(element, depth);
-            using (var header = EbmlWriter.Create(destination, _schema, maxDepth: _maxDepth))
-            {
-                // Emit only the precomputed master header. Each child owns its own writer/copy;
-                // disposing EBML's writer deliberately does not finish an open master.
-                header.BeginMaster(element.Identifier, element.IsUnknownSize ? null : payload, Width(element, payload));
-            }
-            foreach (var child in element.Children) { Write(destination, child, depth + 1); }
+            writer.BeginMaster(element.Identifier, element.IsUnknownSize ? null : payload, Width(element, payload));
+            foreach (var child in element.Children) { Write(writer, child, depth + 1); }
+            writer.EndMaster();
         }
         else if (element.Value is BinarySegment binary)
         {
-            using var writer = EbmlWriter.Create(destination, _schema, maxDepth: _maxDepth);
             writer.WriteBinary(element.Identifier, binary, Width(element, binary.Length));
         }
-        else { WriteScalar(destination, element); }
+        else { WriteScalar(writer, element); }
     }
 
-    private void WriteScalar(Stream destination, EbmlElement element)
+    private (int Value, int Size) ScalarWidths(EbmlElement element)
     {
-        // The generic EBML writer uses empty payloads for defaults. RFC 9559 section 4.4
-        // forbids that for nonzero numeric defaults: explicit widths avoid that core behavior.
-        using var writer = EbmlWriter.Create(destination, _schema, maxDepth: _maxDepth);
-        var sizeWidth = element.SizeLength;
+        // RFC 9559 section 4.4: numeric defaults must have nonempty payloads.
+        var width = element.Value is string ? -1 : 8;
+        if (element.Value is ulong number && !_relocatedPositions.Contains(element))
+        {
+            width = 1;
+            for (var rest = number >> 8; rest != 0; rest >>= 8) { width++; }
+        }
+        var payload = EbmlWriter.GetEncodedLength(element.Identifier, element.Type, element.Value!, _schema, width, 8)
+            - element.Identifier.Length - 8;
+        return (width, Width(element, payload));
+    }
+
+    private void WriteScalar(EbmlWriter writer, EbmlElement element)
+    {
+        var widths = ScalarWidths(element);
         switch (element.Value)
         {
             case ulong number:
-                var width = 1;
-                for (var rest = number >> 8; rest != 0; rest >>= 8) { width++; }
-                if (_relocatedPositions.Contains(element)) { width = 8; }
-                writer.WriteUnsignedInteger(element.Identifier, number, width, sizeWidth); break;
+                writer.WriteUnsignedInteger(element.Identifier, number, widths.Value, widths.Size); break;
             case long number when element.Type == EbmlElementType.Date:
-                writer.WriteDate(element.Identifier, number, 8, sizeWidth); break;
+                writer.WriteDate(element.Identifier, number, widths.Value, widths.Size); break;
             case long number:
-                writer.WriteSignedInteger(element.Identifier, number, 8, sizeWidth); break;
+                writer.WriteSignedInteger(element.Identifier, number, widths.Value, widths.Size); break;
             case double number:
-                writer.WriteFloat(element.Identifier, number, 8, sizeWidth); break;
+                writer.WriteFloat(element.Identifier, number, widths.Value, widths.Size); break;
             case string text when element.Type == EbmlElementType.AsciiString:
-                writer.WriteAsciiString(element.Identifier, text, sizeLength: GrowStringWidth(element, text.Length)); break;
+                writer.WriteAsciiString(element.Identifier, text, widths.Value, widths.Size); break;
             case string text:
-                writer.WriteUtf8String(element.Identifier, text, sizeLength: GrowStringWidth(element, System.Text.Encoding.UTF8.GetByteCount(text))); break;
+                writer.WriteUtf8String(element.Identifier, text, widths.Value, widths.Size); break;
         }
     }
-
-    private static int GrowStringWidth(EbmlElement element, int length) => Width(element, length);
     private static int Width(EbmlElement element, long payload) => element.IsUnknownSize ? Math.Max(1, element.SizeLength == 0 ? 8 : element.SizeLength) :
         Math.Max(element.SizeLength, VInt.EncodeSize((ulong)payload).Length);
     private static long Add(long left, long right, long offset)

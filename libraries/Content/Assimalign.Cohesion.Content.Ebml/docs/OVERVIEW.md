@@ -9,18 +9,21 @@ standard EBML header, Void and CRC-32 come from a supplied schema.
 
 | Surface | Input/output | Appropriate use |
 | --- | --- | --- |
-| `EbmlReader.Create` | Any readable stream | Scan large files or network input; read bounded values or skip payloads |
+| `EbmlReader.Create` | Any readable stream | Scan large files or network input; read bounded values, stream raw payloads or skip them |
 | `EbmlWriter.Create` | Any writable stream | Emit typed elements; precompute master sizes, stream unknown sizes, or back-patch seekable outputs |
 | `EbmlDocument.Load` / `Save` | Seekable source; any writable destination | Edit ordered trees while preserving untouched wire values and lazy binary ranges |
 | `EbmlDocument.CreateReader` / `CreateWriter` | Existing Content reader/writer contracts | Synchronous or cancellable asynchronous document loading and saving |
 
-Reader and writer operations are synchronous streaming APIs. The document contract adapters perform
+Reader header/scalar operations and writer operations are synchronous. Payload streams also support
+asynchronous reads and cancellation. The document contract adapters perform
 actual asynchronous I/O in their async methods, including lazy copy-through and CRC verification.
 
 ## Define a format
 
 IDs passed to `VInt.FromEncoded` include their wire marker. `VInt.MakeId` instead accepts the
-identifier's data bits and is limited to four encoded octets.
+identifier's data bits and is limited to four encoded octets. The active schema can explicitly authorize
+an ID such as Matroska's 0x80 even when VInt.IsValidIdentifier rejects it under the generic rule.
+Undefined invalid IDs are rejected in both strict and lenient modes. VInt itself has no format exception list.
 
 ```csharp
 using Assimalign.Cohesion.Content.Ebml;
@@ -103,14 +106,45 @@ if (reader.ReadNext())
 }
 ```
 
-Consume, skip or enter an element before advancing. `ReadNext` returning false inside a master
+Consume, skip, enter or open a payload stream before advancing. `ReadNext` returning false inside a master
 requires `LeaveMaster`; it is not necessarily end of the outer stream. Unknown-size termination
 uses schema parentage and retains a sibling header for the enclosing level.
+
+For a current element with known size, stream its raw bytes without a payload-sized allocation:
+
+~~~csharp
+long absoluteOrigin = reader.Current.DataOffset;
+using (var payload = reader.OpenPayloadStream())
+{
+    await payload.CopyToAsync(destination, cancellationToken);
+}
+reader.ReadNext(); // Also drains unread bytes if the payload was consumed only partially.
+~~~
+
+The view is forward-only, never reads past the element, and supports asynchronous reads. Its cursor
+and SourceOffset are payload-relative; the saved DataOffset is the absolute origin. The view borrows
+the reader and becomes invalid when the reader advances or is disposed. Disposing just the view
+does not drain it; ReadNext or Skip handles that. Raw access does not interpret scalar values or
+master children, so use typed reads and EnterMaster for EBML headers, DocType selection and semantic
+validation. Unknown-size masters must be traversed.
 
 For a known size, pass `size:` to `BeginMaster`; `EndMaster` checks the result.
 For seekable output, `backPatch: true` reserves a size field. `WriteElement` precomputes a tree's
 sizes without buffering its binary payloads. Typed methods accept explicit payload and size widths;
 `WriteVoid` writes a padding element whose argument counts payload bytes.
+
+## Plan layouts and preserve original elements
+
+EbmlWriter.GetEncodedLength(element, schema) reports the complete encoded tree length, including
+preserved scalar widths and lazy binary sizes, without reading payloads. The value overload accepts
+an ID, type, value, schema and optional payload/size widths. Sum child lengths to supply a known
+master's data size. The query is not a substitute for schema validation.
+
+EbmlWriter.WriteRawElement(originalSegment) copies a complete original element, including its header.
+The source BinarySegment must describe exactly that element; its outer ID, size and schema length
+are checked before copying. Children, scalar contents and CRC bytes remain untouched. Unknown-size
+masters need an eligible schema and an exact original extent supplied by the caller. The source
+must remain open and unchanged, and the destination must use separate storage.
 
 ## Validation and limits
 
@@ -121,7 +155,7 @@ sizes and safety limits still throw. Strongly typed read methods also throw if a
 cannot produce their return type; use `ReadValue` for lenient binary fallback.
 
 The default buffered-value cap is 16 MiB, depth is 64, document node count is one million and
-diagnostic count is 1024. Binary data on a seekable source is not subject to the buffered-value cap.
+diagnostic count is 1024. Lazy binary data and streamed payload views are not subject to the buffered-value cap.
 A parsed header supplies body ID and size widths; unsupported widths above eight are refused.
 Enable `VerifyCrc32` to verify parent checksums while scanning.
 

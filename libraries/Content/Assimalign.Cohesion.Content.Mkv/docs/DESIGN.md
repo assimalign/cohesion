@@ -28,6 +28,9 @@ flowchart LR
 No BMFF dependency, shipped-to-shipped internal visibility, runtime schema loading, reflection,
 dynamic code or codec processing is introduced. Inherited NativeAOT compatibility stays enabled.
 
+<!-- Deviates from the repo documentation.md same-commit rule: the Stage 4 follow-up brief
+explicitly orders consolidated design/overview updates as the fourth commit. -->
+
 ## Specifications and schema composition
 
 The governing documents are [RFC 9559](https://www.rfc-editor.org/rfc/rfc9559.html),
@@ -44,6 +47,12 @@ opaque preservation path. The document additionally checks supported track/codec
 (VP8/VP9/AV1 video, Vorbis/Opus audio and the four WebVTT identifiers with their native track kinds).
 It rejects unsupported header read versions and requires EBMLMaxIDLength=4. Generic Matroska
 CodecID strings pass through without parsing or normalization.
+
+EBML now treats the active schema as the authority for element IDs. ChapterDisplay 0x80 is explicitly
+defined here and parses, validates and writes despite failing VInt.IsValidIdentifier's generic rule.
+Undefined IDs must still pass that generic rule, including in lenient mode. A global exception list
+in VInt was rejected: it would authorize Matroska IDs in unrelated schemas and couple EBML to each
+profile. No VInt public contract or alternate wire ID is needed.
 
 A future EBML-derived package follows this pattern: reference EBML, compose its own immutable
 schema/registry, reuse the reader/writer/tree, and keep semantic validation and external position
@@ -67,7 +76,7 @@ come from the RFC header schema. The complete executable inventory is src/MkvSch
 | TrackEntry / ContentEncodings | Master retained with opaque children; no decompression, decryption or configuration interpretation |
 | Cluster (1F43B675) | Timestamp, SimpleBlock, BlockGroup / Block, BlockDuration, ReferenceBlock; live unknown-size boundary handling belongs to EBML |
 | Cues / CuePoint / CueTrackPositions | CueTime, CueTrack, CueClusterPosition, CueRelativePosition, CueDuration, CueBlockNumber, CueCodecState |
-| Chapters / EditionEntry / ChapterAtom | **Conditional on the EBML 0x80 prerequisite below.** EditionUID/flags, ChapterUID/StringUID/start/end/flags; recursive ChapterAtom; ChapterDisplay with ChapString/Language/LanguageBCP47/Country |
+| Chapters / EditionEntry / ChapterAtom | EditionUID/flags, ChapterUID/StringUID/start/end/flags; recursive ChapterAtom; ChapterDisplay with ChapString/Language/LanguageBCP47/Country |
 | Tags / Tag | Targets (target type and track/edition/chapter/attachment UIDs), recursive SimpleTag (name, languages, default, string/binary value) |
 | Attachments / AttachedFile | Description, name, media type, FileUID and lazy FileData |
 | Globals | Void and four-byte CRC-32, with EBML's placement/occurrence rules |
@@ -79,10 +88,8 @@ processes, ordered-chapter presentation programs and codec decoding. Chapter/col
 preservation is not a claim to interpret those programs. Unknown-size unregistered masters cannot
 be bounded safely and are rejected by EBML.
 
-The current core cannot accept ChapterDisplay's 0x80 ID. Consequently the entire Chapters element
-is currently omitted from the active schema and stays one opaque lazy range. Typed chapter editing
-and chapter-field validation are unavailable. The complete chapter definitions activate once the
-generic VInt fix is integrated; there are no alternate wire IDs or local EBML parser.
+The chapter definitions are active. ChapterDisplay is an ordinary schema-resolved master, and
+its children receive the same bounded parsing and schema validation as other metadata.
 
 ## Three access modes and limits
 
@@ -90,8 +97,9 @@ generic VInt fix is integrated; there are no alternate wire IDs or local EBML pa
 ReadNext reads headers; enter masters and skip binary payloads to scan cluster by cluster.
 Unknown-size masters end using schema-aware sibling lookahead, with no backward seek. Skip drains
 non-seekable bytes with the shared pooled-buffer implementation. There is no frame-payload buffer.
-The core's ReadBinary would buffer a non-seekable payload within its explicit cap; it is not a
-forward-only payload stream accessor.
+MkvBlockReader.Create opens the current SimpleBlock or Block through EbmlReader.OpenPayloadStream.
+ReadFrame hands out bounded ContentSliceStreams over encoded frame bytes; even a frame above the
+buffer cap remains unbuffered. ReadBinary remains available when explicit materialization is wanted.
 
 **Forward-only writer:** EbmlWriter takes the Matroska or WebM schema. Supply precomputed sizes
 or use unknown-size Segment/Cluster masters on non-seekable output; seekable output also supports
@@ -130,12 +138,57 @@ are exposed. Track and lace VINTs permit all data-bit patterns, including all-on
 No lacing means one frame. Xiph stores byte-summed sizes; EBML stores an unsigned first size and
 biased signed size differences; fixed lacing divides the remaining bytes exactly. The last variable
 size is the validated remainder. One-frame lacing, negative sizes, overruns, incomplete headers and
-uneven fixed laces fail before slicing. Frames are BinarySegment subranges, never copied data.
+uneven fixed laces fail before slicing. MkvBlock.Parse exposes BinarySegment subranges;
+MkvBlockReader exposes forward-only frame streams.
+Both paths use one internal framing/lacing parser and neither copies encoded frame data.
 FrameOffsets are absolute in the supplied payload-origin coordinate system.
 
 BlockGroup without ReferenceBlock is a random access point. ReferenceBlock values and BlockDuration
 remain typed native metadata. FlagLacing=0 is enforced when blocks are accessed. A missing TrackEntry
 is a classified lazy sample-read error, rather than a fabricated track.
+
+### Forward-only frame lifetime
+
+MkvBlockReader.Create(EbmlReader, maxFrames) parses only the current block's framing, checks the
+lace count before allocating at most 256 length/offset entries, and exposes track number, relative
+timestamp, flags, lacing, frame count and absolute offsets. It accepts both SimpleBlock and Block;
+BlockGroup ReferenceBlock/BlockDuration handling remains in the enclosing scan. This low-level
+reader does not build track metadata or perform the document adapter's track/profile validation.
+
+ReadFrame opens the next frame. It drains any unread remainder of the previous frame, even after
+early disposal, and invalidates that old view. It returns null after the final frame. A frame
+cannot read past its validated lace boundary. Disposing the block reader invalidates its views
+without draining; the enclosing EBML reader drains the block remainder when ReadNext or Skip runs.
+Advancing the EBML reader first invalidates the block payload. Shared-cursor access is sequential.
+
+Frame streams support asynchronous reads and cancellation. Header parsing and ReadFrame advancement
+are synchronous. No per-frame codec timing or payload buffering is introduced. Stream coordinates
+are relative to the block payload; FrameOffsets supplies absolute source coordinates. Truncated
+framing and encoded bytes retain classified absolute errors, including nested source windows.
+Unknown-size Segment/Cluster traversal uses EBML's existing lookahead and needs no rewind.
+
+## Typed chapter editing
+
+MkvDocument.Chapters is a live `IList<MkvChapterEdition>` over the optional Chapters master.
+MkvChapterEdition exposes its optional UID, default/ordered flags and chapter list. MkvChapter
+exposes UID, optional string UID, exact unsigned start/end nanoseconds, hidden/enabled flags,
+recursive chapters and displays. MkvChapterDisplay exposes text and ordered explicit language,
+BCP 47 language and country occurrences. Empty legacy-language lists represent the implicit eng
+default; BCP 47 values take precedence when a caller chooses a display. Wire spellings are retained,
+without adding language-tag normalization or a chapter presentation engine.
+
+These are native-tree views, not a separately serialized object graph. Reading never inserts
+defaults; property edits change only the corresponding native leaf. Collection edits preserve
+unrelated children and their order. Adding the first edition creates Chapters; removing the last
+edition removes that entire optional container. Detached chapters/displays are created through
+Create factories; an edition has a public parameterless constructor. Full schema validation runs
+on save, so an empty edition or missing required chapter fields is rejected before output.
+
+Start/end values use nanoseconds independently of Segment.TimestampScale and retain the full ulong
+range. Load/save reject an end before its start and require an explicit end on an ordered leaf
+chapter. Recursive occurrence minimums are checked at EditionEntry; recursive children remain
+optional. Ordered flags are editable metadata, not a promise to execute ordered-chapter playback,
+linked segments, menus or chapter processes. Unknown chapter extensions remain preserved native data.
 
 ## Media mapping and timeline
 
@@ -197,7 +250,8 @@ Unknown Duration alone does not imply live.
 
 ## Editing and position maintenance
 
-The native tree supports title, tags, track names/languages/flags and attachment edits. Use
+The native tree supports title, tags, track names/languages/flags, chapters and attachment edits.
+Typed chapter views and direct native edits share that tree. Use
 MkvDocument.Save, not its exposed generic Ebml.Save, for Matroska position maintenance. Cluster
 editing/reordering/removal is refused. The loaded source stays unchanged, and existing tracks and
 sample byte coordinates continue to refer to that source. Reload a saved file for relocated views.
@@ -211,9 +265,13 @@ relative to its data start. CueRelativePosition remains valid because entire clu
 
 Unchanged elements, including every cluster, copy from recorded source ranges byte-for-byte. Known
 metadata leaves preserve original encodings until changed; new scalar values go through EbmlWriter
-with explicit nonempty numeric widths. Layout measurements never read binary payloads. Changed
-masters have CRC-32 removed; unchanged subtrees retain their exact checksum bytes. Saving to the
-same source instance is rejected; callers must also avoid aliases of the same file.
+with explicit nonempty numeric widths. EBML GetEncodedLength queries measure retained scalars
+and explicit values without scratch output or binary payload reads. EBML WriteRawElement copies
+complete original ranges and accounts for open
+master bounds; MkvLayout retains only snapshot identity, format-specific widths and position planning.
+The private counting stream and raw-copy path have been removed. Changed masters have CRC-32 removed;
+unchanged subtrees retain their exact checksum bytes. Saving to the same source instance is rejected;
+callers must also avoid aliases of the same file.
 
 Only retained position fields are repaired. Unknown positional extensions, including deprecated
 cluster Position fields, remain opaque and can become stale after relocation. Remove their native
@@ -245,8 +303,8 @@ disposed resources. Messages come from Properties/ErrorMessages.resx.
 
 tests/TestObjects/Golden contains four files generated by MkvFixtures.Create, with provenance
 comments in that fixture and MkvGoldenCorpusTests. Each checked-in file is compared with regenerated
-bytes. vp9-opus.webm has video/audio; metadata.mkv adds subtitles, tags, an attachment and an opaque
-chapter display; live.webm has unknown masters without cues; laces.mkv covers all three modes.
+bytes. vp9-opus.webm has video/audio; metadata.mkv adds subtitles, tags, an attachment and a
+typed chapter display; live.webm has unknown masters without cues; laces.mkv covers all three modes.
 Codec bytes are placeholders. No downloaded test media or external codec is used.
 
 Every test names RFC 9559 or RFC 8794 sections. The suite covers shared TruncationCorpus prefixes,
@@ -255,24 +313,31 @@ limits, streaming partial reads, nested absolute coordinates, cancellation and o
 exact unmodified saves, whole-cluster bytes through repeated growth/shrink, CRC removal, cue/scan
 agreement, reordered PTS, references, a 40 GiB lazy source and 2,000 deterministic hostile headers.
 
+## Public surface added or changed by the Stage 4 follow-up
+
+- MkvDocument.Chapters: live editable chapter-edition list; Load/Save now validate typed chapters.
+- MkvSchema.Matroska and WebM: activate the retained chapter definitions, including ChapterDisplay 0x80.
+- MkvChapterEdition: public parameterless constructor; Uid, IsDefault, IsOrdered and Chapters.
+- MkvChapter: Create(uid, timeStart), Uid, StringUid, TimeStart, TimeEnd, IsHidden, IsEnabled, Chapters and Displays.
+- MkvChapterDisplay: Create(text), Text, Languages, LanguagesBCP47 and Countries.
+- MkvBlockReader: Create(reader, maxFrames), TrackNumber, RelativeTimestamp, IsKeyframe, IsInvisible,
+  IsDiscardable, Lacing, FrameCount, FrameOffsets, ReadFrame and Dispose.
+- MkvBlock.Parse keeps its existing public contract and shares framing validation with MkvBlockReader.
+- No existing public interface members or shipped-assembly internal visibility were added.
+
+The brief authorizes the typed/editable and streaming capabilities without prescribing their CLR
+names. The concrete names above implement those capabilities; none adds an unrelated surface.
+
 ## Escalations and remaining boundaries
 
-1. **Required EBML fix:** VInt.IsValidIdentifier rejects ID 0x80 despite RFC 9559 §4.2.
-   Typed chapters are blocked; the smallest local workaround preserves the whole Chapters payload.
-   The owner/integration session must land the generic fix and then validate the conditional chapter
-   schema and typed chapter corpus. Content.Ebml was not modified here.
-2. EBML's recursive MinOccurs also applies to the recursive parent. SimpleTag and ChapterAtom use
+1. EBML's recursive MinOccurs also applies to the recursive parent. SimpleTag and ChapterAtom use
    optional recursion in the schema; the adapter enforces their first occurrence in Tag/EditionEntry.
-3. EBML exposes neither an encoded-length query nor raw-element copying. A private range snapshot/
-   layout helper measures scalar leaves through its writer and copies unchanged ranges. It emits
-   precomputed master headers through EbmlWriter without introducing another EBML header parser.
-4. The EBML reader has no forward-only payload stream accessor. Streaming supports header/scalar
-   inspection and unbuffered skips; lazy frame access requires seekable document input.
-5. The brief sanctions functional surfaces without enumerating concrete CLR names. The added public
-   types are MkvSchema, MkvReaderOptions, MkvBlock/MkvLacing and MkvDocument. Their members implement
-   those requested surfaces; no existing public interface or shipped-assembly visibility changed.
-6. The shared Content area README still describes MKV as a scaffold; it is outside this worktree's
+2. The shared Content area README still describes MKV as a scaffold; it is outside this worktree's
    owned paths and should be refreshed by the integration session with the parallel MPEG work.
+
+The schema-ID, payload-stream, encoded-length and raw-copy escalations are resolved by #1559.
+Regression coverage includes every existing golden, typed chapter add/rename/retime and recursive
+limits, and seekable/non-seekable frame equivalence for all lace modes and both block types.
 
 No codec decode/transcode, encryption implementation, attachment extraction to filesystem paths,
 in-place editing, arbitrary cluster rewriting, live refresh, external position-extension repair or

@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Content.Ebml;
 
 /// <summary>Reads EBML elements forwards over seekable or non-seekable streams.</summary>
 /// <remarks>ReadNext returns false at the current master boundary. Call LeaveMaster, then ReadNext
-/// to consume a sibling. Consume, skip, or enter each current element before advancing. The source
+/// to consume a sibling. Consume, skip, enter, or stream each current element before advancing. The source
 /// is borrowed by default. Instances and lazy segments sharing a source must be used sequentially.</remarks>
 public sealed partial class EbmlReader : IDisposable
 {
@@ -31,6 +31,9 @@ public sealed partial class EbmlReader : IDisposable
     private EbmlSchema _schema;
     private EbmlElementHeader? _pending;
     private EbmlElementHeader? _current;
+    private ContentSliceStream? _payload;
+    private uint _payloadCrc;
+    private int _payloadCrcLength;
     private bool _atEnd;
     private bool _disposed;
     private ulong _headerMaxId = 4;
@@ -91,13 +94,15 @@ public sealed partial class EbmlReader : IDisposable
     public IReadOnlyList<ContentFormatException> Diagnostics => _validation.Diagnostics;
 
     /// <summary>Reads the next header at this level, without buffering its payload.</summary>
+    /// <remarks>An opened payload stream is drained and invalidated before the next header is read.</remarks>
     /// <returns>False at the current master's end or clean root-level end.</returns>
     /// <exception cref="ContentFormatException">The header, size, or parent boundary is invalid.</exception>
-    /// <exception cref="InvalidOperationException">The previous element has not been consumed.</exception>
+    /// <exception cref="InvalidOperationException">The previous element has not been consumed, entered, or opened as a payload stream.</exception>
     /// <exception cref="ObjectDisposedException">The reader is disposed.</exception>
     public bool ReadNext()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        CompletePayload();
         if (_current is not null)
         {
             throw new InvalidOperationException(ErrorMessages.ReaderState);
@@ -135,7 +140,7 @@ public sealed partial class EbmlReader : IDisposable
                 return false;
             }
             var id = ReadVInt(0, _options.MaxIdLength);
-            if (!id.IsValidIdentifier)
+            if (!id.IsValidIdentifier && _schema.Find(id) is null)
             {
                 throw new EbmlDataFormatException(ErrorMessages.InvalidVInt, ContentFormatErrorCode.InvalidStructure, start);
             }
@@ -192,6 +197,7 @@ public sealed partial class EbmlReader : IDisposable
     /// <exception cref="ContentFormatException">The depth limit is exceeded.</exception>
     public void EnterMaster()
     {
+        EnsurePayloadClosed();
         var header = Current;
         if (header.Type != EbmlElementType.MasterElement)
         {
@@ -290,11 +296,43 @@ public sealed partial class EbmlReader : IDisposable
     /// <exception cref="ContentFormatException">The type, size, or buffering limit is invalid.</exception>
     public BinarySegment ReadBinary() => ReadScalar<BinarySegment>(EbmlElementType.Binary);
 
+    /// <summary>Opens a bounded, forward-only stream over the current element's raw payload.</summary>
+    /// <returns>A caller-disposable stream borrowing this reader and its source.</returns>
+    /// <remarks>The size must be known. Reading performs no scalar or child interpretation; use typed reads
+    /// and EnterMaster for semantic validation and EBML header/DocType selection. Enclosing CRCs still
+    /// observe every byte. ReadNext or Skip drains any unread bytes, even after the stream is disposed,
+    /// and invalidates the stream. Reader disposal invalidates it without draining. Access is sequential.
+    /// The stream's cursor and SourceOffset are payload-relative; Current.DataOffset is the absolute origin.
+    /// The buffering limit does not apply because no payload is materialized.</remarks>
+    /// <exception cref="InvalidOperationException">No current element exists, a stream is already open, or the size is unknown.</exception>
+    /// <exception cref="ObjectDisposedException">The reader is disposed.</exception>
+    public ContentSliceStream OpenPayloadStream()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsurePayloadClosed();
+        var header = Current;
+        if (header.DataSize is not long length)
+        {
+            throw new InvalidOperationException(ErrorMessages.PayloadSizeUnknown);
+        }
+        _payloadCrc = 0;
+        _payloadCrcLength = 0;
+        _input.End = header.DataOffset + length;
+        _input.RequireData = true;
+        return _payload = ContentSliceStream.CreateForwardOnly(_input, length);
+    }
+
     /// <summary>Skips the current element, descending through masters without buffering binary values.</summary>
     /// <exception cref="ContentFormatException">A malformed child or a depth limit is encountered.</exception>
     /// <exception cref="InvalidOperationException">There is no current element.</exception>
     public void Skip()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_payload is not null)
+        {
+            CompletePayload();
+            return;
+        }
         var header = Current;
         if (header.Type == EbmlElementType.MasterElement)
         {
@@ -328,6 +366,7 @@ public sealed partial class EbmlReader : IDisposable
         }
 
         _disposed = true;
+        _payload?.Dispose();
         if (!_leaveOpen)
         {
             _source.Dispose();
@@ -363,6 +402,7 @@ public sealed partial class EbmlReader : IDisposable
         }
         count++;
 
+        EnsurePayloadClosed();
         var header = Current;
         var sourceOffset = _source.CanSeek ? _source.Position : 0;
         EbmlElement element;
@@ -395,6 +435,7 @@ public sealed partial class EbmlReader : IDisposable
 
     private object ReadValueCore(EbmlElementType type)
     {
+        EnsurePayloadClosed();
         var header = Current;
         if (header.Type == EbmlElementType.MasterElement)
         {
@@ -571,8 +612,41 @@ public sealed partial class EbmlReader : IDisposable
         return null;
     }
 
+    private void EnsurePayloadClosed()
+    {
+        if (_payload is not null)
+        {
+            throw new InvalidOperationException(ErrorMessages.PayloadActive);
+        }
+    }
+
+    private void CompletePayload()
+    {
+        if (_payload is null) { return; }
+        var header = Current;
+        SkipData(header.DataOffset + header.DataSize!.Value - _input.Position);
+        if (_options.VerifyCrc32 && header.Identifier.EncodedValue == 0xBF &&
+            _payloadCrcLength == 4 && _masters.Count > 0)
+        {
+            _masters[^1].ExpectedCrc = _payloadCrc;
+            _masters[^1].CrcOffset = header.DataOffset;
+        }
+        _payload.Dispose();
+        _payload = null;
+        _input.RequireData = false;
+        _current = null;
+    }
+
     private void ObserveData(ReadOnlySpan<byte> bytes)
     {
+        if (_payload is not null && _current is { Identifier.EncodedValue: 0xBF, DataSize: 4 })
+        {
+            foreach (var item in bytes)
+            {
+                if (_payloadCrcLength < 4) { _payloadCrc |= (uint)item << (_payloadCrcLength * 8); }
+                _payloadCrcLength++;
+            }
+        }
         foreach (var frame in _masters)
         {
             if (!ReferenceEquals(frame, _crcExcluded))

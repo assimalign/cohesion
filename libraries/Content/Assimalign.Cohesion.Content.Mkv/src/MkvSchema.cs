@@ -110,10 +110,6 @@ public static class MkvSchema
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x4660), "FileMediaType", EbmlElementType.AsciiString, parentIds: [VInt.FromEncoded(0x61A7)], minOccurs: 1, maxOccurs: 1));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x465C), "FileData", EbmlElementType.Binary, parentIds: [VInt.FromEncoded(0x61A7)], minOccurs: 1, maxOccurs: 1));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x46AE), "FileUID", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0x61A7)], minOccurs: 1, maxOccurs: 1, minimumValue: 1UL));
-// The current EBML core rejects RFC 9559 section 4.2's 0x80. Until that
-        // prerequisite lands, preserve the entire Chapters element through the unknown path.
-        if (VInt.FromEncoded(0x80).IsValidIdentifier)
-        {
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x1043A770), "Chapters", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x18538067)], maxOccurs: 1));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x45B9), "EditionEntry", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x1043A770)], minOccurs: 1));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x45BC), "EditionUID", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0x45B9)], maxOccurs: 1, minimumValue: 1UL));
@@ -132,7 +128,6 @@ public static class MkvSchema
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x437C), "ChapLanguage", EbmlElementType.AsciiString, parentIds: [VInt.FromEncoded(0x80)], minOccurs: 1, defaultValue: "eng"));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x437D), "ChapLanguageBCP47", EbmlElementType.AsciiString, parentIds: [VInt.FromEncoded(0x80)]));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x437E), "ChapCountry", EbmlElementType.AsciiString, parentIds: [VInt.FromEncoded(0x80)]));
-        }
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x1254C367), "Tags", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x18538067)]));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x7373), "Tag", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x1254C367)], minOccurs: 1));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x63C0), "Targets", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x7373)], minOccurs: 1, maxOccurs: 1));

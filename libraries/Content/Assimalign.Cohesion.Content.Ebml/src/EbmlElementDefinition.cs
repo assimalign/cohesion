@@ -20,7 +20,7 @@ public sealed class EbmlElementDefinition
     }
 
     /// <summary>Creates a definition; no parent IDs means root level.</summary>
-    /// <param name="identifier">A valid encoded element ID.</param>
+    /// <param name="identifier">An initialized encoded VINT; this definition authorizes its use as an element ID.</param>
     /// <param name="name">A descriptive name.</param>
     /// <param name="type">The payload type.</param>
     /// <param name="parentIds">Allowed direct parent IDs, copied at creation.</param>
@@ -46,7 +46,7 @@ public sealed class EbmlElementDefinition
         bool minimumInclusive = true, bool maximumInclusive = true, object? excludedValue = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (!identifier.IsValidIdentifier || type < EbmlElementType.SignedInteger || type > EbmlElementType.MasterElement ||
+        if (identifier.Length == 0 || type < EbmlElementType.SignedInteger || type > EbmlElementType.MasterElement ||
             ((unknownSizeAllowed || recursive) && type != EbmlElementType.MasterElement) || (unknownSizeAllowed && recursive))
         {
             throw new ArgumentException(ErrorMessages.SchemaConflict);
@@ -55,7 +55,7 @@ public sealed class EbmlElementDefinition
         var parents = parentIds is null ? Array.Empty<VInt>() : new List<VInt>(parentIds).ToArray();
         foreach (var parent in parents)
         {
-            if (!parent.IsValidIdentifier)
+            if (parent.Length == 0)
             {
                 throw new ArgumentException(ErrorMessages.InvalidVInt, nameof(parentIds));
             }

@@ -1,7 +1,8 @@
 # EBML container design
 
 <!-- Deviates from the repo documentation.md same-commit rule: the Stage 2 brief explicitly
-orders the consolidated documentation as its fourth commit, after implementation and corpus work. -->
+orders the consolidated documentation as its fourth commit, after implementation and corpus work.
+The Stage 4 follow-up brief requires the same implementation-first, fourth-commit documentation order. -->
 
 ## Intent and dependency direction
 
@@ -39,8 +40,9 @@ scan, keep using that reader rather than constructing a new one for each element
 
 `ReadNext` reads only an ID and size. Its immutable header exposes the VInt ID, nullable data size,
 absolute offset, data offset, header length, size width and schema-resolved type.
-A current element must be consumed, skipped or entered before advancing. Entered masters form a
-bounded stack. Known lengths constrain child headers as well as child payloads; source and parent
+A current element must be consumed, skipped, entered or opened as a payload stream before advancing.
+Entered masters form a bounded stack. Known lengths constrain child headers as well as child payloads;
+source and parent
 bounds are checked before creating a segment or allocating.
 
 At the current level's end, `ReadNext` returns false. `LeaveMaster` checks required occurrences and,
@@ -73,6 +75,31 @@ storage and seeks over seekable payloads when checksum verification does not nee
 Skipping validates framing and schema lengths; numeric and header values are also interpreted.
 Skipped body strings and binary payloads do not receive semantic text validation.
 
+### Raw payload streaming
+
+OpenPayloadStream returns a ContentSliceStream over the current element's known-size payload.
+It is forward-only even when the input can seek. It neither buffers the payload nor applies the
+buffered-value cap. Reads stop exactly at the declared boundary and update the reader's counted
+cursor and every active enclosing CRC. Premature source EOF throws Truncated at the absolute input
+position. The stream supports synchronous and asynchronous reads, including cancellation.
+
+ReadNext and Skip finish an opened payload: they drain unread bytes (or seek when CRC accounting
+permits), dispose the old view and clear the current element. This also works when the caller
+disposed the view early. Disposing a payload view alone does not drain it; disposing the reader
+invalidates it without draining or closing a borrowed source. Opening a second view, entering the
+current master or reading its typed value while a payload view is active is a state error. Consumers
+must serialize access; a view cannot be retained across reader advancement.
+
+This is raw access. Scalar semantics and children inside a streamed master are not interpreted.
+Use typed reads and EnterMaster for EBML header values, DocType selection and child validation.
+Streamed CRC-32 leaves still supply their expected checksum when verification is enabled.
+Unknown-size masters have no finite payload window and must be traversed instead.
+
+The view's Position and SourceOffset use payload-relative coordinates (SourceOffset is zero on the
+internal forward-only adapter). Save Current.DataOffset before advancing for the absolute origin.
+Errors raised by the underlying reader retain absolute positions, including nested source windows.
+This local adapter avoids changing Content.Binary's public slice contract.
+
 ## Writer and document lifecycle
 
 The writer emits minimal valid typed payloads and size VINTs, unless an explicit width is supplied.
@@ -89,6 +116,20 @@ Masters support three modes:
 
 No entire master or binary payload is buffered to compute its size. A failed write may leave partial
 output. Disposal does not implicitly finish open masters.
+
+GetEncodedLength has an element-tree overload and a typed-value overload. Both measure ID, size
+VINT and payload without output or payload reads. The tree overload retains raw scalar lengths and
+size widths and reports the available extent of unknown-size masters; the value overload accepts
+the same explicit scalar and size widths as the writer. These queries provide layout facts, not
+complete document validation. Depth and arithmetic bounds still apply.
+
+WriteRawElement takes a BinarySegment containing one original complete element. It validates the
+outer header, schema-authorized ID, known size against the segment extent, and schema length/type
+constraints before output. Unknown-size copying requires an eligible schema master and uses the
+caller's exact segment extent. It then copies through with bounded memory and accounts for the
+writer's position and open master bounds. It does not validate children or scalar contents or
+recalculate CRCs. The caller must supply unchanged original bytes and separate destination storage.
+This replaces format-specific counting streams and raw-copy paths without exposing EBML internals.
 
 The document owns a typed EbmlHeader and an ordered EbmlBody tree. Header properties cover the RFC
 version, read version, maximum widths, DocType and its versions. DocTypeExtension enumerates its
@@ -133,6 +174,18 @@ typed numeric range bounds (including exclusive bounds and one excluded value), 
 wire-length limits, unknown-size permission, recursion and global status. Arrays supplied for parents
 are copied. Builders produce frozen snapshots. One encoded ID has one definition, which may list
 several parents; duplicate ID registration is rejected.
+
+The active schema is the authority for encoded element IDs. Any initialized VINT explicitly defined
+by that schema is an eligible ID, including Matroska's ChapterDisplay 0x80. An undefined ID must pass
+VInt.IsValidIdentifier's generic RFC 8794 section 5 rule. Undefined invalid IDs remain fatal in strict
+and lenient reading, tree validation and writing; leniency does not legalize framing. VINT markers,
+configured width limits and default/uninitialized values retain their existing checks. Definitions
+and model factories accept initialized VINTs so schema-aware boundaries can decide eligibility.
+
+Rejected alternative: a global exception list in VInt, including a special case for 0x80. Such a list
+would make Matroska IDs valid for unrelated DocTypes and require a core edit for every derived schema.
+VInt.IsValidIdentifier and MakeId retain their generic public contract; schema selection controls
+the exception in both synchronous and asynchronous reader/writer paths.
 
 EbmlSchema.Header supplies all RFC 8794 section 11.2 header elements and the section 11.3 globals.
 CRC-32 has a four-byte payload, at most one occurrence, and must be the first child of a parent.
@@ -190,6 +243,17 @@ Options are copied at reader/adapter creation. Width support is one through eigh
 header's MaxIDLength must be at least four. Known-size BinarySegments can describe payloads far larger
 than the buffering cap. A virtual 40 GiB fixture proves document load reads only its headers.
 
+## Public surface added or changed by the Stage 4 follow-up
+
+- EbmlReader.OpenPayloadStream(): bounded raw payload stream, borrowing the reader.
+- EbmlReader.ReadNext(), Skip() and Dispose(): manage an opened payload view's lifetime.
+- EbmlWriter.GetEncodedLength(EbmlElement, EbmlSchema?, int): complete tree encoding length.
+- EbmlWriter.GetEncodedLength(VInt, EbmlElementType, object, EbmlSchema?, int, int): complete leaf encoding length.
+- EbmlWriter.WriteRawElement(BinarySegment): exact original-element copy with outer-header checks.
+- EbmlElementDefinition.Create and EbmlElement.Create: accept initialized schema-authorizable IDs.
+- EbmlSchema.Validate, reader parsing and writer element APIs: apply active-schema ID authority.
+- No public interface, VInt signature or shipped-assembly visibility was widened.
+
 ## AOT posture and tests
 
 The implementation uses explicit type switches, immutable definitions, frozen dictionaries, spans,
@@ -202,14 +266,17 @@ documents and invalid values. Content.Binary's linked TruncationCorpus checks ev
 its chunked and non-seekable streams replace EBML's old duplicate helper. Fixtures are built in code
 or by this package's writer. Coverage includes unknown-size lookahead, nested CRCs, lazy preservation,
 ownership, real async I/O, cancellation, size/depth/diagnostic limits and malformed-input regressions.
+The follow-up adds defined/undefined 0x80 cases in both modes, bounded non-seekable payload streams,
+partial-read advancement, CRC coverage, absolute truncation, raw copies and measurement without payload reads.
 
 ## Non-goals and compatibility changes
 
 No XML schema parser, media model, Matroska semantics, codec processing, seeking index, in-place file
 editor or format sniffer is included. Schemas use direct parent IDs and fully global definitions,
 not XML path expressions or scoped global placeholders. Multiple definitions reusing one ID in
-disjoint paths are not supported. VINT widths above eight are unsupported. Streaming async APIs are
-not exposed separately; asynchronous document operations use the existing Content contracts.
+disjoint paths are not supported. VINT widths above eight are unsupported. Header/scalar streaming
+async APIs are not exposed separately; payload streams support asynchronous
+reads, and asynchronous document operations use the existing Content contracts.
 
 The throwing EbmlStream and empty internal element shells were removed. EbmlReader and EbmlWriter are
 public implementations. EbmlDocument, EbmlHeader, EbmlBody and EbmlElement are sealed, usable models.
