@@ -61,11 +61,22 @@ jobs:
       # A pull request builds its head commit, not the synthetic refs/pull/N/merge commit. The head
       # is what the author pushed, and it stays resolvable after the pull request moves on, so the
       # RepositoryCommit stamped into each package keeps pointing at real history.
-      - name: Checkout
+      - name: Checkout build commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      # The version derivation comes from the commit this workflow file came from, not from the
+      # build commit. A pull request runs the workflow from GitHub's merge commit, so a branch cut
+      # before Get-CohesionCiPackageVersion existed still gets this workflow, but its head lacks the
+      # function. The canonical version still comes from the build commit's own props.
+      - name: Checkout workflow tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: _ci/tooling
+          sparse-checkout: installer/scripts/modules
 
       - name: Resolve CI package version
         id: version
@@ -75,7 +86,7 @@ jobs:
           COHESION_BUILD_NUMBER: ${{ github.run_number }}
           COHESION_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+          Import-Module ./_ci/tooling/installer/scripts/modules/CohesionPackaging.psm1 -Force
 
           $canonicalVersion = (& ./installer/scripts/Get-CohesionVersion.ps1)
           if (-not $canonicalVersion) {
@@ -109,9 +120,10 @@ jobs:
     name: pack all NuGet packages
     needs: prepare
     runs-on: ubuntu-24.04
-    # No completed run has measured this job yet; 120 minutes until one does
-    # (.claude/rules/build-system.md, job limits).
-    timeout-minutes: 120
+    # Measured 14m16s in run 38896710105, the first run (#1558). Doubled and rounded up to a
+    # multiple of 15 that is 30, below the 45-minute floor (.claude/rules/build-system.md, job
+    # limits).
+    timeout-minutes: 45
     # A newer commit on the same pull request cancels a pack still in progress. The group covers
     # this job only, never the publish job, so a run that has already started pushing finishes
     # and no superseded version is left half-published. Each main run gets its own group, so a

@@ -438,6 +438,17 @@ Describe 'Cohesion CI package workflow' {
         $prepareJob | Should -Match "github\.actor != 'dependabot\[bot\]'"
     }
 
+    It 'derives the version with the workflow commit tooling, so a branch that predates it still works' {
+        $prepareJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'prepare:'
+
+        # No ref: the tooling checkout is the commit the workflow file came from (the merge commit
+        # for a pull request), never the build commit, whose branch may predate the function.
+        $prepareJob | Should -Match '(?m)^      - name: Checkout workflow tooling\r?\n        uses: actions/checkout@[0-9a-f]{40} # v[0-9.]+\r?\n        with:\r?\n          persist-credentials: false\r?\n          path: _ci/tooling\r?\n          sparse-checkout: installer/scripts/modules\r?$'
+        $prepareJob | Should -Match 'Import-Module \./_ci/tooling/installer/scripts/modules/CohesionPackaging\.psm1 -Force'
+        $prepareJob | Should -Not -Match 'Import-Module \./installer/'
+        $prepareJob | Should -Match '\(& \./installer/scripts/Get-CohesionVersion\.ps1\)'
+    }
+
     It 'packs the full release inventory at the derived CI version' {
         $prepareJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'prepare:'
         $packJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'pack-packages:'
