@@ -105,7 +105,13 @@
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Media/tests/">
 		<Project Path="Assimalign.Cohesion.Content.Media/tests/Assimalign.Cohesion.Content.Media.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Content/Assimalign.Cohesion.Content.Mkv/" />
+	<Folder Name="/Content/Assimalign.Cohesion.Content.Mkv/">
+		<File Path="Assimalign.Cohesion.Content.Mkv/README.md" />
+	</Folder>
+	<Folder Name="/Content/Assimalign.Cohesion.Content.Mkv/docs/">
+		<File Path="Assimalign.Cohesion.Content.Mkv/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Content.Mkv/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Mkv/src/">
 		<Project Path="Assimalign.Cohesion.Content.Mkv/src/Assimalign.Cohesion.Content.Mkv.csproj" />
 	</Folder>
