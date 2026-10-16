@@ -24,6 +24,8 @@ public class YamlMetadataGrammarTests
 
         // Assert
         var exception = Should.Throw<YamlException>(parse);
+        exception.ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidValue);
+        exception.Position.ShouldNotBeNull();
         exception.Line.ShouldBe(1);
         exception.Column.ShouldBeGreaterThan(0);
     }
@@ -44,6 +46,8 @@ public class YamlMetadataGrammarTests
 
         // Assert
         var exception = Should.Throw<YamlException>(parse);
+        exception.ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidValue);
+        exception.Position.ShouldNotBeNull();
         exception.Line.ShouldBe(line);
         exception.Column.ShouldBeGreaterThan(0);
     }

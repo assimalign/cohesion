@@ -16,7 +16,10 @@ namespace Assimalign.Cohesion.Content.Text;
 public sealed class TextLineReader : IDisposable
 {
     private readonly TextReader _reader;
+    private readonly int _maxLineLength;
     private readonly StringBuilder _buffer = new();
+    private long _position;
+    private bool _lineTooLong;
     private int _lineNumber;
     private bool _disposed;
     private bool _completed;
@@ -27,8 +30,21 @@ public sealed class TextLineReader : IDisposable
     /// <param name="reader">The reader to consume. The line reader takes ownership and disposes it.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="reader"/> is <see langword="null"/>.</exception>
     public TextLineReader(TextReader reader)
+        : this(reader, null)
+    {
+    }
+
+    /// <summary>Initializes a line reader with a bounded line buffer.</summary>
+    /// <param name="reader">The reader to consume and dispose.</param>
+    /// <param name="options">The limits, or null for defaults.</param>
+    /// <exception cref="ArgumentNullException">The reader is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The maximum line length is not positive.</exception>
+    public TextLineReader(TextReader reader, TextLineReaderOptions? options)
     {
         ArgumentNullException.ThrowIfNull(reader);
+        options ??= TextLineReaderOptions.Default;
+        options.Validate();
+        _maxLineLength = options.MaxLineLength;
         _reader = reader;
     }
 
@@ -41,9 +57,14 @@ public sealed class TextLineReader : IDisposable
     /// <param name="line">When this method returns <see langword="true"/>, the line that was read.</param>
     /// <returns><see langword="true"/> when a line was read; <see langword="false"/> at the end of the text.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when the reader has been disposed.</exception>
+    /// <exception cref="ContentFormatException">A line exceeds MaxLineLength: LimitExceeded, with the first excess UTF-16 character's absolute offset. Subsequent reads repeat the failure.</exception>
     public bool TryReadLine(out TextLine line)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_lineTooLong)
+        {
+            throw new ContentFormatException(ErrorMessages.LineLengthLimitExceeded, ContentFormatErrorCode.LimitExceeded, _position - 1);
+        }
 
         if (_completed)
         {
@@ -71,6 +92,7 @@ public sealed class TextLineReader : IDisposable
                 return true;
             }
 
+            _position++;
             var character = (char)next;
             if (character == '\n')
             {
@@ -83,6 +105,7 @@ public sealed class TextLineReader : IDisposable
                 if (_reader.Peek() == '\n')
                 {
                     _reader.Read();
+                    _position++;
                     line = new TextLine(_buffer.ToString(), ++_lineNumber, TextLineEnding.CarriageReturnLineFeed);
                     return true;
                 }
@@ -91,6 +114,11 @@ public sealed class TextLineReader : IDisposable
                 return true;
             }
 
+            if (_buffer.Length >= _maxLineLength)
+            {
+                _lineTooLong = true;
+                throw new ContentFormatException(ErrorMessages.LineLengthLimitExceeded, ContentFormatErrorCode.LimitExceeded, _position - 1);
+            }
             _buffer.Append(character);
         }
     }

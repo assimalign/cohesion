@@ -16,9 +16,7 @@ namespace Assimalign.Cohesion.Content.Markdown.Internal;
 /// </summary>
 internal sealed class MarkdownBlockParser
 {
-    // Containers beyond this depth degrade to paragraph text instead of nesting further, which also
-    // bounds renderer stack depth.
-    private const int maxContainerDepth = 128;
+    private readonly MarkdownParserOptions _options;
 
     private readonly MarkdownDocument _document = new();
     private readonly List<Container> _open = [];
@@ -33,14 +31,16 @@ internal sealed class MarkdownBlockParser
     private int _fenceLength;
     private int _fenceIndent;
 
-    private MarkdownBlockParser()
+    private MarkdownBlockParser(MarkdownParserOptions options)
     {
+        _options = options;
         _open.Add(new Container(ContainerKind.Document, _document.Blocks));
     }
 
-    public static MarkdownDocument Parse(string text)
+    public static MarkdownDocument Parse(string text, MarkdownParserOptions options)
     {
-        var parser = new MarkdownBlockParser();
+        options.Validate();
+        var parser = new MarkdownBlockParser(options);
         var tokenizer = new TextTokenizer(text);
         ReadOnlySpan<char> line = default;
         var hasText = false;
@@ -67,7 +67,7 @@ internal sealed class MarkdownBlockParser
         parser.CloseTo(0);
         foreach (var (target, raw) in parser._pendingInlines)
         {
-            MarkdownInlineParser.Parse(raw, target);
+            MarkdownInlineParser.Parse(raw, target, options);
         }
 
         return parser._document;
@@ -108,7 +108,7 @@ internal sealed class MarkdownBlockParser
         var openedAny = false;
         while (true)
         {
-            if (_open.Count >= maxContainerDepth)
+            if (matched - 1 >= _options.MaxContainerDepth)
             {
                 break;
             }
@@ -468,6 +468,12 @@ internal sealed class MarkdownBlockParser
 
         // A marker while the current item is still matched starts a nested list inside it; a marker
         // after the item stopped matching is a sibling of (or replacement for) the current list.
+        var needed = _open[matched - 1].Kind == ContainerKind.List ? 1 : 2;
+        if (matched - 1 > _options.MaxContainerDepth - needed)
+        {
+            return false;
+        }
+
         CloseTo(matched - 1);
         var deepest = _open[^1];
         Container listContainer;

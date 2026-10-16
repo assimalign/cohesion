@@ -94,14 +94,26 @@ decoding: each maximal ill-formed subpart becomes U+FFFD before ordinary Markdow
 
 ## Robustness posture
 
-- **Container depth caps at 128** during parsing; deeper markers degrade to paragraph text. This
-  bounds block nesting from hostile input.
+- **`MarkdownParserOptions.MaxContainerDepth` defaults to 128**. The document does not count;
+  quotes, lists and list items each count one. Excess block starts degrade to paragraph text.
+  A new list/item pair must fit in the remaining budget. A positive caller value can raise or
+  lower the cap; the parser and renderers use explicit stacks.
+- **`MaxLinkDestinationDepth` defaults to 32** nested parentheses inside a bare destination.
+  Zero permits no nested parentheses. A deeper destination fails link recognition and its source
+  follows ordinary inline parsing; angle-bracket destinations are unaffected.
+- Both options are init-only and apply to every parse overload and `CreateReader`. Invalid
+  ranges throw `ArgumentOutOfRangeException` at composition. Neither limit rejects decoded
+  Markdown, so neither produces `LimitExceeded`; strict decoder failures retain `InvalidValue`.
+  There is no delimiter-run cap: emphasis and code-span runs are scanned in memory and long
+  runs remain accepted. The whole source and resulting model remain buffered.
 - **Inline nesting is unbounded by parsing** (emphasis wraps bottom-up), so **both renderers walk
   iteratively** with explicit op stacks — no recursion anywhere in the package, and caller-built
   trees of any depth render without stack overflow.
 - Unresolved inline literals accumulate in a StringBuilder and materialize once per run, avoiding
   quadratic copying for long bracket sequences. The hostile corpus guards both wall-clock bounds
   at geometrically increasing sizes and linear allocation growth for unresolved labels.
+- Bracket openers use an explicit stack; successful links invalidate prior link openers with a
+  generation counter. Nested labels therefore do not repeatedly scan the accumulated atom prefix.
 - `U+0000` becomes `U+FFFD` at inline parse, per the spec's insecure-characters rule.
 
 Marker-only quotes and list items contain no synthetic empty paragraph. An empty item may start
@@ -155,6 +167,19 @@ can produce.
 
 `<IsAotCompatible>true</IsAotCompatible>` (inherited). Hand-written scanning over spans and the
 `TextTokenizer`; no regular expressions, no reflection, no dynamic code.
+
+## Resource-limit regression coverage
+
+Authored child-process probes exercise 1,000, 10,000 and 100,000 nested quotes, lists, emphasis,
+link labels, images and destination parentheses. Passing probes repeat in-process and render.
+Boundary tests lower and raise the options, ensure list/item pairs stay within the cap, preserve
+sibling items after a full-depth item, and verify destination degradation and long delimiter runs.
+The full CommonMark corpus and canonical round trips remain the conformance floor.
+
+The old block guard counted the document's stack entry and could add a two-entry list/item pair
+across the threshold. The explicit option now consistently excludes the document and checks the
+whole pair. At the default this permits 128 quotes (previously 127), while still limiting lists
+to 128 combined list/item levels.
 
 ## Non-goals
 

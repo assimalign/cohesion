@@ -46,6 +46,21 @@ and which terminator ended the line (`\n`, `\r\n`, lone `\r`, or none at end of 
 - Empty input yields zero lines, and a trailing terminator does not create a phantom final line —
   `"a\n"` is one line, matching how line-oriented specifications count lines.
 
+`TextLineReader` previously accumulated an arbitrarily long line in a `StringBuilder`.
+`TextLineReaderOptions.MaxLineLength` now defaults to 1,048,576 UTF-16 code units, excluding
+CR/LF terminators. A positive init-only value can raise or lower the cap; the original constructor
+uses defaults. The reader consumes the first excess character and throws `ContentFormatException`
+with `LimitExceeded` before appending it. No subsequent read consumes input; it repeats the
+failure. `Position` is that character's zero-based offset from the supplied reader's initial
+position, including preceding terminators. A `TextReader` has no byte origin, so this is a
+character offset, not a fabricated byte position. Disposing the line reader still disposes its
+source, including after failure.
+
+Detection uses a fixed prefix and the tokenizer returns slices without accumulating input-sized
+text buffers, so neither needs a new buffer option. `TextContent` exposes a `TextReader`;
+callers choosing `ReadToEnd` still own their total materialization policy. The line limit does
+not apply to those calls or to YAML/Markdown's separate whole-input parsing paths.
+
 ## Tokenizer
 
 `TextTokenizer` is the base scanning primitive format parsers build on (the Markdown parser, #468,
@@ -86,6 +101,11 @@ literal tokens, and the runs of text between them, every value a zero-copy slice
   `ArgumentException` at construction, never during reads.
 
 ## Error model
+
+Line-buffer limit failures use `ContentFormatException` with `LimitExceeded` and decoded
+character offsets as described above. Exact-limit tests cover EOF and each terminator, original
+UTF-16 positions across CRLF and surrogate pairs, raised caps, repeated failures and disposal.
+An endless generated line proves that reads and allocation stop at the configured budget.
 
 The tokenizer accepts every input and reports positions for format parsers. Invalid tokenizer options
 and creation arguments use BCL argument exceptions; detecting single-use content throws ContentException.

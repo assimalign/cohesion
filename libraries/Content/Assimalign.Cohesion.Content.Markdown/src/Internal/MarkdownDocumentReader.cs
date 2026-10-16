@@ -9,7 +9,15 @@ namespace Assimalign.Cohesion.Content.Markdown.Internal;
 /// </summary>
 internal sealed class MarkdownDocumentReader : IContentReader<MarkdownDocument>
 {
-    public MarkdownDocument Read(Stream stream) => MarkdownText.Parse(stream);
+    private readonly MarkdownParserOptions _options;
+
+    internal MarkdownDocumentReader(MarkdownParserOptions options)
+    {
+        options.Validate();
+        _options = options;
+    }
+
+    public MarkdownDocument Read(Stream stream) => MarkdownText.Parse(stream, _options);
 
     public ValueTask<MarkdownDocument> ReadAsync(Stream stream, CancellationToken cancellationToken = default)
     {

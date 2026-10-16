@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Content.Yaml.Tests</RootNamespace>
+		<StartupObject>Assimalign.Cohesion.Content.Yaml.Tests.ParserBombProbe</StartupObject>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

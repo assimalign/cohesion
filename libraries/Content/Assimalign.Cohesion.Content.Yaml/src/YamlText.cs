@@ -35,10 +35,19 @@ public static class YamlText
     /// <param name="text">The YAML text.</param>
     /// <returns>The parsed stream.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
-    public static YamlStream Parse(string text)
+    public static YamlStream Parse(string text) => Parse(text, null);
+
+    /// <summary>Parses YAML text with resource limits.</summary>
+    /// <param name="text">The YAML text.</param>
+    /// <param name="options">The limits, or null for defaults.</param>
+    /// <returns>The parsed stream.</returns>
+    /// <exception cref="ArgumentNullException">The text is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An option is outside its documented range.</exception>
+    /// <exception cref="YamlException">The input is malformed or exceeds a resource limit.</exception>
+    public static YamlStream Parse(string text, YamlParserOptions? options)
     {
         ArgumentNullException.ThrowIfNull(text);
-        return YamlComposer.Compose(YamlEventParser.Parse(text));
+        return YamlComposer.Compose(YamlEventParser.Parse(text, options ?? YamlParserOptions.Default), text);
     }
 
     /// <summary>
@@ -47,9 +56,19 @@ public static class YamlText
     /// <param name="stream">The readable stream carrying the YAML bytes. Read to its end; not disposed.</param>
     /// <returns>The parsed stream of documents.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
-    public static YamlStream Parse(Stream stream)
+    public static YamlStream Parse(Stream stream) => Parse(stream, null);
+
+    /// <summary>Parses a Unicode byte stream with resource limits.</summary>
+    /// <param name="stream">The readable stream. Read to its end; not disposed.</param>
+    /// <param name="options">The limits, or null for defaults.</param>
+    /// <returns>The parsed stream.</returns>
+    /// <exception cref="ArgumentNullException">The stream is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An option is outside its documented range.</exception>
+    /// <exception cref="YamlException">The decoded input is malformed or exceeds a resource limit.</exception>
+    public static YamlStream Parse(Stream stream, YamlParserOptions? options)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        (options ?? YamlParserOptions.Default).Validate();
 
         using var buffer = new MemoryStream();
         stream.CopyTo(buffer);
@@ -58,7 +77,7 @@ public static class YamlText
         using var content = StreamContent.Create(buffer, Format, leaveOpen: true);
         using var text = TextContent.Create(content, leaveOpen: true);
         using var reader = text.OpenText();
-        return Parse(reader.ReadToEnd());
+        return Parse(reader.ReadToEnd(), options);
     }
 
     /// <summary>
@@ -68,11 +87,22 @@ public static class YamlText
     /// <returns>The parsed stream of documents.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
     /// <exception cref="ContentFormatException">The content's strict decoder rejected malformed bytes; the error code is InvalidValue and the position is a byte offset when known.</exception>
-    public static YamlStream Parse(ITextContent content)
+    public static YamlStream Parse(ITextContent content) => Parse(content, null);
+
+    /// <summary>Parses text content with resource limits.</summary>
+    /// <param name="content">The text content carrying YAML.</param>
+    /// <param name="options">The limits, or null for defaults.</param>
+    /// <returns>The parsed stream.</returns>
+    /// <exception cref="ArgumentNullException">The content is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An option is outside its documented range.</exception>
+    /// <exception cref="YamlException">The decoded input is malformed or exceeds a resource limit.</exception>
+    /// <exception cref="ContentFormatException">The strict decoder rejected malformed bytes with InvalidValue and a byte position when known.</exception>
+    public static YamlStream Parse(ITextContent content, YamlParserOptions? options)
     {
         ArgumentNullException.ThrowIfNull(content);
+        (options ?? YamlParserOptions.Default).Validate();
         using var reader = content.OpenText();
-        return Parse(reader.ReadToEnd());
+        return Parse(reader.ReadToEnd(), options);
     }
 
     /// <summary>
@@ -81,12 +111,22 @@ public static class YamlText
     /// <param name="text">The YAML text.</param>
     /// <returns>The single parsed document.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed or does not contain exactly one document.</exception>
-    public static YamlDocument ParseDocument(string text)
+    public static YamlDocument ParseDocument(string text) => ParseDocument(text, null);
+
+    /// <summary>Parses exactly one YAML document with resource limits.</summary>
+    /// <param name="text">The YAML text.</param>
+    /// <param name="options">The limits, or null for defaults.</param>
+    /// <returns>The single document.</returns>
+    /// <exception cref="ArgumentNullException">The text is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An option is outside its documented range.</exception>
+    /// <exception cref="YamlException">The input is malformed, exceeds a limit, or does not contain exactly one document.</exception>
+    public static YamlDocument ParseDocument(string text, YamlParserOptions? options)
     {
-        var stream = Parse(text);
+        var stream = Parse(text, options);
         return stream.Count == 1
             ? stream[0]
-            : throw new YamlException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DocumentCountInvalid, stream.Count), 1, 1);
+            : throw YamlException.At(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DocumentCountInvalid, stream.Count),
+                ContentFormatErrorCode.InvalidStructure, 1, 1, text);
     }
 
     /// <summary>
@@ -96,10 +136,19 @@ public static class YamlText
     /// <param name="text">The YAML text.</param>
     /// <returns>The events, in document order.</returns>
     /// <exception cref="YamlException">Thrown when the input is malformed.</exception>
-    public static IReadOnlyList<YamlEvent> ParseEvents(string text)
+    public static IReadOnlyList<YamlEvent> ParseEvents(string text) => ParseEvents(text, null);
+
+    /// <summary>Parses YAML events with the same depth and alias budgets as document parsing.</summary>
+    /// <param name="text">The YAML text.</param>
+    /// <param name="options">The limits, or null for defaults.</param>
+    /// <returns>The events in document order.</returns>
+    /// <exception cref="ArgumentNullException">The text is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An option is outside its documented range.</exception>
+    /// <exception cref="YamlException">The input is malformed or exceeds a resource limit.</exception>
+    public static IReadOnlyList<YamlEvent> ParseEvents(string text, YamlParserOptions? options)
     {
         ArgumentNullException.ThrowIfNull(text);
-        return YamlEventParser.Parse(text);
+        return YamlEventParser.Parse(text, options ?? YamlParserOptions.Default);
     }
 
     /// <summary>
@@ -146,7 +195,13 @@ public static class YamlText
     /// Creates a reader implementing the content family's parser seam.
     /// </summary>
     /// <returns>A reader producing <see cref="YamlStream"/> documents.</returns>
-    public static IContentReader<YamlStream> CreateReader() => new YamlStreamReader();
+    public static IContentReader<YamlStream> CreateReader() => CreateReader(null);
+
+    /// <summary>Creates a content reader with resource limits.</summary>
+    /// <param name="options">The limits applied to each read, or null for defaults.</param>
+    /// <returns>A reader producing YAML document streams.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">An option is outside its documented range.</exception>
+    public static IContentReader<YamlStream> CreateReader(YamlParserOptions? options) => new YamlStreamReader(options ?? YamlParserOptions.Default);
 
     /// <summary>
     /// Creates a writer implementing the content family's serializer seam.
