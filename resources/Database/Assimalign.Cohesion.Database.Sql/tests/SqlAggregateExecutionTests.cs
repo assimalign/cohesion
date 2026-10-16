@@ -384,7 +384,7 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, "CREATE TABLE midpoints (category TEXT, amount DECIMAL(29, 28));");
+        await ExecuteAsync(session, "CREATE TABLE midpoints (category TEXT, amount DECIMAL(28, 28));");
         await ExecuteAsync(session, "INSERT INTO midpoints VALUES " +
             "('down', 0.0000000000000000000000000005), ('down', 0), " +
             "('up', 0.0000000000000000000000000007), ('up', 0);");

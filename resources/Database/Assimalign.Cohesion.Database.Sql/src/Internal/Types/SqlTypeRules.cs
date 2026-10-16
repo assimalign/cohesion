@@ -1,7 +1,7 @@
 using System;
-using System.Globalization;
 
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -90,66 +90,7 @@ internal static class SqlTypeRules
     /// <param name="second">The second argument, when one was written.</param>
     /// <returns><see langword="false"/> when the arguments are not one or two unsigned integers.</returns>
     internal static bool TrySplit(string text, out string name, out int? first, out int? second)
-    {
-        name = text.Trim();
-        first = null;
-        second = null;
-        int open;
-        if (name.StartsWith('"'))
-        {
-            int end = 1;
-            while (end < name.Length)
-            {
-                if (name[end] != '"') { end++; continue; }
-                if (end + 1 < name.Length && name[end + 1] == '"') { end += 2; continue; }
-                break;
-            }
-            if (end == name.Length) { return false; }
-            string quotedName = name[1..end].Replace("\"\"", "\"", StringComparison.Ordinal);
-            string remainder = name[(end + 1)..].TrimStart();
-            if (remainder.Length == 0)
-            {
-                name = quotedName;
-                return name.Length > 0;
-            }
-            if (remainder[0] != '(') { return false; }
-            name = quotedName + remainder;
-            open = quotedName.Length;
-        }
-        else
-        {
-            open = name.IndexOf('(');
-        }
-        if (open >= 0)
-        {
-            string arguments = name[(open + 1)..];
-            name = name[..open].TrimEnd();
-            if (!arguments.EndsWith(')'))
-            {
-                return false;
-            }
-
-            var parts = arguments[..^1].Split(',', StringSplitOptions.TrimEntries);
-            if (parts.Length > 2 ||
-                !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int parsedFirst))
-            {
-                return false;
-            }
-
-            first = parsedFirst;
-            if (parts.Length == 2)
-            {
-                if (!int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int parsedSecond))
-                {
-                    return false;
-                }
-
-                second = parsedSecond;
-            }
-        }
-
-        return name.Length > 0;
-    }
+        => SqlTypeModifiers.TrySplit(text, out name, out first, out second);
 
     /// <summary>
     /// Whether two type names as written name the same type the way the catalog resolves them: the
@@ -176,5 +117,5 @@ internal static class SqlTypeRules
     /// <param name="storage">The storage type and its constraints.</param>
     /// <returns><see langword="true"/> when the name is a built-in type's.</returns>
     internal static bool TryResolveBuiltIn(string name, int? first, int? second, out DatabaseTypeInfo storage)
-        => SqlTypeNames.TryResolve(name, first, second is null ? null : first, second, out storage);
+        => SqlTypeNames.TryResolve(name, first, null, second, out storage);
 }

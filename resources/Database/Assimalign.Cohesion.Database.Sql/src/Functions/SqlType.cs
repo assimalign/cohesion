@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -181,15 +182,20 @@ public sealed class SqlType : IEquatable<SqlType>
     ];
 
     /// <summary>Creates <c>NUMERIC(precision, scale)</c>.</summary>
-    /// <param name="precision">The total number of significant digits, at least 1.</param>
+    /// <param name="precision">The total number of significant digits, from 1 through 28.</param>
     /// <param name="scale">The digits after the decimal point, 0 to <paramref name="precision"/>.</param>
     /// <returns>The type.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The precision or the scale is outside its range.</exception>
     public static SqlType Decimal(int precision, int scale)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(precision, 1);
-        ArgumentOutOfRangeException.ThrowIfNegative(scale);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(scale, precision);
+        if (SqlTypeModifiers.GetError(DatabaseType.Decimal, null, precision, null) is { } precisionError)
+        {
+            throw new ArgumentOutOfRangeException(nameof(precision), precision, precisionError);
+        }
+        if (SqlTypeModifiers.GetError(DatabaseType.Decimal, null, precision, scale) is { } scaleError)
+        {
+            throw new ArgumentOutOfRangeException(nameof(scale), scale, scaleError);
+        }
         return new(
             string.Create(CultureInfo.InvariantCulture, $"NUMERIC({precision}, {scale})"),
             new DatabaseTypeInfo(DatabaseType.Decimal, precision: precision, scale: scale),
@@ -197,12 +203,15 @@ public sealed class SqlType : IEquatable<SqlType>
     }
 
     /// <summary>Creates <c>VARCHAR(maxLength)</c>.</summary>
-    /// <param name="maxLength">The most characters a value holds, at least 1.</param>
+    /// <param name="maxLength">The most characters a value holds, from 1 through 10485760.</param>
     /// <returns>The type.</returns>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxLength"/> is less than 1.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxLength"/> is outside 1 through 10485760.</exception>
     public static SqlType VarChar(int maxLength)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(maxLength, 1);
+        if (SqlTypeModifiers.GetError(DatabaseType.String, maxLength, null, null) is { } error)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxLength), maxLength, error);
+        }
         return new(
             string.Create(CultureInfo.InvariantCulture, $"VARCHAR({maxLength})"),
             new DatabaseTypeInfo(DatabaseType.String, maxLength: maxLength),
@@ -299,6 +308,11 @@ public sealed class SqlType : IEquatable<SqlType>
     /// <returns>The built-in type.</returns>
     internal static SqlType ForStorage(DatabaseTypeInfo storage)
     {
+        int? scale = SqlTypeModifiers.NormalizeScale(storage.Type, storage.Precision, storage.Scale);
+        if (scale != storage.Scale)
+        {
+            storage = new DatabaseTypeInfo(storage.Type, storage.MaxLength, storage.Precision, scale);
+        }
         foreach (var builtIn in BuiltIn)
         {
             if (builtIn.Storage.Type == storage.Type)
@@ -309,7 +323,7 @@ public sealed class SqlType : IEquatable<SqlType>
                 }
 
                 string name = storage.Type == DatabaseType.Decimal && storage.Precision is { } precision
-                    ? string.Create(CultureInfo.InvariantCulture, $"NUMERIC({precision}, {storage.Scale ?? 0})")
+                    ? string.Create(CultureInfo.InvariantCulture, $"NUMERIC({precision}, {storage.Scale})")
                     : storage.MaxLength is { } length
                         ? string.Create(CultureInfo.InvariantCulture, $"{(storage.Type == DatabaseType.String ? "VARCHAR" : builtIn.Name)}({length})")
                         : builtIn.Name;

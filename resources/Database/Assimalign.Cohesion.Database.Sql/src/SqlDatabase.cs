@@ -535,6 +535,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// (<c>COHSQLP005</c>), needs a destructive step it does not allow (<c>COHSQLP005</c>), or a step
     /// failed (<c>COHSQLP004</c>, after the completed reversible steps were compensated).
     /// </exception>
+    /// <exception cref="SqlSchemaValidationException">A recorded schema document uses an unsupported format.</exception>
     /// <remarks>
     /// Kept public on the sealed leaf for tools, Studio and tests (owner decision 53 of
     /// 2026-10-09). An engine's builder applies each declared database's schema through the same
@@ -573,6 +574,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <param name="cancellationToken">Observed before the comparison.</param>
     /// <returns>The result, which is always already applied.</returns>
     /// <exception cref="SqlSchemaMigrationException">The database drifted from the schema (<c>COHSQLP003</c>).</exception>
+    /// <exception cref="SqlSchemaValidationException">A recorded schema document uses an unsupported format.</exception>
     internal ValueTask<SqlSchemaMigrationResult> VerifySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();

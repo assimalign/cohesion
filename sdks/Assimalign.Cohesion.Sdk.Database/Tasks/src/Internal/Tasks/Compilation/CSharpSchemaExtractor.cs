@@ -8,6 +8,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
@@ -148,7 +149,7 @@ internal sealed class CSharpSchemaExtractor
 
                 if (method.Name == "Script" && DisplayTypeName(method.ContainingType) == databaseBuilderType)
                 {
-                    Error("COHDBSDK110", "Declared scripts are runtime journaled migrations and are not extracted into the v4 typed-schema artifact. Provision them with an Apply-mode deployment before Verify-mode startup; keep this declaration outside the SDK schema compilation.", invocation.GetLocation());
+                    Error("COHDBSDK110", "Declared scripts are runtime journaled migrations and are not extracted into the v5 typed-schema artifact. Provision them with an Apply-mode deployment before Verify-mode startup; keep this declaration outside the SDK schema compilation.", invocation.GetLocation());
                 }
                 if (IsSchemaFactory(method))
                 {
@@ -434,15 +435,15 @@ internal sealed class CSharpSchemaExtractor
                 continue;
             }
 
-            precision = ConstantInt32(model, operation.ArgumentList.Arguments[0].Expression);
-            scale = ConstantInt32(model, operation.ArgumentList.Arguments[1].Expression);
+            precision = ConstantInt32(model, GetArgument(operation, operationMethod, "precision", 0)!);
+            scale = ConstantInt32(model, GetArgument(operation, operationMethod, "scale", 1)!);
             if (precision is null || scale is null)
             {
                 Error("COHDBSDK104", "Decimal precision and scale must be compile-time integer constants.", operation.GetLocation());
             }
-            else if (precision < 1 || scale < 0 || scale > precision)
+            else if (SqlTypeModifiers.GetError(DatabaseType.Decimal, null, precision, scale) is { } error)
             {
-                Error("COHDBSDK106", $"Decimal precision/scale '{precision},{scale}' is invalid.", operation.GetLocation());
+                Error("COHDBSDK106", $"Domain '{sqlName}': {error}", operation.GetLocation());
             }
         }
 
@@ -451,50 +452,14 @@ internal sealed class CSharpSchemaExtractor
             Error("COHDBSDK106", $"Custom type '{TypeName(type)}' must declare its storage representation with Decimal(precision, scale).", configure.GetLocation());
         }
 
-        return new SchemaTypeSource(TypeName(type), sqlName, precision, scale);
+        return new SchemaTypeSource(TypeName(type), sqlName, precision,
+            SqlTypeModifiers.NormalizeScale(DatabaseType.Decimal, precision, scale));
     }
 
     // The runtime's rule for a domain's or a type name's identifier (Sql.Schema's CompiledSchemaTypeNames).
-    private static bool IsSqlIdentifier(string text)
-    {
-        if (text.Length == 0 || !(char.IsAsciiLetter(text[0]) || text[0] == '_'))
-        {
-            return false;
-        }
+    private static bool IsSqlIdentifier(string text) => SqlTypeModifiers.IsIdentifier(text);
 
-        foreach (char character in text)
-        {
-            if (!(char.IsAsciiLetterOrDigit(character) || character == '_'))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    // The runtime's shape of table.Column(selector, sqlType)'s name: an identifier, optionally with one
-    // or two unsigned integer arguments in parentheses.
-    private static bool IsSqlTypeName(string text)
-    {
-        int open = text.IndexOf('(');
-        if (open < 0)
-        {
-            return IsSqlIdentifier(text);
-        }
-
-        if (!IsSqlIdentifier(text[..open].TrimEnd()) || !text.EndsWith(')'))
-        {
-            return false;
-        }
-
-        string[] arguments = text[(open + 1)..^1].Split(',');
-        return arguments.Length <= 2 && arguments.All(static argument =>
-        {
-            string digits = argument.Trim();
-            return digits.Length is > 0 and <= 9 && digits.All(char.IsAsciiDigit);
-        });
-    }
+    private static bool IsSqlTypeName(string text) => SqlTypeModifiers.IsTypeName(text);
 
     private SchemaTableSource ExtractTable(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
     {
@@ -615,6 +580,13 @@ internal sealed class CSharpSchemaExtractor
         {
             Error("COHDBSDK106", $"Column '{tableName}.{columnName}' is declared with '{sqlType}', which is not a SQL type name: an identifier, " +
                 "optionally followed by one or two unsigned integer arguments in parentheses.", typeExpression!.GetLocation());
+            return;
+        }
+
+        SqlTypeModifiers.TrySplit(sqlType, out string name, out int? first, out int? second);
+        if (SqlTypeModifiers.GetError(name, first, second) is { } error)
+        {
+            Error("COHDBSDK106", $"Column '{tableName}.{columnName}': {error}", typeExpression!.GetLocation());
             return;
         }
 

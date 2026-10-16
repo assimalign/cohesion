@@ -78,10 +78,14 @@ the parser implements today. Recognized clauses outside that set produce the sha
 - **Type names resolve through one table.** `SqlTypeNames` is the single
   SQL-name → `DatabaseType` mapping (with the `DECIMAL(p[,s])`
   argument-is-precision rule); catalogs and the schema compiler must not grow
-  their own copies. A name outside the table is not this package's error (phase E3):
+  their own copies. The mapping and modifier ranges live in the stateless internal shared source
+  `SqlTypeModifiers`; `SqlTypeNames.TryResolve` refuses invalid modifiers and defaults an
+  explicit decimal precision to scale zero. SQL, Sql.Schema and Sdk.Database compile the same
+  source through `CohesionSharedSource`, with no new public seam or assembly-access grant.
+  A name outside the table is not this package's error (phase E3):
   an engine's type catalog may register it as a domain, so a CAST target that is not
-  a built-in name parses with no resolved type and no diagnostic (only malformed
-  arguments are `SQL0005`), and DDL keeps any identifier as the column's type text;
+  a built-in name parses with no resolved type and no diagnostic when it has no
+  arguments (domains take none; arguments produce `SQL0005`), and DDL keeps any identifier as the column's type text;
   the engine resolves both and reports a name it does not know. Which conversions a
   CAST may make is the engine's cast registry's question too, so every built-in type
   is a valid CAST target here.
@@ -359,3 +363,36 @@ checks/defaults and declaration attributes. Syntax belongs here; namespace, vola
 ownership and binding belong to the engine. DIALECT.md defines the supported clauses and errors.
 Function parameter and return type text retains identifier delimiters until the engine resolves
 it, so a quoted type name's punctuation cannot be mistaken for type arguments.
+
+## Declaration modifiers (#1438)
+
+CAST and ParseDefinitionType apply SqlTypeModifiers before producing an executable statement.
+The latter serves columns (CREATE, ADD and ALTER), domain bases, and function parameters and
+results, with an object-specific diagnostic subject. SQL0005 now covers malformed and invalid
+modifiers on every type spelling, including a domain given arguments. SQL0003 remains for
+surrounding syntax errors. SqlTypeNames.TryResolve returns false for an unknown name or invalid
+modifiers; name-only resolution still distinguishes known built-ins. The shared splitter preserves
+quoted identifiers and reads at most two unsigned Int32 arguments; typed schemas retain their
+identifier-only supported spelling and recognize interval qualifiers for the unsupported-modifier
+diagnostic. DIALECT.md records the exact ranges and unbounded defaults.
+
+`NormalizeScale` is the shared decimal default: an explicit precision with no scale means zero;
+a bare decimal stays unconstrained. Compiled-schema snapshots, their validation, the typed
+builders, SDK extraction and engine provisioning use this same rule as SQL and CAST resolution.
+
+FLOAT(p) admission and resolution follow PostgreSQL's `gram.y:14991-15016`: 1..24 bits selects
+Float32, 25..53 selects Float64, and bare FLOAT is Float64. The resolved type carries no length,
+decimal precision or scale. Out-of-range FLOAT precision remains SQL0005. Temporal precision
+(TIME, TIMESTAMP/DATETIME, TIMESTAMPTZ and INTERVAL) is valid PostgreSQL syntax whose rounding
+is not implemented here: the shared rule returns COHDBL001 with the modifier, and parser callers
+attach the declaration or CAST target. The rule distinguishes these unsupported modifiers from
+malformed argument lists, which remain SQL0005. A single unsigned precision above six is also
+recognized, because PostgreSQL clamps it with a warning; DIALECT.md records the difference.
+
+The declaration parser and CAST share interval-field consumption before argument parsing.
+SqlTypeModifiers owns the six fields and seven accepted X TO Y ranges, following PostgreSQL
+`src/backend/parser/gram.y:15197-15267`. Only SECOND (alone or at a range's end) takes precision.
+Every valid qualifier reports one COHDBL001 naming the declaration and complete modifier, including
+forms without precision. Invalid ranges remain SQL0003; malformed arguments remain SQL0005 and
+suppress a secondary unsupported diagnostic. Case and token trivia do not change admission.
+Delimited names retain their lexical identity so a domain named `"INTERVAL DAY"` is still a domain.

@@ -114,7 +114,7 @@ public sealed class SqlDomainTests
         // Assert
         unknown.Message.ShouldBe($"{UnregisteredType}: Column 'code': type 'nosuch' does not exist: it is neither a built-in type nor a domain " +
             "this engine registers. Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types) before Build.");
-        withArguments.Message.ShouldContain("domain 'email' takes no type arguments", Case.Sensitive);
+        withArguments.Message.ShouldContain("SQL0005", Case.Sensitive);
         added.Message.ShouldStartWith($"{UnregisteredType}: Column 'code': type 'nosuch' does not exist", Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         table.Columns.ShouldHaveSingleItem();
@@ -398,10 +398,10 @@ public sealed class SqlDomainTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Domains: the build refuses a declared column type it cannot provision before touching any file")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Domains: declaration or build refuses a column type it cannot provision before touching any file")]
     [InlineData("nosuch", "COHSQLE010: Column 'Email': type 'nosuch' does not exist")]
     [InlineData("BIGINT", "Column 'Email' is declared with type 'BIGINT', which is stored as BIGINT, but its member is stored as TEXT")]
-    [InlineData("email(3)", "domain 'email' takes no type arguments")]
+    [InlineData("email(3)", "This type does not accept type arguments")]
     public async Task DeclaredSchema_WithAColumnTypeTheEngineCannotProvision_ShouldBeRefused(string sqlType, string reason)
     {
         // Arrange
@@ -409,13 +409,26 @@ public sealed class SqlDomainTests
         var builder = SqlDatabaseEngine.CreateBuilder("sql-domain-refused");
         builder.Options.RootPath = root;
         builder.Types.Add(Email());
-        builder.AddDatabase("shop", database => database.Schema(schema => schema.Table<Customer>("customers", table =>
+        Action declare = () => builder.AddDatabase("shop", database => database.Schema(schema => schema.Table<Customer>("customers", table =>
         {
             table.Key(customer => customer.Id);
             table.Column(customer => customer.Email, sqlType);
         })));
 
         // Act
+        if (sqlType == "email(3)")
+        {
+            var invalid = Should.Throw<SqlSchemaValidationException>(declare);
+
+            // Assert: invalid modifiers are rejected by the declaration, before engine preflight.
+            var error = invalid.Errors.ShouldHaveSingleItem();
+            error.Code.ShouldBe(SqlSchemaValidationErrorCode.UnsupportedType);
+            error.Declaration.ShouldBe("customers.Email");
+            invalid.Message.ShouldContain(reason, Case.Sensitive);
+            Directory.Exists(root).ShouldBeFalse();
+            return;
+        }
+        declare();
         var refused = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync());
 
         // Assert
@@ -568,13 +581,13 @@ public sealed class SqlDomainTests
         (await RowsAsync(session, "SELECT id, v, c FROM m ORDER BY id")).ShouldBe([[1, 123.45m, "ABCDE"], [2, 123.46m, "A"]]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Domains: a domain over NUMERIC beyond what System.Decimal bounds casts and stores")]
-    public async Task Domain_OverWideNumeric_ShouldCastAndStore()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Domains: bounded and unbounded NUMERIC domains cast and store")]
+    public async Task Domain_BoundedAndUnboundedNumeric_ShouldCastAndStore()
     {
-        // Arrange: precision 40 and scale 30 bound nothing System.Decimal can exceed.
+        // Arrange: explicit precision stops at 28; omitted precision preserves Decimal's full range.
         await using var engine = await BuildAsync(static types => types
-            .Add(SqlType.CreateDomain("bignum", SqlType.Decimal(40, 2)))
-            .Add(SqlType.CreateDomain("fine", SqlType.Decimal(40, 30))));
+            .Add(SqlType.CreateDomain("bignum", SqlType.Decimal(28, 2)))
+            .Add(SqlType.CreateDomain("fine", SqlType.Numeric)));
         var database = await engine.CreateDatabaseAsync("wide");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE b (id INT, v bignum, f fine)");

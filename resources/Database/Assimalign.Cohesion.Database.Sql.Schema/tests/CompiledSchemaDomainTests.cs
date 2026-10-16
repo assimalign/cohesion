@@ -31,7 +31,7 @@ public sealed class CompiledSchemaDomainTests
         });
 
         // Assert
-        schema.Format.ShouldBe("cohesion/database-schema/v4");
+        schema.Format.ShouldBe("cohesion/database-schema/v5");
         schema.Types.ShouldHaveSingleItem().ShouldBe(new CompiledSchemaType("Money", DatabaseType.Decimal, 18, 2));
         schema.Tables[0].Columns[1].ShouldBe(new CompiledSchemaColumn("Price", DatabaseType.Decimal, false, Precision: 18, Scale: 2, CustomType: "Money"));
         SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument).Hash.ShouldBe(schema.Hash);
@@ -73,11 +73,11 @@ public sealed class CompiledSchemaDomainTests
     [InlineData("DECIMAL(18, 2, 1)")]
     [InlineData("\"email\"")]
     public void Column_WithMalformedSqlType_ShouldBeRefused(string sqlType)
-        => Should.Throw<ArgumentException>(() => SqlSchema.Compile("crm", database => database.Table<Customer>("customers", table =>
+        => Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Compile("crm", database => database.Table<Customer>("customers", table =>
         {
             table.Key(customer => customer.Code);
             table.Column(customer => customer.Email, sqlType);
-        }))).ParamName.ShouldBe("sqlType");
+        }))).Errors.ShouldHaveSingleItem().Declaration.ShouldBe("customers.Email");
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema domains: a column declared with two SQL types is refused at the second")]
     public void Column_DeclaredWithTwoSqlTypes_ShouldBeRefused()

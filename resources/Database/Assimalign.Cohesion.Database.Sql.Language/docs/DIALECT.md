@@ -1268,13 +1268,11 @@ minimum. Inside `CAST` an unrepresentable literal stays a CAST failure.
 | `INT`, `INTEGER`, `INT4` | `Int32` |
 | `BIGINT`, `INT8` | `Int64` |
 | `REAL`, `FLOAT4` | `Float32` |
-| `FLOAT`, `FLOAT8`, `DOUBLE` | `Float64` |
+| `FLOAT[(p)]` | `Float32` for p = 1..24; `Float64` for p = 25..53 or no argument |
+| `FLOAT8`, `DOUBLE` | `Float64` |
 | `DECIMAL[(p[,s])]`, `NUMERIC[(p[,s])]` | `Decimal` (single argument = precision) |
-| `CHAR[(n)]`, `CHARACTER[(n)]`, `VARCHAR[(n)]`, `TEXT` | `String` |
-
-In DDL, `n`, `p` and `s` are unsigned integer literals within the Int32 range;
-any other argument, or a third one, reports `SQL0003` at parse time (#1068).
-| `BINARY`, `VARBINARY`, `BLOB`, `BYTEA` | `Binary` |
+| `CHAR[(n)]`, `CHARACTER[(n)]`, `VARCHAR[(n)]`, `TEXT[(n)]` | `String` |
+| `BINARY[(n)]`, `VARBINARY[(n)]`, `BLOB[(n)]`, `BYTEA[(n)]` | `Binary` |
 | `DATE` / `TIME` / `TIMESTAMP`, `DATETIME` / `TIMESTAMPTZ` / `INTERVAL` | `Date` / `Time` / `DateTime` / `DateTimeOffset` / `TimeSpan` |
 | `UUID`, `GUID` | `Guid` |
 | `JSON` / `JSONB` | `Json` / `JsonBinary` |
@@ -1299,6 +1297,80 @@ which a `CAST` raises too, with an empty table). Plain columns and domain base t
 use the same bounds, described next. A native domain's name is an ASCII identifier. SQL-defined
 domains and functions may use delimited names containing punctuation, such as `"positive.type:amount"`.
 Function parameters, results, columns and CAST targets resolve the same domain name ignoring case.
+
+## Type modifiers at declaration (#1438)
+
+Every type spelling uses these ranges: CREATE TABLE, ALTER TABLE ADD COLUMN,
+ALTER TABLE ALTER COLUMN, CREATE DOMAIN, CREATE FUNCTION parameters and RETURNS,
+CAST, declared scripts, and typed schemas (including SDK extraction).
+
+| Type names | Accepted arguments | No arguments |
+| --- | --- | --- |
+| NUMERIC, DECIMAL | Precision p = 1..28; optional scale s = 0..p; omitted scale is zero | No declared precision or scale; values must still fit System.Decimal |
+| VARCHAR, CHAR, CHARACTER, TEXT | One length n = 1..10485760 Unicode scalar values | No declared length limit |
+| BINARY, VARBINARY, BLOB, BYTEA | One length n = 1..10485760 bytes | No declared length limit |
+| FLOAT | One binary precision p = 1..53: 1..24 resolves to REAL (Float32), 25..53 to DOUBLE PRECISION (Float64) | Float64 |
+| TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL; DATETIME alias | One nonnegative precision is recognized but unsupported (COHDBL001) | The type's normal meaning |
+| INTERVAL field qualifiers | YEAR, MONTH, DAY, HOUR, MINUTE, SECOND and the ranges below are recognized but unsupported (COHDBL001); only SECOND accepts `(p)` | Bare INTERVAL keeps its normal meaning |
+| Every other built-in type and every domain | None (INT(5), BOOLEAN(1) and domain(1) are invalid) | The type's normal meaning |
+
+Arguments are one or two unsigned integer literals within Int32; negative, fractional,
+overflowing, empty or extra arguments are invalid. CHAR and CHARACTER remain VARCHAR
+aliases with the same length rule; no blank padding is introduced. The explicit string
+ceiling follows PostgreSQL's anychar_typmodin (src/backend/utils/adt/varchar.c:33-57)
+and MaxAttrSize (src/include/access/htup_details.h:620-626). The same ceiling for binary
+makes explicit bounded declarations consistent; a bound does not allocate a buffer.
+Unbounded VARCHAR and the other unbounded aliases remain unbounded. The numeric ceiling
+is Cohesion's System.Decimal policy, rather than PostgreSQL's wider NUMERIC range
+(src/backend/utils/adt/numeric.c:1332-1397). Types without modifiers follow PostgreSQL's
+refusal in src/backend/parser/parse_type.c:358-365.
+
+FLOAT follows PostgreSQL's storage selection (src/backend/parser/gram.y:14991-15016).
+FLOAT(0) reports that precision must be at least 1 bit; FLOAT(54) and greater report that
+precision must be less than 54 bits. Both are SQL0005 and name the declaration or CAST target.
+The catalog reports the resolved type; binary precision is not retained as a decimal modifier.
+REAL/FLOAT4 and DOUBLE/FLOAT8 do not take arguments. Function overloads use the resolved storage
+type, so FLOAT(24) is a REAL signature and FLOAT(53) is a DOUBLE signature.
+
+**PostgreSQL difference: temporal precision is recognized, not supported.** TIME(p), TIMESTAMP(p),
+TIMESTAMPTZ(p), INTERVAL(p), and this dialect's DATETIME(p) alias report COHDBL001, naming both the
+object and precision modifier, including in CAST and declared scripts. The engine does not yet
+implement fractional-second rounding and never silently ignores a precision. PostgreSQL admits
+these modifiers (gram.y:15146-15181 and timestamp.c:1051-1110), and reduces precision above six
+with a warning (date.c:57-81; timestamp.c:110-132). A single unsigned Int32 precision above six
+is therefore also unsupported here. Malformed argument lists remain SQL0005. Typed declarations
+retain UnsupportedType and SDK diagnostics retain COHDBSDK106, with COHDBL001 in their detail.
+Fractional-second rounding is a separate follow-up.
+
+**PostgreSQL difference: interval field qualifiers are recognized but unsupported.** The complete
+recognized set is YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, YEAR TO MONTH, DAY TO HOUR,
+DAY TO MINUTE, DAY TO SECOND, HOUR TO MINUTE, HOUR TO SECOND, and MINUTE TO SECOND.
+SECOND, including the last field of a range, may carry one unsigned Int32 precision `(p)`.
+PostgreSQL accepts these forms (`src/backend/parser/gram.y:15197-15267`); Cohesion does not yet
+implement their field restriction/truncation or precision rounding. Every declaration site and
+CAST therefore reports COHDBL001 naming the object and complete qualifier, with or without
+precision. The same refusal reaches declared scripts, typed SQL names and SDK extraction.
+Malformed arguments remain SQL0005; invalid ranges such as YEAR TO DAY remain SQL0003 in SQL.
+Delimited domain names such as `"INTERVAL DAY"` remain identifiers, not field qualifiers.
+
+Invalid modifiers produce SQL0005 before execution, naming the column, domain, function
+parameter or return type, or CAST target. In process the text execution API throws
+DatabaseParseException; Database.Sql.Client receives ParseFailure with SQL0005 and the
+same object name in its message, and ConnectionUsable stays true. Malformed surrounding
+statement syntax remains SQL0003. Declared scripts are parsed during engine Build before
+any database is opened, and preserve SQL0005. Typed schema builders and compiled schema
+validation use SqlSchemaValidationException with UnsupportedType and the table/column
+or domain name; Sdk.Database uses COHDBSDK106 at the source location. COHSQLS001-005 are
+script receipt/ownership codes, not the typed-schema validation enum.
+
+Raw compiled decimal columns and domains with precision but no scale normalize to scale zero
+before validation and hashing, just like SQL and CAST resolution. They apply, re-apply, verify
+and reopen with the same metadata as an explicit zero scale; bare decimals remain unconstrained.
+
+The supported alteration is the full definition, for example
+ALTER TABLE t ALTER COLUMN c NUMERIC(28,2). PostgreSQL's ALTER COLUMN c TYPE ...
+form remains unsupported. Function overload identity and invocation semantics are
+unchanged apart from FLOAT(p)'s resolved storage selection.
 
 ## Declared bounds on writes (#1418)
 
@@ -1349,9 +1421,8 @@ lengths can compare equal under the index's collation.
   grouping, and a decimal point without digits on both sides are rejected.
   Unquoted SQL numeric literals retain their separate lexical rules.
   Declared scale does not promise display padding or arbitrary precision.
-  A scale of 28 or more needs no rounding of a value
-  Decimal can hold; wider declarations do not extend its storage range. Modifier
-  application rejects precision below 1 or scale outside 0..precision.
+  Scale 28 needs no rounding of a value Decimal can hold. Declaration validation
+  rejects precision outside 1..28 or scale outside 0..precision.
 
 Bounds are checked before DML writes or DDL publication, so a failing statement
 stores no partial rows or added column. Its code leads the `DatabaseException`
@@ -1364,7 +1435,7 @@ now truncates character values, and all four paths round NUMERIC to its scale.
 ## Explicit conversion (`CAST`, #1022, E3)
 
 A target that is a built-in type name resolves through `SqlTypeNames` into
-`DatabaseTypeInfo`, which the parser checks for argument shape only: every built-in
+`DatabaseTypeInfo`, with the shared declaration modifier checks: every built-in
 type is a valid target. Any other name is left to the engine's type catalog (a
 domain, or `COHSQLE010` while planning). Which conversions exist is the engine's
 **cast registry** (phase E3), PostgreSQL's `pg_cast` (`castfunc`, `castcontext`): the
@@ -1453,15 +1524,16 @@ bounds.
   text still cannot fit Decimal exactly, or unscaled text cannot fit it exactly,
   conversion fails with the same `COHSQLE002` code.
   The output does not promise padding to the declared scale.
-- **Strings:** all four string aliases permit an optional positive Int32 length
-  n; bare aliases have no CAST length limit. Length counts Unicode scalar values.
+- **Strings:** all four string aliases permit an optional length
+  n from 1 through 10485760; bare aliases have no CAST length limit. Length counts Unicode scalar values.
   Longer results truncate at a character boundary; CHAR/CHARACTER do not pad. The
-  binary aliases permit an optional positive length too. Every other built-in
+  binary aliases permit the same optional length in bytes. Every other built-in
   target, and a domain, takes no parameters.
 - **Diagnostics and metadata:** a name that is not a built-in type and that the
   engine does not register as a domain fails while planning with `COHSQLE010`
   (`SQL0004` is retired: the parser no longer knows which names exist); invalid
-  target arguments produce `SQL0005`; malformed CAST syntax produces `SQL0003`.
+  target arguments produce `SQL0005`; recognized but unsupported temporal precision
+  produces `COHDBL001`; malformed CAST syntax produces `SQL0003`.
   A pair no registered cast converts is `COHSQLE011` (SQLSTATE 42846). A conversion
   that fails on the value (a `FormatException`, `OverflowException` or
   `InvalidCastException`, the only failures the built-in casts throw, an
@@ -1584,12 +1656,12 @@ function names are lexed but not supported (see the statement matrix).
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `COHDBL001` | Error | Recognized clause, keyword or operator is not supported by the SQL model surface, including prefix and infix `~` (#1101); the message names the construct |
+| `COHDBL001` | Error | Recognized clause, keyword, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
-| `SQL0005` | Error | Invalid CAST target parameters: malformed arguments, or arguments a built-in target does not take |
+| `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including VARCHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), or arguments a type does not take; names the declaration. Recognized but unsupported temporal precision uses COHDBL001 |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
 | `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
 | `SQL0100` | Information | Statement does not end with `;` |
@@ -1665,7 +1737,11 @@ text converted to the column type. Enums use their numeric storage values.
 `table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
 for example `DefaultSql(row => row.Placed, "'2026-01-01'")`; the SQL typed prefix
 `DATE '2026-01-01'` remains unsupported. Both declarations store the rendered literal text in the
-unchanged `cohesion/database-schema/v4` document, so equal text gives the same hash.
+`cohesion/database-schema/v5` document, so equal text gives the same hash. This format normalizes
+an omitted decimal scale to zero when precision is present. Earlier artifacts, applied markers
+and pending targets are refused before hash comparison (SqlSchemaValidationException,
+InvalidDocument at schema.format; COHDBSDK206 for SDK migration input). Rebuild artifacts and
+recreate databases recording an earlier schema format; there is no upgrade or old-hash reconciliation.
 
 `DEFAULT -7` and `DEFAULT -1.2500` accept a single numeric minus. Arithmetic, nested unary expressions,
 functions and other computed expressions remain unsupported in typed defaults and ADD COLUMN; see E4 below for CREATE TABLE function-call defaults. `DEFAULT NULL` has the same
@@ -1762,4 +1838,4 @@ TABLE against a typed table, and DROP INDEX against a typed index (including its
 are refused before Build opens or changes the database. Scripts may create and later alter their
 own tables, create their own indexes on typed tables, and run DML against typed tables.
 Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
-SDK v4 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
+SDK v5 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.

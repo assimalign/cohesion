@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
 
@@ -25,14 +26,18 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// SQL engine, so <see cref="CompiledSchemaType.Name"/> is its SQL name, the CLR type's simple name,
 /// where <c>v2</c> held the CLR type's identity; and a column may be declared with a SQL type
 /// (<c>table.Column(selector, sqlType)</c>), kept in <see cref="CompiledSchemaColumn.CustomType"/> as
-/// written. A <c>v2</c> document no longer deserializes, so a provisioner plans from the live catalog
-/// once, as it did for <c>v1</c>.
+/// written. Earlier document formats are refused.
 /// </para>
 /// <para>
 /// <b>Format <c>v4</c> (phase B2).</b> Columns may declare
 /// <see cref="CompiledSchemaColumn.DefaultLiteral"/>. Strict earlier readers cannot read that
-/// member, so every document uses <c>cohesion/database-schema/v4</c>, including schemas without
-/// defaults. Earlier formats are refused; provisioning reconstructs their state from the catalog.
+/// member, so B2 advanced the format even for schemas without defaults.
+/// </para>
+/// <para>
+/// <b>Format <c>v5</c> (#1438).</b> Decimal precision with an omitted scale is normalized to zero
+/// before hashing. Earlier documents, including persisted applied markers and pending targets,
+/// are refused through the format gate. Rebuild artifacts and recreate affected databases;
+/// there is no upgrade path or reconciliation of earlier identities. The SDK uses this format too.
 /// </para>
 /// <para>
 /// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
@@ -42,7 +47,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v4";
+    public const string CurrentFormat = "cohesion/database-schema/v5";
 
     // Computed once, on first read: the schema is immutable. Two threads that race the first read
     // compute the same strings, so the race costs only the duplicate work.
@@ -68,10 +73,12 @@ public sealed class SqlCompiledSchema
         IReadOnlyList<CompiledSchemaTable> tables,
         IReadOnlyList<CompiledSchemaPrincipal> principals)
     {
+        SqlCompiledSchemaValidator.ValidateFormat(format);
         Format = format;
         Name = name;
         AllowsDestructiveChanges = allowsDestructiveChanges;
-        Types = Snapshot(types, "schema.types", static value => value.Name);
+        Types = Snapshot(types, "schema.types", static value => value.Name,
+            static value => value with { Scale = SqlTypeModifiers.NormalizeScale(value.StorageType, value.Precision, value.Scale) });
         Tables = Snapshot(tables, "schema.tables", static value => value.Name);
         Principals = Snapshot(principals, "schema.principals", static value => value.Name);
 
@@ -130,7 +137,8 @@ public sealed class SqlCompiledSchema
     private static IReadOnlyList<T> Snapshot<T>(
         IReadOnlyList<T>? values,
         string declaration,
-        Func<T, string?> nameSelector)
+        Func<T, string?> nameSelector,
+        Func<T, T>? normalize = null)
     {
         if (values is null)
         {
@@ -149,7 +157,7 @@ public sealed class SqlCompiledSchema
                     "The compiled schema collection cannot contain a null entry.");
             }
 
-            copy[index] = values[index];
+            copy[index] = normalize is null ? values[index] : normalize(values[index]);
         }
 
         Array.Sort(copy, (left, right) =>
@@ -165,7 +173,7 @@ public sealed class SqlCompiledSchema
 /// <param name="Name">The domain's SQL name: the CLR type's simple name, a SQL identifier.</param>
 /// <param name="StorageType">The underlying storage type.</param>
 /// <param name="Precision">The decimal precision.</param>
-/// <param name="Scale">The decimal scale.</param>
+/// <param name="Scale">The decimal scale; omitted scale becomes zero with an explicit precision in a compiled schema.</param>
 public sealed record CompiledSchemaType(string Name, DatabaseType StorageType, int? Precision, int? Scale);
 
 /// <summary>Describes a compiled table.</summary>
@@ -226,13 +234,17 @@ public sealed class CompiledSchemaTable
     /// <summary>Gets the constraints in stable name order.</summary>
     public IReadOnlyList<CompiledSchemaConstraint> Constraints { get; }
 
-    private static IReadOnlyList<T> Snapshot<T>(IReadOnlyList<T> values)
+    private static IReadOnlyList<CompiledSchemaColumn> Snapshot(IReadOnlyList<CompiledSchemaColumn> values)
     {
         ArgumentNullException.ThrowIfNull(values);
-        var copy = new T[values.Count];
+        var copy = new CompiledSchemaColumn[values.Count];
         for (int index = 0; index < values.Count; index++)
         {
-            copy[index] = values[index];
+            var column = values[index];
+            copy[index] = column is null ? null! : column with
+            {
+                Scale = SqlTypeModifiers.NormalizeScale(column.Type, column.Precision, column.Scale),
+            };
         }
 
         return Array.AsReadOnly(copy);
@@ -245,7 +257,7 @@ public sealed class CompiledSchemaTable
 /// <param name="IsNullable">Whether null values are permitted.</param>
 /// <param name="MaxLength">The optional maximum length.</param>
 /// <param name="Precision">The optional decimal precision.</param>
-/// <param name="Scale">The optional decimal scale.</param>
+/// <param name="Scale">The optional decimal scale; a compiled table normalizes an omitted scale to zero when precision is given.</param>
 /// <param name="CustomType">
 /// The SQL type the column is declared with, when it does not follow from the member's CLR type: a
 /// domain the schema declares, a domain the SQL engine registers, or a built-in type name with its

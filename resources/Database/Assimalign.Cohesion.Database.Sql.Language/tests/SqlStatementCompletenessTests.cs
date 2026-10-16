@@ -255,12 +255,6 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("CREATE TABLE z (a TEXT NOT^);", ")")]
     [InlineData("CREATE TABLE z (a INT,^);", ")")]
     [InlineData("CREATE TABLE z (a^);", ")")]
-    [InlineData("CREATE TABLE z (a VARCHAR(25 ^5));", "5")]
-    [InlineData("CREATE TABLE z (b DECIMAL(10, 2^, 5));", ",")]
-    [InlineData("CREATE TABLE z (c VARCHAR(^-5));", "-")]
-    [InlineData("CREATE TABLE z (a VARCHAR(^MAX));", "MAX")]
-    [InlineData("CREATE TABLE z (a VARCHAR(^99999999999));", "99999999999")]
-    [InlineData("ALTER TABLE t ADD COLUMN c VARCHAR(^1e3);", "1e3")]
     [InlineData("ALTER ^INDEX ix RENAME TO iy;", "INDEX")]
     [InlineData("ALTER ^t ADD COLUMN c INT;", "t")]
     [InlineData("ALTER TABLE ^ADD COLUMN c INT;", "ADD")]
@@ -270,6 +264,28 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("DELETE FROM t WHERE id = 1 AND name LIKE 'x' ^ESCAPE;", "ESCAPE")]
     public void Parse_MissingToken_ShouldReportOneSyntaxErrorWhereExpected(string marked, string located)
         => AssertOneSyntaxErrorAt(marked, located);
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: malformed modifiers report SQL0005 at the offending token")]
+    [InlineData("CREATE TABLE z (a VARCHAR(25 ^5));", "5")]
+    [InlineData("CREATE TABLE z (b DECIMAL(10, 2^, 5));", ",")]
+    [InlineData("CREATE TABLE z (c VARCHAR(^-5));", "-")]
+    [InlineData("CREATE TABLE z (a VARCHAR(^MAX));", "MAX")]
+    [InlineData("CREATE TABLE z (a VARCHAR(^99999999999));", "99999999999")]
+    [InlineData("ALTER TABLE t ADD COLUMN c VARCHAR(^1e3);", "1e3")]
+    public void Parse_MalformedModifier_ShouldReportOneLocatedModifierError(string marked, string located)
+    {
+        // Arrange
+        int position = marked.IndexOf('^');
+        string sql = marked.Remove(position, 1);
+
+        // Act
+        var error = Errors(Parse(sql)).ShouldHaveSingleItem();
+
+        // Assert
+        error.Code.ShouldBe("SQL0005");
+        error.Start.ShouldBe(position);
+        sql[error.Start!.Value..error.End!.Value].ShouldBe(located);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: a second statement after the terminator is reported separately")]
     public void Parse_UnclosedTypeArgumentsFollowedByStatement_ShouldReportBoth()

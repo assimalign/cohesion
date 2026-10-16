@@ -704,6 +704,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                     throw;
                 }
                 SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
+                SqlSchemaProvisioner.ValidateRecordedFormats(catalog);
 
                 try
                 {

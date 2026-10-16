@@ -34,7 +34,7 @@ not an edge.
 | Library areas | 21 |
 | Resource areas | 18 |
 | Declared project references | 728 |
-| Declared shared-source links | 27 |
+| Declared shared-source links | 31 |
 
 ## Ambiguous project names
 
@@ -724,11 +724,11 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Memory` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Protocol` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Security` | — | — | — | — |
-| `Assimalign.Cohesion.Database.Sql` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Sql.Catalog`<br>`Assimalign.Cohesion.Database.Sql.Language`<br>`Assimalign.Cohesion.Database.Sql.Schema`<br>`Assimalign.Cohesion.Database.Sql.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Sql.Catalog` | — |
+| `Assimalign.Cohesion.Database.Sql` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Sql.Catalog`<br>`Assimalign.Cohesion.Database.Sql.Language`<br>`Assimalign.Cohesion.Database.Sql.Schema`<br>`Assimalign.Cohesion.Database.Sql.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Sql.Catalog`<br>`Assimalign.Cohesion.Database.Sql.Language` | — |
 | `Assimalign.Cohesion.Database.Sql.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Sql.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database.Sql.Catalog` | — |
 | `Assimalign.Cohesion.Database.Sql.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.Sql`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
-| `Assimalign.Cohesion.Database.Sql.Language` | `Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
-| `Assimalign.Cohesion.Database.Sql.Schema` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database.Sql.Schema` | — |
+| `Assimalign.Cohesion.Database.Sql.Language` | `Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database.Sql.Language` | — |
+| `Assimalign.Cohesion.Database.Sql.Schema` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database.Sql.Language`<br>`Assimalign.Cohesion.Database.Sql.Schema` | — |
 | `Assimalign.Cohesion.Database.Sql.Security` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Sql.Storage` | `Assimalign.Cohesion.Database.Storage` | — | — | — |
 | `Assimalign.Cohesion.Database.Sql.Tcp` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Database.Sql` | — | — | — |

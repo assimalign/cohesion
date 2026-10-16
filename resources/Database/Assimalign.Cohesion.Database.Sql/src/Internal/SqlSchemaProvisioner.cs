@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -9,6 +10,7 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -25,6 +27,8 @@ internal sealed partial class SqlSchemaProvisioner
     private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
     private string? _validatedHash;
+    private string? _formatCheckedStateDocument;
+    private string? _formatCheckedPendingDocument;
 
     // Instance-local test hooks, reached only by this assembly's tests. A skip must not
     // enter any catalog traversal; crash tests capture durable storage after each step.
@@ -36,6 +40,47 @@ internal sealed partial class SqlSchemaProvisioner
     {
         _database = database;
         _catalog = catalog;
+        // Existing databases passed the document gate before their data file set opened.
+        _formatCheckedStateDocument = catalog.SchemaState?.CanonicalDocument;
+        _formatCheckedPendingDocument = catalog.PendingMigration?.CanonicalDocument;
+    }
+
+    internal static void ValidateRecordedFormats(SqlCatalog catalog)
+    {
+        ValidateRecordedFormat(catalog.SchemaState?.CanonicalDocument);
+        ValidateRecordedFormat(catalog.PendingMigration?.CanonicalDocument);
+    }
+
+    private void ValidateRecordedFormats()
+    {
+        string? state = _catalog.SchemaState?.CanonicalDocument;
+        string? pending = _catalog.PendingMigration?.CanonicalDocument;
+        if (!ReferenceEquals(state, _formatCheckedStateDocument)) { ValidateRecordedFormat(state); }
+        if (!ReferenceEquals(pending, _formatCheckedPendingDocument)) { ValidateRecordedFormat(pending); }
+        _formatCheckedStateDocument = state;
+        _formatCheckedPendingDocument = pending;
+    }
+
+    private static void ValidateRecordedFormat(string? document)
+    {
+        if (document is null) { return; }
+        try
+        {
+            using JsonDocument json = JsonDocument.Parse(document);
+            if (json.RootElement.ValueKind == JsonValueKind.Object &&
+                json.RootElement.TryGetProperty("format", out JsonElement format) &&
+                format.ValueKind == JsonValueKind.String && format.GetString() == SqlCompiledSchema.CurrentFormat)
+            {
+                return;
+            }
+        }
+        catch (JsonException)
+        {
+            // A damaged marker still follows the existing live-catalog reconstruction path.
+            // A valid document of any other format must reach the schema package's gate.
+            return;
+        }
+        _ = SqlCompiledSchemaSerializer.Deserialize(document);
     }
 
     internal async ValueTask<SqlSchemaMigrationResult> ApplyAsync(
@@ -45,6 +90,7 @@ internal sealed partial class SqlSchemaProvisioner
     {
         ArgumentNullException.ThrowIfNull(schema);
         cancellationToken.ThrowIfCancellationRequested();
+        ValidateRecordedFormats();
         if (deferDataScalingSteps && TryGetDeferredResult(schema) is { } deferredResult)
         {
             return deferredResult;
@@ -150,6 +196,7 @@ internal sealed partial class SqlSchemaProvisioner
                 await _catalog.SaveSchemaStateAsync(
                     new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, generation),
                     cancellationToken).ConfigureAwait(false);
+                _formatCheckedStateDocument = schema.CanonicalDocument;
             }
             catch (Exception failure)
             {
@@ -260,6 +307,7 @@ internal sealed partial class SqlSchemaProvisioner
         try
         {
             TraceStage("Validate", SqlProvisioningCodes.PolicyRefused);
+            ValidateRecordedFormats();
             ValidateSupportedSchema(schema);
             TraceStage("Verify", SqlProvisioningCodes.Drift, stepCount: 0);
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
@@ -339,7 +387,8 @@ internal sealed partial class SqlSchemaProvisioner
         domain = null;
         if (column.CustomType is not { } declared)
         {
-            return new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision, column.Scale);
+            return new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision,
+                SqlTypeModifiers.NormalizeScale(column.Type, column.Precision, column.Scale));
         }
 
         if (types.Resolve(declared, out string? error) is not { } type)
@@ -796,11 +845,9 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     private static string DescribeType(DatabaseType type, int? maxLength, int? precision, int? scale)
-        => maxLength is { } length
-            ? $"{type}({length})"
-            : precision is { } digits
-                ? $"{type}({digits},{scale ?? 0})"
-                : type.ToString();
+        => $"{type}(MaxLength={maxLength?.ToString(CultureInfo.InvariantCulture) ?? "null"}, " +
+            $"Precision={precision?.ToString(CultureInfo.InvariantCulture) ?? "null"}, " +
+            $"Scale={scale?.ToString(CultureInfo.InvariantCulture) ?? "null"})";
 
     /// <summary>
     /// The catalog stores a CHECK as the canonical text of its parsed predicate, while a compiled

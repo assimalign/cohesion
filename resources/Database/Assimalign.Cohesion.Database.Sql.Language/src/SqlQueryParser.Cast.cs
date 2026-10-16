@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
@@ -37,6 +38,7 @@ public sealed partial class SqlQueryParser
         }
 
         int targetStart = lexer.Current.Position;
+        int diagnosticsBeforeTarget = _parseDiagnostics.Count;
         int targetEnd = targetStart;
         string targetName = string.Empty;
         int? firstArgument = null;
@@ -47,6 +49,8 @@ public sealed partial class SqlQueryParser
             targetName = CurrentText(ref lexer);
             targetEnd = lexer.Current.Position + lexer.Current.Value.Length;
             Advance(ref lexer);
+            targetName = ParseIntervalQualifier(ref lexer, targetName, out int? qualifierEnd);
+            targetEnd = qualifierEnd ?? targetEnd;
             if (lexer.Current.Type == TokenType.LeftParen)
             {
                 Advance(ref lexer);
@@ -80,7 +84,7 @@ public sealed partial class SqlQueryParser
 
         string targetType = targetName.Length == 0 ? string.Empty : _sourceText[targetStart..targetEnd];
         DatabaseTypeInfo? targetTypeInfo = null;
-        if (targetName.Length > 0)
+        if (targetName.Length > 0 && _parseDiagnostics.Count == diagnosticsBeforeTarget)
         {
             targetTypeInfo = ResolveCastTarget(targetName, firstArgument, secondArgument,
                 validArguments, targetStart, targetEnd);
@@ -123,52 +127,29 @@ public sealed partial class SqlQueryParser
     private DatabaseTypeInfo? ResolveCastTarget(
         string name, int? firstArgument, int? secondArgument, bool validArguments, int start, int end)
     {
-        const string argumentShape = "CAST type arguments must be one or two unsigned integer literals within the Int32 range.";
-        if (!SqlTypeNames.TryResolve(name, firstArgument, null, secondArgument, out var typeInfo))
-        {
-            if (!validArguments)
-            {
-                AddCastTargetDiagnostic("SQL0005", argumentShape, start, end);
-            }
-
-            return null;
-        }
-
-        string? error = !validArguments
-            ? argumentShape
-            : typeInfo.Type switch
-            {
-                DatabaseType.Decimal when firstArgument is < 1 or > 28 =>
-                    "CAST decimal precision must be between 1 and 28.",
-                DatabaseType.Decimal when secondArgument > firstArgument =>
-                    "CAST decimal scale must be between 0 and precision.",
-                DatabaseType.String when firstArgument is < 1 || secondArgument is not null =>
-                    "CAST string targets accept one positive length argument.",
-                DatabaseType.Binary when firstArgument is < 1 || secondArgument is not null =>
-                    "CAST binary targets accept one positive length argument.",
-                DatabaseType.Decimal or DatabaseType.String or DatabaseType.Binary => null,
-                _ when firstArgument is not null => $"CAST target '{name}' does not accept type arguments.",
-                _ => null,
-            };
-
+        // The lexer retains delimiters; resolution uses the identifier's value.
+        SqlTypeModifiers.TrySplit(name, out string identifier, out _, out _);
+        string code = SqlTypeModifiers.DiagnosticCode;
+        string? error = validArguments
+            ? SqlTypeModifiers.GetError(identifier, firstArgument, secondArgument, out code, isDelimited: name.StartsWith('"'))
+            : SqlTypeModifiers.ArgumentShape;
         if (error is not null)
         {
-            AddCastTargetDiagnostic("SQL0005", error, start, end);
+            AddTypeModifierDiagnostic($"CAST target '{name}'", error, start, end, code);
             return null;
         }
 
-        // An explicit precision implies scale zero; a bare DECIMAL remains unconstrained.
-        return typeInfo.Type == DatabaseType.Decimal && typeInfo.Precision is not null
-            ? new DatabaseTypeInfo(typeInfo.Type, precision: typeInfo.Precision, scale: typeInfo.Scale ?? 0)
-            : typeInfo;
+        return SqlTypeNames.TryResolve(identifier, firstArgument, null, secondArgument, out var typeInfo)
+            ? typeInfo : null;
     }
 
-    private void AddCastTargetDiagnostic(string code, string message, int start, int end)
+    private void AddTypeModifierDiagnostic(string subject, string message, int start, int end,
+        string code = SqlTypeModifiers.DiagnosticCode)
     {
         _parseDiagnostics.Add(new Diagnostic
         {
             Code = code,
-            Message = message,
+            Message = $"{subject}: {message}",
             Start = start,
             End = end,
             Severity = DiagnosticSeverity.Error,

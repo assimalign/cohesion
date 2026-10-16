@@ -206,3 +206,18 @@ can derive from `DuplexConnectionFactory`, implement `ConnectCoreAsync` returnin
 `ValueTask<IDuplexConnection>`, and produce a `DuplexConnection` implementation. Built-in TCP,
 InMemory and TLS-layered duplex factories already satisfy the new contract. Database wire
 framing, handshake and model messages are unchanged.
+
+## Declaration modifier failures (#1438)
+
+The server parses every SQL declaration and CAST against the shared modifier ranges before any
+catalog mutation. SQL0005 and the column/domain/function parameter or return-type name travel in
+the existing ParseFailure message; SqlClientException reports ParseFailure with ConnectionUsable
+true. No client ABI or wire format changes. Typed schema and declared-script validation happen at
+host declaration/Build, before a server starts; these host APIs have no remote declaration verb.
+
+Recognized but unsupported temporal precision uses COHDBL001 in the same ParseFailure exchange,
+including CAST, naming the declaration and modifier. FLOAT(p) returns the resolved Float32
+(1..24 bits) or Float64 (25..53 bits) in catalog queries and result headers; bare FLOAT stays
+Float64. Invalid FLOAT precision remains SQL0005. INTERVAL field/range qualifiers, including
+SECOND(p), likewise report COHDBL001 at every declaration site and CAST, naming the complete
+qualifier; no-precision forms are also unsupported. Neither path changes the wire format.

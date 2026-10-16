@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
@@ -19,7 +20,7 @@ public sealed partial class SqlQueryParser
         return name;
     }
 
-    private string ParseDefinitionType(ref TokenLexer lexer)
+    private string ParseDefinitionType(ref TokenLexer lexer, string subject)
     {
         if (!IsIdentifierOrKeyword(ref lexer))
         {
@@ -27,9 +28,55 @@ public sealed partial class SqlQueryParser
             return "?";
         }
         // Type text retains lexical delimiters so a quoted '(' cannot become a type argument.
+        int start = lexer.Current.Position;
+        int diagnosticsBeforeType = _parseDiagnostics.Count;
         string type = CurrentText(ref lexer);
         Advance(ref lexer);
-        return lexer.Current.Type == TokenType.LeftParen ? type + ParseTypeArguments(ref lexer) : type;
+        type = ParseIntervalQualifier(ref lexer, type, out _);
+        if (lexer.Current.Type == TokenType.LeftParen)
+        {
+            type += ParseTypeArguments(ref lexer, subject);
+        }
+        if (_parseDiagnostics.Count == diagnosticsBeforeType &&
+            SqlTypeModifiers.TrySplit(type, out string name, out int? first, out int? second) &&
+            SqlTypeModifiers.GetError(name, first, second, out string code, isDelimited: type.StartsWith('"')) is { } error)
+        {
+            AddTypeModifierDiagnostic(subject, error, start, _lastTokenEnd, code);
+        }
+        return type;
+    }
+
+    private string ParseIntervalQualifier(ref TokenLexer lexer, string type, out int? end)
+    {
+        end = null;
+        if (!type.Equals("INTERVAL", StringComparison.OrdinalIgnoreCase) ||
+            !SqlTypeModifiers.IsIntervalField(CurrentText(ref lexer)))
+        {
+            return type;
+        }
+        string first = CurrentText(ref lexer);
+        type += " " + first;
+        end = lexer.Current.Position + lexer.Current.Value.Length;
+        Advance(ref lexer);
+        if (IsWord(ref lexer, "TO"))
+        {
+            type += " " + CurrentText(ref lexer);
+            Advance(ref lexer);
+            string last = CurrentText(ref lexer);
+            if (!SqlTypeModifiers.IsIntervalField(last))
+            {
+                AddExpectedDiagnostic(ref lexer, "an interval field after TO");
+                return type;
+            }
+            if (!SqlTypeModifiers.IsIntervalRange(first, last))
+            {
+                AddSyntaxDiagnostic(ref lexer, $"Invalid INTERVAL field range '{first} TO {last}'.");
+            }
+            type += " " + last;
+            end = lexer.Current.Position + lexer.Current.Value.Length;
+            Advance(ref lexer);
+        }
+        return type;
     }
 
     private SqlCreateFunctionExpression ParseCreateFunction(ref TokenLexer lexer, int pos)
@@ -48,13 +95,13 @@ public sealed partial class SqlQueryParser
                         Advance(ref lexer);
                     }
                     string parameter = ParseDefinitionName(ref lexer, "a parameter name");
-                    parameters.Add(new SqlFunctionParameter(parameter, ParseDefinitionType(ref lexer)));
+                    parameters.Add(new SqlFunctionParameter(parameter, ParseDefinitionType(ref lexer, $"Function '{name}' parameter '{parameter}'")));
                 } while (lexer.Current.Type == TokenType.Comma);
             }
             ExpectDdlToken(ref lexer, TokenType.RightParen, "')' after function parameters");
         }
         ExpectKeyword(ref lexer, "RETURNS", "RETURNS and a result type");
-        string returnType = ParseDefinitionType(ref lexer);
+        string returnType = ParseDefinitionType(ref lexer, $"Function '{name}' return type");
         string volatility = "VOLATILE";
         bool strict = false, sawVolatility = false, sawNullBehavior = false;
         while (!IsAtEnd(ref lexer) && !IsKeyword(ref lexer, "RETURN"))
@@ -111,7 +158,7 @@ public sealed partial class SqlQueryParser
                     {
                         Advance(ref lexer);
                     }
-                    types.Add(ParseDefinitionType(ref lexer));
+                    types.Add(ParseDefinitionType(ref lexer, $"Function '{name}' parameter type"));
                 } while (lexer.Current.Type == TokenType.Comma);
             }
             ExpectDdlToken(ref lexer, TokenType.RightParen, "')' after the function signature");
@@ -124,7 +171,7 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer);
         string name = ParseDefinitionName(ref lexer, "a domain name");
         ExpectKeyword(ref lexer, "AS", "AS and a base type");
-        string type = ParseDefinitionType(ref lexer);
+        string type = ParseDefinitionType(ref lexer, $"Domain '{name}'");
         SqlExpression? defaultValue = null, check = null;
         string? constraint = null;
         bool notNull = false;

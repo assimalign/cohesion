@@ -124,22 +124,23 @@ public sealed class SqlStatementCompletenessExecutionTests
     /// column and VARCHAR(MAX) threw a raw FormatException from the planner.
     /// </summary>
     /// <param name="sql">The malformed DDL statement.</param>
+    /// <param name="code">The diagnostic for type modifiers or surrounding syntax.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: malformed DDL fails at parse time and changes no schema")]
-    [InlineData("CREATE TABLE z (a VARCHAR(25 5));")]
-    [InlineData("CREATE TABLE z (b DECIMAL(10, 2, 5));")]
-    [InlineData("CREATE TABLE z (c VARCHAR(-5));")]
-    [InlineData("CREATE TABLE z (a VARCHAR(MAX));")]
-    [InlineData("CREATE TABLE z (a VARCHAR(abc));")]
-    [InlineData("CREATE TABLE z (a TEXT NOT);")]
-    [InlineData("CREATE TABLE IF NOT z (a INT);")]
-    [InlineData("ALTER TABLE t ADD COLUMN c VARCHAR(MAX);")]
-    [InlineData("ALTER TABLE ADD COLUMN c INT;")]
-    [InlineData("ALTER INDEX ix RENAME TO iy;")]
-    [InlineData("CREATE INDEX ON t (name);")]
-    [InlineData("CREATE INDEX IF EXISTS ix ON t (name);")]
-    [InlineData("CREATE INDEX ix ON t (name,, age);")]
-    [InlineData("DROP TABLE IF t;")]
-    public async Task ExecuteAsync_MalformedDdl_ShouldFailAtParseTimeWithoutSchemaChange(string sql)
+    [InlineData("CREATE TABLE z (a VARCHAR(25 5));", "SQL0005")]
+    [InlineData("CREATE TABLE z (b DECIMAL(10, 2, 5));", "SQL0005")]
+    [InlineData("CREATE TABLE z (c VARCHAR(-5));", "SQL0005")]
+    [InlineData("CREATE TABLE z (a VARCHAR(MAX));", "SQL0005")]
+    [InlineData("CREATE TABLE z (a VARCHAR(abc));", "SQL0005")]
+    [InlineData("CREATE TABLE z (a TEXT NOT);", "SQL0003")]
+    [InlineData("CREATE TABLE IF NOT z (a INT);", "SQL0003")]
+    [InlineData("ALTER TABLE t ADD COLUMN c VARCHAR(MAX);", "SQL0005")]
+    [InlineData("ALTER TABLE ADD COLUMN c INT;", "SQL0003")]
+    [InlineData("ALTER INDEX ix RENAME TO iy;", "SQL0003")]
+    [InlineData("CREATE INDEX ON t (name);", "SQL0003")]
+    [InlineData("CREATE INDEX IF EXISTS ix ON t (name);", "SQL0003")]
+    [InlineData("CREATE INDEX ix ON t (name,, age);", "SQL0003")]
+    [InlineData("DROP TABLE IF t;", "SQL0003")]
+    public async Task ExecuteAsync_MalformedDdl_ShouldFailAtParseTimeWithoutSchemaChange(string sql, string code)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("sql-completeness-ddl", new SqlDatabaseEngineOptions());
@@ -152,7 +153,7 @@ public sealed class SqlStatementCompletenessExecutionTests
         var error = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        error.Message.ShouldContain("SQL0003", Case.Sensitive);
+        error.Message.ShouldContain(code, Case.Sensitive);
         (await SchemaSnapshotAsync(session)).ShouldBe(before);
     }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
@@ -14,12 +15,8 @@ internal static class SqlCompiledSchemaValidator
     {
         ArgumentNullException.ThrowIfNull(schema);
 
+        ValidateFormat(schema.Format);
         var errors = new List<SqlSchemaValidationError>();
-        if (!string.Equals(schema.Format, SqlCompiledSchema.CurrentFormat, StringComparison.Ordinal))
-        {
-            Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, "schema.format",
-                $"Compiled schema format '{schema.Format}' is not supported.");
-        }
 
         RequireName(schema.Name, "schema.name", errors);
 
@@ -33,6 +30,16 @@ internal static class SqlCompiledSchemaValidator
         if (errors.Count > 0)
         {
             throw new SqlSchemaValidationException(errors);
+        }
+    }
+
+    internal static void ValidateFormat(string? format)
+    {
+        if (!string.Equals(format, SqlCompiledSchema.CurrentFormat, StringComparison.Ordinal))
+        {
+            throw InvalidDocument("schema.format",
+                $"Compiled schema format '{format}' is not supported; expected '{SqlCompiledSchema.CurrentFormat}'. " +
+                "Rebuild schema artifacts and recreate databases that record an older schema format.");
         }
     }
 
@@ -83,6 +90,7 @@ internal static class SqlCompiledSchemaValidator
 
             ValidateStorageType(
                 declaration.StorageType,
+                null,
                 declaration.Precision,
                 declaration.Scale,
                 path,
@@ -362,22 +370,11 @@ internal static class SqlCompiledSchemaValidator
             }
 
             ValidateTypeReference(column.Type, column.CustomType, types, $"{columnPath}.type", errors);
-            ValidateStorageType(column.Type, column.Precision, column.Scale, columnPath, errors);
+            ValidateStorageType(column.Type, column.MaxLength, column.Precision, column.Scale, columnPath, errors);
             if (column.DefaultLiteral is not null && string.IsNullOrWhiteSpace(column.DefaultLiteral))
             {
                 Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{columnPath}.defaultLiteral",
                     "A declared DEFAULT literal cannot be empty or white space.");
-            }
-
-            if (column.MaxLength is <= 0)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{columnPath}.maxLength",
-                    "Maximum length must be greater than zero.");
-            }
-            else if (column.MaxLength is not null && column.Type is not DatabaseType.String and not DatabaseType.Binary)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{columnPath}.maxLength",
-                    "Maximum length is supported only for string and binary values.");
             }
         }
 
@@ -490,11 +487,16 @@ internal static class SqlCompiledSchemaValidator
         if (!types.TryGetValue(customType, out CompiledSchemaType? declaration))
         {
             // Not a type the schema declares: a domain the SQL engine registers, or a built-in type
-            // name, which the engine resolves. Only its shape is this package's to check.
+            // name. Shape and built-in modifiers are validated here; domain existence is the engine's.
             if (!CompiledSchemaTypeNames.IsTypeName(customType))
             {
                 Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{path}.customType",
                     $"'{customType}' is not a SQL type name: an identifier, optionally followed by one or two unsigned integer arguments.");
+            }
+            else if (SqlTypeModifiers.TrySplit(customType, out string name, out int? first, out int? second) &&
+                SqlTypeModifiers.GetError(name, first, second) is { } error)
+            {
+                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path, error);
             }
         }
         else if (declaration.StorageType != type)
@@ -506,6 +508,7 @@ internal static class SqlCompiledSchemaValidator
 
     private static void ValidateStorageType(
         DatabaseType type,
+        int? length,
         int? precision,
         int? scale,
         string path,
@@ -518,16 +521,9 @@ internal static class SqlCompiledSchemaValidator
             return;
         }
 
-        if (precision is null && scale is null)
+        if (SqlTypeModifiers.GetError(type, length, precision, scale) is { } error)
         {
-            return;
-        }
-
-        if (type != DatabaseType.Decimal || precision is null || scale is null ||
-            precision <= 0 || scale < 0 || scale > precision)
-        {
-            Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{path}.precision",
-                "Precision and scale must form a valid decimal storage definition.");
+            Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path, error);
         }
     }
 

@@ -930,6 +930,56 @@ in a CHECK, an index or a generated expression, or applies `Implicit` contexts, 
 PostgreSQL's text forms of INTERVAL (the engine reads .NET's `[d.]hh:mm:ss`, so `'12'` is twelve
 days, not seconds); and a `COHESION_SCHEMA` view of casts.
 
+## Modifier admission (#1438)
+
+The parser validates modifiers for columns, domain bases and function signatures before planning,
+using the same internal SqlTypeModifiers source as CAST, SqlTypeNames, SqlTypeCatalog,
+SqlType.Decimal/VarChar, Sql.Schema and Sdk.Database. This source is linked with
+CohesionSharedSource; no public helper, interface, visibility grant or engine dependency is added
+to the schema package. TryResolveBuiltIn passes decimal's first argument once, as precision,
+so NUMERIC(p,s) no longer also carries a spurious MaxLength. Explicit precision defaults scale
+to zero consistently. Invalid catalog resolution reports the shared reason as defense in depth.
+
+DIALECT.md records precision 1..28, scale 0..precision, and explicit string/binary length
+1..10485760. Bare types retain their unbounded meaning, and CHAR stays a VARCHAR alias.
+Invalid SQL modifiers are SQL0005 naming the column, domain, function parameter/result or CAST
+target. Text execution throws DatabaseParseException; the server sends ParseFailure and keeps the
+connection usable. Declared scripts parse in Build before database I/O, so the same failure precedes
+any script effects. Typed schema declarations use their existing UnsupportedType validation enum;
+COHSQLS codes remain reserved for script receipts/ownership. There is no persisted-catalog upgrade
+or compatibility reader: nothing has shipped. The full-definition ALTER COLUMN form is covered;
+PostgreSQL's TYPE/USING syntax remains unsupported.
+
+Raw compiled decimal metadata follows the same shared scale normalization: precision with no
+scale resolves to scale zero. Compiled snapshots canonicalize it before hashing, and provisioning
+resolves it identically before comparing the catalog. Apply, the already-applied skip, Verify and
+reopen therefore agree. Type-drift messages show every compared field (`MaxLength`, `Precision`,
+`Scale`) explicitly, including `null`, rather than formatting a null scale as zero.
+
+This normalization advances the runtime/SDK document to `cohesion/database-schema/v5`: a v4
+NUMERIC(3) declaration could record scale:null while applying scale zero, so rereading it must
+not silently change its hash. The schema format gate refuses every earlier document with
+SqlSchemaValidationException (InvalidDocument, schema.format), naming both formats and the
+rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
+file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
+The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
+identity. Both catalog records retain a versioned document, so catalog format 10 is unchanged.
+
+FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
+The shared resolver supplies that storage identity everywhere, including domain bases, function
+signatures, CAST and provisioning of typed SQL names. Catalog metadata records REAL or DOUBLE,
+with INFORMATION_SCHEMA reporting REAL or DOUBLE PRECISION; no decimal modifier remains.
+Precision 0 or greater than 53 is SQL0005 with PostgreSQL's bit-range reason. Temporal precision
+is recognized but lacks fractional-second rounding, so declarations, scripts and CAST fail closed
+with COHDBL001 naming the object and modifier. Malformed arguments still use SQL0005. The wire
+keeps its ParseFailure category and usable connection. See DIALECT.md for the PostgreSQL difference.
+
+INTERVAL field qualifiers (the six individual fields and seven PostgreSQL X TO Y ranges), with
+optional precision on SECOND, follow the same unsupported-modifier path. The parser consumes the
+complete qualifier at columns, domain bases, function signatures and CAST; shared validation
+reports COHDBL001 with the object and qualifier before provisioning or script execution. Typed
+SQL names and SDK extraction use that rule too. Delimited domain names remain identifiers.
+
 ## Declared column bounds (#1418)
 
 `SqlCastConverter.ParseNumericText(text, target)` is the shared text-to-NUMERIC conversion:
@@ -986,13 +1036,12 @@ character probes whole: a longer string can compare equal under the index's coll
   leading/trailing decimal points are rejected in every text conversion path. An unquoted
   numeric DEFAULT keeps SQL literal syntax, including exponent notation; its original numeric
   text reaches the same exact rounding routine. This does not add arbitrary-precision storage.
-  A declared scale of 28 or more requires
-  no rounding of a value Decimal can represent, and an integer-digit allowance of 29 or more
-  adds no limit within that representation. Target-scale padding is not promised. The parser's
-  explicit built-in CAST precision range remains 1..28; domains and column metadata can carry
-  wider bounds without expanding Decimal's storage range. The shared routine rejects precision
-  below 1 or scale outside 0..precision, preserving DEFAULT's modifier validation while
-  accepting valid scales of 28 or more.
+  A declared scale of 28 requires no rounding of a value Decimal can represent. Target-scale
+  padding is not promised. Declaration validation now gives CAST, domains and column metadata
+  the same precision range 1..28 and scale range 0..precision (#1438). Bare NUMERIC retains the
+  full Decimal representation, including representable 29-digit coefficients. Converter tests
+  still cover rounding at the coefficient and scale limits directly, without admitting invalid
+  precision-29 declarations into a catalog.
 - **Errors.** `SqlEvaluationException` retains the existing message-prefix convention:
   `COHSQLE012` for character assignment overflow and the existing `COHSQLE002` for numeric
   modifier overflow or an inexact Decimal representation after any target-scale rounding.
@@ -1053,13 +1102,16 @@ wire refusal. A marker-free catalog containing one genuine old counter tuple is 
 duplicate counters, unknown record kinds, and malformed or ambiguous markers remain corruption.
 
 The marker retains the canonical document for migration history, alongside `{hash, generation}`.
-Equal declared hash and current generation return immediately: no ownership scan, snapshot,
+After the open-time document format gate, equal declared hash and current generation return immediately: no ownership scan, snapshot,
 document deserialization, serialization or SHA-256 in the provisioning phase. Declaration identity
 is computed before I/O in Build phase 3; immutable retained `SqlSchema` declarations cache their
 compiled schema, and compiled schemas cache their document and hash. A fresh declaration still has
 to be compiled and hashed once. The instance-local `CatalogWalkCount` hook covers every provisioner
 catalog traversal; its own assembly's tests assert zero on the second Build. Schema's own tests
 assert its identity computation counters stay at one on repeated reads and compilation.
+The provisioner caches the checked immutable document references; replacing a marker or pending
+target through the catalog requires another format check. Current-format damaged markers still
+follow the existing live-catalog reconstruction path; another document format never does.
 The required open-time binding pass also retains its first unresolved CHECK and domain at that
 generation. Post-provisioning declaration validation reuses those results until DDL changes the
 generation, avoiding two further table walks on an unchanged Build. Its internal
@@ -1089,8 +1141,8 @@ emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain expl
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
 on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
 Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
-has the same canonical document and hash. The document remains `cohesion/database-schema/v4`:
-this changes declaration syntax and literal admission, not the document shape.
+has the same canonical document and hash. The document now uses `cohesion/database-schema/v5`
+for normalized decimal identities; typed defaults keep the shape introduced in B2.
 The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
 `SqlPlanExecutor.ResolveDefault` conversion as CREATE TABLE and ADD COLUMN, which uses
@@ -1100,7 +1152,7 @@ Build with `COHSQLP001` before either file set exists; finite and underflow chec
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
-`cohesion/database-schema/v4`, because strict v3 readers cannot read `defaultLiteral`. Null defaults
+`cohesion/database-schema/v5`; B2 introduced `defaultLiteral` in v4. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
@@ -4391,7 +4443,7 @@ records only typed objects, whose structure scripts cannot change; it is safe to
 generation after script execution or receipt-chain recovery.
 
 Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
-data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v4 typed
+data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v5 typed
 artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
 Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
 SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views

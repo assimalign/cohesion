@@ -118,8 +118,8 @@ compiler's `DuplicateDeclaration`).
 
 `table.Column(selector, sqlType)` and `schema.Type<T>` (E3, design §5.7) extract with the same
 parity. The SQL type is a compile-time string constant kept as written (`COHDBSDK104` when it is
-not one), checked only for the runtime's shape, an identifier with up to two unsigned integer
-arguments (`COHDBSDK106`), and a member declared with two names is `COHDBSDK105`. **Domains are
+not one), checked for the runtime's identifier/Int32 argument shape and shared modifier
+ranges (`COHDBSDK106`), and a member declared with two names is `COHDBSDK105`. **Domains are
 invisible to the task** as functions are: a column of a domain the application registers on its
 engine builder compiles into the artifact, and the engine's build resolves the name before it
 touches a file. `schema.Type<T>(t => t.Decimal(p, s))` is a domain named for `T`'s simple name, as
@@ -148,7 +148,7 @@ Either verb selects a column on its own, before or after `Column`, including an 
 type or inferred domain. Repeating the same rendered literal is idempotent; a different literal
 for that column is `COHDBSDK105`. Only `DefaultLiteral` reaches the document: a typed default and
 `DefaultSql` containing its exact rendered literal produce identical documents and hashes. The
-shape remains v4. The SDK/runtime parity tests cover every constant kind, all enum backing widths,
+shape retains the B2 members; #1438 advances the format to v5 for decimal normalization. The SDK/runtime parity tests cover every constant kind, all enum backing widths,
 nullable values, implicit numeric conversions, constant concatenation, named arguments, domains,
 and exact document/hash equality. Foreign-key compatibility compares the compiled storage and
 SQL type metadata, so an enum and its integer storage, or char and string, match when their
@@ -164,7 +164,7 @@ The diagnostics:
 | `COHDBSDK103` | A schema, table, type or principal callback is not an inline lambda. |
 | `COHDBSDK104` | An operation the DSL does not support, or a CHECK's SQL text, column's SQL type, or DefaultSql literal that is not a non-empty constant. |
 | `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, a conflicting column type or DEFAULT literal, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
-| `COHDBSDK106` | A semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
+| `COHDBSDK106` | Invalid type modifiers naming the table/column or domain; or a semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
 | `COHDBSDK108` | `SqlSchemaBuilder.Principal`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal and grant DDL exists. (`SqlSchemaBuilder.Type<T>` was refused here too until E3 made it a domain.) |
 | `COHDBSDK109` | A typed Default value is not a C# compile-time constant; use DefaultSql with a constant SQL literal. |
 
@@ -177,9 +177,14 @@ The outputs are:
 | `CohesionDatabaseSchema` items | Set by `CohesionDatabaseCompileSchema` | One per database the manifest lists (its schema document, full path), with `DatabaseName` and `HashPath` metadata, for downstream targets. |
 | `Schemas` task output | `CompileDatabaseSchemaTask` | One item per database, named for it, with `Hash`, `SchemaPath` and `HashPath` metadata. |
 
-The document format is `cohesion/database-schema/v4`, shared with the runtime compiler and the
-migration baseline writer. B2's `defaultLiteral` member changes the strict document contract;
-earlier formats are refused, including v3. The document contains semantic data only, never source paths or timestamps. The task writes with
+The document format is `cohesion/database-schema/v5`, shared with the runtime compiler and the
+migration baseline writer. B2 introduced `defaultLiteral` in v4; #1438 advances the format again
+because normalizing an omitted decimal scale changes a raw v4 NUMERIC(p) document's identity.
+Earlier formats are refused before normalization, including v4. Rebuild artifacts and recreate
+databases recording an earlier schema format; no old hash or identity is reconciled. Reading an
+old artifact or migration baseline reports COHDBSDK206 with the schema.format refusal and remedy,
+without writing a migration. Runtime deserialization uses SqlSchemaValidationException with
+InvalidDocument. The document contains semantic data only, never source paths or timestamps. The task writes with
 LF line endings and avoids replacing unchanged outputs. The manifest is the only record of which
 files in the directory are the SDK's: the task deletes the `.schema.json` and `.schema.sha256`
 files of a database its previous manifest listed and that is no longer declared, and leaves every
@@ -238,7 +243,7 @@ dependency closure.
 
 ## E4 script artifact decision
 
-Iteration 1 keeps declared scripts outside the v4 typed schema. They require runtime statement
+Iteration 1 keeps declared scripts outside the v5 typed schema. They require runtime statement
 receipts and checksummed history that generated SQL alone cannot establish. The extractor emits
 COHDBSDK110 for SqlDatabaseBuilder.Script, preventing incomplete artifacts: migration files that
 carried a script without its receipt would leave a Verify-mode application unable to start, and a
@@ -256,3 +261,31 @@ engine test `BuildAsync_VerifyWithoutScriptsAfterScriptedApply_ShouldAcceptTheSc
 this. Making the pipeline itself script-aware (an artifact carrying each script's name, digest and
 body, applied through a receipt-aware runner rather than plain SQL files) is
 [#1504](https://github.com/assimalign/cohesion/issues/1504).
+
+## Type modifier parity (#1438)
+
+The extractor links the stateless internal Sql.Language/shared/SqlTypeModifiers through
+CohesionSharedSource, alongside the schema package and engine. Column SQL text and Decimal(p,s)
+use one mapping and rule (named Decimal arguments bind by parameter name in either order):
+p 1..28, s 0..p, string/binary length 1..10485760, and FLOAT binary precision 1..53.
+Temporal precision is recognized but unsupported; other types and domain references take no
+modifiers. Omitted bounds stay unbounded. Invalid declarations emit COHDBSDK106
+with their table/column or domain name and source location, and write no schema artifact. The
+compiled-schema validator also covers raw metadata. No new diagnostic id or public API is added;
+valid artifacts and hashes retain runtime parity. Declared scripts remain COHDBSDK110 because
+only runtime provisioning owns their receipts.
+
+Decimal scale normalization is shared too: precision with an omitted scale means zero. The
+compiled-schema snapshots normalize raw records before validation and hashing, so SDK artifacts,
+runtime declarations and raw compiled metadata cannot disagree about that default.
+
+The same SQL text rule admits FLOAT(p) for 1..53 bits (1..24 selects Float32, 25..53 Float64 at
+engine resolution). Temporal precision is recognized but unsupported and reports COHDBSDK106
+with COHDBL001 in its detail, naming the column and modifier; malformed or invalid modifiers
+retain SQL0005 in that detail. No artifact is written on either refusal. The existing diagnostic
+ids and runtime/SDK canonical-document parity remain unchanged.
+
+INTERVAL field qualifiers and ranges, with optional precision on SECOND, are recognized by the
+same linked grammar. Extraction reports COHDBSDK106 with COHDBL001, naming the column and full
+qualifier, even without precision; no artifact is written. DIALECT.md lists all accepted spellings
+and the unimplemented field restriction/rounding semantics.

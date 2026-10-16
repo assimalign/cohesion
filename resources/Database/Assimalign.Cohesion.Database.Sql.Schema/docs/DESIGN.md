@@ -34,10 +34,12 @@ area root's model-agnostic `CompiledSchema`, which carried an engine `Model` and
 canonical document and its SHA-256 on every read (one apply read each twice). The root keeps no
 schema type now; the compiled schema owns its `Format`, `Name` and `AllowsDestructiveChanges`, and
 computes `CanonicalDocument` and `Hash` once, on first read (the schema is immutable, so a race on
-the first read costs only duplicate work). Dropping `Model` changed the document, so the format is
-`cohesion/database-schema/v2`; a `v1` document no longer deserializes (the format check refuses it,
-and its `model` member is unmapped), and a database whose recorded state is `v1` is replanned from
-its catalog snapshot. The root's `SchemaMigrationResult` moved here as `SqlSchemaMigrationResult`.
+the first read costs only duplicate work). Dropping `Model` changed the document, so the format moved to
+`cohesion/database-schema/v2` at the time (a `v1` document no longer deserialized, and a database
+whose recorded state was `v1` was replanned from its catalog snapshot). The format is now
+`v5`: #1438 normalized an omitted decimal scale, which changes the canonical document, so every
+earlier document — an SDK artifact, an applied marker or a pending migration target — is refused
+by the format check rather than replanned. The root's `SchemaMigrationResult` moved here as `SqlSchemaMigrationResult`.
 The C# lambda `Function<…>` and `Trigger<…>` declarations, the `Extension` value, their compiled
 records (`CompiledSchemaFunction`, `CompiledSchemaTrigger`, `CompiledSchemaExtension`,
 `CompiledSchemaParameter`), `SqlTriggerContext`, `SqlTriggerEvent` and the
@@ -81,12 +83,12 @@ scale). `table.Column(selector, sqlType)` declares a column of a named SQL type,
 engine registers (`"email"`) or a built-in type name with its arguments (`"VARCHAR(320)"`): the
 column keeps its member's storage type and the name as written, without length, precision or
 scale, and a member declared with two names is refused at the second. This package does not know
-the engine's types, so it checks only the name's shape (an identifier, optionally one or two
+the engine's domain registrations; it checks the built-in modifier ranges as well as the name's shape (an identifier, optionally one or two
 unsigned integer arguments; `CompiledSchemaTypeNames`), which also keeps the name safe to write
 into DDL; the SQL engine's build resolves it, built-in names first, and refuses an unknown name or
 a type not stored as the member is, before it touches any file. Because a declared type's name and
 a column's type changed meaning, E3 moved the document format to `cohesion/database-schema/v3`; a `v2`
-document no longer deserializes, so a recorded `v2` state is replanned once from the catalog. The
+document no longer deserializes; recorded documents of earlier formats are refused at open. The
 validator accepts a column `CustomType` the schema does not declare when it has the shape (the
 engine's domain or a built-in name), and checks the storage type of one it declares. The planner
 plans `AddDomain` before the tables (so columns can be declared with the domain) and `DropDomain`
@@ -138,13 +140,14 @@ for retained declarations, while source-extracted schemas express those values w
 
 Typed defaults and raw defaults with the same rendered literal produce identical canonical
 documents and hashes. Arbitrarily different raw spellings are not normalized in the document.
-Only the authoring API and rendering change in round 2: the document's shape and format stay v4.
+Only the authoring API and rendering changed in B2 round 2; #1438 later advances the format to v5.
 
 The optional `defaultLiteral` member is omitted when null. Adding it changes the strict document
-contract, so B2 uses `cohesion/database-schema/v4` for every schema, with or without defaults.
+contract, so B2 introduced `cohesion/database-schema/v4` for every schema, with or without defaults.
 Earlier documents are refused; no v3 compatibility reader or upgrade is provided. Provisioning
-reconstructs the live catalog before recording the v4 document and its new hash. The SDK compiler
-and migration baseline writer use this same format. `NULL` text remains part of a declaration's identity even
+refuses their recorded documents before any hash comparison or catalog reconstruction. The SDK compiler
+and migration baseline writer share the current v5 format with runtime schema compilation.
+`NULL` text remains part of a declaration's identity even
 though SQL gives it the same database behavior as an absent default. Adding or removing a
 default changes column equivalence, so the planner carries both definitions in `AlterColumn`
 instead of reporting false convergence; the current dialect still refuses that operation.
@@ -255,7 +258,54 @@ I/O-free.
 ## E4 scripts
 
 SqlDatabaseBuilder.Script belongs to the database declaration after typed apply. SqlCompiledSchema
-stays v4 and typed defaults remain literal-only. Script history has its own ordered-set digest
+uses v5 and typed defaults remain literal-only. Script history has its own ordered-set digest
 and catalog-generation marker, so unchanged reconciliation hashes nothing. Script-created tables
 and indexes are excluded from typed snapshot reconstruction; deleting script code undoes nothing.
 See Database.Sql's E4 section for recovery and the inline-execution/SDK owner-review decisions.
+
+## Modifier validation (#1438)
+
+The builders and compiled-schema validator link Sql.Language/shared/SqlTypeModifiers through
+CohesionSharedSource, as does Sdk.Database. The helper owns the built-in mapping, modifier ranges
+and argument splitter; it is stateless, internal and reflection-free. No Language assembly
+reference or public bridge is needed. Column(selector, sqlType) refuses an invalid modifier
+immediately with SqlSchemaValidationException, UnsupportedType, naming table.column.
+SqlTypeBuilder.Decimal uses the same exception and names the domain (the CLR type's simple name).
+Its previous ArgumentOutOfRangeException becomes the schema's existing coded error category.
+CompiledSchemaColumn fields and CustomType text, and CompiledSchemaType precision/scale, are
+validated when a SqlCompiledSchema is constructed or deserialized, closing the raw-record path.
+
+Precision is 1..28, scale 0..precision (an omitted scale means zero with an explicit precision),
+and explicit string/binary lengths are 1..10485760; omitted bounds remain unbounded. Domains take
+no modifiers at use sites. Supported typed names remain identifiers; interval field qualifiers are
+also recognized solely to report COHDBL001. Integer arguments
+now use the parser's Int32 rule rather than the previous nine-digit shape check. DIALECT.md is the
+range contract. C# int/string parameters and the raw compiled
+records cannot express these ranges at compile time; runtime declaration validation and the SDK's
+COHDBSDK106 provide parity without new public signatures. COHSQLS is the engine's script-history
+family, not this package's validation codes.
+
+Compiled table and schema snapshots normalize raw decimal columns and domains with a precision
+but no scale to scale zero, including records made with `with` and deserialized documents.
+The shared `NormalizeScale` rule also serves typed builders, the validator, SQL resolution,
+provisioning and SDK extraction. An omitted scale and explicit zero therefore have the same
+canonical document and hash; a bare decimal keeps both fields null.
+
+The current format is `cohesion/database-schema/v5`, shared with Sdk.Database. Although the JSON
+members are unchanged, normalization changes the identity of a v4 raw NUMERIC(p) column whose
+precision was set and scale was null. Deserialization checks the format before constructing any
+schema objects. Earlier formats fail with SqlSchemaValidationException, InvalidDocument at
+schema.format, naming the found/current formats and the remedy: rebuild artifacts and recreate
+affected databases. Applied markers and pending targets retain the document's format, so SQL
+gates them at open and before Apply/Verify compares any hashes. No old hash is validated or
+reconciled, and no catalog version bump or upgrade path is needed.
+
+SQL type text accepts FLOAT(p) for 1..53 bits. The engine resolves 1..24 as Float32 and 25..53 as
+Float64 and verifies that it matches the member's CLR storage; the compiled declaration retains
+its SQL text. Temporal precision is recognized but unsupported: the existing UnsupportedType
+exception carries COHDBL001 and names the table/column and modifier, for builders and raw compiled
+CustomType metadata alike. Invalid FLOAT precision retains SQL0005 in the validation detail.
+
+INTERVAL field qualifiers use the shared PostgreSQL field/range grammar, including SECOND(p).
+Builders and raw CustomType metadata report UnsupportedType with COHDBL001 naming table/column
+and the full qualifier, with or without precision. Field restrictions and rounding do not execute.
