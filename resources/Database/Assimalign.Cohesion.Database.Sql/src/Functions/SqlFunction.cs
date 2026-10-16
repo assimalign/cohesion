@@ -218,7 +218,7 @@ public abstract class SqlFunction
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool HasDeclaredResultType(DatabaseType type, scoped in SqlArguments arguments)
         => type == _resultType
-            ? _resultType != DatabaseType.Null || !IsNeverNull
+            ? _resultType != DatabaseType.Character && (_resultType != DatabaseType.Null || !IsNeverNull)
             : (uint)_elementIndex < (uint)arguments.Count && arguments.TypeAt(_elementIndex) == type;
 
     /// <summary>
@@ -236,6 +236,11 @@ public abstract class SqlFunction
         if (result.IsNull)
         {
             return IsNeverNull ? throw ResultMismatch("NULL", "it declares that it never returns NULL") : result;
+        }
+
+        if (_resultType == DatabaseType.Character && result.Type == DatabaseType.Character)
+        {
+            return SqlValue.FromObject(SqlCastConverter.ApplyModifiers(result.ToObject()!, ReturnType.Storage));
         }
 
         string returned = SqlType.NameOf(result.Type);

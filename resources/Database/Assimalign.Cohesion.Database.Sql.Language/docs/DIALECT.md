@@ -44,7 +44,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `UPDATE` | Supported | multi-column `SET`, `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, without an aggregate |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening checks existing live values and refuses changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
@@ -1163,7 +1163,7 @@ database.
 
 `DATA_TYPE` uses canonical names for catalog type identities; it does not retain
 the original alias spelling. For example, `INT`/`INTEGER` report `INTEGER`,
-`DECIMAL`/`NUMERIC` report `NUMERIC`, and `CHAR`/`VARCHAR`/`TEXT` report
+`DECIMAL`/`NUMERIC` report `NUMERIC`, and `CHAR` reports `CHARACTER` with its declared length; `VARCHAR`/`TEXT` report
 `CHARACTER VARYING`. The remaining canonical names are `BOOLEAN`, `TINYINT`,
 `SMALLINT`, `BIGINT`, `REAL`, `DOUBLE PRECISION`, `BINARY VARYING`, `DATE`,
 `TIME`, `TIMESTAMP`, `TIMESTAMP WITH TIME ZONE`, `INTERVAL`, `UUID`, `JSON`, and
@@ -1271,7 +1271,8 @@ minimum. Inside `CAST` an unrepresentable literal stays a CAST failure.
 | `FLOAT[(p)]` | `Float32` for p = 1..24; `Float64` for p = 25..53 or no argument |
 | `FLOAT8`, `DOUBLE` | `Float64` |
 | `DECIMAL[(p[,s])]`, `NUMERIC[(p[,s])]` | `Decimal` (single argument = precision) |
-| `CHAR[(n)]`, `CHARACTER[(n)]`, `VARCHAR[(n)]`, `TEXT[(n)]` | `String` |
+| `CHAR[(n)]`, `CHARACTER[(n)]` | `Character` (bare CHAR is CHAR(1)) |
+| `VARCHAR[(n)]`, `TEXT[(n)]` | `String` |
 | `BINARY[(n)]`, `VARBINARY[(n)]`, `BLOB[(n)]`, `BYTEA[(n)]` | `Binary` |
 | `DATE` / `TIME` / `TIMESTAMP`, `DATETIME` / `TIMESTAMPTZ` / `INTERVAL` | `Date` / `Time` / `DateTime` / `DateTimeOffset` / `TimeSpan` |
 | `UUID`, `GUID` | `Guid` |
@@ -1307,7 +1308,8 @@ CAST, declared scripts, and typed schemas (including SDK extraction).
 | Type names | Accepted arguments | No arguments |
 | --- | --- | --- |
 | NUMERIC, DECIMAL | Precision p = 1..28; optional scale s = 0..p; omitted scale is zero | No declared precision or scale; values must still fit System.Decimal |
-| VARCHAR, CHAR, CHARACTER, TEXT | One length n = 1..10485760 Unicode scalar values | No declared length limit |
+| CHAR, CHARACTER | One length n = 1..10485760 Unicode scalar values | CHAR(1) |
+| VARCHAR, TEXT | One length n = 1..10485760 Unicode scalar values | No declared length limit |
 | BINARY, VARBINARY, BLOB, BYTEA | One length n = 1..10485760 bytes | No declared length limit |
 | FLOAT | One binary precision p = 1..53: 1..24 resolves to REAL (Float32), 25..53 to DOUBLE PRECISION (Float64) | Float64 |
 | TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL; DATETIME alias | One nonnegative precision is recognized but unsupported (COHDBL001) | The type's normal meaning |
@@ -1315,8 +1317,8 @@ CAST, declared scripts, and typed schemas (including SDK extraction).
 | Every other built-in type and every domain | None (INT(5), BOOLEAN(1) and domain(1) are invalid) | The type's normal meaning |
 
 Arguments are one or two unsigned integer literals within Int32; negative, fractional,
-overflowing, empty or extra arguments are invalid. CHAR and CHARACTER remain VARCHAR
-aliases with the same length rule; no blank padding is introduced. The explicit string
+overflowing, empty or extra arguments are invalid. CHAR and CHARACTER share the length validator
+with VARCHAR, but have their own padded type identity. The explicit string
 ceiling follows PostgreSQL's anychar_typmodin (src/backend/utils/adt/varchar.c:33-57)
 and MaxAttrSize (src/include/access/htup_details.h:620-626). The same ceiling for binary
 makes explicit bounded declarations consistent; a bound does not allocate a buffer.
@@ -1394,11 +1396,72 @@ lengths can compare equal under the index's collation.
   in `varchar()` and `bpchar()` (`src/backend/utils/adt/varchar.c:264-268`,
   `:605-647`). A bound never splits a surrogate pair. Bare VARCHAR and TEXT have no
   declared length limit.
-- **CHAR padding:** CHAR and CHARACTER remain unpadded VARCHAR aliases. A short
-  value stored in CHAR(3) remains `'a'`, not `'a  '`, in assignment and CAST. This
-  differs from PostgreSQL's fixed-character padding
-  (`src/backend/utils/adt/varchar.c:330-343`). The shared type and column metadata
-  keep no separate CHAR identity; this fix retains that representation.
+- **CHAR padding:** CHAR and CHARACTER are the distinct shared `Character` type. A short
+  value stores and returns ASCII spaces through n Unicode scalar values. Bare CHAR is CHAR(1).
+  Comparison, sorting, grouping, DISTINCT, hashes, index keys, UNIQUE/primary keys and CHAR foreign
+  keys ignore trailing U+0020 before applying the collation; tabs and nonbreaking spaces remain
+  significant. An untyped string literal or bound parameter compared with CHAR acquires CHAR
+  comparison semantics without assignment truncation. A simple CASE literal input remains TEXT,
+  as PostgreSQL forces it to TEXT before comparing WHEN values (src/backend/parser/parse_expr.c:1668-1669).
+  A typed VARCHAR/TEXT operand retains its
+  spaces, with the CHAR side converted to text. CHAR-to-TEXT/VARCHAR casts strip trailing spaces;
+  CHAR-to-CHAR casts repad to the target length. Concatenation converts CHAR to text first, so
+  `CAST('a' AS CHAR(3)) || 'b'` yields `'ab'`. LENGTH ignores padding and counts Unicode scalar
+  values for CHAR (the existing TEXT/VARCHAR LENGTH counts UTF-16 code units).
+  LIKE sees the stored padded left operand; its pattern is text, so a CHAR pattern is stripped.
+  Thus CHAR(3) 'a' fails LIKE 'a', but matches LIKE 'a  ' and LIKE 'a%'. There is no separate
+  pattern operator class or OCTET_LENGTH builtin in this dialect. The compatibility invariant
+  collation's LIKE wildcard still advances UTF-16 code units; the three index-backed collations
+  advance Unicode scalars. PostgreSQL's bpchar pattern
+  ordering operators trim spaces too; they do not define LIKE's input conversion.
+  Native scalar and aggregate CHAR arguments apply their declared lengths even when an argument
+  is already CHAR, before STRICT skips a NULL row. A native domain check also receives the
+  CHAR width its own parameter declares. CHECK accepts CHAR-returning functions in character
+  comparisons, BETWEEN and IN. Runtime unary-sign errors report Character, as planning errors do.
+  Domains over CHAR and CHAR function
+  parameters/results retain and enforce their declared
+  length, including after reopen. This differs from PostgreSQL function signatures, which discard
+  typmods when resolving parameter/result type OIDs (functioncmds.c:114, :250, :276).
+  Mixed CHAR and TEXT/VARCHAR CASE or COALESCE results use TEXT and strip CHAR branches.
+  BETWEEN resolves each comparison independently (`src/backend/parser/parse_expr.c:1325-1341`),
+  so `'a ' BETWEEN CAST('a' AS CHAR(3)) AND CAST('a' AS TEXT)` returns FALSE.
+  IN binds candidates containing table-column references as independent comparisons, including references
+  inside calls, casts and other expressions (`parse_expr.c:1163-1176,1253-1295`). For a table column
+  `c CHAR(3)` containing `'a'`, `'a ' IN (c, CAST('b' AS TEXT))` therefore returns TRUE, like its
+  `= OR =` expansion. Only when more than one remaining candidate has no table-column reference does IN
+  choose a common character type, considering the left operand first (`:1182-1190`). The first
+  non-unknown CHAR/TEXT/VARCHAR type wins: the one-way implicit-cast replacement rule in
+  `parse_coerce.c:1397-1440` cannot replace any of these with another, because
+  `src/include/catalog/pg_cast.dat:313-325` permits implicit casts in both directions. Untyped string
+  literals/statement parameters do not set the type; all-unknown inputs use TEXT (`parse_coerce.c:1444-1456`).
+  SQL function parameters and domain VALUE are typed values in that common group, including when
+  nested inside calls or other expressions. PostgreSQL binds them as `Param`
+  (`src/backend/executor/functions.c:491-505`) and `CoerceToDomainValue`
+  (`src/backend/commands/typecmds.c:3603-3618`), neither a table Var. Consequently
+  `'a ' IN (CAST('b' AS TEXT), p)` returns FALSE for a CHAR parameter `p` containing `'a'`.
+  A domain `CHECK ('a ' IN (text_b(), VALUE))`, where `text_b()` returns TEXT `'b'`, rejects
+  `'a'` for the same reason: the common TEXT comparison sees trimmed CHAR `'a'`.
+  Domain CHECK rejects FALSE and accepts UNKNOWN (`execExprInterp.c:4498-4508`).
+  Thus `'a ' IN (CAST('b' AS CHAR(3)), CAST('a' AS TEXT))` returns TRUE; reversing those candidates
+  returns FALSE. VARCHAR first preserves significant text spaces too. A CHAR left operand wins
+  before either: `CAST('a' AS CHAR(3)) IN ('a ', CAST('b' AS TEXT))` returns TRUE. Common coercion
+  applies no operand's declared length (`parse_coerce.c:1583-1585`); CHAR equality ignores trailing
+  spaces on both sides (`varchar.c:746-776`), while TEXT equality retains them (`varlena.c:1429-1480`).
+  ALTER COLUMN validates every CHAR length change, widening included, and refuses changes that
+  would repad existing non-null values. An unchanged length can change nullability when existing
+  values satisfy it. Empty or all-null columns can change length. Table rewrites remain deferred
+  to #1447; both rewrite refusals name the column and direct callers to an explicit table-copy
+  migration. Code-first validation on populated tables runs on the provisioning worker.
+  Branch string literals retain this dialect's TEXT identity, unlike PostgreSQL's unknown literals.
+  CHARACTER VARYING, bpchar, :: casts and typed string prefixes are not accepted spellings; use
+  VARCHAR and CAST.
+  The overflow code is COHSQLE012/22001; its shared message still names character varying(n).
+  PostgreSQL anchors: varchar.c:130 (input), :219 (padded output), :271 (explicit coercion),
+  :673-712 (trimmed LENGTH versus padded octet length), :746, :912, :933, :991 (comparison,
+  sorting and hashing), :1112-1119 (pattern ordering); pg_cast.dat:318-325 and pg_proc.dat:1178
+  (trimmed text conversion), pg_proc.dat:3669-3670 (bpcharlike uses textlike),
+  gram.y:15114-15119 (bare CHAR defaults to one). Paths are under PostgreSQL src/backend/utils/adt,
+  src/include/catalog, src/backend/commands and src/backend/parser respectively.
 - **NUMERIC(p,s), DECIMAL(p,s):** round to s fractional digits, with midpoint ties
   away from zero, then reject a rounded magnitude of `10^(p-s)` or more with
   `COHSQLE002`, SQLSTATE 22003 (`numeric field overflow`). NUMERIC(p) and DECIMAL(p)
@@ -1524,9 +1587,9 @@ bounds.
   text still cannot fit Decimal exactly, or unscaled text cannot fit it exactly,
   conversion fails with the same `COHSQLE002` code.
   The output does not promise padding to the declared scale.
-- **Strings:** all four string aliases permit an optional length
-  n from 1 through 10485760; bare aliases have no CAST length limit. Length counts Unicode scalar values.
-  Longer results truncate at a character boundary; CHAR/CHARACTER do not pad. The
+- **Strings:** CHAR/CHARACTER and VARCHAR/TEXT permit an optional length
+  n from 1 through 10485760; bare CHAR is CHAR(1), while bare VARCHAR/TEXT have no CAST length limit.
+  Length counts Unicode scalar values. Longer results truncate at a character boundary; CHAR pads shorter results. The
   binary aliases permit the same optional length in bytes. Every other built-in
   target, and a domain, takes no parameters.
 - **Diagnostics and metadata:** a name that is not a built-in type and that the
@@ -1751,7 +1814,7 @@ text converted to the column type. Enums use their numeric storage values.
 `table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
 for example `DefaultSql(row => row.Placed, "'2026-01-01'")`; the SQL typed prefix
 `DATE '2026-01-01'` remains unsupported. Both declarations store the rendered literal text in the
-`cohesion/database-schema/v5` document, so equal text gives the same hash. This format normalizes
+`cohesion/database-schema/v6` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
 an omitted decimal scale to zero when precision is present. Earlier artifacts, applied markers
 and pending targets are refused before hash comparison (SqlSchemaValidationException,
 InvalidDocument at schema.format; COHDBSDK206 for SDK migration input). Rebuild artifacts and
@@ -1852,4 +1915,4 @@ TABLE against a typed table, and DROP INDEX against a typed index (including its
 are refused before Build opens or changes the database. Scripts may create and later alter their
 own tables, create their own indexes on typed tables, and run DML against typed tables.
 Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
-SDK v5 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
+SDK v6 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.

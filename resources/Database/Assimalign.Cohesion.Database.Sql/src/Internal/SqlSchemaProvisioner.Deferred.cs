@@ -8,6 +8,7 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -51,7 +52,7 @@ internal sealed partial class SqlSchemaProvisioner
                 continue;
             }
             bool scales = operation.Kind is SqlSchemaMigrationOperationKind.AddIndex or SqlSchemaMigrationOperationKind.AddConstraint
-                || operation.Kind == SqlSchemaMigrationOperationKind.AlterColumn && Tightens(operation)
+                || operation.Kind == SqlSchemaMigrationOperationKind.AlterColumn && RequiresValueValidation(operation)
                 || operation.Kind == SqlSchemaMigrationOperationKind.AddColumn &&
                     (operation.Column is { IsNullable: false } || operation.Column?.CustomType is { } domain &&
                         _database.Engine.Types.Find(domain)?.Check is not null);
@@ -77,7 +78,7 @@ internal sealed partial class SqlSchemaProvisioner
         return deferred;
     }
 
-    private bool Tightens(SqlSchemaMigrationOperation operation)
+    private bool RequiresValueValidation(SqlSchemaMigrationOperation operation)
     {
         if (operation.Column is not { } column || operation.PreviousColumn is not { } previous)
         {
@@ -86,6 +87,7 @@ internal sealed partial class SqlSchemaProvisioner
         var type = ResolveColumnType(column, _database.Engine.Types, out _);
         var previousType = ResolveColumnType(previous, _database.Engine.Types, out _);
         return previous.IsNullable && !column.IsNullable ||
+            type.Type == DatabaseType.Character && type.MaxLength != previousType.MaxLength ||
             type.MaxLength is { } length && (previousType.MaxLength is null || length < previousType.MaxLength) ||
             type.Precision is { } precision && (previousType.Precision is null || precision < previousType.Precision);
     }

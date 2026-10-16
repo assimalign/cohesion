@@ -890,12 +890,14 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="table">The table version the predicate constrains.</param>
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
+    /// <param name="bindingContext">Whether the named slots are table columns or domain VALUE.</param>
     /// <returns>The resolved identities of its function calls, in expression preorder.</returns>
     /// <exception cref="DatabaseException">The predicate does not bind or is not a valid CHECK.</exception>
     internal static IReadOnlyList<string> ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions)
+        SqlFunctionEnvironment functions, SqlBindingContext bindingContext = SqlBindingContext.Table)
     {
-        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions);
+        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions,
+            bindingContext: bindingContext);
         SqlPlanner.ValidateExpression(expression, scope);
         new SqlCheckSyntax(table, scope, declaring: true).Validate(expression, requireBoolean: true);
         return SqlDefinitionBinder.FunctionCalls(expression, scope);
@@ -1002,7 +1004,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     throw new DatabaseException($"FOREIGN KEY '{name}' requires matching column types.");
                 }
-                if (table.Columns[childOrdinal].Type.Type == DatabaseType.String
+                if (table.Columns[childOrdinal].Type.Type is DatabaseType.String or DatabaseType.Character
                     && (table.Columns[childOrdinal].Collation ?? _catalog.DefaultCollation)
                         != (parent.Columns[parentOrdinal].Collation ?? _catalog.DefaultCollation))
                 {
@@ -1197,11 +1199,12 @@ internal sealed partial class SqlPlanExecutor
             var (call, type, other) = leftCall is not null ? (leftCall, leftType, rightType) : (rightCall!, rightType, leftType);
             throw new SqlFunctionResultMismatchException(call, SqlType.NameOf(type), $"a value that compares with {SqlType.NameOf(other)}");
 
-            // The value order's own rule (SqlValueComparer): the same type, or two numbers. JSON is read as text and JSONB as bytes.
+            // The value order's own rule (SqlValueComparer): the same type, two numbers or two character
+            // types. JSON is read as text and JSONB as bytes.
             static bool Comparable(DatabaseType first, DatabaseType second)
             {
-                first = first switch { DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => first };
-                second = second switch { DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => second };
+                first = first switch { DatabaseType.Character or DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => first };
+                second = second switch { DatabaseType.Character or DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => second };
                 return first == second || IsNumber(first) && IsNumber(second);
             }
         }

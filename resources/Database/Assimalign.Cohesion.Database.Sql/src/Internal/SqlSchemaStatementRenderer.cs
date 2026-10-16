@@ -224,6 +224,7 @@ internal static class SqlSchemaStatementRenderer
             DatabaseType.Float32 => "REAL",
             DatabaseType.Float64 => "DOUBLE",
             DatabaseType.Decimal => DecimalTypeName(column),
+            DatabaseType.Character => SizedTypeName("CHAR", "CHAR", column.MaxLength ?? 1),
             DatabaseType.String => SizedTypeName("VARCHAR", "TEXT", column.MaxLength),
             DatabaseType.Binary => SizedTypeName("VARBINARY", "BLOB", column.MaxLength),
             DatabaseType.Date => "DATE",

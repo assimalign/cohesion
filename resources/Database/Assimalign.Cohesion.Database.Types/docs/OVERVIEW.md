@@ -9,8 +9,9 @@ this project so ordering is consistent across every database model.
 ## Scope
 
 - **Type identity** — the `DatabaseType` scalar set (boolean, integers, floats,
-  decimal, string, binary, date/time family, GUID, JSON) and `DatabaseTypeInfo`
-  constraints (length/precision/scale).
+  decimal, fixed-length character, string, binary, date/time family, GUID, JSON) and
+  `DatabaseTypeInfo` constraints (length/precision/scale). Character retains a distinct
+  catalog/wire metadata identity; SQL stores padded strings and trims their index keys.
 - **Collation** — explicit, named, persisted-by-id string ordering rules:
   `Collation.Binary` (code-point order), `CaseInsensitive` (Unicode simple case fold),
   and `CaseAccentInsensitive` (canonical decomposition, mark removal, case fold).

@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Execution — Design
 
+## Declared result length (#1437)
+
+QueryColumn includes optional MaxLength as result metadata. It describes the declared character
+count (or binary byte limit), not the size of an individual value. SQL uses it with the shared
+Character identity to report CHAR(n) faithfully in process and in its result header; execution
+and padding rules remain in the SQL model.
+
 The shared request/result vocabulary (area architecture:
 [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). Planners,
 operators and model semantics deliberately live outside it — this layer owns the *shape* of

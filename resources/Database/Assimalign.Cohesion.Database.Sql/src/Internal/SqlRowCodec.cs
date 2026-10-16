@@ -52,7 +52,8 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 11 adds durable table reclamation intents and owner-tagged index pages;
+    /// the catalog: 12 gives CHAR its own catalog identity and trims its index keys;
+    /// 11 added durable table reclamation intents and owner-tagged index pages;
     /// 10 adds SQL definitions and script receipts; 9 adds durable pending migration intents (49a) to generation-stamped format 8, with
     /// format 7's row and index layout unchanged. Format 7 = format 6's rows, index trees and physical column layout, with
     /// each column's domain name in its table's catalog record (table-record extension
@@ -71,7 +72,7 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 11;
+    internal const int RecordSpaceFormatVersion = 12;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
@@ -233,7 +234,14 @@ internal static class SqlRowCodec
     /// floating keys.
     /// </summary>
     internal static void AppendKeyValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation collation)
-        => AppendValue(writer, type, ToKeyIdentity(value), collation);
+    {
+        if (type == DatabaseType.Character && value is not null)
+        {
+            writer.AppendString(value is SqlCharacter character ? character.Text : ((string)value).TrimEnd(' '), collation);
+            return;
+        }
+        AppendValue(writer, type, ToKeyIdentity(value), collation);
+    }
 
     /// <summary>
     /// Maps a value to the canonical member of its SQL equality class for key
@@ -277,6 +285,7 @@ internal static class SqlRowCodec
             case DatabaseType.Float32: writer.AppendFloat32((float)value); break;
             case DatabaseType.Float64: writer.AppendFloat64((double)value); break;
             case DatabaseType.Decimal: writer.AppendDecimal((decimal)value); break;
+            case DatabaseType.Character: writer.AppendString(((SqlCharacter)value).Value, collation ?? Collation.Binary); break;
             case DatabaseType.String or DatabaseType.Json: writer.AppendString((string)value, collation ?? Collation.Binary); break;
             case DatabaseType.Binary or DatabaseType.JsonBinary: writer.AppendBinary((byte[])value); break;
             case DatabaseType.Date: writer.AppendDate((DateOnly)value); break;
@@ -316,6 +325,7 @@ internal static class SqlRowCodec
             DatabaseType.Float32 => reader.ReadFloat32(),
             DatabaseType.Float64 => reader.ReadFloat64(),
             DatabaseType.Decimal => reader.ReadDecimal(),
+            DatabaseType.Character => new SqlCharacter(reader.ReadString(out _)),
             DatabaseType.String or DatabaseType.Json => reader.ReadString(out _),
             DatabaseType.Binary or DatabaseType.JsonBinary => reader.ReadBinary(),
             DatabaseType.Date => reader.ReadDate(),

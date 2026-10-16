@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -146,12 +148,43 @@ internal sealed partial class SqlExpressionEvaluator
     {
         var left = Bind(binary.Left, out SqlCollationCandidate leftCollation);
         var right = Bind(binary.Right, out SqlCollationCandidate rightCollation);
+        if (binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan
+            or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual)
+        {
+            left = BindCharacterComparand(binary.Left, left, binary.Right);
+            right = BindCharacterComparand(binary.Right, right, binary.Left);
+        }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
             SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindCharacterComparand(SqlExpression syntax, SqlBoundExpression bound, SqlExpression other)
+    {
+        return BindCharacterComparand(syntax, bound, StaticTypeOf(other));
+    }
+
+    private static SqlBoundExpression BindCharacterComparand(SqlExpression syntax, SqlBoundExpression bound, DatabaseType otherType)
+    {
+        if (otherType != DatabaseType.Character) { return bound; }
+        while (syntax is SqlCollateExpression collate) { syntax = collate.Operand; }
+        // Untyped literals/parameters take the CHAR operand's identity without length coercion.
+        return (syntax, bound) switch
+        {
+            (SqlLiteralExpression { LiteralType: SqlLiteralType.String }, SqlBoundConstant { Value: string text })
+                => new SqlBoundConstant(new SqlCharacter(text)),
+            (SqlParameterExpression, SqlBoundParameter { Value: string text } parameter)
+                => new SqlBoundParameter(parameter.Name, new SqlCharacter(text)),
+            _ => bound,
+        };
+    }
+
+    private SqlBoundExpression CharacterToText(SqlExpression syntax, SqlBoundExpression value)
+        => StaticTypeOf(syntax) == DatabaseType.Character
+            ? new SqlBoundCast(value, "TEXT", SqlType.Text, _functions.Types.ResolveCasts(null, SqlType.Text), _functions.Database, _defaultCollation)
+            : value;
+
     private SqlBoundExpression BindIsNull(SqlIsNullExpression isNull, out SqlCollationCandidate collation)
     {
         var operand = Bind(isNull.Operand, out SqlCollationCandidate operandCollation);
@@ -165,8 +198,14 @@ internal sealed partial class SqlExpressionEvaluator
         var operand = Bind(between.Operand, out SqlCollationCandidate operandCollation);
         var low = Bind(between.Low, out SqlCollationCandidate lowCollation);
         var high = Bind(between.High, out SqlCollationCandidate highCollation);
+        // PostgreSQL parse_expr.c:1325-1333 binds the two comparisons separately.
+        // Neither bound may change the value used to compare against the other.
+        var lowOperand = BindCharacterComparand(between.Operand, operand, between.Low);
+        var highOperand = BindCharacterComparand(between.Operand, operand, between.High);
+        low = BindCharacterComparand(between.Low, low, between.Operand);
+        high = BindCharacterComparand(between.High, high, between.Operand);
         collation = CollationOf(between, [operandCollation, lowCollation, highCollation]);
-        return new SqlBoundBetween(operand, low, high, between.IsNegated,
+        return new SqlBoundBetween(lowOperand, highOperand, low, high, between.IsNegated,
             SqlBoundCollation.Of(operandCollation, lowCollation, _defaultCollation),
             SqlBoundCollation.Of(operandCollation, highCollation, _defaultCollation));
     }
@@ -388,6 +427,7 @@ internal sealed partial class SqlExpressionEvaluator
                 return NotMaterialized();
             }
 
+            operand = BindCharacterComparand(membership.Operand, operand, slot.Type);
             // Every value of one subquery carries the subquery column's collation.
             return new SqlBoundInSubquery(operand, slot.Id,
                 SqlBoundCollation.Of(operandCollation, new SqlCollationCandidate(slot.Collation, 2), _defaultCollation),
@@ -402,14 +442,64 @@ internal sealed partial class SqlExpressionEvaluator
 
         var candidates = new SqlBoundExpression[values.Count];
         var comparisons = new SqlBoundCollation[values.Count];
+        var referencesColumn = new bool[values.Count];
+        int nonColumnCount = 0;
+        DatabaseType comparisonType = InComparisonType(membership.Operand);
         for (int index = 0; index < candidates.Length; index++)
         {
             candidates[index] = Bind(values[index], out collations[index + 1]);
             comparisons[index] = SqlBoundCollation.Of(operandCollation, collations[index + 1], _defaultCollation);
+            referencesColumn[index] = ReferencesTableColumn(values[index]);
+            if (!referencesColumn[index])
+            {
+                nonColumnCount++;
+                // PostgreSQL parse_coerce.c:1397-1456, pg_cast.dat:313-325: the string
+                // casts are implicit both ways, so the first non-unknown type wins.
+                if (comparisonType == DatabaseType.Null) { comparisonType = InComparisonType(values[index]); }
+            }
         }
 
         collation = CollationOf(membership, collations);
-        return new SqlBoundIn(operand, candidates, comparisons, membership.IsNegated);
+        if (comparisonType == DatabaseType.Null) { comparisonType = DatabaseType.String; }
+        if (nonColumnCount == candidates.Length && nonColumnCount != 1)
+        {
+            return new SqlBoundIn(operand, candidates, comparisons, comparisonType, membership.IsNegated);
+        }
+
+        // PostgreSQL parse_expr.c:1163-1176 groups only non-Var candidates, and only
+        // when there are at least two. Each remaining comparison binds independently
+        // (:1273-1279), just as the corresponding = OR = / <> AND <> expression does.
+        var terms = new List<SqlBoundExpression>();
+        if (nonColumnCount > 1)
+        {
+            var commonCandidates = new SqlBoundExpression[nonColumnCount];
+            var commonCollations = new SqlBoundCollation[nonColumnCount];
+            int commonIndex = 0;
+            for (int index = 0; index < candidates.Length; index++)
+            {
+                if (referencesColumn[index]) { continue; }
+                commonCandidates[commonIndex] = candidates[index];
+                commonCollations[commonIndex++] = comparisons[index];
+            }
+            terms.Add(new SqlBoundIn(operand, commonCandidates, commonCollations, comparisonType, membership.IsNegated));
+        }
+        for (int index = 0; index < candidates.Length; index++)
+        {
+            if (nonColumnCount > 1 && !referencesColumn[index]) { continue; }
+            var left = BindCharacterComparand(membership.Operand, operand, values[index]);
+            var right = BindCharacterComparand(values[index], candidates[index], membership.Operand);
+            terms.Add(new SqlBoundBinary(membership.IsNegated ? SqlBinaryOperator.NotEqual : SqlBinaryOperator.Equal,
+                left, right, comparisons[index]));
+        }
+        return terms.Count == 1 ? terms[0] : new SqlBoundLogical(!membership.IsNegated, terms.ToArray());
+    }
+
+    private DatabaseType InComparisonType(SqlExpression expression)
+    {
+        while (expression is SqlCollateExpression collate) { expression = collate.Operand; }
+        var type = StaticTypeOf(expression);
+        return type == DatabaseType.String && expression is SqlLiteralExpression or SqlParameterExpression
+            ? DatabaseType.Null : type;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -423,13 +513,19 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         // CASE conditions select a result; their collation does not describe that result.
+        bool textResult = StaticTypeOf(conditional) == DatabaseType.String;
         var clauses = conditional.WhenClauses;
         var whens = new SqlBoundWhen[clauses.Count];
         var results = new SqlCollationCandidate[clauses.Count + (conditional.ElseResult is null ? 0 : 1)];
         for (int index = 0; index < whens.Length; index++)
         {
             var condition = Bind(clauses[index].Condition, out SqlCollationCandidate conditionCollation);
+            if (conditional.Input is not null)
+            {
+                condition = BindCharacterComparand(clauses[index].Condition, condition, conditional.Input);
+            }
             var result = Bind(clauses[index].Result, out results[index]);
+            if (textResult) { result = CharacterToText(clauses[index].Result, result); }
             whens[index] = new SqlBoundWhen(condition, result,
                 input is null ? default : SqlBoundCollation.Of(inputCollation, conditionCollation, _defaultCollation));
         }
@@ -438,6 +534,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (conditional.ElseResult is not null)
         {
             elseResult = Bind(conditional.ElseResult, out results[^1]);
+            if (textResult) { elseResult = CharacterToText(conditional.ElseResult, elseResult); }
         }
 
         collation = CollationOf(conditional, results);
@@ -496,22 +593,37 @@ internal sealed partial class SqlExpressionEvaluator
         collation = CollationOf(call, collations);
         if (coalesce)
         {
+            if (StaticCallType(call) == DatabaseType.String)
+            {
+                for (int index = 0; index < arguments.Length; index++)
+                {
+                    arguments[index] = CharacterToText(call.Arguments[index], arguments[index]);
+                }
+            }
             return new SqlBoundCoalesce(arguments);
         }
 
         var scalar = (SqlScalarFunction)function!;
         bool fixedArguments = AreFixed(arguments);
         var callCollation = SqlBoundCollation.Of(collation, default, _defaultCollation);
-        for (int index = 0; index < arguments.Length; index++)
-        {
-            if (scalar.ParameterAt(index) is { IsDomain: true } domain)
-            {
-                arguments[index] = new SqlBoundDomainArgument(arguments[index], domain, scalar.Name, callCollation, _functions.Database, _cancellationToken);
-            }
-        }
+        BindParameterCoercions(scalar, arguments, callCollation);
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
             callCollation, _functions.Database, _cancellationToken);
         return scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
+    }
+
+    /// <summary>Applies declared CHAR bounds and domain checks before scalar or aggregate STRICT dispatch.</summary>
+    internal void BindParameterCoercions(SqlFunction function, SqlBoundExpression[] arguments, SqlBoundCollation collation)
+    {
+        for (int index = 0; index < arguments.Length; index++)
+        {
+            var parameter = function.ParameterAt(index);
+            if (parameter.IsDomain || parameter.Storage.Type == DatabaseType.Character)
+            {
+                arguments[index] = new SqlBoundDomainArgument(arguments[index], parameter, function.Name,
+                    collation, _functions.Database, _cancellationToken);
+            }
+        }
     }
 
     /// <summary>Whether every argument has a value fixed when the statement was bound: a constant or a parameter.</summary>

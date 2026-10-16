@@ -134,7 +134,7 @@ internal sealed partial class SqlPlanner
                 var value = evaluator.Bind(column.Expression, out SqlBoundCollation collation);
                 projections.Add(new SqlProjection(
                     column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
-                    GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation });
+                    GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation, MaxLength = evaluator.MaximumLengthOf(column.Expression) });
             }
         }
 
@@ -183,7 +183,7 @@ internal sealed partial class SqlPlanner
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
     private static SqlProjection PassThrough(string name, int ordinal, IReadOnlyList<SqlCatalogColumn> columns, SqlExpressionEvaluator scope)
-        => new(name, ordinal, null, columns[ordinal].Type.Type) { Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)) };
+        => new(name, ordinal, null, columns[ordinal].Type.Type) { Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)), MaxLength = columns[ordinal].Type.MaxLength };
 
     /// <summary>Binds <c>ORDER BY</c> keys in their ordering scope, each with the collation it sorts under.</summary>
     /// <param name="orderBy">The keys.</param>
@@ -461,19 +461,19 @@ internal sealed partial class SqlPlanner
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates,
         bool columnOnLeft = true)
     {
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         // A comparand that calls a volatile function can change between the plan and a row.
-        if (ReferencesAnyColumn(comparand) || ContainsVolatileCall(comparand))
+        if (evaluator.ReferencesTableColumn(comparand) || ContainsVolatileCall(comparand))
         {
             return;
         }
 
         var column = (SqlColumnReferenceExpression)UnwrapCollation(columnExpression);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         int ordinal;
         try
         {
             ordinal = evaluator.ResolveColumn(column);
-            if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Json)
+            if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Character or DatabaseType.Json)
             {
                 var indexedCollation = table.Columns[ordinal].Collation ?? _catalog.DefaultCollation;
                 var effectiveCollation = columnOnLeft ? evaluator.ResolveCollation(columnExpression, comparand)
@@ -494,6 +494,11 @@ internal sealed partial class SqlPlanner
         {
             value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken)
                 .Evaluate(comparand, Array.Empty<object?>());
+            if (table.Columns[ordinal].Type.Type == DatabaseType.Character
+                && UnwrapCollation(comparand) is SqlLiteralExpression or SqlParameterExpression)
+            {
+                value = SqlCharacter.Input(value, DatabaseType.Character);
+            }
             object? storageValue = SqlPlanExecutor.CoerceForColumn(value, table.Columns[ordinal]);
             // A rounded bound can exclude qualifying rows before residual evaluation
             // (e.g. an INT key > CAST('1.5' AS DECIMAL) must still include 2).
@@ -546,24 +551,13 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private static bool IsRangeSargable(DatabaseType type) => type switch
     {
-        DatabaseType.Boolean or DatabaseType.String
+        DatabaseType.Boolean or DatabaseType.String or DatabaseType.Character
             or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
             or DatabaseType.Decimal
             or DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime
             or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan => true,
         _ => false,
     };
-
-    private static bool ReferencesAnyColumn(SqlExpression expression)
-    {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlColumnReferenceExpression)
-        {
-            return true;
-        }
-
-        return Children(expression).Any(ReferencesAnyColumn);
-    }
 
     private SqlPlan PlanInsert(SqlInsertExpression insert)
     {
@@ -902,7 +896,7 @@ internal sealed partial class SqlPlanner
         {
             return null;
         }
-        if (type.Type != DatabaseType.String)
+        if (type.Type is not (DatabaseType.String or DatabaseType.Character))
         {
             throw new DatabaseException($"COLLATE requires a string column; '{definition.ColumnName}' is {type.Type}.");
         }
@@ -929,7 +923,7 @@ internal sealed partial class SqlPlanner
         foreach (string column in create.Columns)
         {
             int ordinal = FindColumnOrdinal(table, column);
-            if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Json
+            if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Character or DatabaseType.Json
                 && !(table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).IsIndexBacked)
             {
                 throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{column}' cannot have an index or indexed constraint.");

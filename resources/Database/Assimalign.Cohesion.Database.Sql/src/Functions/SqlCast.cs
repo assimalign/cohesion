@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -141,7 +142,8 @@ public sealed class SqlCast
 
     private static void RequireStorage(SqlType mapped, SqlType type, string parameter, string argument)
     {
-        if (mapped.Storage.Type != type.Storage.Type)
+        if (mapped.Storage.Type != type.Storage.Type &&
+            !(mapped.Storage.Type == DatabaseType.String && type.Storage.Type == DatabaseType.Character))
         {
             throw new ArgumentException(
                 $"{parameter} maps to {mapped.Name}, but {type.Name}{(type.IsDomain ? $" (a domain over {type.BaseType!.Name})" : string.Empty)} " +

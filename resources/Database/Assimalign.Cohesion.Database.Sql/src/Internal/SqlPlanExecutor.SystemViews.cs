@@ -59,6 +59,7 @@ internal sealed partial class SqlPlanExecutor
             columns[i] = new QueryColumn
             {
                 Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type,
+                MaxLength = plan.Projections[i].MaxLength,
                 IsNullable = plan.Projections[i].Expression is SqlCastExpression,
             };
         }
@@ -93,7 +94,7 @@ internal sealed partial class SqlPlanExecutor
                         [
                             database, table.Schema, table.Name, column.Name, (long)ordinal + 1,
                             SystemColumnDefault(column), column.IsNullable ? "YES" : "NO", SystemDataType(column.Type.Type),
-                            column.Type.Type == DatabaseType.String ? (long?)column.Type.MaxLength : null,
+                            column.Type.Type is DatabaseType.String or DatabaseType.Character ? (long?)column.Type.MaxLength : null,
                             null, // No character-set byte bound is stored in the catalog.
                             SystemNumericPrecision(column.Type), SystemNumericRadix(column.Type.Type), SystemNumericScale(column.Type),
                             SystemDateTimePrecision(column.Type.Type),
@@ -316,6 +317,7 @@ internal sealed partial class SqlPlanExecutor
         DatabaseType.Float32 => "REAL",
         DatabaseType.Float64 => "DOUBLE PRECISION",
         DatabaseType.Decimal => "NUMERIC",
+        DatabaseType.Character => "CHARACTER",
         DatabaseType.String => "CHARACTER VARYING",
         DatabaseType.Binary => "BINARY VARYING",
         DatabaseType.Date => "DATE",

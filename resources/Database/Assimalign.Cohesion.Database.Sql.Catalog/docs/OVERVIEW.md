@@ -7,6 +7,10 @@ physical index registrations exported by `Database.Indexing`.
 
 ## Scope
 
+- **Fixed-length characters** — columns retain Character identity and length; domains and
+  function signatures retain CHAR(n). Record-space format 12 gates the new identity and
+  trimmed index keys; applied and pending compiled documents use schema format v6.
+
 - **Metadata model** — table descriptions with stable `ObjectId`s, ordered columns
   typed by the shared type system (`DatabaseTypeInfo`), nullability, default
   literals, and primary-key constraints.
@@ -28,7 +32,7 @@ physical index registrations exported by `Database.Indexing`.
   change advances `DdlGeneration` in its own transaction, so interrupted provisioning
   and later DDL trigger live-catalog reconciliation.
 
-- **SQL definitions and scripts** — format 11 retains format 10's function bodies, domains, dependencies,
+- **SQL definitions and scripts** — format 12 retains format 10's function bodies, domains, dependencies,
   ownership, statement-prefix script receipts and a script-set reconciliation marker. Catalog
   mutations can enlist a receipt in their existing transaction; the catalog remains language-free.
 

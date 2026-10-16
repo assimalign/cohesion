@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// The descriptor is open: a value is a name over the physical type the row codec stores
 /// (<see cref="Storage"/>), so a domain over a base type (phase E3) needs no change to the codec,
 /// the key encoding or the on-disk format. The instances are the built-in types below,
-/// parameterized <see cref="Decimal(int, int)"/> and <see cref="VarChar(int)"/>, and the domains an
+/// parameterized <see cref="Decimal(int, int)"/>, <see cref="VarChar(int)"/> and <see cref="Char(int)"/>, and the domains an
 /// application creates and registers on its engine (<see cref="SqlTypeCollection.Add"/>), which
 /// resolve in DDL and CAST through the same type catalog as the built-in types.
 /// </para>
@@ -34,7 +34,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// A function's signature identity and overload resolution compare storage types only, as
 /// PostgreSQL ignores a type modifier in a function's signature: <c>VARCHAR(20)</c> and
 /// <see cref="Text"/> are the same parameter type, and a call is not checked against a length,
-/// precision or scale.
+/// precision or scale for the existing variable-length/numeric native signatures. CHAR parameters
+/// and results enforce their declared padding and length; domains also apply their base bounds.
 /// </para>
 /// <para>
 /// Pseudo-types never describe a stored value. <see cref="Any"/> accepts an argument of any type,
@@ -121,6 +122,9 @@ public sealed class SqlType : IEquatable<SqlType>
     /// <summary>Gets <c>TEXT</c>, the Unicode string without a declared length.</summary>
     public static SqlType Text { get; } = Create("TEXT", DatabaseType.String);
 
+    /// <summary>Gets bare <c>CHAR</c>, equivalent to <c>CHAR(1)</c>.</summary>
+    public static SqlType Character { get; } = Char(1);
+
     /// <summary>Gets <c>BINARY</c>, the byte string.</summary>
     public static SqlType Binary { get; } = Create("BINARY", DatabaseType.Binary);
 
@@ -177,7 +181,7 @@ public sealed class SqlType : IEquatable<SqlType>
     /// <summary>Gets the built-in storage types, in declaration order; the pseudo-types are not among them.</summary>
     internal static SqlType[] BuiltIn { get; } =
     [
-        Boolean, TinyInt, SmallInt, Integer, BigInt, Real, Double, Numeric, Text, Binary,
+        Boolean, TinyInt, SmallInt, Integer, BigInt, Real, Double, Numeric, Text, Character, Binary,
         Date, Time, Timestamp, TimestampTz, Interval, Uuid, Json, Jsonb,
     ];
 
@@ -200,6 +204,20 @@ public sealed class SqlType : IEquatable<SqlType>
             string.Create(CultureInfo.InvariantCulture, $"NUMERIC({precision}, {scale})"),
             new DatabaseTypeInfo(DatabaseType.Decimal, precision: precision, scale: scale),
             isPseudo: false);
+    }
+
+    /// <summary>Creates a fixed-length, blank-padded <c>CHAR(length)</c> type.</summary>
+    /// <param name="length">The number of Unicode characters, from 1 through 10485760.</param>
+    /// <returns>The fixed-length character type.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="length"/> is outside the supported range.</exception>
+    public static SqlType Char(int length)
+    {
+        if (SqlTypeModifiers.GetError(DatabaseType.Character, length, null, null) is { } error)
+        {
+            throw new ArgumentOutOfRangeException(nameof(length), length, error);
+        }
+        return new(string.Create(CultureInfo.InvariantCulture, $"CHAR({length})"),
+            new DatabaseTypeInfo(DatabaseType.Character, maxLength: length), isPseudo: false);
     }
 
     /// <summary>Creates <c>VARCHAR(maxLength)</c>.</summary>
@@ -308,6 +326,7 @@ public sealed class SqlType : IEquatable<SqlType>
     /// <returns>The built-in type.</returns>
     internal static SqlType ForStorage(DatabaseTypeInfo storage)
     {
+        if (storage.Type == DatabaseType.Character) { return Char(storage.MaxLength ?? 1); }
         int? scale = SqlTypeModifiers.NormalizeScale(storage.Type, storage.Precision, storage.Scale);
         if (scale != storage.Scale)
         {

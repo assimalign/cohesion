@@ -111,6 +111,8 @@ internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpress
     /// <summary>Gets the bound computed expression the executor evaluates; null for pass-through projections.</summary>
     internal SqlBoundExpression? Value { get; init; }
 
+    internal int? MaxLength { get; init; }
+
     /// <summary>Gets the collation <c>DISTINCT</c> compares and hashes the output's values under.</summary>
     internal SqlBoundCollation Collation { get; init; }
 

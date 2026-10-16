@@ -27,8 +27,8 @@ public class SqlCastParserTests
     [InlineData("INT8", DatabaseType.Int64)]
     [InlineData("DECIMAL", DatabaseType.Decimal)]
     [InlineData("NUMERIC", DatabaseType.Decimal)]
-    [InlineData("CHAR", DatabaseType.String)]
-    [InlineData("CHARACTER", DatabaseType.String)]
+    [InlineData("CHAR", DatabaseType.Character)]
+    [InlineData("CHARACTER", DatabaseType.Character)]
     [InlineData("VARCHAR", DatabaseType.String)]
     [InlineData("TEXT", DatabaseType.String)]
     [InlineData("integer", DatabaseType.Int32)]
@@ -39,7 +39,7 @@ public class SqlCastParserTests
         var cast = GetCast(statement);
 
         cast.TargetTypeInfo.ShouldNotBeNull().Type.ShouldBe(expected);
-        cast.TargetTypeInfo.MaxLength.ShouldBeNull();
+        cast.TargetTypeInfo.MaxLength.ShouldBe(expected == DatabaseType.Character ? 1 : (int?)null);
         cast.TargetTypeInfo.Precision.ShouldBeNull();
         cast.TargetTypeInfo.Scale.ShouldBeNull();
         statement.Diagnostics.ShouldNotContain(diagnostic =>
@@ -66,17 +66,17 @@ public class SqlCastParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - CAST: Retains string length")]
-    [InlineData("CHAR(1)", 1)]
-    [InlineData("CHARACTER(5)", 5)]
-    [InlineData("VARCHAR(100)", 100)]
-    [InlineData("TEXT(10485760)", 10485760)]
-    public void Parse_StringTarget_RetainsLength(string target, int length)
+    [InlineData("CHAR(1)", 1, DatabaseType.Character)]
+    [InlineData("CHARACTER(5)", 5, DatabaseType.Character)]
+    [InlineData("VARCHAR(100)", 100, DatabaseType.String)]
+    [InlineData("TEXT(10485760)", 10485760, DatabaseType.String)]
+    public void Parse_StringTarget_RetainsLength(string target, int length, DatabaseType expected)
     {
         var statement = Parse($"SELECT CAST(42 AS {target});");
 
         var type = GetCast(statement).TargetTypeInfo.ShouldNotBeNull();
 
-        type.Type.ShouldBe(DatabaseType.String);
+        type.Type.ShouldBe(expected);
         type.MaxLength.ShouldBe(length);
         type.Precision.ShouldBeNull();
         type.Scale.ShouldBeNull();

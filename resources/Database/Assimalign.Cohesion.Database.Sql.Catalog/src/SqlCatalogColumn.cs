@@ -39,7 +39,7 @@ public sealed class SqlCatalogColumn
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(type);
-        if (collation is not null && type.Type != DatabaseType.String)
+        if (collation is not null && type.Type is not (DatabaseType.String or DatabaseType.Character))
         {
             throw new ArgumentException("Only string columns may declare a collation.", nameof(collation));
         }

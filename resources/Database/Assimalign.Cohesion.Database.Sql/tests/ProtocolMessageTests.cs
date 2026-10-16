@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Protocol;
 using Shouldly;
@@ -7,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public class ProtocolMessageTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Protocol: model payloads preserve legacy encoding")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Protocol: model payloads carry versioned column metadata")]
     public void Messages_EncodeDecode_ShouldRoundTrip()
     {
         ((byte)SqlProtocolMessageType.Execute).ShouldBe((byte)5);
@@ -24,20 +25,35 @@ public class ProtocolMessageTests
         decodedExecute.Statement.ShouldBe(execute.Statement);
         decodedExecute.Parameters["id"].ShouldBe(new byte[] { 0x05, 0x01, 0x02 });
 
-        var headerMessage = new ProtocolResultHeaderMessage(new List<(string, byte)> { ("id", 5), ("name", 9) });
+        var headerMessage = new ProtocolResultHeaderMessage(new List<(string, byte, int?)> { ("id", 5, null), ("name", 19, 3) });
         var decodedHeader = ProtocolResultHeaderMessage.Decode(headerMessage.Encode());
         decodedHeader.Columns.Count.ShouldBe(2);
         decodedHeader.Columns[1].Name.ShouldBe("name");
-        decodedHeader.Columns[1].Type.ShouldBe((byte)9);
+        decodedHeader.Columns[1].Type.ShouldBe((byte)19);
+        decodedHeader.Columns[1].MaxLength.ShouldBe(3);
 
         var complete = new ProtocolResultCompleteMessage(42);
         ProtocolResultCompleteMessage.Decode(complete.Encode()).AffectedCount.ShouldBe(42);
         ProtocolExecuteMessage.Create("X").Encode().ShouldBe(new byte[] { 0, 0, 0, 1, 88, 0, 0, 0, 0 });
-        new ProtocolResultHeaderMessage(new[] { ("id", (byte)5) }).Encode()
-            .ShouldBe(new byte[] { 0, 0, 0, 1, 0, 0, 0, 2, 105, 100, 5 });
+        new ProtocolResultHeaderMessage(new[] { ("id", (byte)5, (int?)null) }).Encode()
+            .ShouldBe(new byte[] { 255, 255, 255, 254, 0, 0, 0, 1, 0, 0, 0, 2, 105, 100, 5, 255, 255, 255, 255 });
         new ProtocolResultCompleteMessage(42).Encode().ShouldBe(new byte[] { 0, 0, 0, 0, 0, 0, 0, 42 });
         Should.Throw<ProtocolException>(() => ProtocolExecuteMessage.Decode(new byte[] { 0, 0, 0, 5, 65 }));
         Should.Throw<ProtocolException>(() => ProtocolResultCompleteMessage.Decode(new byte[] { 1, 2 }));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Protocol: old and malformed result headers are refused")]
+    public void Decode_UnsupportedOrMalformedHeader_ShouldThrowProtocolException()
+    {
+        // Arrange
+        byte[] valid = new ProtocolResultHeaderMessage(new[] { ("c", (byte)19, (int?)3) }).Encode();
+        byte[] invalidLength = (byte[])valid.Clone();
+        invalidLength[^1] = 0;
+        // Act / Assert
+        Should.Throw<ProtocolException>(() => ProtocolResultHeaderMessage.Decode(new byte[] { 0, 0, 0, 0 }));
+        Should.Throw<ProtocolException>(() => ProtocolResultHeaderMessage.Decode(valid.AsSpan(0, valid.Length - 1)));
+        Should.Throw<ProtocolException>(() => ProtocolResultHeaderMessage.Decode(invalidLength));
+        Should.Throw<ProtocolException>(() => ProtocolResultHeaderMessage.Decode([.. valid, 0]));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Protocol: a parameter length that overflows the bounds check is rejected")]

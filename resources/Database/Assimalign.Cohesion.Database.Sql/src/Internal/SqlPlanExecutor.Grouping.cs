@@ -50,7 +50,7 @@ internal sealed partial class SqlPlanExecutor
             var row = new object?[source.FieldCount];
             for (int i = 0; i < row.Length; i++)
             {
-                row[i] = source.GetValue(i);
+                row[i] = SqlCharacter.Input(source.GetValue(i), input.Columns[i].Type);
             }
             var key = keys.Count == 0 ? [] : new object?[keys.Count];
             for (int i = 0; i < key.Length; i++)
@@ -115,6 +115,7 @@ internal sealed partial class SqlPlanExecutor
             Name = projection.Name,
             Ordinal = ordinal,
             Type = projection.Type,
+            MaxLength = projection.MaxLength,
             IsNullable = projection.IsNullable,
         }).ToArray();
         return new SqlMaterializedResultSet(columns, window.ToList());
@@ -213,7 +214,8 @@ internal sealed partial class SqlPlanExecutor
         {
             ref var value = ref values[i];
             value = SqlValue.FromObject(evaluator.Evaluate(arguments[i], row));
-            if (targets is not null && targets[i] != DatabaseType.Null && targets[i] != value.Type)
+            if (targets is not null && targets[i] != DatabaseType.Null
+                && (targets[i] != value.Type || targets[i] == DatabaseType.Character))
             {
                 value = Coerce(aggregate, i, value, targets[i]);
             }

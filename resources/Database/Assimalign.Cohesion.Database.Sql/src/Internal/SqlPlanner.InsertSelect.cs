@@ -67,7 +67,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private static bool CanAssignInsertType(DatabaseType source, DatabaseType target)
     {
-        if (source == DatabaseType.Null || source == target || target is DatabaseType.String or DatabaseType.Json)
+        if (source == DatabaseType.Null || source == target || target is DatabaseType.String or DatabaseType.Character or DatabaseType.Json)
         {
             return true;
         }
@@ -76,14 +76,14 @@ internal sealed partial class SqlPlanner
 
         return target switch
         {
-            DatabaseType.Boolean => IsNumber(source) || source is DatabaseType.String or DatabaseType.Json,
+            DatabaseType.Boolean => IsNumber(source) || source is DatabaseType.String or DatabaseType.Character or DatabaseType.Json,
             DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
                 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal
-                => IsNumber(source) || source is DatabaseType.Boolean or DatabaseType.String or DatabaseType.Json,
+                => IsNumber(source) || source is DatabaseType.Boolean or DatabaseType.String or DatabaseType.Character or DatabaseType.Json,
             DatabaseType.Binary or DatabaseType.JsonBinary => source is DatabaseType.Binary or DatabaseType.JsonBinary,
-            DatabaseType.Date => source is DatabaseType.String or DatabaseType.Json or DatabaseType.DateTime,
+            DatabaseType.Date => source is DatabaseType.String or DatabaseType.Character or DatabaseType.Json or DatabaseType.DateTime,
             DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan or DatabaseType.Guid
-                => source is DatabaseType.String or DatabaseType.Json,
+                => source is DatabaseType.String or DatabaseType.Character or DatabaseType.Json,
             _ => false,
         };
     }

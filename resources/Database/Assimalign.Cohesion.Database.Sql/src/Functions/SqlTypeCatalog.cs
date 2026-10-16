@@ -25,7 +25,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
 {
     // One slot per storage type, indexed by its value: the casts a bound CAST may apply.
-    private const int storageTypeCount = (int)DatabaseType.JsonBinary + 1;
+    private const int storageTypeCount = (int)DatabaseType.Character + 1;
 
     private readonly SqlType[] _types;
     private readonly SqlCast[] _casts;

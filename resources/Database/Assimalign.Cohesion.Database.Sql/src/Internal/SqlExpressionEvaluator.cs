@@ -46,6 +46,7 @@ internal sealed partial class SqlExpressionEvaluator
     private static readonly SqlExpressionEvaluator RowEvaluator = new(Array.Empty<SqlCatalogColumn>(), null);
 
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
+    private readonly SqlBindingContext _bindingContext;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly IReadOnlyList<SqlTableBinding>? _bindings;
     private readonly IReadOnlyDictionary<SqlExpression, int>? _valueOrdinals;
@@ -87,9 +88,11 @@ internal sealed partial class SqlExpressionEvaluator
         SqlSubqueryValues? subqueryValues = null,
         SqlFunctionEnvironment? functions = null,
         CancellationToken cancellationToken = default,
-        SqlExpressionEvaluator? slotScope = null)
+        SqlExpressionEvaluator? slotScope = null,
+        SqlBindingContext bindingContext = SqlBindingContext.Table)
     {
         _columns = columns;
+        _bindingContext = bindingContext;
         _parameters = parameters;
         _bindings = bindings;
         _valueOrdinals = valueOrdinals;
@@ -150,7 +153,7 @@ internal sealed partial class SqlExpressionEvaluator
             sources[expression] = projections[index];
         }
         return new SqlExpressionEvaluator(_columns, _parameters, _bindings, ordinals,
-            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope);
+            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext);
     }
 
     /// <summary>
@@ -260,6 +263,19 @@ internal sealed partial class SqlExpressionEvaluator
     [MethodImpl(MethodImplOptions.NoInlining)]
     private object? EvaluateDomainArgument(SqlBoundDomainArgument argument, object?[] row)
         => argument.Coerce(EvaluateCore(argument.Operand, row), _subqueryValues, _cancellationToken);
+
+    /// <summary>
+    /// Whether an expression reads a table column in this binding context. SQL function parameters
+    /// and domain VALUE share the named-slot representation, but are not table references.
+    /// </summary>
+    internal bool ReferencesTableColumn(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        // PostgreSQL functions.c:491 and typecmds.c:3609 use Param and CoerceToDomainValue,
+        // neither of which is a Var for parse_expr.c:1163. The binding site supplies that distinction.
+        if (_bindingContext != SqlBindingContext.Table) { return false; }
+        return expression is SqlColumnReferenceExpression || SqlPlanner.Children(expression).Any(ReferencesTableColumn);
+    }
 
     internal int ResolveColumn(SqlColumnReferenceExpression column)
     {
@@ -691,6 +707,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>Names a runtime value's type the way the dialect's types are named.</summary>
     internal static string OperandTypeName(object value) => value switch
     {
+        SqlCharacter => nameof(DatabaseType.Character),
         string => nameof(DatabaseType.String),
         bool => nameof(DatabaseType.Boolean),
         byte[] => nameof(DatabaseType.Binary),
@@ -705,17 +722,21 @@ internal sealed partial class SqlExpressionEvaluator
 
     private object? EvaluateBetween(SqlBoundBetween expression, object?[] row)
     {
-        object? value = EvaluateCore(expression.Operand, row);
+        object? lowValue = EvaluateCore(expression.LowOperand, row);
+        // Only literals/parameters get separate CHAR comparands. Keep evaluating a
+        // shared expression once, including a volatile function call.
+        object? highValue = ReferenceEquals(expression.LowOperand, expression.HighOperand)
+            ? lowValue : EvaluateCore(expression.HighOperand, row);
         object? lower = EvaluateCore(expression.Low, row);
         object? upper = EvaluateCore(expression.High, row);
 
-        if (value is null || lower is null || upper is null)
+        if (lowValue is null || highValue is null || lower is null || upper is null)
         {
             return null;
         }
 
-        bool between = Compare(value, lower, expression.LowCollation.Resolve(_subqueryValues)) >= 0
-            && Compare(value, upper, expression.HighCollation.Resolve(_subqueryValues)) <= 0;
+        bool between = Compare(lowValue, lower, expression.LowCollation.Resolve(_subqueryValues)) >= 0
+            && Compare(highValue, upper, expression.HighCollation.Resolve(_subqueryValues)) <= 0;
         return Box(between != expression.IsNegated);
     }
 
@@ -729,7 +750,9 @@ internal sealed partial class SqlExpressionEvaluator
             return Box(expression.IsNegated);
         }
 
-        object? value = EvaluateCore(expression.Operand, row);
+        // Common coercion has no typmod (PostgreSQL parse_coerce.c:1583-1585).
+        // CHAR identity applies to typed TEXT/VARCHAR candidates too; no column width applies.
+        object? value = SqlCharacter.Input(EvaluateCore(expression.Operand, row), expression.ComparisonType);
 
         if (value is null)
         {
@@ -739,7 +762,7 @@ internal sealed partial class SqlExpressionEvaluator
         bool hasUnknown = false;
         for (int index = 0; index < candidates.Length; index++)
         {
-            object? candidateValue = EvaluateCore(candidates[index], row);
+            object? candidateValue = SqlCharacter.Input(EvaluateCore(candidates[index], row), expression.ComparisonType);
 
             if (candidateValue is null)
             {
@@ -803,7 +826,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         bool matches = LikeMatches(
-            Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+            Convert.ToString(SqlCharacter.Output(value), CultureInfo.InvariantCulture) ?? string.Empty,
             Convert.ToString(pattern, CultureInfo.InvariantCulture) ?? string.Empty,
             expression.Collation.Resolve(_subqueryValues));
 
@@ -983,7 +1006,8 @@ internal sealed partial class SqlExpressionEvaluator
         {
             ref var argument = ref arguments[index];
             argument = SqlValue.FromObject(values[index]);
-            if (targets is not null && targets[index] != DatabaseType.Null && targets[index] != argument.Type)
+            if (targets is not null && targets[index] != DatabaseType.Null
+                && (targets[index] != argument.Type || targets[index] == DatabaseType.Character))
             {
                 argument = SqlFunctionResolver.Coerce(argument, targets[index], call.Function, index);
             }

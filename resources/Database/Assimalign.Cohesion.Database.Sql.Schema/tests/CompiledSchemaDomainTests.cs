@@ -16,6 +16,29 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 /// </summary>
 public sealed class CompiledSchemaDomainTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database] - Schema CHAR: fixed length has its own identity and changing to VARCHAR requires a migration")]
+    [InlineData("CHAR(3)", 3)]
+    [InlineData("CHARACTER", 1)]
+    public void Compile_CharacterColumn_ShouldPersistIdentityAndPlanTypeChange(string spelling, int length)
+    {
+        // Arrange
+        SqlCompiledSchema before = SqlSchema.Compile("crm", schema => schema.Table<Customer>("customers", table => table.Column(customer => customer.Code, spelling)));
+        SqlCompiledSchema after = SqlSchema.Compile("crm", schema =>
+        {
+            schema.AllowDestructiveChanges();
+            schema.Table<Customer>("customers", table => table.Column(customer => customer.Code, "VARCHAR(3)"));
+        });
+        // Act
+        var restored = SqlCompiledSchemaSerializer.Deserialize(before.CanonicalDocument);
+        var operation = SqlSchemaMigrationPlanner.Plan(before, after).Operations.ShouldHaveSingleItem();
+        // Assert
+        restored.Tables[0].Columns[0].Type.ShouldBe(DatabaseType.Character);
+        restored.Tables[0].Columns[0].MaxLength.ShouldBe(length);
+        operation.Kind.ShouldBe(SqlSchemaMigrationOperationKind.AlterColumn);
+        operation.Safety.ShouldBe(SqlSchemaMigrationSafety.Destructive);
+        after.Hash.ShouldNotBe(before.Hash);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - Schema domains: schema.Type<T> lowers to a domain named for T, and its members' columns are declared with it")]
     public void Compile_TypeDeclaration_ShouldLowerToANamedDomain()
     {
@@ -31,7 +54,7 @@ public sealed class CompiledSchemaDomainTests
         });
 
         // Assert
-        schema.Format.ShouldBe("cohesion/database-schema/v5");
+        schema.Format.ShouldBe("cohesion/database-schema/v6");
         schema.Types.ShouldHaveSingleItem().ShouldBe(new CompiledSchemaType("Money", DatabaseType.Decimal, 18, 2));
         schema.Tables[0].Columns[1].ShouldBe(new CompiledSchemaColumn("Price", DatabaseType.Decimal, false, Precision: 18, Scale: 2, CustomType: "Money"));
         SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument).Hash.ShouldBe(schema.Hash);

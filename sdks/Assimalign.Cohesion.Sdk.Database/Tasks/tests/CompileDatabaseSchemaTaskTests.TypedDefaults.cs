@@ -210,7 +210,8 @@ public partial class CompileDatabaseSchemaTaskTests
 
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: references compare mapped storage and SQL type metadata")]
     [InlineData("int", "Status", "", true)]
-    [InlineData("string", "char", "", true)]
+    [InlineData("string", "char", "", false)]
+    [InlineData("char", "char", "", true)]
     [InlineData("int", "Status", "table.Column(row => row.Id, \"state\");", false)]
     public void Execute_WithMappedReferenceTypes_ShouldRespectStorageAndDomain(string targetType, string sourceType, string targetColumn, bool expected)
     {

@@ -50,9 +50,9 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
                     hasResultFrames = true;
                     ProtocolResultHeaderMessage header = ProtocolResultHeaderMessage.Decode(frame.Payload.Span);
                     var decoded = new List<DatabaseClientColumn>(header.Columns.Count);
-                    foreach ((string name, byte type) in header.Columns)
+                    foreach ((string name, byte type, int? maxLength) in header.Columns)
                     {
-                        decoded.Add(new DatabaseClientColumn(name, (DatabaseType)type));
+                        decoded.Add(new DatabaseClientColumn(name, (DatabaseType)type, maxLength));
                     }
                     columns = decoded;
                     break;

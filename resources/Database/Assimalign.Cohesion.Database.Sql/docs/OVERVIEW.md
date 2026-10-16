@@ -85,10 +85,15 @@ shared storage, with DDL flowing through the relational catalog
   and the application's alike. A typed schema names a domain with `table.Column(selector,
   "email")`, and `schema.Type<T>(t => t.Decimal(p, s))` declares one. See DESIGN.md, "Types,
   domains and casts (E3)".
+- **Fixed-length characters** — CHAR(n) has its own Character type, stores and returns padded
+  strings, and ignores trailing spaces for comparison, grouping and index keys. CHAR-to-text
+  casts and concatenation strip padding; LENGTH ignores it, while LIKE sees padded input.
+  Domains and function parameters/results preserve their CHAR lengths. Compiled schemas use
+  format v6; result-header format 2 carries Character identity and the declared length.
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in catalog format 11. A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in catalog format 12. A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.

@@ -36,7 +36,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     break;
                 }
-                rows.Add(row.GetValue(0));
+                rows.Add(SqlCharacter.Input(row.GetValue(0), result.Columns[0].Type));
             }
             if (query.Kind == SqlSubqueryKind.Exists)
             {

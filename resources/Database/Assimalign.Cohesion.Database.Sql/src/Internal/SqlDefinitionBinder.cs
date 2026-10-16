@@ -79,7 +79,8 @@ internal static class SqlDefinitionBinder
         var scopeEnvironment = new SqlFunctionEnvironment(collection, environment.Database, environment.Types);
         var columns = create.Parameters.Select((parameter, index) => new SqlCatalogColumn(parameter.Name, types[index].Storage,
             domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
-        var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: scopeEnvironment);
+        var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: scopeEnvironment,
+            bindingContext: SqlBindingContext.Function);
         SqlPersistedExpression.Bind(create.Body, scope);
         SqlPlanner.ValidateExpression(create.Body, scope);
         var dependencies = Dependencies(create.Body, scope, volatility);
@@ -142,8 +143,9 @@ internal static class SqlDefinitionBinder
         {
             var column = new SqlCatalogColumn("VALUE", type.Storage);
             var table = new SqlCatalogTable(0, "dbo", create.Name, [column]);
-            SqlPlanExecutor.ValidateCheck(predicate, table, collation, environment);
-            var scope = new SqlExpressionEvaluator([column], null, defaultCollation: collation, functions: environment);
+            SqlPlanExecutor.ValidateCheck(predicate, table, collation, environment, SqlBindingContext.Domain);
+            var scope = new SqlExpressionEvaluator([column], null, defaultCollation: collation, functions: environment,
+                bindingContext: SqlBindingContext.Domain);
             dependencies = Dependencies(predicate, scope, SqlFunctionVolatility.Immutable);
             calls = FunctionCalls(predicate, scope);
             check = SqlPersistedExpression.Canonicalize(predicate, $"CHECK of domain '{create.Name}'");
@@ -204,7 +206,7 @@ internal static class SqlDefinitionBinder
     }
 
     internal static SqlExpressionFunction Bind(SqlCatalogFunction function, SqlFunctionEnvironment environment, Collation collation,
-        CancellationToken cancellationToken, bool notNullCheck = false)
+        CancellationToken cancellationToken, bool notNullCheck = false, SqlBindingContext bindingContext = SqlBindingContext.Function)
     {
         var types = function.ParameterTypes.Select(type => ResolveType(type, environment)).ToArray();
         var result = ResolveType(function.ReturnType, environment);
@@ -245,9 +247,10 @@ internal static class SqlDefinitionBinder
             // A parameter inherits the invocation's collation; literals retain the database default.
             // PostgreSQL: src/backend/executor/functions.c:496-505.
             var columns = function.ParameterNames.Select((name, index) => new SqlCatalogColumn(name, types[index].Storage,
-                collation: types[index].Storage.Type == DatabaseType.String ? inputCollation : null,
+                collation: types[index].Storage.Type is DatabaseType.String or DatabaseType.Character ? inputCollation : null,
                 domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
-            var bodyScope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment, cancellationToken: bindingToken);
+            var bodyScope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment,
+                cancellationToken: bindingToken, bindingContext: bindingContext);
             PinCalls(expression, bodyScope, function.BodyFunctionCalls);
             return bodyScope;
         }
@@ -262,7 +265,7 @@ internal static class SqlDefinitionBinder
             var function = new SqlCatalogFunction(domain.Name + "_check", Signature(domain.Name + "_check", [type]), ["VALUE"], [type.Name],
                 "BOOLEAN", "IMMUTABLE", false, domain.CheckExpression ?? "TRUE", domain.Dependencies, domain.Owner, domain.OwningSchema,
                 domain.CheckFunctionCalls);
-            check = Bind(function, environment, collation, cancellationToken, domain.IsNotNull);
+            check = Bind(function, environment, collation, cancellationToken, domain.IsNotNull, SqlBindingContext.Domain);
         }
         return SqlType.CreateSqlDomain(domain.Name, type, check, domain.DefaultLiteral, domain.IsNotNull);
     }

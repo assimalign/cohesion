@@ -26,8 +26,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <para>
 /// <b>Then by type.</b> Each candidate costs the sum of its arguments' costs: nothing for an exact
 /// type, the number of steps for an implicit widening along INT8 → INT16 → INT32 → INT64 → DECIMAL →
-/// FLOAT64, or one step for FLOAT32 → FLOAT64 (nothing widens to FLOAT32, and nothing to or from
-/// text), and more than any widening for a pseudo-type, so a concrete
+/// FLOAT64, or one step for FLOAT32 → FLOAT64 and CHAR ↔ TEXT (nothing widens to FLOAT32),
+/// and more than any widening for a pseudo-type, so a concrete
 /// overload is preferred to a polymorphic one. An argument whose type the plan cannot tell — a NULL
 /// literal, a NULL parameter — matches any parameter for nothing; a grouping key or aggregate
 /// result has its type over the input row. Every
@@ -193,6 +193,11 @@ internal static class SqlFunctionResolver
             }
         }
 
+        if (function.ResultRule == SqlResultRule.TextElement && element == DatabaseType.Character)
+        {
+            return DatabaseType.String;
+        }
+
         // ABS widens an exact integer to BIGINT and keeps any other type, a non-number included, as
         // it did before typed signatures (owner decision 67): ABS('x') is still typed TEXT, so a CASE
         // or SUM over it is refused while planning, and the call itself fails only when it runs.
@@ -251,11 +256,16 @@ internal static class SqlFunctionResolver
     /// <param name="target">The parameter's storage type.</param>
     /// <param name="function">The function, for the message.</param>
     /// <param name="index">The argument's position, for the message.</param>
-    /// <returns>The converted argument; NULL and a value of the target type unchanged.</returns>
+    /// <returns>The converted argument; CHAR always applies its declared width, even when the storage type already matches.</returns>
     /// <exception cref="OverflowException">An integer does not fit the parameter's type; the evaluator codes it <c>COHSQLE002</c>.</exception>
     /// <exception cref="DatabaseException">The value's type does not convert to the parameter's.</exception>
     internal static SqlValue Coerce(in SqlValue value, DatabaseType target, SqlFunction function, int index)
     {
+        if (target == DatabaseType.Character && value.Type is DatabaseType.String or DatabaseType.Character)
+        {
+            return SqlValue.FromObject(SqlCastConverter.ApplyModifiers(value.AsString(), function.ParameterAt(index).Storage));
+        }
+
         // A JSON column's values are read as text, and a JSONB column's as bytes.
         if (value.IsNull || value.Type == target
             || target == DatabaseType.Json && value.Type == DatabaseType.String
@@ -264,6 +274,10 @@ internal static class SqlFunctionResolver
             return value;
         }
 
+        if (target == DatabaseType.String && value.Type == DatabaseType.Character)
+        {
+            return SqlValue.FromString(value.AsString().TrimEnd(' '));
+        }
         if (IsExactInteger(value.Type))
         {
             long number = value.Type switch
@@ -322,7 +336,9 @@ internal static class SqlFunctionResolver
             return false;
         }
 
-        widened = Coerce(value, target, function, 0); // a widening never overflows
+        widened = target == DatabaseType.Character
+            ? SqlValue.FromObject(SqlCastConverter.ApplyModifiers(value.AsString(), function.ReturnType.Storage))
+            : Coerce(value, target, function, 0); // numeric widenings never overflow
         return true;
     }
 
@@ -427,6 +443,7 @@ internal static class SqlFunctionResolver
         {
             return 0;
         }
+        if (from is DatabaseType.String or DatabaseType.Character && to is DatabaseType.String or DatabaseType.Character) { return 1; }
         if (from == DatabaseType.Float32)
         {
             // REAL widens to DOUBLE, losslessly, and to nothing else (PostgreSQL's implicit

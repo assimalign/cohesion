@@ -25,8 +25,8 @@ internal static class SqlDefaultLiteralRenderer
         string? literal = (columnType, value) switch
         {
             (DatabaseType.Boolean, bool boolean) => boolean ? "TRUE" : "FALSE",
-            (DatabaseType.String, string text) => Quote(text),
-            (DatabaseType.String, char character) => Quote(character.ToString()),
+            (DatabaseType.String or DatabaseType.Character, string text) => Quote(text),
+            (DatabaseType.String or DatabaseType.Character, char character) => Quote(character.ToString()),
             (DatabaseType.Binary, byte[] bytes) => Quote("\\x" + Convert.ToHexString(bytes)),
             (DatabaseType.Int8, _) => Integer(value, sbyte.MinValue, sbyte.MaxValue),
             (DatabaseType.Int16, _) => Integer(value, short.MinValue, short.MaxValue),
@@ -67,7 +67,8 @@ internal static class SqlDefaultLiteralRenderer
             : valueType == typeof(decimal) || isEnum && valueType == typeof(ulong) ? DatabaseType.Decimal
             : valueType == typeof(float) ? DatabaseType.Float32
             : valueType == typeof(double) ? DatabaseType.Float64
-            : valueType == typeof(string) || valueType == typeof(char) ? DatabaseType.String
+            : valueType == typeof(char) ? DatabaseType.Character
+            : valueType == typeof(string) ? DatabaseType.String
             : valueType == typeof(byte[]) ? DatabaseType.Binary
             : valueType == typeof(DateOnly) ? DatabaseType.Date
             : valueType == typeof(TimeOnly) ? DatabaseType.Time

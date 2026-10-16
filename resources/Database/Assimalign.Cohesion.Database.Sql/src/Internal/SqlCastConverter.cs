@@ -49,9 +49,9 @@ internal static class SqlCastConverter
                 {
                     // The built-in text conversion needs the destination scale before reducing
                     // its digits to Decimal. Application casts still own their conversions.
-                    converted = value is string text && cast.Target.Storage.Type == DatabaseType.Decimal
+                    converted = (value is string || value is SqlCharacter) && cast.Target.Storage.Type == DatabaseType.Decimal
                         && SqlStandardCasts.Contains(registered)
-                        ? ParseNumericText(text, cast.Target.Storage)
+                        ? ParseNumericText(value is SqlCharacter fixedText ? fixedText.Text : (string)value, cast.Target.Storage)
                         : registered.Apply(value);
                 }
                 else if (source != DatabaseType.Null)
@@ -109,6 +109,30 @@ internal static class SqlCastConverter
     /// <exception cref="InvalidCastException">A binary value exceeds its declared length.</exception>
     internal static object ApplyModifiers(object value, DatabaseTypeInfo target, bool isExplicit = false)
     {
+        if (value is SqlCharacter character) { value = character.Value; }
+        if (target.Type == DatabaseType.Character)
+        {
+            string text = (string)value;
+            int length = target.MaxLength ?? 1;
+            int characters = 0;
+            int end = 0;
+            // PostgreSQL varchar.c:130-190 and 271-339: count characters, pad on storage;
+            // only an explicit cast may discard non-space overflow.
+            foreach (var rune in text.EnumerateRunes())
+            {
+                if (characters == length)
+                {
+                    if (!isExplicit && text.AsSpan(end).ContainsAnyExcept(' '))
+                    {
+                        throw SqlEvaluationException.StringDataRightTruncation(length);
+                    }
+                    return new SqlCharacter(text[..end]);
+                }
+                characters++;
+                end += rune.Utf16SequenceLength;
+            }
+            return new SqlCharacter(characters == length ? text : text + new string(' ', length - characters));
+        }
         switch (value)
         {
             case string text when target.MaxLength is int length && text.Length > length:
@@ -169,6 +193,7 @@ internal static class SqlCastConverter
     /// <returns>The storage type; <see cref="DatabaseType.Null"/> for a CLR type the codec does not store.</returns>
     private static DatabaseType StorageTypeOf(object value) => value switch
     {
+        SqlCharacter => DatabaseType.Character,
         string => DatabaseType.String,
         long => DatabaseType.Int64,
         int => DatabaseType.Int32,

@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Types — Design
 
+## Character identity (#1437)
+
+`DatabaseType.Character` is the shared catalog/result type byte **19**, distinct from String (9).
+It represents fixed-length CHAR and keeps the wire honest without duplicating the string codec.
+As with JSON's text representation, CHAR row payloads use the existing String tuple component;
+the catalog or result header supplies the logical identity and declared length. SQL owns blank
+padding and trailing-space comparison: it trims CHAR index keys before calling the shared string
+writer with the resolved collation. The key writer, reader, collation set and Indexing layout do
+not change. SQL's record-space gate advances to 12; there is no legacy-reader or upgrade path.
+
 The shared scalar type system (area architecture:
 [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). One rule drives everything
 here: **all type intelligence is spent at encoding time so that comparison time is a
