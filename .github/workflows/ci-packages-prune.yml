@@ -1,0 +1,127 @@
+# Keeps the GitHub Packages feed that .github/workflows/ci-packages.yml fills usable.
+#
+# ci-packages.yml publishes the full release set, about 400 package versions, for every push to
+# main and every commit to an open same-repository pull request. This workflow deletes two kinds of
+# them and nothing else:
+#
+#   * every <base>.pr.<N>.<build> version of a pull request the GitHub API reports closed, merged
+#     or not; N is compared as a number, so closing #15 never touches #152; and
+#   * every main build (<base>.ci.<build>) outside the newest 20 of its base.
+#
+# Selection is Select-CohesionCiPackageVersionToPrune in
+# installer/scripts/modules/CohesionPackaging.psm1, which only ever returns those exact CI shapes,
+# so a release version (10.0.0-preview.1), stable or local version is never selected. The packages
+# examined are the ones the release inventory publishes (Get-CohesionReleasePackageId), because
+# GITHUB_TOKEN cannot list an organization's packages; cohesion-platforms' packages of the same
+# prefix are never in that set. Retention policy and its numbers:
+# docs/VERSIONING_RELEASE_POLICY.md, "CI packages" -> "Feed growth".
+#
+# Every run recomputes the whole selection from the feed, so one run per trigger is enough and a
+# run that stops early leaves nothing to carry over:
+#
+#   * pull_request_target (closed) deletes a pull request's builds as soon as it closes;
+#   * the hourly schedule finishes what a run deferred on the rate-limit budget, trims main builds,
+#     and catches closes this trigger skips (Dependabot, forks) or that a queued run lost; and
+#   * workflow_dispatch defaults to a dry run that lists what would be deleted.
+#
+# pull_request_target, not pull_request, because it runs this file and the pruning module from the
+# default branch: the code that decides what to delete is reviewed code, never the closing pull
+# request's own. It also fires for a pull request closed with a merge conflict, which pull_request
+# does not. No step checks out or runs pull request code, and nothing from the event payload reaches
+# a script; the payload is read only by the job condition below. ci-packages.yml itself must stay
+# off pull_request_target, because it does build the code under review.
+#
+# The REST budget is the constraint, not CI time. GITHUB_TOKEN gets 1,000 requests per hour per
+# repository; one run lists about 400 packages (one request each) and then deletes one request per
+# version, paced a second apart, down to a 100-request reserve, and defers the rest. Sizing:
+# docs/VERSIONING_RELEASE_POLICY.md.
+#
+# Every `uses:` is pinned to a commit SHA with a trailing version comment, for the reason given at
+# the top of release.yml.
+name: CI Packages Prune
+
+on:
+  pull_request_target:
+    types: [closed]
+    # The same filter as ci-packages.yml: a pull request that changes only these never published,
+    # so its close is not worth a scan. One that did publish and later reverted to them is left
+    # to the hourly run.
+    paths-ignore:
+      - '.claude/**'
+      - 'docs/**'
+  schedule:
+    - cron: '41 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'List what would be deleted without deleting anything'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# One prune at a time: two runs would race on the same versions and split the rate limit. A queued
+# run replaced by a newer one loses nothing, because each run prunes everything.
+concurrency:
+  group: cohesion-ci-packages-prune
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: prune CI package versions
+    # Fork pull requests never publish, so their close has nothing to delete. A Dependabot-triggered
+    # event gets a read-only token, so its deletes would fail; the hourly run removes those builds.
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    # No measured run exists yet. The module stops starting requests after 45 minutes; 120 is the
+    # no-evidence default in .claude/rules/build-system.md (job limits). Resize from the first runs.
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # The deletes. The repository holds the Admin role on every package its workflows published,
+      # which GitHub requires for deleting through GITHUB_TOKEN.
+      packages: write
+      # Pull request state decides which pr builds are closed.
+      pull-requests: read
+    steps:
+      # The default branch's tooling: pull_request_target and schedule both check out the default
+      # branch, and no ref is given, so pull request code is never checked out here.
+      - name: Checkout pruning tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: installer/scripts/modules
+
+      - name: Prune CI package versions
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ github.token }}
+          COHESION_PACKAGE_OWNER: ${{ github.repository_owner }}
+          COHESION_REPOSITORY: ${{ github.repository }}
+          COHESION_PRUNE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+        run: |
+          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+          Import-Module ./installer/scripts/modules/CohesionPackageFeed.psm1 -Force
+
+          $arguments = @{
+            Organization   = $env:COHESION_PACKAGE_OWNER
+            Repository     = $env:COHESION_REPOSITORY
+            # What ci-packages.yml pushes: every library, framework pack for every RID, and SDK.
+            PackageName    = Get-CohesionReleasePackageId
+            Token          = $env:GITHUB_PACKAGES_TOKEN
+            # The newest 20 main builds of each base stay; see "Feed growth" for why 20.
+            MainBuildCount = 20
+            SummaryPath    = $env:GITHUB_STEP_SUMMARY
+            WhatIf         = $env:COHESION_PRUNE_DRY_RUN -eq 'true'
+          }
+
+          $summary = Invoke-CohesionCiPackagePrune @arguments
+          Write-Host ("Selected {0}, deleted {1}, deferred {2}, {3} API requests." -f
+            $summary.Selected,
+            $summary.Deleted,
+            $summary.Deferred,
+            $summary.Requests)

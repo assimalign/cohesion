@@ -178,7 +178,8 @@ Describe 'CohesionPackaging workflow classification' {
                 'analyzers.yml',
                 'sdk-smoke.yml',
                 'credential-guard.yml',
-                'ci-packages.yml'
+                'ci-packages.yml',
+                'ci-packages-prune.yml'
             )
         }
     }

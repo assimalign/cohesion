@@ -6,7 +6,8 @@
 # build of main, or of a pull request still in review, before any real preview is cut.
 #
 # This workflow never writes to nuget.org and never publishes a canonical version. Release
-# versions stay with .github/workflows/release.yml.
+# versions stay with .github/workflows/release.yml. .github/workflows/ci-packages-prune.yml deletes
+# a pull request's versions when it closes and keeps the newest 20 main builds.
 #
 # The version comes from Get-CohesionCiPackageVersion in
 # installer/scripts/modules/CohesionPackaging.psm1. It extends the PREDECESSOR of the canonical

@@ -150,6 +150,9 @@ before its framework and library packages have arrived. Pull requests that chang
 - **Pin an exact version.** Set every Cohesion entry in the consumer's `global.json`
   `msbuild-sdks` block to the same CI version (pin agreement is ordinal, see below). The publish
   job's name and summary show the version for each run.
+- **A pin is temporary.** A pull request's builds are deleted when it closes, and a `main` build
+  once 20 newer `main` builds of its base exist (see "Feed growth"). Pin a release version for
+  anything that must keep restoring.
 - **Float only within a channel.** `10.0.0-preview.0.ci.*` tracks the latest `main` build and
   `10.0.0-preview.0.pr.1520.*` the latest build of one pull request. `pr` sorts above `ci`, so an
   unbounded float such as `10.0.0-*`, or an update bot reading the feed, picks the newest pull
@@ -162,10 +165,87 @@ before its framework and library packages have arrived. Pull requests that chang
 
 ### Feed growth
 
-Each run publishes the full set, about 400 package versions today (223 libraries and resources, 21
-SDKs, and 19 frameworks with one targeting pack and seven runtime packs each). Nothing prunes CI
-versions yet. Delete merged or closed pull request versions and old `main` versions from GitHub
-Packages before the feed's version lists become unwieldy; never delete a release version.
+Each run publishes the full set: 396 package versions today (223 libraries and resources, 21 SDKs,
+and 19 frameworks with one targeting pack and seven runtime packs each).
+[`.github/workflows/ci-packages-prune.yml`](../.github/workflows/ci-packages-prune.yml) deletes
+two kinds of CI version, and nothing else ever deletes from the feed:
+
+- **Closed pull requests.** Every `<base>.pr.<N>.<build>` version of a pull request the GitHub API
+  reports closed, merged or not. `N` is compared as a number, so closing #15 never touches #152.
+  The run starts when the pull request closes; a pull request reopened before it runs keeps its
+  builds.
+- **Old `main` builds.** For each base, every `main` build outside the newest **20**.
+
+**A release version is never deleted.** Selection is `Select-CohesionCiPackageVersionToPrune` in
+[`CohesionPackaging.psm1`](../installer/scripts/modules/CohesionPackaging.psm1), which considers
+only versions `ConvertFrom-CohesionCiPackageVersion` recognizes: the exact shapes
+`Get-CohesionCiPackageVersion` produces. A release (`10.0.0-preview.1`), stable, or local version,
+or a near miss such as `10.0.0-ci.5`, is ignored whatever else the run is asked to do, and the
+deleting loop checks the shape again before each request. The release-inventory Pester suite pins
+both, including a test that feeds release versions to the most aggressive selection possible.
+
+**Why 20 `main` builds per base.** The count bounds what stays on the feed; the deletion rate does
+not depend on it, because every `main` build is deleted eventually whatever the count is.
+
+- Twenty builds keep 7,920 versions per base, 20 per package, so a package's version list stays
+  on one 100-entry API page and listing it stays one request.
+- A pinned build lives for the next 20 merges: two and a half days at the eight merges of
+  2026-10-15, about a week at two or three a day. A downstream repository that pins a `main` build
+  should move its pin at least that often.
+- A count rather than an age. An age limit is unbounded during a burst of merges and, if combined
+  with a count, empties the channel after a quiet spell.
+- Builds are ranked as whole builds by their newest publish time, not package by package and not
+  by run number, so every kept build stays complete and a restart of the run counter does not
+  delete the fresh builds as old.
+- Per base, so the post-tag bump does not count the previous line's builds against the new line.
+  A superseded line keeps its last 20 builds (7,920 versions) until someone deletes them; that is
+  the one growth the pruner leaves, at one set per release line.
+
+**Which packages it examines.** `GITHUB_TOKEN` cannot use the organization's list-packages
+endpoint, so the run examines the ids the release inventory publishes
+(`Get-CohesionReleasePackageId`, which is exactly what `ci-packages.yml` pushes). If the listing
+does answer, it adds packages named `Assimalign.Cohesion.*` and linked to this repository.
+`cohesion-platforms` publishes `Assimalign.Cohesion.*` packages too; they are in neither set. The
+cost: a package dropped from the inventory, and a package only a never-merged pull request added,
+keep whatever builds they had, a bounded handful each.
+
+**Permissions.** The NuGet registry uses granular permissions, so deleting through `GITHUB_TOKEN`
+needs the Admin role on each package, not only `packages: write`. GitHub grants that role
+automatically to a repository whose workflow publishes the package, which `ci-packages.yml` and
+`release.yml` do. Deleting through `GITHUB_TOKEN` is a GitHub public preview. If deletions are
+refused (HTTP 403, and the run stops after five in a row), open the package's settings, choose
+**Manage Actions access**, and give `assimalign/cohesion` the **Admin** role. No personal access
+token is needed or used. The alternative, a classic token with `read:packages` and
+`delete:packages` from an organization owner, can delete any package in the organization, release
+versions included, so it would be a deliberate owner decision, not a fallback.
+
+**Rate limits, not CI time, bound the pruner.** `GITHUB_TOKEN` gets 1,000 REST requests per hour
+per repository. A run lists every package (397 requests, one each plus the refused organization
+listing), asks the state of each pull request that has builds, then deletes one request per
+version, a second apart as GitHub asks for mutating requests. It stops, successfully, when 100
+requests remain, when a secondary rate limit asks for a wait over two minutes, or after 45 minutes,
+and reports the rest as deferred. Every run recomputes the whole selection, so the next run picks
+up the remainder with nothing to carry over.
+
+- That makes one run worth about 500 deletes, and the hourly schedule about 12,000 a day.
+- Demand is 396 deletes per `main` merge plus 396 per published pull request commit. At the eight
+  merges of 2026-10-15 with two published commits each, that is about 9,500 deletes, inside the
+  ceiling. Heavier days leave a backlog that quiet hours drain.
+- GitHub limits content-creating requests to 500 per hour and does not say whether a delete counts.
+  If it does, the run meets the secondary limit first and stops early on its own.
+- If the backlog grows, publish fewer pull request builds before reaching for a broader token: the
+  pull request channel is most of the volume.
+
+**Triggers.** `pull_request_target` (closed) starts a run when a pull request closes. It runs this
+workflow from the default branch, so the code that decides what to delete is never the closing pull
+request's own, and it fires for a pull request closed with a merge conflict, which `pull_request`
+does not. No step checks out or runs pull request code. Fork pull requests publish nothing and are
+skipped, and so is a pull request that changes only `docs/` or `.claude/` (the paths
+`ci-packages.yml` ignores), since its close would cost a full scan for nothing; a
+Dependabot-triggered close gets a read-only token. The hourly run covers all three.
+`ci-packages.yml` itself stays off `pull_request_target`, because it builds the code under review.
+`workflow_dispatch` defaults to a dry run that lists, selects, and writes the summary without
+deleting anything. One run at a time; a queued run replaced by a newer one loses nothing.
 
 ## Consumer SDK pin agreement
 
