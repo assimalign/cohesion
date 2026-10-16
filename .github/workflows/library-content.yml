@@ -54,6 +54,7 @@ jobs:
             'Assimalign.Cohesion.Content.Binary',
             'Assimalign.Cohesion.Content.Text',
             'Assimalign.Cohesion.Content.Ebml',
+            'Assimalign.Cohesion.Content.Exe',
             'Assimalign.Cohesion.Content.Markdown',
             'Assimalign.Cohesion.Content.Yaml'
         ]]
