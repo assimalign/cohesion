@@ -63,7 +63,7 @@ public class MarkdownModelTests
     [Fact(DisplayName = "Cohesion Test [Content.Markdown] - Model: text content parsing reads through the text layer")]
     public void Parse_TextContent_Reads()
     {
-        using var content = TextContentFactory.FromString("- a\n- b");
+        using var content = TextContent.Create("- a\n- b");
         var document = MarkdownText.Parse(content);
         document.Count.ShouldBe(1);
         document[0].ShouldBeOfType<MarkdownList>().Items.Count.ShouldBe(2);

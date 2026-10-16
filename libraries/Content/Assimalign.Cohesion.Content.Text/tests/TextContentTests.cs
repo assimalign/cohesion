@@ -7,12 +7,12 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Content.Text.Tests;
 
-public class TextContentFactoryTests
+public class TextContentTests
 {
     [Fact(DisplayName = "Cohesion Test [Content.Text] - Factory: FromString round-trips through OpenText")]
-    public void FromString_OpenText_RoundTrips()
+    public void Create_StringInput_RoundTrips()
     {
-        using var content = TextContentFactory.FromString("key: value", name: "doc.yaml");
+        using var content = TextContent.Create("key: value", name: "doc.yaml");
 
         content.Encoding.WebName.ShouldBe("utf-8");
         content.Name.ShouldBe("doc.yaml");
@@ -23,22 +23,22 @@ public class TextContentFactoryTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Text] - Factory: explicit encoding decodes without detection")]
-    public void FromContent_ExplicitEncoding_Decodes()
+    public void Create_ExplicitEncoding_Decodes()
     {
         var encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: false);
-        using var inner = ContentFactory.FromBytes(encoding.GetBytes("héllo"));
-        using var content = TextContentFactory.FromContent(inner, encoding, leaveOpen: true);
+        using var inner = MemoryContent.Create(encoding.GetBytes("héllo"));
+        using var content = TextContent.Create(inner, encoding, leaveOpen: true);
 
         using var reader = content.OpenText();
         reader.ReadToEnd().ShouldBe("héllo");
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Text] - Factory: detection reads the mark and skips it")]
-    public void FromContent_Detection_SkipsByteOrderMark()
+    public void Create_Detection_SkipsByteOrderMark()
     {
         var bytes = Concat([0xFF, 0xFE], new UnicodeEncoding(bigEndian: false, byteOrderMark: false).GetBytes("hi"));
-        using var inner = ContentFactory.FromBytes(bytes);
-        using var content = TextContentFactory.FromContent(inner);
+        using var inner = MemoryContent.Create(bytes);
+        using var content = TextContent.Create(inner);
 
         content.Encoding.WebName.ShouldBe("utf-16");
         using var reader = content.OpenText();
@@ -46,10 +46,10 @@ public class TextContentFactoryTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Text] - Factory: detection without a mark uses null-byte patterns")]
-    public void FromContent_DetectionWithoutMark_UsesPatterns()
+    public void Create_DetectionWithoutMark_UsesPatterns()
     {
-        using var inner = ContentFactory.FromBytes(new UnicodeEncoding(bigEndian: true, byteOrderMark: false).GetBytes("a:"));
-        using var content = TextContentFactory.FromContent(inner);
+        using var inner = MemoryContent.Create(new UnicodeEncoding(bigEndian: true, byteOrderMark: false).GetBytes("a:"));
+        using var content = TextContent.Create(inner);
 
         content.Encoding.WebName.ShouldBe("utf-16BE", StringCompareShould.IgnoreCase);
         using var reader = content.OpenText();
@@ -57,18 +57,18 @@ public class TextContentFactoryTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Text] - Factory: detection rejects single-use content")]
-    public void FromContent_Detection_RejectsSingleUseContent()
+    public void Create_Detection_RejectsSingleUseContent()
     {
-        using var inner = ContentFactory.FromStream(new NonSeekableStream("a"u8.ToArray()));
+        using var inner = StreamContent.Create(new NonSeekableStream("a"u8.ToArray()));
 
-        Should.Throw<ContentException>(() => TextContentFactory.FromContent(inner));
+        Should.Throw<ContentException>(() => TextContent.Create(inner));
     }
 
     [Fact(DisplayName = "Cohesion Test [Content.Text] - Factory: owned inner content is disposed with the text content")]
     public void Dispose_OwnedInnerContent_Disposes()
     {
-        var inner = ContentFactory.FromBytes("a"u8.ToArray());
-        var content = TextContentFactory.FromContent(inner, Encoding.UTF8);
+        var inner = MemoryContent.Create("a"u8.ToArray());
+        var content = TextContent.Create(inner, Encoding.UTF8);
 
         content.Dispose();
 
@@ -78,8 +78,8 @@ public class TextContentFactoryTests
     [Fact(DisplayName = "Cohesion Test [Content.Text] - Factory: borrowed inner content stays usable")]
     public void Dispose_BorrowedInnerContent_StaysUsable()
     {
-        using var inner = ContentFactory.FromBytes("a"u8.ToArray());
-        var content = TextContentFactory.FromContent(inner, Encoding.UTF8, leaveOpen: true);
+        using var inner = MemoryContent.Create("a"u8.ToArray());
+        var content = TextContent.Create(inner, Encoding.UTF8, leaveOpen: true);
 
         content.Dispose();
 

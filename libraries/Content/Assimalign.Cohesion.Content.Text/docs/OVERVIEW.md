@@ -8,13 +8,17 @@ with terminator fidelity (`TextLineReader`), and configurable literal tokenizati
 ## Scope
 
 - `TextEncodingDetector` — pure detection over the first four bytes, YAML 1.2 §5.2 compatible.
-- `TextContentFactory` — text content from strings, from content with a known encoding, or from
+- `TextContent.Create` — text content from strings, from content with a known encoding, or from
   content with detection.
 - `TextLineReader` / `TextLine` / `TextLineEnding` — lines with one-based numbers and exact endings.
 - `TextTokenizer` / `TextToken` / `TextTokenDefinition` / `TextTokenizerOptions` — a stack-only
   tokenizer over `SequenceReader<char>`: caller-registered literal tokens (defaults are the three
   line terminators, overridable), zero-copy text-run slices, optional whitespace runs, and
   line/column/offset positions (`TextPosition`) for parser diagnostics.
+
+Creation lives on public sealed TextContent (private constructor); ownership and reopenability
+follow the root contracts. Invalid creation arguments use BCL argument exceptions; detection over
+single-use content throws ContentException. Messages come from package resources.
 
 ## Dependencies
 
@@ -27,7 +31,7 @@ using Assimalign.Cohesion.Content;
 using Assimalign.Cohesion.Content.Text;
 
 // Detect the encoding of reopenable content and read it as text.
-using var text = TextContentFactory.FromContent(content);
+using var text = TextContent.Create(content);
 using var reader = text.OpenText();
 
 // Line-oriented reading with terminator fidelity.

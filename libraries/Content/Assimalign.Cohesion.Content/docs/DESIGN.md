@@ -25,8 +25,9 @@ it. FileSystem integration belongs in an adapter at the edge, not in the anchor 
 | `ContentFormat` / `ContentKind` | Immutable format descriptor: name, classification, media types, extensions, governing specification |
 | `ContentException` / `ContentFormatException` | Area exception root and the malformed-input error every format reader reports through |
 
-Concrete implementations are `internal` (`MemoryContent`, `StreamContent`, `CompositeContent`),
-created through the public `ContentFactory` — interface-first per the repo coding rules.
+Concrete implementations are public sealed MemoryContent, StreamContent, and CompositeContent,
+with private constructors and concrete-returning Create methods (decision 59). MemoryContent.CreateWritable
+creates an empty writable buffer. Consumers can continue to depend on the interfaces.
 
 ## Stream ownership (the load-bearing decision)
 
@@ -35,7 +36,7 @@ Predictable parsing and serving requires every stream's lifetime to have exactly
 - **Streams handed out are caller-owned.** `OpenRead`/`OpenWrite` return streams the caller must
   dispose. For stream-backed content the returned object is a non-disposing *view*: disposing it never
   tears down the backing source, because the content instance owns that decision.
-- **Backing resources are owned or borrowed at creation.** `ContentFactory.FromStream(..., leaveOpen:)`
+- **Backing resources are owned or borrowed at creation.** `StreamContent.Create(..., leaveOpen:)`
   decides whether disposing the content disposes the source. The same rule applies to composites and
   their children (`leaveItemsOpen`).
 - **Reopenability is explicit.** `CanReopen` distinguishes replayable content (memory, seekable
@@ -72,6 +73,11 @@ stabilization-feature concern that must not weigh down the contract root.
 throws instead of leaking raw parsing exceptions; format packages derive from it when they need
 richer diagnostics (the EBML package's existing exceptions should migrate onto this root as part of
 its repair feature).
+
+ContentFormatException also carries ErrorCode: Unspecified (legacy constructors), Truncated,
+InvalidStructure, InvalidValue, LimitExceeded, or Unsupported. Positions are absolute when the
+reader knows the source origin. Tests assert codes and positions, never message text.
+All package-authored exception messages live in Properties/ErrorMessages.resx.
 
 ## Family dependency direction
 

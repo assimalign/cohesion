@@ -55,8 +55,8 @@ public static class YamlText
         stream.CopyTo(buffer);
         buffer.Position = 0;
 
-        using var content = ContentFactory.FromStream(buffer, Format, leaveOpen: true);
-        using var text = TextContentFactory.FromContent(content, leaveOpen: true);
+        using var content = StreamContent.Create(buffer, Format, leaveOpen: true);
+        using var text = TextContent.Create(content, leaveOpen: true);
         using var reader = text.OpenText();
         return Parse(reader.ReadToEnd());
     }
