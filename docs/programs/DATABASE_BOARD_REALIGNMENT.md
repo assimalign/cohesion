@@ -1,6 +1,7 @@
 # Data Platform Board Realignment (v2)
 
-**Status:** approved, not yet run (0 of 4 windows) · **Decided:** 2026-10-16 · **Owner:** Chase Crawford ·
+**Status:** approved; W1A runs right before this record's tooling PR merges, W1B–W4 after it · **Decided:**
+2026-10-16 · **Owner:** Chase Crawford ·
 **Scope:** GitHub Project #13, the `[L03.02.00] Cohesion - Data Platform` tree (#1067: 391 work items under 8
 epics and the Hardening gate), and the two skills that file and draw it.
 
@@ -40,7 +41,7 @@ All approved by the owner on 2026-10-16, in full. Decisions 1–10 gate the run,
 | 3 | **The 42-category set**, with rules R6 and R7 and the Core membership rule. | §3; `taxonomy.json` |
 | 4 | **6 new cross-epic moves:** #1012, #1231, #1420 → Core C04; #1342 → C03; #1371 → C01; #1446 → Tooling C02. | `taxonomy.json` mapping |
 | 5 | **Execution order (D7 v2): the tree first**, each category filled as it is created (#31 peaks at 80 of 100), then the gate, the cross-epic moves and the fields. 4 windows at 400 requests per hour. | §8 |
-| 6 | **Tooling (D8 v2).** `-Category` is mandatory in Data Platform and an untiered filing needs `-Wave` or `-Priority`; `-DirectUnderEpic`, not `-Force`, is the only override of the epic guard; #1511 takes no child; a T2/T3 filing names its plan family. The tooling merges after Stage 0 and before Stage 1. Five of its edits reach every area (§5). | §5; the work-items skill |
+| 6 | **Tooling (D8 v2).** `-Category` is mandatory in Data Platform once the epic has categories, and an untiered filing needs `-Wave` or `-Priority`; `-DirectUnderEpic`, not `-Force`, is the only override of the epic guard; #1511 takes no child; a T2/T3 filing names its plan family. The tooling merges after Stage 0 and before Stage 1. Five of its edits reach every area (§5). | §5; the work-items skill |
 | 7 | **One body edit:** a member note appended to #1511 after its features move; the existing text is untouched, and the append aborts if the body's hash changed. | §8 (W2) |
 | 8 | **The Program rule:** an item in two programs carries the one the tree cannot show (#1373 becomes Hardening). No "Query Language T1" option: Tier carries T1. | `taxonomy.json` |
 | 9 | **The WBS rule:** "the prefix names the epic an item was filed in; membership is the tree plus Category and Area". | §2 |
@@ -129,22 +130,37 @@ is the guide. In Data Platform:
 - A work item goes **under a category**. An epic with categories refuses a direct child unless
   `-DirectUnderEpic`, the guard's only override (`-Force` only skips the duplicate check). The refusal lists
   every category.
-- **`-Category` is mandatory** once the epic has categories, unless the parent is a category. It names the
-  category of the code that changes; the parent is not a reliable answer (it disagrees for about half of the
-  measured children), so the script suggests it but never inherits it.
+- **`-Category` is mandatory** once the epic has categories, unless the parent is a category. It comes from
+  the epic the item sits under and names the category there of the code that changes; the parent is not a
+  reliable answer (it disagrees for about half of the measured children), so the script suggests it but never
+  inherits it. A Category from another epic draws a warning (file the item under that epic instead).
 - **Untiered work needs `-Wave` or `-Priority`**, bugs included, or the roadmap leaves it Unplaced.
 - **Language-surface work carries a Tier** (bugs exempt); **T2 and T3 work names its plan family**
-  (`-Family <slug>`, or `-Family none` for out-of-plan work).
+  (`-Family <slug>`, or `-Family none` for out-of-plan work), and a language family must match its category's
+  language (`oql-*` under SQL C01 is refused; cross-cutting families fit anywhere).
 - Category, Tier, Program and Area are written at create; Tier and Program are inherited from the nearest
   ancestor that has one, Area is copied from the category.
 - **#1511 takes no child** (read from `programs.json`); §7 gives the three steps instead.
 
 **In every area** (decision 6 names these five as repo-wide): a WBS that names more than one issue stops the
 run; a parent at 100 sub-issues is refused before anything is created; new scope under a closed parent is
-refused; a failed sub-issue link or field read-back exits non-zero and the item is recorded as `UNLINKED`; and
-bulk filing is paced at 35 filings an hour, none during a realignment window. `-Audit` reports decay through
-the paths no guard sees: open work directly under a categorised epic, missing Category or Area, untiered
-language-surface work, parents near the cap, duplicated codes and `UNLINKED` rows.
+refused; once the issue exists, any failed step (project add, a field write, the read-back, the link) still
+records it in the branch manifest as `UNLINKED` and/or `INCOMPLETE:<step>`, prints its number and exits
+non-zero, and re-running the same filing resumes it; and bulk filing is paced at 35 filings an hour, none during
+a realignment window. `-Audit` reports decay through the paths no guard sees: open work directly under a
+categorised epic, missing Category or Area, untiered language-surface work, parents near the cap, duplicated
+codes and unfinished manifest rows.
+
+**Two choices made after `tooling.md` (the main session's calls; the owner can override either):**
+
+- **A Story's child is typed Task, not Story.** `tooling.md`'s E4 table typed every child of a Feature, Story,
+  Task or Bug as a Story. The board says otherwise: all 72 Story → child links on it are typed Task (#1577–#1580
+  among them), the realignment executor types its depth-6 items Task, and the owner's hierarchy of 2026-10-11
+  (Initiative → Epic → Feature → Story) puts Data Platform's sixth-segment items as Tasks under a Story. The
+  script now types a Feature's child a Story and a Story's, Task's or Bug's child a Task.
+- **`-Origin Defect` is a bug filing.** Either it or `-As bug` takes the bug path with all its guards, and a
+  bug's Origin is always Defect, so an `-Origin Defect` task cannot bypass the open, not-planned or duplicate
+  parent refusals.
 
 ## 6. The bug policy (decision 10)
 
@@ -175,7 +191,7 @@ that member, plus the same link.
 
 ## 8. Execution
 
-The run is about **1,565 content requests in 4 one-hour windows** at 400 requests per rolling hour, at least
+The run is about **1,566 content requests in 4 one-hour windows** at 400 requests per rolling hour, at least
 9 s apart (GitHub's content limit is about 500 per hour, account-wide and including web UI clicks; whether
 project-field and sub-issue mutations count is undocumented, so every mutation is counted). The executor
 (regenerated from the approved data and dry-run end to end on 2026-10-16, with a full rollback rehearsal) keeps
@@ -184,7 +200,7 @@ a session scratchpad. An independent review of the executor was running when thi
 
 | Window | Content | Requests | Waits for | State at the end |
 | --- | --- | ---: | --- | --- |
-| **W1A** | Stage 0: create Category (the 42-option ceiling check), Tier and Program; add the Area, Kind and Origin options | 6 | the final rollback pre-image (≤ 6 h old) | 3 new fields; tree untouched. **Safe for any pause** |
+| **W1A** | Stage 0: create Category (the 42-option ceiling check), Tier and Program; the option-id probe (Program's sixth option, added with the other five resent by id); add the Area, Kind and Origin options | 7 | the final rollback pre-image (≤ 6 h old); runs right before the tooling PR merges | 3 new fields; tree untouched. **Safe for any pause** |
 | **W1B** | Create and fill the Core (17), SQL (7), Documents (5) and KV/Blob/Cache (3) categories, one at a time | 388 | **`tooling-merged`**: this record's tooling PR on `main` (`New-CohesionWorkItem.ps1` contains `DirectUnderEpic`) | 4 epics categorised; #31 at 21 (peak 80), #4 at 22; nothing has left #1511. Safe for hours |
 | **W2** | Graph, Tooling, Mapping and the new L03.02.09 epic; the Hardening gate (Program, Kind, 33 links, read back); the 27 cross-epic moves; the #1511 append; Tier 71, Program, issue type | 389 | **`skill-gate-entry`**: `programs.json` with the #1511 gate on `main` | **Tree final**, gate live. **The safe point for a pause of days** |
 | **W3** | Category on all 391 items | 391 | W2 read back | Category roll-ups complete |
@@ -193,12 +209,21 @@ a session scratchpad. An independent review of the executor was running when thi
 
 **The executor stops itself** at each checkpoint above and on: a missing, tampered or stale pre-image
 (`preimage`); a plan that no longer matches the board (`drift`, every target re-read at window start; a moved
-target is skipped only with `--accept-drift`, never forced); **any item under #1067 without a mapping row**
-(`unmapped`, which is why nothing may be filed in Data Platform from W1A until W4 completes); a second executor
-on the state directory (`locked`); a window run out of order (`order`); a parent about to pass 100 sub-issues;
-a feature leaving #1511 before the gate's links and Program values read back; and a changed #1511 body before
-the append. A crash is resumed by re-running the same command: an intent with no recorded outcome is decided by
-reading the board, never by resending.
+target is skipped only with `--accept-drift`, never forced); a second executor on the state directory
+(`locked`); a window run out of order (`order`); a probe or option-list rewrite that loses an option id
+(`probe-failed`, `options-lost`); a parent about to pass 100 sub-issues; a feature leaving #1511 before the
+gate's links and Program values read back; and a changed #1511 body before the append. A crash is resumed by
+re-running the same command: an intent with no recorded outcome is decided by reading the board, never by
+resending.
+
+**Filing between windows.** Each window reads the board live at its start and accepts a Data Platform item filed
+during the pause when its Category belongs to the epic it sits under (it then gets Area, and from W2 an item
+filed flat during the W1A → W1B pause is moved into its category). It halts, sending nothing, on an item whose
+Category comes from another epic (`late-epic-mismatch`), on one with no Category (`unmapped`, until it has an
+entry in the executor's `mapping-additions.json`), and from W2 on a new item created directly under an epic
+after that epic's first category, unless the owner marks it to stay (`late-direct-under-epic`, `stayDirect`).
+So: **between windows, file only under an epic that already has categories, with a `-Category` from that epic;
+during a window, file nothing.**
 
 **Rollback** runs windows in reverse (W4 → W1A) through the same limiter: moves return to the pre-image parent,
 fields to their pre-image value, the 33 links are deleted, #1511's body is restored only while it still hashes
@@ -211,11 +236,18 @@ Tier or Program field definitions in the UI.
 
 ## 9. Ledger
 
-| Step | State |
-| --- | --- |
-| Decisions 11–13 board corrections; the execution seam #1576–#1580 filed and linked | applied 2026-10-16, read back by the roadmap |
-| Roadmap skill v2 (`cohesion-roadmap`, with `programs.json`'s gate entry) | on the realignment-tooling branch |
-| Filing tooling (decision 6) | on the realignment-tooling branch; merges between W1A and W1B |
-| W1A · W1B · W2 · W3 · W4 | not run |
-| Decision 14 values | open |
-| Bug-policy X1 / X2 | open until the post-#1168 backfill |
+Filled in as the run goes: one row per step, with when it ran and the evidence (journal line, merge commit,
+read-back).
+
+| Step | Ran | Evidence |
+| --- | --- | --- |
+| Decisions 11–13 board corrections; the execution seam #1576–#1580 filed and linked | 2026-10-16 | read back by the roadmap's Changes tab |
+| W1A (Stage 0) | | |
+| Realignment-tooling PR merged (`tooling-merged`) | | |
+| W1B | | |
+| `programs.json` gate entry on `main` (`skill-gate-entry`) | | |
+| W2 | | |
+| W3 | | |
+| W4 | | |
+| Decision 14 values (optional window D14) | | |
+| Bug-policy X1 / X2 decided (post-#1168 backfill) | | |
