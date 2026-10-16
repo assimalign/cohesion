@@ -19,14 +19,16 @@ added categories, the Category / Tier / Program fields and the bug policy is rec
 ## The model (read this first)
 
 The **tree is held by native GitHub parent/sub-issue links**; every item is added to Project #13. The GitHub
-**issue type** names the level: **Initiative → Epic → Feature → Story**, plus **Bug** for a defect. The script
-chooses the type from the parent's kind and sets it in the create call.
+**issue type** names the level: **Initiative → Epic → Feature → Story** (owner, 2026-10-11), a **Task** below a
+Story, and **Bug** for a defect. The script chooses the type from the parent's kind and sets it in the create
+call.
 
 | Parent | New item's type / `Kind` |
 | --- | --- |
 | Area epic (`[L01.01.11] Foundation - Http`) or Data Platform category (`[L03.02.02.C04] SQL - Indexing`) | Feature / Feature |
-| Feature, Story, Task or Bug | Story / Task |
-| any closed delivered item, with `-As bug` | Bug / Bug |
+| Feature | Story / Task |
+| Story, Task or Bug | Task / Task |
+| any closed delivered item, with `-As bug` or `-Origin Defect` | Bug / Bug |
 | Program root (`[L01.01.00]`, `[L03.02.00]`) or a program gate (#1511) | refused |
 
 Titles carry a WBS code: `[<wbs>] <description>`. **The prefix names the epic an item was filed in;
@@ -55,7 +57,8 @@ the item's **Origin**.
   kind (`-As task|feature` has no effect). Origin **Planned**; add `-Origin DiscoveredTask|DiscoveredFeature`
   if it really is creep.
 - **A defect in behaviour a *closed* item delivered** → a **bug child of that item**
-  (`-As bug -Parent <issue number>`), Origin **Defect**. See *Bugs* below.
+  (`-As bug -Parent <issue number>`), Origin **Defect**. See *Bugs* below. `-Origin Defect` means the same
+  thing: either one makes the filing a bug, with every bug guard, and a bug's Origin is always Defect.
 - **Same intent as an existing item** → do **not** create a duplicate; reuse it.
 
 If the classification is ambiguous, state your reasoning and ask the user which bucket it is before creating.
@@ -71,8 +74,11 @@ category layer decayed.
    Pass `-Parent <category#>`. `-DirectUnderEpic` is the only override, for work that belongs to the epic
    itself; `-Force` does **not** override it (it only skips the duplicate check).
 2. **`-Category` is mandatory once the epic has categories,** unless the parent is itself a category.
-   Name the category of **the code the work changes** (taxonomy rule R2), not the parent's: the parent is
-   the wrong answer about half the time. The refusal suggests the nearest ancestor's category.
+   The Category must come from **the epic the item sits under**: name the category there that owns **the
+   code the work changes** (taxonomy rule R2), which is not necessarily the parent's (the parent is the wrong
+   answer about half the time). If that code belongs to another epic, file the item under that epic's
+   category instead. The refusal suggests the nearest ancestor's category; a Category from another epic
+   draws a warning, and the realignment executor halts on one.
 3. **Untiered work needs `-Wave` or `-Priority`.** The roadmap places work by its tier, else its Wave
    window, else its Priority window; with none of them it lands in *Unplaced*. Bugs included. A tiered
    item (from `-Tier` or a tiered ancestor) may omit both.
@@ -167,10 +173,15 @@ What the script refuses, and the only way past each refusal:
 | New scope under a closed parent | it vanishes from every open view | `-As bug`, or `-AllowClosedParent` |
 | A bug under an open, not-planned, duplicate, epic or category parent | bug policy B2–B4 | `-AllowOpenParent` (open only) |
 | A Data Platform filing missing Category, Tier, Wave/Priority or Family where required | the roadmap cannot place it | pass the value |
+| A `-Family` of another language than the category (`oql-*` under SQL C01) | it would take the wrong plan slot | the category's own language (cross-cutting `x-*` families fit anywhere) |
 | An option that does not exist on the board (preflight) | a skipped field is how items landed unclassified | create the option, or wait for realignment Stage 0 |
 
-After a real create it reads the fields back and re-checks the parent's room before linking. **A failed link
-or read-back exits 1**, and the manifest row is marked `UNLINKED`; link it by hand (manual recipe step 6).
+**Once the issue exists, every outcome is recorded.** After the create it adds the item to the project, sets
+the fields, reads them back, re-checks the parent's room and links it. If any of those steps fails, or the
+create itself errors after making the issue, the script still writes the manifest row — `|UNLINKED` unless the
+link succeeded, `|INCOMPLETE:<step>` when a step failed or a field read back wrong — prints the issue number and
+exits 1. **Re-running the same command resumes it:** the row (same branch, parent and title) makes the script
+reuse that issue instead of creating another, finish the remaining steps and replace the row.
 
 Before the realignment's Stage 0 creates `Category`, `Tier` and `Program` (and adds `Kind` Bug, `Origin`
 Defect and the `Database*` Area options), a filing that does not need them behaves as it always did; one that
@@ -224,8 +235,9 @@ its sub-issues or vice versa, so list each item the PR resolves.
 
 Read-only. Lists open work items directly under an epic that has categories, items under such epics missing
 Category or Area, open language-surface items without a Tier, parents at 95+ sub-issues, WBS codes carried by
-more than one issue, and `UNLINKED` rows in this worktree's manifest. **Exit 1 when it finds anything.** It
-catches what no filing guard sees: REST bulk filing, the manual recipe, the web UI and `-DirectUnderEpic`.
+more than one issue, and `UNLINKED` and `INCOMPLETE` rows in this worktree's manifest. **Exit 1 when it finds
+anything.** It catches what no filing guard sees: REST bulk filing, the manual recipe, the web UI and
+`-DirectUnderEpic`.
 
 ## Guardrails
 
@@ -234,10 +246,17 @@ catches what no filing guard sees: REST bulk filing, the manual recipe, the web 
   category code comes from a signed-off design and is created by the realignment executor or the manual
   category recipe, never by the script.
 - **Pace bulk filing: at most 35 filings per hour.** A filing is 8–12 content-generating requests and
-  GitHub's account-wide content limit is about 500 per hour, web UI clicks included.
-- **No Data Platform filing while the realignment runs** (from W1A until W4 completes). A window spends 400
-  of the 500 hourly requests, and the executor halts at the next window on any item under #1067 it has no
-  mapping row for. File nothing at all during a window.
+  GitHub's account-wide content limit is about 500 per hour, web UI clicks included. GraphQL points matter
+  less: a `-DryRun` costs **2 points** (3 when the parent is inferred as a sibling, +1 for each `-Category`
+  read by number or code), each of the script's own queries measured at 1 point, and the issue list is read
+  over REST. A filing costs about **15–20 points**: the dry-run reads, the read-back, the node-id read and the
+  link, plus gh's own requests inside `issue create` and `project item-add` and one per field write, each
+  counted at GitHub's minimum of 1 point (those were not measured live: they write).
+- **While the board realignment runs:** between windows, file only under an epic that already has
+  categories, with a `-Category` from that epic; during a window, file nothing. A window spends 400 of the
+  500 hourly requests, and the executor halts the next window on a Data Platform item whose Category comes
+  from another epic, on one with no Category, and on a new item directly under a categorised epic unless the
+  owner marks it to stay.
 - **One concern per item.** If the creep is really several things, create several items.
 - **Don't create duplicates**: search first (Step 1).
 - **Confirm before creating** when the parent or classification is uncertain; `-DryRun` previews everything.

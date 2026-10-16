@@ -213,6 +213,7 @@ $InheritableTiers = @('T1', 'T2', 'T3', 'Fix-first', 'Prerequisite')
 $RoadmapDataDir = Join-Path $PSScriptRoot '../../cohesion-roadmap/data'
 $script:AllIssuesCache = $null
 $script:FieldMapCache  = $null
+$script:ProjectId      = $null
 $StopWords = @('add','the','and','for','with','to','of','a','an','is','are','be','via','use','new',
                'implement','implementation','support','enable','provide','create','make','into','over')
 
@@ -567,14 +568,31 @@ function Find-SimilarIssues {
 
 # --- Project field helpers -------------------------------------------------------------------
 
+# The project's id and its fields with their options, in one GraphQL query (1 point). `gh project field-list`
+# reads items x field values as well and costs about 101 points a call.
+$FieldMapQuery = @'
+query {
+  organization(login: "assimalign") { projectV2(number: 13) { id
+    fields(first: 50) { nodes {
+      ... on ProjectV2SingleSelectField { id name options { id name } }
+      ... on ProjectV2IterationField { id name }
+      ... on ProjectV2Field { id name } } } } }
+}
+'@
+
 function Get-FieldMap {
     if ($null -ne $script:FieldMapCache) { return $script:FieldMapCache }
-    $fields = ConvertFrom-GhJson (Invoke-GhRetry -GhArgs @('project', 'field-list', "$ProjectNum", '--owner', $Owner, '--format', 'json', '--limit', '100'))
+    $resp = ConvertFrom-GhJson (Invoke-GhRetry -GraphQL -GhArgs @('api', 'graphql', '-f', "query=$FieldMapQuery"))
+    $project = Get-Prop (Get-Prop (Get-Prop $resp 'data') 'organization') 'projectV2'
+    if (-not $project) { throw "Project #$ProjectNum of $Owner could not be read." }
+    $script:ProjectId = [string](Get-Prop $project 'id')
     $map = @{}
-    foreach ($f in @(Get-Prop $fields 'fields')) {
+    foreach ($f in @(Get-Prop (Get-Prop $project 'fields') 'nodes')) {
+        $name = [string](Get-Prop $f 'name')
+        if (-not $name) { continue }
         $opts = @{}
         foreach ($o in @(Get-Prop $f 'options')) { if ($o) { $opts[[string]$o.name] = [string]$o.id } }
-        $map[[string]$f.name] = @{ id = [string]$f.id; options = $opts }
+        $map[$name] = @{ id = [string](Get-Prop $f 'id'); options = $opts }
     }
     $script:FieldMapCache = $map
     return $map
@@ -635,7 +653,9 @@ function New-BodyTemplate {
     return $sb.ToString()
 }
 
-# Manifest rows: branch, number, wbs, origin[|UNLINKED], title, parent.
+# Manifest rows: branch, number, wbs, origin[|UNLINKED][|INCOMPLETE:<step>], title, parent.
+# UNLINKED: the item is not a sub-issue of its parent. INCOMPLETE:<step>: the filing stopped at that step
+# (create, project-add, fields, read-back); re-running the same filing resumes it.
 function Read-ManifestRows {
     param([string] $Branch)
     $manifest = Get-ManifestPath
@@ -646,18 +666,35 @@ function Read-ManifestRows {
         if ($parts.Count -lt 2) { continue }          # skip malformed rows rather than throwing
         if ($Branch -and $parts[0] -ne $Branch) { continue }
         if ($parts[1] -notmatch '^\d+$') { continue }  # second field must be an issue number
-        $origin = if ($parts.Count -ge 4 -and $parts[3]) { $parts[3] } else { 'Planned' }
+        $flags = @((($(if ($parts.Count -ge 4 -and $parts[3]) { $parts[3] } else { 'Planned' })) -split '\|') | Where-Object { $_ })
+        $incomplete = @($flags | Where-Object { $_ -like 'INCOMPLETE:*' } | ForEach-Object { $_.Substring(11) }) | Select-Object -First 1
         [pscustomobject]@{
-            branch   = $parts[0]
-            number   = [int]$parts[1]
-            wbs      = $(if ($parts.Count -ge 3) { $parts[2] } else { '' })
-            origin   = ($origin -replace '\|UNLINKED$', '')
-            unlinked = ($origin -like '*|UNLINKED')
-            title    = $(if ($parts.Count -ge 5) { $parts[4] } else { '' })
-            parent   = $(if ($parts.Count -ge 6 -and $parts[5] -match '^\d+$') { [int]$parts[5] } else { $null })
+            branch     = $parts[0]
+            number     = [int]$parts[1]
+            wbs        = $(if ($parts.Count -ge 3) { $parts[2] } else { '' })
+            origin     = $(if ($flags.Count) { $flags[0] } else { 'Planned' })
+            unlinked   = ($flags -contains 'UNLINKED')
+            incomplete = $incomplete
+            title      = $(if ($parts.Count -ge 5) { $parts[4] } else { '' })
+            parent     = $(if ($parts.Count -ge 6 -and $parts[5] -match '^\d+$') { [int]$parts[5] } else { $null })
         }
     }
     return @($rows)
+}
+
+# Record a filing in the per-branch manifest, replacing an earlier row for the same branch and issue (a resumed
+# filing) instead of adding a second one. Tabs and newlines are stripped so they cannot corrupt a row.
+function Write-ManifestRow {
+    param([string] $Branch, [int] $Number, [string] $Code, [string] $RowOrigin, [string] $RowTitle, [int] $ParentNumber)
+    $manifest = Get-ManifestPath
+    if (-not $manifest) { Write-Warning "No git directory, so #$Number was not recorded in a branch manifest."; return $null }
+    $row = "{0}`t{1}`t{2}`t{3}`t{4}`t{5}" -f $Branch, $Number, $Code, $RowOrigin, ($RowTitle -replace "[`t`r`n]", ' '), $ParentNumber
+    $kept = @()
+    if (Test-Path $manifest) {
+        $kept = @(Get-Content $manifest | Where-Object { $p = $_ -split "`t"; -not ($p.Count -ge 2 -and $p[0] -eq $Branch -and $p[1] -eq "$Number") })
+    }
+    Set-Content -Path $manifest -Value (@($kept) + $row)
+    return $manifest
 }
 
 # --- Search mode -----------------------------------------------------------------------------
@@ -685,9 +722,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Closes') {
         Write-Host "# No work items recorded for branch '$branch'." -ForegroundColor Yellow
         return
     }
-    foreach ($r in @($rows | Where-Object { $_.unlinked })) {
+    foreach ($r in @($rows | Where-Object { $_.unlinked -or $_.incomplete })) {
         $to = if ($r.parent) { "#$($r.parent)" } else { 'its parent (not recorded)' }
-        Write-Warning "UNLINKED: #$($r.number) [$($r.wbs)] was created but never linked under $to. Link it before merging: the filing exited 1 when the link failed."
+        if ($r.incomplete) { Write-Warning "INCOMPLETE: #$($r.number) [$($r.wbs)] stopped at '$($r.incomplete)'$(if ($r.unlinked) { " and is not linked under $to" }). Re-run the same filing (same title, same parent) to resume it, before merging." }
+        else { Write-Warning "UNLINKED: #$($r.number) [$($r.wbs)] was created but never linked under $to. Link it before merging: the filing exited 1 when the link failed." }
     }
     $planned    = @($rows | Where-Object { $_.origin -notlike 'Discovered*' -and $_.origin -ne 'Defect' } | ForEach-Object { $_.number })
     $discovered = @($rows | Where-Object { $_.origin -like 'Discovered*' } | ForEach-Object { $_.number })
@@ -814,9 +852,12 @@ query($endCursor: String) {
     $dups = @($byCode.GetEnumerator() | Where-Object { $_.Value.Count -gt 1 -and @($_.Value | Where-Object { $inTree.Contains($_) }).Count } | Sort-Object Key | ForEach-Object { "[$($_.Key)] " + (($_.Value | Sort-Object | ForEach-Object { "#$_" }) -join ', ') })
     & $show '5. WBS codes on more than one issue' $dups; $findings += $dups.Count
 
-    # 6. UNLINKED rows in this worktree's manifest.
-    $unl = @(Read-ManifestRows | Where-Object { $_.unlinked } | ForEach-Object { "#$($_.number) [$($_.wbs)] on $($_.branch)$(if ($_.parent) { ", meant for #$($_.parent)" })" })
+    # 6-7. Unfinished filings in this worktree's manifest.
+    $manifestRows = @(Read-ManifestRows)
+    $unl = @($manifestRows | Where-Object { $_.unlinked } | ForEach-Object { "#$($_.number) [$($_.wbs)] on $($_.branch)$(if ($_.parent) { ", meant for #$($_.parent)" })" })
     & $show '6. UNLINKED manifest rows in this worktree' $unl; $findings += $unl.Count
+    $inc = @($manifestRows | Where-Object { $_.incomplete } | ForEach-Object { "#$($_.number) [$($_.wbs)] on $($_.branch), stopped at '$($_.incomplete)'" })
+    & $show '7. INCOMPLETE manifest rows in this worktree (re-run the filing to resume)' $inc; $findings += $inc.Count
 
     if ($findings -gt 0) { Write-Host "Audit: $findings finding(s)." -ForegroundColor Yellow; exit 1 }
     Write-Host "Audit: clean." -ForegroundColor Green
@@ -825,13 +866,18 @@ query($endCursor: String) {
 
 # --- Create mode -----------------------------------------------------------------------------
 
-$isBug = ($As -eq 'bug')
+# A defect is one filing however it is asked for: -As bug or -Origin Defect. Either makes it a bug, so every bug
+# guard applies (an -Origin Defect filing must not slip past them as a plain task), and a bug's Origin is Defect.
+$isBug = ($As -eq 'bug' -or $Origin -eq 'Defect')
 if ($isBug) {
+    if ($As -ne 'bug') { Write-Host "Note: -Origin Defect files a defect: the bug path and all its guards apply, as with -As bug." -ForegroundColor Yellow }
+    elseif ($Origin -and $Origin -ne 'Defect') { Write-Host "Note: -As bug files a defect, so its Origin is Defect, not $Origin." -ForegroundColor Yellow }
+    $Origin = 'Defect'
     if (-not $Parent) {
-        throw "-As bug requires -Parent <issue#>: a defect attaches to the item whose delivered behaviour is wrong (bug policy B1). There is no branch inference for a defect."
+        throw "A defect (-As bug or -Origin Defect) requires -Parent <issue#>: it attaches to the item whose delivered behaviour is wrong (bug policy B1). There is no branch inference for a defect."
     }
     if ($Parent -notmatch '^\d+$') {
-        throw "-As bug requires -Parent as an ISSUE NUMBER, not [$Parent]: WBS codes repeat (7 codes on 14 issues when measured), so a code can attach a defect to the wrong delivered item."
+        throw "A defect (-As bug or -Origin Defect) requires -Parent as an ISSUE NUMBER, not [$Parent]: WBS codes repeat (7 codes on 14 issues when measured), so a code can attach a defect to the wrong delivered item."
     }
 }
 $tierData = Get-TierData
@@ -957,18 +1003,42 @@ if ($DirectUnderEpic -and -not ($parentKind -eq 'AreaEpic' -and $categorised)) {
     Write-Host "Note: -DirectUnderEpic has no effect: the parent is not an epic with categories." -ForegroundColor DarkGray
 }
 
-# 4. Type, Kind and Origin from the parent's kind.
+# 4. Type, Kind and Origin from the parent's kind. The issue types follow Initiative -> Epic -> Feature -> Story
+# (owner, 2026-10-11), and a child of a Story, Task or Bug is a Task: the board's Story children are all typed
+# Task, the realignment executor types depth-6 items Task, and Data Platform's sixth-segment items sit as Tasks.
 if ($isBug) { $issueType = 'Bug'; $kindOpt = 'Bug' }
 elseif ($parentKind -in @('AreaEpic', 'Category')) { $issueType = 'Feature'; $kindOpt = 'Feature' }
-else { $issueType = 'Story'; $kindOpt = 'Task' }
+elseif ($parentKind -eq 'Feature') { $issueType = 'Story'; $kindOpt = 'Task' }
+else { $issueType = 'Task'; $kindOpt = 'Task' }
 if (-not $Origin) {
-    if ($isBug) { $Origin = 'Defect' }
-    elseif ($inferred) { $Origin = if ($As -eq 'feature') { 'DiscoveredFeature' } else { 'DiscoveredTask' } }
+    if ($inferred) { $Origin = if ($As -eq 'feature') { 'DiscoveredFeature' } else { 'DiscoveredTask' } }
     else { $Origin = 'Planned' }
 }
 
+# An earlier run of this same filing (same branch, parent and title) that created the issue but stopped before
+# finishing is resumed, not created a second time.
+$resume = $null; $alreadyLinked = $false
+$cleanTitle = ($Title -replace "[`t`r`n]", ' ')
+$pending = @(Read-ManifestRows -Branch (Get-BranchName) | Where-Object { ($_.unlinked -or $_.incomplete) -and $_.parent -eq $parentNode.number -and $_.title -ceq $cleanTitle })
+if ($pending.Count) {
+    $row = $pending[-1]
+    $prior = $null
+    try { $prior = @((Get-IssueChain -Number $row.number).nodes) } catch { Write-Warning "The manifest records an unfinished filing #$($row.number), but it cannot be read ($_); filing anew." }
+    if ($prior -and $prior[0].state -ne 'OPEN') { Write-Warning "The manifest records an unfinished filing #$($row.number), but it is closed; filing anew."; $prior = $null }
+    if ($prior) {
+        if ($prior.Count -ge 2 -and $prior[1].number -ne $parentNode.number) {
+            throw "#$($row.number), an unfinished earlier filing of '$Title', now sits under #$($prior[1].number), not #$($parentNode.number). Finish it by hand, or delete its row from the branch manifest."
+        }
+        $resume = $prior[0]; $alreadyLinked = ($prior.Count -ge 2)
+        $stoppedAt = if ($row.incomplete) { $row.incomplete } else { 'link' }
+        Write-Host "Resuming #$($resume.number): already created by an earlier run that stopped at '$stoppedAt'; it is not created again." -ForegroundColor Yellow
+        if ($Wbs -and $Wbs -cne $resume.wbs) { Write-Host "Note: -Wbs $Wbs is ignored: #$($resume.number) already carries [$($resume.wbs)]." -ForegroundColor DarkGray }
+    }
+}
+
 # 5. WBS code.
-if ($Wbs) {
+if ($resume) { $newWbs = if ($resume.wbs) { $resume.wbs } else { $row.wbs } }
+elseif ($Wbs) {
     if ($Wbs -cnotmatch ('^' + [regex]::Escape($parentWbs) + '\.\d{2,}$')) { throw "-Wbs [$Wbs] is not a direct child of the parent's code [$parentWbs]." }
     $existingWbs = @(Get-IssuesByWbs $Wbs)
     if ($existingWbs.Count -gt 0) { throw "-Wbs [$Wbs] is already used by #$($existingWbs[0].number) '$($existingWbs[0].title)'." }
@@ -976,7 +1046,7 @@ if ($Wbs) {
 }
 else { $newWbs = Get-NextChildWbs -ParentWbs $parentWbs }
 $fullTitle = "[$newWbs] $Title"
-Write-Host "New $($issueType.ToLowerInvariant()) ($Origin): $fullTitle" -ForegroundColor Green
+Write-Host "$(if ($resume) { "Resumed $($issueType.ToLowerInvariant())" } else { "New $($issueType.ToLowerInvariant())" }) ($Origin): $fullTitle" -ForegroundColor Green
 
 # 6. Board fields, each with its source.
 $fieldPlan = [System.Collections.Generic.List[object]]::new()
@@ -1000,6 +1070,9 @@ if ($Category) {
 elseif ($parentKind -eq 'Category') { $cat = $parentNode; $catSource = "parent is category #$($parentNode.number)" }
 $catCode = if ($cat) { $cat.wbs } else { $null }
 $catName = if ($cat) { ($cat.title -replace '^\[[^\]]+\]\s*', '').Trim() } else { $null }
+if ($cat -and $epicNode -and $epicNode.wbs -and -not $catCode.StartsWith($epicNode.wbs + '.')) {
+    Write-Warning "Category [$catCode] belongs to another epic than the one this item sits under (#$($epicNode.number) [$($epicNode.wbs)]). File it under a category of its own epic, or under [$catCode] itself: tree and field then agree. While the board realignment runs, its executor halts on a cross-epic Category."
+}
 if (-not $cat -and $categorised) {
     $hint = $null
     foreach ($n in $chain) { if ((Get-IssueKind $n -NoThrow) -eq 'Category') { $hint = "-Category $($n.wbs) (#$($n.number), an ancestor)"; break } }
@@ -1053,6 +1126,7 @@ if ($isDataPlatform -and -not $tierVal -and -not $Wave -and -not $Priority) {
 }
 
 # Family (E19): the plan-family line for T1-T3 work; T2 and T3 must name one ("none" for out-of-plan work).
+$langCode = if ($catCode) { $catCode } elseif ($epicNode) { $epicNode.wbs } else { $parentWbs }
 $planTier = $null
 if ($tierVal) { $planTier = if ($tierData -and $tierData.options.Contains($tierVal)) { $tierData.options[$tierVal] } else { $tierVal } }
 $planLine = $null
@@ -1064,9 +1138,15 @@ if ($Family) {
     else {
         if (-not $tierData) { throw "-Family needs the roadmap skill's tiers.json ($RoadmapDataDir), which is missing." }
         $fam = @($tierData.families | Where-Object { $_.id -ceq $Family -or @(Get-Prop $_ 'bodySlugs') -ccontains $Family }) | Select-Object -First 1
-        $lang = Get-PlanLanguage $(if ($catCode) { $catCode } elseif ($epicNode) { $epicNode.wbs } else { $parentWbs })
+        $lang = Get-PlanLanguage $langCode
         $listFor = { param($T) $l = @($tierData.families | Where-Object { @($_.tiers) -ccontains $T -and (-not $lang -or $_.language -eq $lang) } | ForEach-Object { $_.id }); if ($l.Count) { $l -join ', ' } else { '(none)' } }
         if (-not $fam) { throw "-Family '$Family' is not a plan family in tiers.json.$(if ($planTier) { " $planTier families$(if ($lang) { " for $lang" }): $(& $listFor $planTier)." })" }
+        # A language family belongs to its own language's categories. Cross-cutting families may sit anywhere
+        # (#1068 under SQL C01), and Core may hold a language family's kernel work (#1012, SQL, in Core C04).
+        $languages = @('SQL', 'OQL', 'GQL')
+        if ($lang -in $languages -and [string]$fam.language -in $languages -and [string]$fam.language -ne $lang) {
+            throw "Family '$Family' is $($fam.language) work, but this item's category [$langCode] is $lang work: a language family must match its category's language.$(if ($planTier) { " $planTier families for ${lang}: $(& $listFor $planTier)." })"
+        }
         if (-not $planTier) { throw "-Family '$Family' needs a tier: pass -Tier, or file under tiered work." }
         if ($planTier -notin @('T1', 'T2', 'T3')) { throw "-Family applies to T1, T2 and T3 work; this item's tier is $planTier." }
         if (@($fam.tiers) -cnotcontains $planTier) { throw "Family '$Family' has no $planTier row (its tiers: $(@($fam.tiers) -join ', ')). $planTier families$(if ($lang) { " for $lang" }): $(& $listFor $planTier)." }
@@ -1074,68 +1154,73 @@ if ($Family) {
     }
 }
 elseif ($planTier -in @('T2', 'T3') -and -not $isBug) {
-    $lang = Get-PlanLanguage $(if ($catCode) { $catCode } elseif ($epicNode) { $epicNode.wbs } else { $parentWbs })
+    $lang = Get-PlanLanguage $langCode
     $l = if ($tierData) { @($tierData.families | Where-Object { @($_.tiers) -ccontains $planTier -and (-not $lang -or $_.language -eq $lang) } | ForEach-Object { $_.id }) -join ', ' } else { '' }
     throw "A $planTier item must name its plan family so the roadmap can put it in its slot: -Family <slug>, or -Family none for out-of-plan work.$(if ($l) { " $planTier families$(if ($lang) { " for $lang" }): $l." })"
 }
 
-# 7. Reuse before creating: look for an existing item that may already cover this.
-$similar = @(Find-SimilarIssues -TitleText $Title)
-if ($isBug) {
-    # The parent shares every significant word with its defect by construction; its other children are the
-    # real duplicate risk, so they rank first.
-    $similar = @($similar | Where-Object { $_.Number -ne $parentNode.number })
-    $siblingRx = '^\[' + [regex]::Escape($parentWbs) + '\.\d{2,}\]'
-    $siblingNums = @((Get-AllIssues) | Where-Object { $_.title -cmatch $siblingRx } | ForEach-Object { $_.number })
-    $similar = @($similar | Sort-Object -Property @{Expression={ [int]($siblingNums -contains $_.Number) }; Descending=$true}, @{Expression='Shared'; Descending=$true})
-}
-$strong = @($similar | Where-Object { $_.State -eq 'OPEN' -and ($_.Jaccard -ge 0.5 -or $_.Shared -ge 3) })
-if ($strong.Count -gt 0 -and -not $Force) {
-    Write-Warning "A likely-duplicate existing item was found for '$Title':"
-    foreach ($c in $strong) { Write-Host "  #$($c.Number) [$($c.State)] $($c.Title)  (shared=$($c.Shared), jaccard=$($c.Jaccard); terms: $($c.Terms))" -ForegroundColor Yellow }
-    Write-Host "Reuse one of the above (add work to it), or re-run with -Force to create a new item anyway." -ForegroundColor Yellow
-    return
-}
-elseif ($similar.Count -gt 0) {
-    Write-Host "Similar existing items (not blocking; confirm this is genuinely new):" -ForegroundColor DarkGray
-    foreach ($c in ($similar | Select-Object -First 3)) { Write-Host "  #$($c.Number) [$($c.State)] $($c.Title)" -ForegroundColor DarkGray }
-}
-
-# 8. Body: template or file, the plan-family line, and the provenance stamp.
-$parentRef = "[$parentWbs] (#$($parentNode.number))"
-if ($BodyFile) {
-    if (-not (Test-Path $BodyFile)) { throw "BodyFile not found: $BodyFile" }
-    $body = Get-Content $BodyFile -Raw
-    if ($planLine) {
-        $fm = [regex]::Match($body, 'Tier ([123]) family `([a-z0-9-]+)`')
-        if ($fm.Success) {
-            if ($fm.Groups[2].Value -cne $Family -or "T$($fm.Groups[1].Value)" -ne $planTier) { throw "The body already names Tier $($fm.Groups[1].Value) family '$($fm.Groups[2].Value)', which disagrees with -Family $Family at $planTier." }
-        }
-        else { $body = $body.TrimEnd() + "`n`n" + $planLine + "`n" }
+# 7. Reuse before creating: look for an existing item that may already cover this. A resumed filing skips it:
+# the issue that would match is its own.
+if (-not $resume) {
+    $similar = @(Find-SimilarIssues -TitleText $Title)
+    if ($isBug) {
+        # The parent shares every significant word with its defect by construction; its other children are the
+        # real duplicate risk, so they rank first.
+        $similar = @($similar | Where-Object { $_.Number -ne $parentNode.number })
+        $siblingRx = '^\[' + [regex]::Escape($parentWbs) + '\.\d{2,}\]'
+        $siblingNums = @((Get-AllIssues) | Where-Object { $_.title -cmatch $siblingRx } | ForEach-Object { $_.number })
+        $similar = @($similar | Sort-Object -Property @{Expression={ [int]($siblingNums -contains $_.Number) }; Descending=$true}, @{Expression='Shared'; Descending=$true})
+    }
+    $strong = @($similar | Where-Object { $_.State -eq 'OPEN' -and ($_.Jaccard -ge 0.5 -or $_.Shared -ge 3) })
+    if ($strong.Count -gt 0 -and -not $Force) {
+        Write-Warning "A likely-duplicate existing item was found for '$Title':"
+        foreach ($c in $strong) { Write-Host "  #$($c.Number) [$($c.State)] $($c.Title)  (shared=$($c.Shared), jaccard=$($c.Jaccard); terms: $($c.Terms))" -ForegroundColor Yellow }
+        Write-Host "Reuse one of the above (add work to it), or re-run with -Force to create a new item anyway." -ForegroundColor Yellow
+        return
+    }
+    elseif ($similar.Count -gt 0) {
+        Write-Host "Similar existing items (not blocking; confirm this is genuinely new):" -ForegroundColor DarkGray
+        foreach ($c in ($similar | Select-Object -First 3)) { Write-Host "  #$($c.Number) [$($c.State)] $($c.Title)" -ForegroundColor DarkGray }
     }
 }
-else { $body = New-BodyTemplate -Sum $Summary -Acc $Acceptance -Std $Standards -Bug:$isBug -ParentRef $parentRef -PlanLine $planLine }
-if ($Origin -eq 'Defect') {
-    $closedOn = if ($parentNode.closedAt) { ([datetime]$parentNode.closedAt).ToUniversalTime().ToString('yyyy-MM-dd') } else { 'not closed' }
-    $body = "> Defect in [$parentWbs] (#$($parentNode.number)), closed $closedOn.`n`n" + $body
-}
-elseif ($Origin -like 'Discovered*' -and $branchWbs) {
-    $stampItem = $branchItem
-    if (-not $stampItem) { $h = @(Get-IssuesByWbs $branchWbs); if ($h.Count -eq 1) { $stampItem = $h[0] } }
-    $featRef = if ($stampItem) { "[$branchWbs] (#$($stampItem.number))" } else { "[$branchWbs]" }
-    $body = "> Discovered while implementing $featRef.`n`n" + $body
-}
 
-# Discovered work is labeled scope-creep and a defect `bug`, so both are countable from the issues CLI.
-$labels = @($Label | Where-Object { $_ })
-if ($Origin -like 'Discovered*' -and $labels -notcontains 'scope-creep') { $labels += 'scope-creep' }
-if ($Origin -eq 'Defect' -and $labels -notcontains 'bug') { $labels += 'bug' }
+# 8. Body: template or file, the plan-family line, and the provenance stamp (only for a new issue).
+$body = $null; $labels = @()
+if (-not $resume) {
+    $parentRef = "[$parentWbs] (#$($parentNode.number))"
+    if ($BodyFile) {
+        if (-not (Test-Path $BodyFile)) { throw "BodyFile not found: $BodyFile" }
+        $body = Get-Content $BodyFile -Raw
+        if ($planLine) {
+            $fm = [regex]::Match($body, 'Tier ([123]) family `([a-z0-9-]+)`')
+            if ($fm.Success) {
+                if ($fm.Groups[2].Value -cne $Family -or "T$($fm.Groups[1].Value)" -ne $planTier) { throw "The body already names Tier $($fm.Groups[1].Value) family '$($fm.Groups[2].Value)', which disagrees with -Family $Family at $planTier." }
+            }
+            else { $body = $body.TrimEnd() + "`n`n" + $planLine + "`n" }
+        }
+    }
+    else { $body = New-BodyTemplate -Sum $Summary -Acc $Acceptance -Std $Standards -Bug:$isBug -ParentRef $parentRef -PlanLine $planLine }
+    if ($Origin -eq 'Defect') {
+        $when = if ($closedParent -and $parentNode.closedAt) { 'closed ' + ([datetime]$parentNode.closedAt).ToUniversalTime().ToString('yyyy-MM-dd') } else { 'which is still open' }
+        $body = "> Defect in [$parentWbs] (#$($parentNode.number)), $when.`n`n" + $body
+    }
+    elseif ($Origin -like 'Discovered*' -and $branchWbs) {
+        $stampItem = $branchItem
+        if (-not $stampItem) { $h = @(Get-IssuesByWbs $branchWbs); if ($h.Count -eq 1) { $stampItem = $h[0] } }
+        $featRef = if ($stampItem) { "[$branchWbs] (#$($stampItem.number))" } else { "[$branchWbs]" }
+        $body = "> Discovered while implementing $featRef.`n`n" + $body
+    }
+    # Discovered work is labeled scope-creep and a defect `bug`, so both are countable from the issues CLI.
+    $labels = @($Label | Where-Object { $_ })
+    if ($Origin -like 'Discovered*' -and $labels -notcontains 'scope-creep') { $labels += 'scope-creep' }
+    if ($Origin -eq 'Defect' -and $labels -notcontains 'bug') { $labels += 'bug' }
+}
 
 # 9. The full field plan, then the preflight: every option about to be written must exist.
 $fieldPlan.Insert(0, [pscustomobject]@{ field = 'Status'; value = $Status; source = '-Status'; hard = $false })
 $kindPhrase = switch ($parentKind) { 'AreaEpic' { 'an area epic' } 'Category' { 'a category' } default { "a $parentKind" } }
 $fieldPlan.Insert(1, [pscustomobject]@{ field = 'Kind'; value = $kindOpt; source = $(if ($isBug) { "defect in #$($parentNode.number)" } else { "child of $kindPhrase" }); hard = $true })
-$fieldPlan.Insert(2, [pscustomobject]@{ field = 'Origin'; value = $Origin; source = $(if ($inferred) { 'inferred from the branch' } elseif ($isBug) { '-As bug' } else { 'explicit parent' }); hard = $true })
+$fieldPlan.Insert(2, [pscustomobject]@{ field = 'Origin'; value = $Origin; source = $(if ($isBug) { 'a defect' } elseif ($inferred) { 'inferred from the branch' } else { 'explicit parent' }); hard = $true })
 if ($Priority) { Add-FieldPlan 'Priority' $Priority '-Priority' $false }
 if ($Wave)     { Add-FieldPlan 'Wave' $Wave '-Wave' $false }
 
@@ -1158,91 +1243,133 @@ foreach ($f in $fieldPlan) {
 if ($planLine) { Write-Host "  family    $Family (body line)" -ForegroundColor Gray }
 Write-Host "  level     $childLevel of $MaxNestingLevel; #$($parentNode.number) has $($parentNode.subTotal)/$SubIssueCap sub-issues$(if ($isDataPlatform) { '; Data Platform' })$(if ($categorised) { "; epic #$($epicNode.number) has $($epicCategories.Count) categories" })" -ForegroundColor Gray
 
-$tmp = New-TemporaryFile
-Set-Content -Path $tmp -Value $body -Encoding UTF8
-$createArgs = @('issue', 'create', '--repo', $Repo, '--title', $fullTitle, '--body-file', "$tmp", '--type', $issueType)
-foreach ($lbl in $labels) { $createArgs += @('--label', $lbl) }
+$tmp = $null; $createArgs = $null
+if (-not $resume) {
+    $tmp = New-TemporaryFile
+    Set-Content -Path $tmp -Value $body -Encoding UTF8
+    $createArgs = @('issue', 'create', '--repo', $Repo, '--title', $fullTitle, '--body-file', "$tmp", '--type', $issueType)
+    foreach ($lbl in $labels) { $createArgs += @('--label', $lbl) }
+}
 
 if ($DryRun) {
-    Write-Host "DRYRUN gh $($createArgs -join ' ')" -ForegroundColor DarkYellow
-    Write-Host "DRYRUN body:`n$body" -ForegroundColor DarkGray
-    Remove-Item $tmp -Force
-    Write-Host "DRYRUN would: add to Project #$ProjectNum, set the fields above, read them back, re-check #$($parentNode.number)'s room, link as its sub-issue, record in the branch manifest." -ForegroundColor DarkYellow
+    if ($resume) {
+        Write-Host "DRYRUN would resume #$($resume.number) $($resume.url): no create." -ForegroundColor DarkYellow
+    }
+    else {
+        Write-Host "DRYRUN gh $($createArgs -join ' ')" -ForegroundColor DarkYellow
+        Write-Host "DRYRUN body:`n$body" -ForegroundColor DarkGray
+        Remove-Item $tmp -Force
+    }
+    Write-Host "DRYRUN would: add to Project #$ProjectNum, set the fields above, read them back, re-check #$($parentNode.number)'s room, link as its sub-issue$(if ($alreadyLinked) { ' (already linked)' }), record in the branch manifest." -ForegroundColor DarkYellow
     if ($preflight.Count) { throw ("Preflight refused (nothing would be created):`n  " + ($preflight -join "`n  ")) }
     Write-Host "Preflight: every option exists." -ForegroundColor Green
     return
 }
-if ($preflight.Count) { Remove-Item $tmp -Force; throw ("Preflight refused (nothing was created):`n  " + ($preflight -join "`n  ")) }
+if ($preflight.Count) { if ($tmp) { Remove-Item $tmp -Force }; throw ("Preflight refused (nothing was created):`n  " + ($preflight -join "`n  ")) }
 
-# 10. Create, typed in the same call.
-$createOut = Invoke-GhRetry -GhArgs $createArgs
-Remove-Item $tmp -Force
-$issueUrl = ($createOut | Select-String -Pattern 'https://github\.com/\S+/issues/\d+' | Select-Object -Last 1)
-if (-not $issueUrl) { throw "Issue creation failed or no issue URL returned:`n$createOut" }
-$issueUrl  = $issueUrl.Matches[0].Value
-$newNumber = [int]($issueUrl -split '/')[-1]
-Write-Host "Created #$newNumber ($issueType) -> $issueUrl" -ForegroundColor Green
+# 10. Create, typed in the same call; or take the issue an earlier run created.
 $failures = [System.Collections.Generic.List[string]]::new()
-
-# 11. Add to the project (idempotent: the project's auto-add can win the race) and set the fields.
-$projectId = (ConvertFrom-GhJson (Invoke-GhRetry -GhArgs @('project', 'view', "$ProjectNum", '--owner', $Owner, '--format', 'json'))).id
-$itemId = $null
-try { $itemId = (ConvertFrom-GhJson (Invoke-GhRetry -GhArgs @('project', 'item-add', "$ProjectNum", '--owner', $Owner, '--url', $issueUrl, '--format', 'json'))).id }
-catch {
-    if ("$_" -notmatch '(?i)content already exists') { throw }
-    $q = 'query($n:Int!){ repository(owner:"assimalign", name:"cohesion"){ issue(number:$n){ projectItems(first:10){ nodes{ id project{ number } } } } } }'
-    $r = ConvertFrom-GhJson (Invoke-GhRetry -GraphQL -GhArgs @('api', 'graphql', '-f', "query=$q", '-F', "n=$newNumber"))
-    $nodes = @(Get-Prop (Get-Prop (Get-Prop (Get-Prop (Get-Prop $r 'data') 'repository') 'issue') 'projectItems') 'nodes')
-    $itemId = @($nodes | Where-Object { $_ -and [int](Get-Prop (Get-Prop $_ 'project') 'number') -eq $ProjectNum } | ForEach-Object { $_.id }) | Select-Object -First 1
-    if (-not $itemId) { throw "#$newNumber is reported as already on Project #$ProjectNum, but no item was found for it." }
+$newNumber = $null; $issueUrl = $null; $linked = $alreadyLinked; $incomplete = $null
+if ($resume) {
+    $newNumber = [int]$resume.number; $issueUrl = [string]$resume.url
+    Write-Host "Resuming #$newNumber ($issueType) -> $issueUrl" -ForegroundColor Green
 }
-Write-Host "Added to Project #$ProjectNum (item $itemId)" -ForegroundColor Green
-$written = @{}
-foreach ($f in $fieldPlan) {
-    if (Set-ProjectField -FieldMap $fieldMap -ProjectId $projectId -ItemId $itemId -FieldName $f.field -OptionName $f.value) { $written[$f.field] = $f.value }
-}
-
-# 12. Read the fields back: a throttled item-edit can print success and leave the field unset.
-$rq = 'query($id:ID!){ node(id:$id){ ... on ProjectV2Item { fieldValues(first:50){ nodes{ ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } } } } } }'
-$rb = ConvertFrom-GhJson (Invoke-GhRetry -GraphQL -GhArgs @('api', 'graphql', '-f', "query=$rq", '-F', "id=$itemId"))
-$actual = @{}
-foreach ($v in @(Get-Prop (Get-Prop (Get-Prop (Get-Prop $rb 'data') 'node') 'fieldValues') 'nodes')) {
-    $fn = Get-Prop (Get-Prop $v 'field') 'name'
-    if ($fn) { $actual[[string]$fn] = [string](Get-Prop $v 'name') }
-}
-foreach ($k in $written.Keys) {
-    if ($actual[$k] -cne $written[$k]) { $failures.Add("Field $k reads '$($actual[$k])' after the write of '$($written[$k])'.") }
+else {
+    $createOut = $null; $createError = $null
+    try { $createOut = Invoke-GhRetry -GhArgs $createArgs }
+    catch { $createError = $_ }
+    finally { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+    $hit = @($createOut | Select-String -Pattern 'https://github\.com/\S+/issues/\d+') | Select-Object -Last 1
+    if ($hit) { $issueUrl = $hit.Matches[0].Value; $newNumber = [int]($issueUrl -split '/')[-1] }
+    else {
+        # The create failed or answered without a URL, yet it may have created the issue: look for it by title.
+        $jq = '.[] | select(has("pull_request") | not) | {number, title, url: .html_url}'
+        $recent = @(Invoke-GhRetry -AllowFailure -GhArgs @('api', "repos/$Repo/issues?state=all&sort=created&direction=desc&per_page=50", '--jq', $jq) | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+        $found = @($recent | Where-Object { [string](Get-Prop $_ 'title') -ceq $fullTitle }) | Select-Object -First 1
+        if (-not $found) {
+            if ($createError) { throw $createError }
+            throw "Issue creation returned no issue URL, and no issue is titled '$fullTitle':`n$createOut"
+        }
+        $newNumber = [int]$found.number
+        $issueUrl = if (Get-Prop $found 'url') { [string]$found.url } else { "https://github.com/$Repo/issues/$newNumber" }
+        $incomplete = 'create'
+        $failures.Add("The create reported $(if ($createError) { 'an error: ' + (("$createError" -split "`n") | Where-Object { $_.Trim() } | Select-Object -Last 1) } else { 'no issue URL' }); #$newNumber exists with this title, so the filing stopped there.")
+    }
+    Write-Host "Created #$newNumber ($issueType) -> $issueUrl" -ForegroundColor Green
 }
 
-# 13. Re-check the parent's room (another session may have filed meanwhile), then link.
-$linked = $false
+# 11-13. Everything after the issue exists runs under try/finally: whatever fails, the manifest records the issue
+# (UNLINKED unless it is linked, INCOMPLETE:<step> when a step failed), the number is printed, and the script
+# exits 1. Re-running the same filing (same branch, parent and title) resumes it instead of creating another.
+$step = 'project-add'
 try {
-    Assert-SubIssueRoom -ParentNumber $parentNode.number | Out-Null
-    $childNodeId = (ConvertFrom-GhJson (Invoke-GhRetry -GhArgs @('issue', 'view', "$newNumber", '--repo', $Repo, '--json', 'id'))).id
-    $linkOut = Invoke-GhRetry -GraphQL -AllowFailure -GhArgs @('api', 'graphql',
-        '-f', "query=mutation(`$p:ID!,`$c:ID!){ addSubIssue(input:{issueId:`$p, subIssueId:`$c}){ subIssue { number } } }",
-        '-F', "p=$($parentNode.nodeId)", '-F', "c=$childNodeId")
-    $linkResp = ConvertFrom-GhJson $linkOut
-    if ($linkResp -and (Get-Prop (Get-Prop $linkResp 'data') 'addSubIssue')) { $linked = $true }
-    else { $failures.Add("The sub-issue link to #$($parentNode.number) failed:$(if ($linkOut) { "`n$($linkOut -join "`n")" })") }
-}
-catch { $failures.Add("The sub-issue link to #$($parentNode.number) was not made: $_") }
-if ($linked) { Write-Host "Linked #$newNumber as sub-issue of #$($parentNode.number)" -ForegroundColor Green }
+    if (-not $incomplete) {
+        # 11. Add to the project (idempotent: the project's auto-add can win the race) and set the fields.
+        $itemId = $null
+        try { $itemId = (ConvertFrom-GhJson (Invoke-GhRetry -GhArgs @('project', 'item-add', "$ProjectNum", '--owner', $Owner, '--url', $issueUrl, '--format', 'json'))).id }
+        catch {
+            if ("$_" -notmatch '(?i)content already exists') { throw }
+            $q = 'query($n:Int!){ repository(owner:"assimalign", name:"cohesion"){ issue(number:$n){ projectItems(first:10){ nodes{ id project{ number } } } } } }'
+            $r = ConvertFrom-GhJson (Invoke-GhRetry -GraphQL -GhArgs @('api', 'graphql', '-f', "query=$q", '-F', "n=$newNumber"))
+            $nodes = @(Get-Prop (Get-Prop (Get-Prop (Get-Prop (Get-Prop $r 'data') 'repository') 'issue') 'projectItems') 'nodes')
+            $itemId = @($nodes | Where-Object { $_ -and [int](Get-Prop (Get-Prop $_ 'project') 'number') -eq $ProjectNum } | ForEach-Object { $_.id }) | Select-Object -First 1
+            if (-not $itemId) { throw "#$newNumber is reported as already on Project #$ProjectNum, but no item was found for it." }
+        }
+        Write-Host "Added to Project #$ProjectNum (item $itemId)" -ForegroundColor Green
+        $step = 'fields'
+        $written = @{}
+        foreach ($f in $fieldPlan) {
+            if (Set-ProjectField -FieldMap $fieldMap -ProjectId $script:ProjectId -ItemId $itemId -FieldName $f.field -OptionName $f.value) { $written[$f.field] = $f.value }
+        }
 
-# 14. Record in the per-branch manifest (sanitized so tabs and newlines cannot corrupt a row).
-$branch = Get-BranchName
-$manifest = Get-ManifestPath
-if ($manifest) {
-    $safeTitle = ($Title -replace "[`t`r`n]", ' ')
-    $rowOrigin = if ($linked) { $Origin } else { "$Origin|UNLINKED" }
-    Add-Content -Path $manifest -Value ("{0}`t{1}`t{2}`t{3}`t{4}`t{5}" -f $branch, $newNumber, $newWbs, $rowOrigin, $safeTitle, $parentNode.number)
-    Write-Host "Recorded in branch manifest ($manifest)" -ForegroundColor DarkGray
+        # 12. Read the fields back: a throttled item-edit can print success and leave the field unset.
+        $step = 'read-back'
+        $rq = 'query($id:ID!){ node(id:$id){ ... on ProjectV2Item { fieldValues(first:50){ nodes{ ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } } } } } }'
+        $rb = ConvertFrom-GhJson (Invoke-GhRetry -GraphQL -GhArgs @('api', 'graphql', '-f', "query=$rq", '-F', "id=$itemId"))
+        $actual = @{}
+        foreach ($v in @(Get-Prop (Get-Prop (Get-Prop (Get-Prop $rb 'data') 'node') 'fieldValues') 'nodes')) {
+            $fn = Get-Prop (Get-Prop $v 'field') 'name'
+            if ($fn) { $actual[[string]$fn] = [string](Get-Prop $v 'name') }
+        }
+        foreach ($k in $written.Keys) {
+            if ($actual[$k] -cne $written[$k]) { $failures.Add("Field $k reads '$($actual[$k])' after the write of '$($written[$k])'."); $incomplete = 'fields' }
+        }
+
+        # 13. Re-check the parent's room (another session may have filed meanwhile), then link.
+        $step = 'link'
+        if (-not $linked) {
+            try {
+                Assert-SubIssueRoom -ParentNumber $parentNode.number | Out-Null
+                $childNodeId = (ConvertFrom-GhJson (Invoke-GhRetry -GhArgs @('issue', 'view', "$newNumber", '--repo', $Repo, '--json', 'id'))).id
+                $linkOut = Invoke-GhRetry -GraphQL -AllowFailure -GhArgs @('api', 'graphql',
+                    '-f', "query=mutation(`$p:ID!,`$c:ID!){ addSubIssue(input:{issueId:`$p, subIssueId:`$c}){ subIssue { number } } }",
+                    '-F', "p=$($parentNode.nodeId)", '-F', "c=$childNodeId")
+                $linkResp = ConvertFrom-GhJson $linkOut
+                if ($linkResp -and (Get-Prop (Get-Prop $linkResp 'data') 'addSubIssue')) { $linked = $true }
+                else { $failures.Add("The sub-issue link to #$($parentNode.number) failed:$(if ($linkOut) { "`n$($linkOut -join "`n")" })") }
+            }
+            catch { $failures.Add("The sub-issue link to #$($parentNode.number) was not made: $_") }
+        }
+        if ($linked) { Write-Host "Linked #$newNumber as sub-issue of #$($parentNode.number)" -ForegroundColor Green }
+    }
+}
+catch {
+    $incomplete = $step
+    $failures.Add("The filing stopped at '$step': $((("$_" -split "`n") | Where-Object { $_.Trim() } | Select-Object -First 2) -join ' ')")
+}
+finally {
+    # 14. Record in the per-branch manifest, always: an issue that exists is never left untracked.
+    $flags = @($Origin)
+    if (-not $linked) { $flags += 'UNLINKED' }
+    if ($incomplete) { $flags += "INCOMPLETE:$incomplete" }
+    $mf = Write-ManifestRow -Branch (Get-BranchName) -Number $newNumber -Code $newWbs -RowOrigin ($flags -join '|') -RowTitle $Title -ParentNumber $parentNode.number
+    if ($mf) { Write-Host "Recorded in branch manifest as $($flags -join '|') ($mf)" -ForegroundColor DarkGray }
 }
 
 if ($failures.Count) {
     Write-Host ""
     foreach ($f in $failures) { Write-Host "FAILED: $f" -ForegroundColor Red }
-    if (-not $linked) { Write-Host "Link #$newNumber under #$($parentNode.number) by hand (reference/project-schema.md, manual recipe step 6), then re-run -Audit." -ForegroundColor Red }
+    Write-Host "Issue #$newNumber ($issueUrl) exists, but the filing is unfinished$(if (-not $linked) { ": it is not linked under #$($parentNode.number)" }). Re-run the same command to resume it (#$newNumber is reused, not created again), or finish it by hand (reference/project-schema.md, manual recipe)." -ForegroundColor Red
     exit 1
 }
 Write-Host ""

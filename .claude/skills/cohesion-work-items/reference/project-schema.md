@@ -38,8 +38,15 @@ never derived by trimming a code.
 | `L01.01.NN` | **Area epic** | **Epic** | Area Epic | `[L01.01.11] Foundation - Http` (#314) | program root |
 | `L03.02.NN.Cxx` | **Category** (Data Platform) | **Feature** | Feature | `[L03.02.02.C04] SQL - Indexing` | area epic |
 | `<parent>.NN` under an epic or category | **Feature** | **Feature** | Feature | `[L01.01.11.18] Implement HTTP request lifetime…` (#703) | area epic or category |
-| `<parent>.NN` under a Feature/Story/Task/Bug | **Story** | **Story** | Task | `[L01.01.11.18.01] Implement the … HttpRequestLifetime` (#713) | an item |
-| `<parent>.NN` with `-As bug` | **Defect** | **Bug** | Bug | `[L03.02.02.02.02.04.01]` | the **closed** item whose behaviour is wrong |
+| `<parent>.NN` under a Feature | **Story** | **Story** | Task | `[L01.01.11.18.01] Implement the … HttpRequestLifetime` (#713) | a feature |
+| `<parent>.NN` under a Story, Task or Bug | **Task** | **Task** | Task | `[L03.02.01.56.10.01]` (#1577, under the Story #1576) | a story or below |
+| `<parent>.NN` with `-As bug` or `-Origin Defect` | **Defect** | **Bug** | Bug | `[L03.02.02.02.02.04.01]` | the **closed** item whose behaviour is wrong |
+
+The GitHub **issue type** carries the hierarchy Initiative → Epic → Feature → Story (owner, 2026-10-11); the
+script sets it on create. Data Platform's older branches are one level deeper (`[L03.02.00]` #1067 was added
+above its sub-areas): their sixth-segment items are typed **Task** under a Story. So below a Story the type is
+Task, for every area: all 72 Story → child links on the board were typed Task when this was written (#1577–#1580
+among them), and the realignment executor types its depth-6 items the same way.
 
 - **Serials have any width**: `.07`, `.99`, `.100`, `.101`. The next code is the highest existing direct
   child (open **and** closed) plus one; the script then asserts nobody carries it. A two-digit allocator
@@ -62,24 +69,27 @@ for fixes. The code in the branch names the **item in flight**; any serial width
 
 ### Foundation area epics (parents for new features)
 
-| Issue | Code | Area |
-| --- | --- | --- |
-| #308 | L01.01.01 | Amqp |
-| #11  | L01.01.02 | ApplicationModel |
-| #14  | L01.01.05 | Content |
-| #8   | L01.01.06 | Core |
-| #323 | L01.01.07 | DependencyInjection |
-| #311 | L01.01.08 | Dns |
-| #313 | L01.01.10 | Hosting |
-| #314 | L01.01.11 | Http (at 100/100 sub-issues: file under one of its features) |
-| #105 | L01.01.12 | IdentityModel |
-| #324 | L01.01.14 | Net |
-| #316 | L01.01.15 | OpenApi |
-| #317 | L01.01.16 | OpenTelemetry |
-| #318 | L01.01.17 | Resilience |
-| #325 | L01.01.18 | Security |
+State as read on 2026-10-16. A closed epic, or a closed item under one, refuses new scope (the closed-parent
+rule), and an epic at 100 sub-issues refuses another child.
 
-(Re-list with: `gh issue list --repo assimalign/cohesion --state open --search '"Foundation -" in:title' --json number,title`)
+| Issue | Code | Area | Can take new work? |
+| --- | --- | --- | --- |
+| #308 | L01.01.01 | Amqp | yes |
+| #11  | L01.01.02 | ApplicationModel | yes |
+| #14  | L01.01.05 | Content | yes |
+| #8   | L01.01.06 | Core | yes |
+| #323 | L01.01.07 | DependencyInjection | yes |
+| #311 | L01.01.08 | Dns | yes |
+| #313 | L01.01.10 | Hosting | yes |
+| #314 | L01.01.11 | Http | **no: Http has no open parent for new work.** #314 is at 100/100 sub-issues and all 100 are closed, so neither it nor any child takes a new item. The owner must open a new Http container first |
+| #105 | L01.01.12 | IdentityModel | yes |
+| #324 | L01.01.14 | Connections (was Net) | **no: closed** |
+| #316 | L01.01.15 | OpenApi | **no: closed** |
+| #317 | L01.01.16 | OpenTelemetry | yes |
+| #318 | L01.01.17 | Resilience | yes |
+| #325 | L01.01.18 | Security | yes |
+
+(Re-list with: `gh issue list --repo assimalign/cohesion --state all --search '"Foundation -" in:title' --json number,title,state`)
 
 ### Data Platform epics and categories
 
@@ -129,8 +139,8 @@ The script resolves these **by name**; the ids are for the manual path.
 | --- | --- | --- |
 | Status | `-Status` (default Backlog) | always |
 | Kind / issue type | the parent's kind (table above) | always |
-| Origin | `-Origin`, else inferred (Planned / DiscoveredTask / DiscoveredFeature / Defect) | always |
-| Category | `-Category <code\|issue#>`, else the parent **is** a category | once the item's epic has categories (never inherited: the parent is wrong about half the time) |
+| Origin | `-Origin`, else inferred (Planned / DiscoveredTask / DiscoveredFeature); always Defect for a bug, and `-Origin Defect` makes the filing a bug | always |
+| Category | `-Category <code\|issue#>` from the epic the item sits under, else the parent **is** a category | once the item's epic has categories (never inherited: the parent is wrong about half the time; a Category from another epic draws a warning) |
 | Tier | `-Tier`, else the nearest ancestor's T1/T2/T3/Fix-first/Prerequisite | in a language-surface category, except for a bug |
 | Program | `-Program`, else the nearest ancestor's | never |
 | Area | the category's own Area, else the `Foundation - X` epic title | in Data Platform, whenever a category is resolved (a category without Area is refused) |
@@ -140,7 +150,9 @@ The script resolves these **by name**; the ids are for the manual path.
 **Preflight:** before anything is created, every option about to be written must exist; a missing option on
 Kind, Origin, Category, Tier, Program or a Data Platform Area stops the run with a message naming it. (Status,
 Priority, Wave and a Foundation Area keep the old warn-and-skip.) After the writes, the item's field values are
-read back and diffed against what was written: a mismatch exits 1.
+read back and diffed against what was written: a mismatch exits 1. The field ids and options come from one
+GraphQL query of the project (1 point), which also supplies the project id; `gh project field-list` is not used
+(it reads every item's field values and costs about 101 points).
 
 `Discovered*` items get the **`scope-creep`** label; defects get **`bug`**.
 
@@ -253,7 +265,8 @@ including web UI clicks, and it cannot be queried. Count every mutation (create,
 write, the link): a filing is 8–12. **Bulk filing runs at 400 per hour at most, at least 9 s apart — about 35
 filings — and never during a realignment window.** Enumerate issues over REST (as above), not
 `gh issue list`/GraphQL, and cache ids up front: re-enumerating per item is what exhausted the 5,000-point
-GraphQL budget at about 40 items on 2026-09-30.
+GraphQL budget at about 40 items on 2026-09-30. The script's own budget: a dry run costs 2 GraphQL points and a
+filing about 15–20 (SKILL.md, Guardrails).
 
 ## Manual recipe — creating a `Cxx` category
 
@@ -291,8 +304,11 @@ Closes #715
 
 The script's `-EmitClosesBlock` groups them as **planned / discovered (out-of-scope) / defects in delivered
 work**, from the Origin recorded in the per-branch manifest (`.git/cohesion/workitems.tsv`: branch, number,
-code, origin, title, parent). Defects are listed but kept out of the creep tally. A row whose link failed is
-recorded as `<origin>|UNLINKED` and printed as a warning above the block.
+code, origin, title, parent). Defects are listed but kept out of the creep tally. The origin column also
+carries the filing's state: `<origin>|UNLINKED` when the item is not linked under its parent, and
+`|INCOMPLETE:<step>` (create, project-add, fields, read-back) when the filing stopped there or a field read back
+wrong. Both are printed as warnings above the block. Re-running the same filing (same branch, parent and title)
+resumes the issue the row names and replaces the row.
 
 Closing a parent feature does **not** close its sub-issues, and closing every sub-issue does **not** close the
 parent. List each work item the PR actually resolves.
@@ -321,9 +337,8 @@ reopened to carry a defect.
 ## Re-discovering IDs if the schema changes
 
 ```bash
-# Project node id
-gh project view 13 --owner assimalign --format json --jq .id
-# All single-select fields with their option ids
-gh project field-list 13 --owner assimalign --format json --limit 100 \
-  --jq '.fields[] | select(.type=="ProjectV2SingleSelectField") | {name, id, options:[.options[]|{name,id}]}'
+# The project node id and every single-select field with its option ids, in one query (1 GraphQL point;
+# `gh project field-list` returns the same fields but costs about 101, because it also reads item values).
+gh api graphql -f query='query { organization(login: "assimalign") { projectV2(number: 13) { id
+  fields(first: 50) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }'
 ```
