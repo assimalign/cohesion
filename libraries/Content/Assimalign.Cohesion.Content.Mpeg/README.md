@@ -6,7 +6,6 @@ ranges, edit-list timing, fast start and retained CMAF structure checks.
 
 - [Overview and usage](docs/OVERVIEW.md)
 - [Design, supported scope and extension gaps](docs/DESIGN.md)
-- [Public surface](docs/PUBLIC_SURFACE.md)
 
 Build and test from the repository root:
 

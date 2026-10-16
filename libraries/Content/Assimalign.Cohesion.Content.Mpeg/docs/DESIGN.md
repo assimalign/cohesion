@@ -187,10 +187,9 @@ seek, arbitrary private offset relocation, full CMAF certification and multi-res
 
 ## Public declarations and review decisions
 
-[PUBLIC_SURFACE.md](PUBLIC_SURFACE.md) lists every new public type/member, one declaration per
-line; no existing shipped interface changes. The brief sanctions these concepts without prescribing
-their CLR names. The inventory is therefore also the complete name-level escalation for review,
-including Mp4Profile, Mp4File, Mp4ReaderOptions, Mp4BrandFeatures and each sealed box class.
+No existing shipped interface changes. The package's public surface is `Mp4Profile`, `Mp4File`,
+`Mp4ReaderOptions`, `Mp4BrandFeatures` and one sealed box class per sample entry and configuration
+box; the complete per-member inventory was recorded in the integration pull request for name review.
 No public track implementation or index class was added: consumers use the existing Media contracts.
 
 O-C3 remains the owner's decision: retain HEIF/AVIF in a separate profile package in Stage 5, if

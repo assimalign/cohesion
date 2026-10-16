@@ -75,5 +75,4 @@ container constraints described in [DESIGN](DESIGN.md), not full codec or switch
 Standalone media segments need their initialization metadata and are not independently loadable
 media files.
 
-The [public declaration inventory](PUBLIC_SURFACE.md) lists all added types and members.
 The [design](DESIGN.md) maps BMFF fields to Media contracts and records current extension gaps.

@@ -28,6 +28,8 @@ flowchart LR
     Media --> Binary
     Bmff --> Media
     Heif --> Bmff
+    Mpeg --> Bmff
+    Mpeg --> Media
     Ebml --> Binary
     Pdf --> Binary
     Exe --> Binary
@@ -38,7 +40,7 @@ flowchart LR
 The text node groups Text, Yaml and Markdown to keep this map within twelve nodes.
 HEIF references BMFF only. Binary references the root; Media, EBML, PDF and Exe reference Binary; BMFF references Media; Text
 references the root, and YAML and Markdown reference both the root and Text. MKV references EBML and
-Media. MPEG references nothing yet: the MP4 stage puts it on BMFF and Media. The target direction is in the [area architecture record](../../docs/libraries/Content/DESIGN.md#family-map).
+Media, and MPEG references BMFF and Media. The target direction is in the [area architecture record](../../docs/libraries/Content/DESIGN.md#family-map).
 
 | Package | Role | Depends on today | Classification | State |
 | --- | --- | --- | --- | --- |
@@ -50,13 +52,13 @@ Media. MPEG references nothing yet: the MP4 stage puts it on BMFF and Media. The
 | [`Assimalign.Cohesion.Content.Media`](./Assimalign.Cohesion.Content.Media/) | Shared tracks, rational timestamps, lazy sample indexes and seek ranges | Content.Binary | Strategic | Implemented (profile adapters in Stage 4) |
 | [`Assimalign.Cohesion.Content.Bmff`](./Assimalign.Cohesion.Content.Bmff/) | ISO BMFF composite box model, registry, reader, writer and document with lazy `mdat` | Content.Media | Strategic | Implemented (strategic box field models in progress) |
 | [`Assimalign.Cohesion.Content.Heif`](./Assimalign.Cohesion.Content.Heif/) | HEIF/AVIF still-image items, derived images, lazy payloads and metadata editing | Content.Bmff | Strategic | Implemented (still-image container scope) |
-| [`Assimalign.Cohesion.Content.Mpeg`](./Assimalign.Cohesion.Content.Mpeg/) | Planned MP4 profile over BMFF | None | Strategic | Placeholder |
+| [`Assimalign.Cohesion.Content.Mpeg`](./Assimalign.Cohesion.Content.Mpeg/) | MP4 profile over BMFF: brands, sample entries, media model, edit lists, fast start, CMAF checks | Content.Bmff, Content.Media | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Ebml`](./Assimalign.Cohesion.Content.Ebml/) | EBML reader, writer, document, schema and DocType registry | Content.Binary | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Mkv`](./Assimalign.Cohesion.Content.Mkv/) | Matroska and WebM over EBML: schema, blocks and lacing, media model, metadata editing | Content.Ebml, Content.Media | Strategic | Implemented (typed chapters and forward-only frames in #1559) |
 | [`Assimalign.Cohesion.Content.Pdf`](./Assimalign.Cohesion.Content.Pdf/) | PDF object model, parser, cross-reference resolution, full save and incremental update | Content.Binary | Strategic | Implemented |
 | [`Assimalign.Cohesion.Content.Exe`](./Assimalign.Cohesion.Content.Exe/) | Executable inspection and, separately, process invocation (owner decision O-C1) | Content.Binary | Strategic | Implemented |
 
-MPEG and MKV remain placeholders until Stage 4 of the [program plan](../../docs/programs/CONTENT_FOUNDATION_PLAN.md).
+Every package now has an implementation; the remaining work is tracked in the [program plan](../../docs/programs/CONTENT_FOUNDATION_PLAN.md).
 State describes the delivered surface, not stabilization approval. No package is experimental or archive today; classification definitions,
 standards, O-C1 and the gates live in the [area architecture record](../../docs/libraries/Content/DESIGN.md).
 
