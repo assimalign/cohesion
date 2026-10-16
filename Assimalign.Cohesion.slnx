@@ -111,6 +111,9 @@
 	<Folder Name="/cohesion/docs/libraries/ApplicationModel/">
 		<File Path="docs/libraries/ApplicationModel/DESIGN.md" />
 	</Folder>
+	<Folder Name="/cohesion/docs/libraries/Content/">
+		<File Path="docs/libraries/Content/DESIGN.md" />
+	</Folder>
 	<Folder Name="/cohesion/docs/programs/">
 		<File Path="docs/programs/DATABASE_PROGRAM_PLAN.md" />
 		<File Path="docs/programs/DELIVERY_ROADMAP.md" />

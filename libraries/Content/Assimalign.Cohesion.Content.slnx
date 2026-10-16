@@ -5,6 +5,7 @@
 		<Platform Name="x86" />
 	</Configurations>
 	<Folder Name="/Content/">
+		<File Path="../../docs/libraries/Content/DESIGN.md" />
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
 		<File Path="README.md" />
