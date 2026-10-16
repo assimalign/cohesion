@@ -101,4 +101,20 @@ public class MarkdownCorpusRegressionTests
         MarkdownModelComparison.ShouldEqual(expected, actual, source);
         MarkdownText.Write(actual).ShouldBe(written);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Writer: all-space code spans do not gain padding")]
+    [InlineData("` `")]
+    [InlineData("`  `")]
+    [InlineData("`   `")]
+    [InlineData("` x `")]
+    public void Write_SpaceOnlyCodeSpan_PreservesWidth(string source)
+    {
+        // Arrange. Authored whitespace widths exercise CommonMark 138/334 without encoder oracles.
+        var expected = MarkdownText.Parse(source);
+
+        // Act
+        var written = MarkdownText.Write(expected);
+
+        // Assert
+        MarkdownModelComparison.ShouldEqual(expected, MarkdownText.Parse(written), source);
+    }
 }

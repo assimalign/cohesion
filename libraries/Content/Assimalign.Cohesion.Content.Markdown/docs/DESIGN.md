@@ -126,6 +126,8 @@ emphasis delimiters alternating `*`/`_` by nesting depth (so nested emphasis nev
 **write → parse → write is a fixed point, and parse → write → parse preserves the rendered HTML.**
 Literal CR/LF/tab and edge spaces use numeric references when raw whitespace would change the
 model; literal hashes are escaped so heading text cannot become a closing ATX sequence.
+All-space code spans emit exactly their space count; padding is only added when code-span
+normalization will remove it (or to separate literal backticks from the fence).
 The guarantee covers parser-produced trees; hand-built trees can express forms with no Markdown
 spelling (emphasis around whitespace) and round-trip only when they stay inside what the parser
 can produce.

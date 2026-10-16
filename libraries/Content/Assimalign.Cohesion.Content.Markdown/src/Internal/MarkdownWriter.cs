@@ -371,9 +371,9 @@ internal sealed class MarkdownWriter
     private static string FormatCodeSpan(string literal)
     {
         var fence = new string('`', Math.Max(1, LongestRun(literal, '`') + 1));
-        var pad = literal.Length == 0
-            || literal[0] is '`' or ' '
-            || literal[^1] is '`' or ' ';
+        var allSpaces = literal.AsSpan().IndexOfAnyExcept(' ') < 0;
+        var pad = literal.Length == 0 || literal[0] == '`' || literal[^1] == '`'
+            || (!allSpaces && (literal[0] == ' ' || literal[^1] == ' '));
         return pad ? $"{fence} {literal} {fence}" : fence + literal + fence;
     }
 
