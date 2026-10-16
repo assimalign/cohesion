@@ -15,6 +15,49 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Eighty-level documents survive whole and projected results")]
+    [InlineData("SELECT * FROM items", true)]
+    [InlineData("SELECT nested FROM items", false)]
+    public async Task QueryAsync_DeepDocument_ShouldHonorConfiguredJsonDepth(string statement, bool whole)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        string nested = new string('[', 80) + "0" + new string(']', 80);
+        byte[] content = Encoding.UTF8.GetBytes("{\"nested\":" + nested + "}");
+        await connection.PutAsync("items", "deep", content, cancellationToken: harness.Token);
+
+        // Act
+        var result = await connection.QueryAsync(statement, cancellationToken: harness.Token);
+
+        // Assert
+        (await connection.GetAsync("items", "deep", harness.Token)).ShouldNotBeNull().Content.ToArray().ShouldBe(content);
+        var value = result.ShouldHaveSingleItem()[0].ShouldBeOfType<JsonElement>();
+        (whole ? value.GetProperty("nested") : value).GetRawText().ShouldBe(nested);
+        connection.IsOpen.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Client] - Eighty-level parameters cross the wire and return as JSON")]
+    public async Task QueryAsync_DeepParameter_ShouldHonorConfiguredJsonDepth()
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "one", "{}"u8.ToArray(), cancellationToken: harness.Token);
+        string nested = new string('[', 80) + "0" + new string(']', 80);
+        using var json = JsonDocument.Parse(nested, new JsonDocumentOptions { MaxDepth = 256 });
+
+        // Act
+        var result = await connection.QueryAsync("SELECT @value AS nested FROM items",
+            new Dictionary<string, object?> { ["value"] = json.RootElement }, harness.Token);
+
+        // Assert
+        result.ShouldHaveSingleItem()[0].ShouldBeOfType<JsonElement>().GetRawText().ShouldBe(nested);
+        connection.IsOpen.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - CRUD preserves versions, bytes and collections on both transports")]
     [InlineData(false)]
     [InlineData(true)]

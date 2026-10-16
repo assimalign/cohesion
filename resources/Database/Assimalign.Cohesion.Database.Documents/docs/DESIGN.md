@@ -986,3 +986,8 @@ and text execution; a foreign-model request fails compilation. `DocumentQueryReq
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+JSON result and parameter writers use `JsonElement.WriteTo` so the configured writer depth
+of 256 applies, including values deeper than 64 levels. The other wire readers explicitly set
+256. Embedded stored-document validation and query reads explicitly use 128; system-collection
+JSON uses fixed, one-level objects and cannot carry arbitrary nested content.

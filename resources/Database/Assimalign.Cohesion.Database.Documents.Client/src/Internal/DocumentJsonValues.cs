@@ -47,7 +47,7 @@ internal static class DocumentJsonValues
             case bool boolean: writer.WriteBooleanValue(boolean); break;
             case string text: writer.WriteStringValue(text); break;
             case JsonElement json when json.ValueKind != JsonValueKind.Undefined:
-                writer.WriteRawValue(json.GetRawText()); break;
+                json.WriteTo(writer); break;
             case byte or sbyte or short or ushort or int or uint or long or ulong or decimal:
                 writer.WriteNumberValue(Convert.ToDecimal(value, CultureInfo.InvariantCulture)); break;
             case float number when float.IsFinite(number): writer.WriteNumberValue(Convert.ToDecimal(number)); break;

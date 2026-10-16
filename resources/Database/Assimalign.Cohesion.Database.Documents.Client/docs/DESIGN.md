@@ -156,3 +156,8 @@ the shared protocol's responsibility (#1095 / #1105), with no model-specific ver
 The [protocol layout](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#document-wire-family)
 is authoritative for bytes and completion semantics. Tests drive both transports, all advertised
 OQL clauses and commands, malformed responses, lifecycle limits, failure recovery and telemetry.
+
+JSON result and parameter writers use `JsonElement.WriteTo` so the configured writer depth
+of 256 applies, including values deeper than 64 levels. The other wire readers explicitly set
+256. Embedded stored-document validation and query reads explicitly use 128; system-collection
+JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
