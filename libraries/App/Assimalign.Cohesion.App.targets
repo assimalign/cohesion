@@ -282,9 +282,12 @@
     <!--
         Manifest writer. Takes the declarative @(CohesionFrameworkAssembly)
         list (each Identity is an assembly name) and emits FrameworkList.xml
-        or RuntimeList.xml depending on RootElementName. Version + PKT are
-        uniform across the framework, supplied as task parameters from
-        $(CohesionVersion) / $(CohesionPublicKeyToken). No DLL inspection.
+        or RuntimeList.xml depending on RootElementName. Every Cohesion
+        assembly gets the same stamp, supplied as task parameters from
+        $(CohesionVersionPrefix) / $(CohesionPublicKeyToken), without
+        opening the DLL. A package-delivered member (any name outside
+        Assimalign.Cohesion.*) is the one case that reads its DLL: see
+        AssemblyFiles below.
     -->
     <UsingTask TaskName="CohesionWriteFrameworkList"
                TaskFactory="RoslynCodeTaskFactory"
@@ -320,11 +323,25 @@
             <PathPrefix Required="false" />
             <RootElementName Required="true" />
             <OutputPath Required="true" />
+            <!--
+                The DLLs the pack collects (@(_CohesionExpectedAssembly)). Read only for
+                package-delivered members such as System.Threading.RateLimiting: they keep
+                their package's own AssemblyVersion, FileVersion and PublicKeyToken, and the
+                .NET SDK's conflict resolution compares the manifest's values with a
+                consumer's own copy of the package. A Cohesion stamp is wrong both ways:
+                once $(CohesionVersionPrefix) passes the package's AssemblyVersion it beats
+                a newer serviced package, and until then its FileVersion loses to every
+                copy with the same AssemblyVersion, older ones included. Reading the file
+                that ships is the explicit alternative to recording the values by hand.
+            -->
+            <AssemblyFiles ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="false" />
         </ParameterGroup>
         <Task>
             <Using Namespace="System" />
+            <Using Namespace="System.Diagnostics" />
             <Using Namespace="System.IO" />
             <Using Namespace="System.Linq" />
+            <Using Namespace="System.Reflection" />
             <Using Namespace="System.Text" />
             <Code Type="Fragment" Language="cs"><![CDATA[
                 Directory.CreateDirectory(Path.GetDirectoryName(OutputPath));
@@ -334,6 +351,7 @@
                 string fileVersion = asmVersion;
                 string pkt = PublicKeyToken ?? "";
                 string pathPrefix = PathPrefix ?? "";
+                var assemblyFiles = AssemblyFiles ?? new Microsoft.Build.Framework.ITaskItem[0];
 
                 var sb = new StringBuilder();
                 sb.Append("<").Append(RootElementName)
@@ -344,12 +362,32 @@
 
                 foreach (var name in AssemblyNames.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
                 {
+                    string entryAsmVersion = asmVersion;
+                    string entryFileVersion = fileVersion;
+                    string entryPkt = pkt;
+                    if (!name.StartsWith("Assimalign.Cohesion.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var file = assemblyFiles.FirstOrDefault(item => string.Equals(item.GetMetadata("Filename"), name, StringComparison.OrdinalIgnoreCase));
+                        if (file == null)
+                        {
+                            Log.LogError("Framework assembly '" + name + "' is not built by Cohesion, so its manifest entry is read from the collected DLL, but no collected file matches it.");
+                            return false;
+                        }
+                        string dll = file.GetMetadata("FullPath");
+                        AssemblyName identity = AssemblyName.GetAssemblyName(dll);
+                        FileVersionInfo fileInfo = FileVersionInfo.GetVersionInfo(dll);
+                        byte[] token = identity.GetPublicKeyToken() ?? new byte[0];
+                        entryAsmVersion = identity.Version.ToString();
+                        // The numeric parts, as the SDK reads a file's version for conflict resolution.
+                        entryFileVersion = fileInfo.FileMajorPart + "." + fileInfo.FileMinorPart + "." + fileInfo.FileBuildPart + "." + fileInfo.FilePrivatePart;
+                        entryPkt = string.Concat(token.Select(b => b.ToString("x2")));
+                    }
                     sb.Append("  <File Type=\"Managed\"")
                       .Append(" Path=\"").Append(pathPrefix).Append(name).Append(".dll\"")
-                      .Append(" PublicKeyToken=\"").Append(pkt).Append("\"")
+                      .Append(" PublicKeyToken=\"").Append(entryPkt).Append("\"")
                       .Append(" AssemblyName=\"").Append(name).Append("\"")
-                      .Append(" AssemblyVersion=\"").Append(asmVersion).Append("\"")
-                      .Append(" FileVersion=\"").Append(fileVersion).Append("\"")
+                      .Append(" AssemblyVersion=\"").Append(entryAsmVersion).Append("\"")
+                      .Append(" FileVersion=\"").Append(entryFileVersion).Append("\"")
                       .Append(" />\r\n");
                 }
 
@@ -418,10 +456,12 @@
             FrameworkVersion = $(CohesionVersionPrefix), NOT $(CohesionVersion).
             The task writes this value as AssemblyVersion="..." into each <File>
             entry; the .NET SDK's ResolveTargetingPackAssets parses it as a
-            System.Version, which rejects semver suffixes.
+            System.Version, which rejects semver suffixes. Package-delivered
+            entries take their values from @(_CohesionExpectedAssembly) instead.
         -->
         <CohesionWriteFrameworkList Condition="'$(CohesionFrameworkKind)' == 'Ref'"
             AssemblyNames="@(CohesionFrameworkAssembly)"
+            AssemblyFiles="@(_CohesionExpectedAssembly)"
             AnalyzerNames="@(CohesionFrameworkAnalyzer)"
             FrameworkName="$(CohesionFrameworkName)"
             FrameworkVersion="$(CohesionVersionPrefix)"
@@ -475,6 +515,7 @@
         <!-- Same constraint as the Ref pack writer above: numeric prefix only. -->
         <CohesionWriteFrameworkList Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != ''"
             AssemblyNames="@(CohesionFrameworkAssembly);@(CohesionFrameworkPrivateAssembly)"
+            AssemblyFiles="@(_CohesionExpectedAssembly)"
             FrameworkName="$(CohesionFrameworkName)"
             FrameworkVersion="$(CohesionVersionPrefix)"
             TargetFrameworkVersion="10.0"
