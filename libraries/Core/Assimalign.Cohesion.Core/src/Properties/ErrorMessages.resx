@@ -132,4 +132,7 @@
   <data name="UlidTextInvalid" xml:space="preserve">
     <value>The ULID must contain exactly 26 Crockford base32 characters with a leading digit from 0 through 7.</value>
   </data>
+  <data name="GlobBraceGroupEmpty" xml:space="preserve">
+    <value>The glob pattern has an empty brace group at index {0}. A brace group needs at least one non-empty alternative.</value>
+  </data>
 </root>

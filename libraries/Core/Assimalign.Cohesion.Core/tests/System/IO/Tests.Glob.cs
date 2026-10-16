@@ -336,7 +336,9 @@ public class GlobTests
     [Theory]
     [InlineData("a{b,c}d", "abd")]
     [InlineData("a{b,c}d", "acd")]
-    // TODO: Need to implement more error handling in parser to bubble up bad argument exception.
+    // Empty alternatives are not supported: the parser drops them, so "ad" does not match (Common
+    // Pitfalls in docs/Assembly/System.IO/Glob/OVERVIEW.md). A group left with no alternatives
+    // makes Glob.Parse throw ArgumentException; GlobBraceGroupingTests covers that.
     //[InlineData("a{,c}d", "acd", "ad")]
     //[InlineData("a{b,}d", "abd", "ad")]
     [InlineData("file.{cs,txt}", "file.cs")]

@@ -35,7 +35,7 @@ Notes:
 | Scenario | What happens | How to fix |
 | --- | --- | --- |
 | A brace alternative is a prefix of a later one, e.g. `*.{js,json}` | The first alternative that matches is kept, even when the rest of the match then fails, so `*.{js,json}` matches `a.js` but not `a.json`. | Put the longer alternative first: `*.{json,js}`. |
-| An empty brace alternative, e.g. `a{,c}d` or `a{b,}d` | Not supported. The parser drops the empty alternative, so `a{,c}d` matches `acd` but not `ad`, and an empty group, `{}`, fails to parse. | Spell each alternative out in full: `{ad,acd}`. |
+| An empty brace alternative, e.g. `a{,c}d` or `a{b,}d` | Not supported. The parser drops the empty alternative, so `a{,c}d` matches `acd` but not `ad`. A group left with no alternatives, `{}` or `{,}`, makes `Glob.Parse` throw `ArgumentException`, whose message gives the group's index in the pattern. | Spell each alternative out in full: `{ad,acd}`. |
 | A brace alternative with a wildcard, a nested group or more than one element, e.g. `{*.cs,*.ts}` | Each alternative must be a single element: literal text, `?`, or a `[...]` set or range. `{*.cs,*.ts}` matches neither `a.cs` nor `a.ts`, and `{a?,b}` is read as the three alternatives `a`, `?` and `b`. | Keep wildcards outside the group, as in `*.{cs,ts}`, or use separate globs. |
 | Mixing OS-specific path rules | Assuming Windows or POSIX case/separator rules applies universally. | Normalize your input and be explicit about separators before matching. |
 | Segment `**` misuse | Using `**` as part of a segment (e.g., `foo**bar`). | Use `**` as its own segment or prefer `*` within a segment. |

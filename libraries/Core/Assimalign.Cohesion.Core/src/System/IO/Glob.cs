@@ -167,7 +167,7 @@ public sealed partial class Glob
         }
 
         // if all tokens matched but still more text then fail!
-        if (position < value.Length - 1)
+        if (position < value.Length)
         {
             return false;
         }
@@ -182,7 +182,10 @@ public sealed partial class Glob
     /// <param name="pattern">The glob pattern to parse.</param>
     /// <returns>A glob that matches <paramref name="pattern"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="pattern"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="pattern"/> is empty.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="pattern"/> is empty, or has a brace group with no alternatives: <c>{}</c>,
+    /// <c>{,}</c>, or a <c>{</c> that ends the pattern.
+    /// </exception>
     /// <remarks>
     /// Safe to call from any number of threads at once. Parsed patterns are cached process-wide,
     /// so parsing a cached pattern again allocates only the returned glob.
@@ -256,7 +259,10 @@ public sealed partial class Glob
     /// <param name="pattern">The glob pattern to parse.</param>
     /// <returns>The glob that <see cref="Parse(string)"/> returns for <paramref name="pattern"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="pattern"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="pattern"/> is empty.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="pattern"/> is empty, or has a brace group with no alternatives: <c>{}</c>,
+    /// <c>{,}</c>, or a <c>{</c> that ends the pattern.
+    /// </exception>
     public static implicit operator Glob(string pattern)
     {
         return Parse(pattern);

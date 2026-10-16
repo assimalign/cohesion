@@ -228,6 +228,45 @@ cached pattern allocates exactly one `Glob`. `GlobTokensTests` asserts that writ
 `Tokens` throw `NotSupportedException` and leave the shared array intact, and that reading the
 tokens allocates nothing.
 
+## `Glob` brace groups match the whole input
+
+Three defects in brace groups, recorded in #1507, are fixed together:
+
+- **A match could stop one character short.** The end-of-input checks in `Glob.IsMatch` and
+  `CompositeGlobToken.TestAll` tested `position < value.Length - 1`, so `**/*.{js,ts}` matched
+  `src/App.tsx` and `a{b,c}d` matched `abdx`. Without a group, the up-front fixed-length check, or
+  a `*` that anchors fixed-length tokens to the end, caught the extra character. A group is
+  variable-length, which turns both off. The checks now require the match to reach the end.
+- **Tokens after a longer alternative ran out of input.** The length checks count only a group's
+  shortest alternative, so `{ab,c}/` passes them on `ab`. A `*` or `**` owns the rest of the
+  pattern, so the group is the one variable-length token that other tokens follow. A path
+  separator, `?`, set or range token after it then read past the end, and `IsMatch` threw
+  `IndexOutOfRangeException`. Each now returns `false` at the end. A `*` followed by fixed-length
+  tokens had the same blind spot without throwing: it placed those tokens at the end of the input,
+  which is before the `*` itself once the group took the longer alternative, so `{ab,c}*b` matched
+  `ab` by reading the group's `b` twice. That `*` now fails when too little input is left.
+- **An empty group threw `InvalidOperationException`.** `{}`, `{,}` (empty alternatives are
+  dropped) and a `{` that ends the pattern leave a group with no alternatives, and LINQ's `Min`
+  over them threw. `Glob.Parse` now throws `ArgumentException` for `pattern`, with the
+  `GlobBraceGroupEmpty` message giving the group's index. A pattern that fails to parse is not
+  cached.
+
+One more change keeps the fix inside brace groups. A `*` whose remaining tokens can match nothing,
+such as the `/**` in `src*/**`, falls back to taking the rest of its segment, but it reported the
+position of its last failed attempt rather than the end. The old check let that through. The
+corrected one would have rejected `srcx` while still accepting `src`. The fallback now reports the
+end, so every pattern without a brace group matches as before. This change leaves open whether
+`src*/**` should match `srcx` at all, given that `src/**` does not match `src`.
+
+Within the documented limits, a brace group now behaves as the atomic regex group `(?>md|cs)`:
+the first alternative that matches at its position is kept, and the rest of the pattern must match
+what follows it. Compared with 10.0.0-preview.1, the corrected results are an intentional
+behavioral breaking change. `IsMatch` returns `false` where it returned `true` or threw, and
+`Glob.Parse` throws `ArgumentException` instead of `InvalidOperationException`. The public member
+signatures are unchanged, and so are the limits the overview lists: alternatives are tried in
+order without backtracking, and empty alternatives and wildcards inside alternatives are not
+supported. `GlobBraceGroupingTests` pins each case.
+
 ## AOT posture
 
 Runtime-contract parsing uses direct string, integer, and URI operations. It performs no
