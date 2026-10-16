@@ -109,6 +109,51 @@ public sealed class DocumentDatabaseEngineBuilder
         return this;
     }
 
+    /// <summary>
+    /// Registers an engine-owned server the model creates: the build runs <paramref name="configure"/>
+    /// on new server options and creates a <see cref="DocumentDatabaseServer"/> over the engine with them.
+    /// </summary>
+    /// <param name="configure">Configures the server options, its listener included; invoked once, during the build.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
+    /// <remarks>
+    /// The server is created stopped and starts with the application, after its services; it keeps
+    /// a copy of the options, so a later change to the object the callback configured never reaches
+    /// it. When the server cannot be created, the listener the options carry is disposed.
+    /// </remarks>
+    public DocumentDatabaseEngineBuilder AddServer(Action<DocumentDatabaseServerOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _state.AddServer(engine =>
+        {
+            var options = new DocumentDatabaseServerOptions();
+            try
+            {
+                configure(options);
+                return DocumentDatabaseServer.Create(engine, options);
+            }
+            catch (Exception failure) when (failure is not OutOfMemoryException)
+            {
+                // Nothing owns the listener the callback created until the server does.
+                if (options.Listener is { } listener)
+                {
+                    try
+                    {
+                        Task.Run(async () => await listener.DisposeAsync().ConfigureAwait(false)).GetAwaiter().GetResult();
+                    }
+                    catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+                    {
+                        throw new AggregateException(failure, cleanup);
+                    }
+                }
+
+                throw;
+            }
+        });
+        return this;
+    }
+
     /// <summary>Registers a factory for an engine-owned server.</summary>
     /// <param name="factory">The factory, invoked once against the engine the server must front, after every worker.</param>
     /// <returns>This builder.</returns>

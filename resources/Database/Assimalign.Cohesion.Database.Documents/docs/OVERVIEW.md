@@ -3,7 +3,14 @@
 `Assimalign.Cohesion.Database.Documents` implements named logical databases containing
 versioned UTF-8 JSON documents. Each session is bound to one database. The engine
 supports document CRUD, an explicit OQL query and index-DDL subset, secondary B+Tree indexes,
-snapshot and read-committed transactions, and durable file or in-memory storage.
+snapshot and read-committed transactions, durable file or in-memory storage, and a wire server.
+
+`DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
+serves OQL and document/collection commands on a consumer-supplied listener. Each authenticated
+connection binds one database. [Documents.Client](../../Assimalign.Cohesion.Database.Documents.Client/docs/OVERVIEW.md)
+provides pooled concrete client APIs, whole-document and row results, versioned mutations and
+structured diagnostics. Statement failures leave the connection reusable; explicit transactions
+remain in process only.
 
 The public entry points are `DocumentDatabaseEngine.Create(name, options)` and the builder from
 `DocumentDatabaseEngine.CreateBuilder(name)`; no options type carries the engine name. A created database is a

@@ -65,7 +65,7 @@ jobs:
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
         # transitively. The as-yet source-less model scaffolds (Cache, plus
-        # Documents.Client/.Security, Graph.Security, Blob.Security and
+        # Documents.Security, Graph.Security, Blob.Security and
         # KeyValuePair.Security) and the post-MVP shells (Sql.Security, Memory) are
         # excluded until they ship.
         # One leg per OS builds and tests the whole area: the inner list is a single matrix value
@@ -80,6 +80,7 @@ jobs:
             'Assimalign.Cohesion.Database.Client',
             'Assimalign.Cohesion.Database.Documents',
             'Assimalign.Cohesion.Database.Documents.Catalog',
+            'Assimalign.Cohesion.Database.Documents.Client',
             'Assimalign.Cohesion.Database.Documents.Language',
             'Assimalign.Cohesion.Database.Documents.Storage',
             'Assimalign.Cohesion.Database.Embedded',
@@ -134,7 +135,7 @@ jobs:
           category: 'Database'
           projects: ${{ steps.select.outputs.projects }}
 
-  # The SQL engine's two NativeAOT harnesses, published for linux-x64 and run (this machine leg
+  # The Database NativeAOT harnesses, published for linux-x64 and run (this machine leg
   # does not exist locally; win-arm64 is published by hand, see each csproj):
   # - the statement benchmark (DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md section 10), the instrument
   #   each engine phase's performance gate is measured with, so it must keep compiling and running
@@ -142,11 +143,13 @@ jobs:
   #   timings it prints are not a gate;
   # - the function-ABI guard (phase E2), which registers typed and hand-written functions, runs
   #   them in process and over the wire, and exits 1 when a check fails, so a trimmed or
-  #   AOT-compiled build that loses a code path fails the job.
-  # Both projects set PublishAot. Each publish step fails on any IL2xxx/IL3xxx warning in its
+  #   AOT-compiled build that loses a code path fails the job;
+  # - the Documents client guard, which drives OQL and document commands through real servers
+  #   over InMemory and TCP, checking typed failures and pooled session reuse.
+  # All three projects set PublishAot. Each publish step fails on any IL2xxx/IL3xxx warning in its
   # output, whatever the project promotes to an error (the guard also makes ILC's warnings errors).
   sql-benchmarks:
-    name: "Database.Sql NativeAOT harnesses (linux-x64)"
+    name: "Database NativeAOT harnesses (linux-x64)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -184,6 +187,28 @@ jobs:
           & (Join-Path $output "Assimalign.Cohesion.Database.Sql.AotSample")
           if ($LASTEXITCODE -ne 0) {
             throw "Database.Sql.AotSample reported a failed check (exit code $LASTEXITCODE)."
+          }
+
+      - name: Publish and run the Documents client NativeAOT guard
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "documents-aot-sample"
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Documents.Client/samples/Assimalign.Cohesion.Database.Documents.AotSample/Assimalign.Cohesion.Database.Documents.AotSample.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Database.Documents.AotSample failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning IL[23][0-9]{3}") {
+            throw "NativeAOT publish of Database.Documents.AotSample reported IL2xxx/IL3xxx warnings."
+          }
+
+          & (Join-Path $output "Assimalign.Cohesion.Database.Documents.AotSample")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Database.Documents.AotSample reported a failed check (exit code $LASTEXITCODE)."
           }
 
       - name: Publish and smoke-run the NativeAOT statement benchmark

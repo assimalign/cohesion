@@ -223,6 +223,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Database/Assimalign.Cohesion.Database.Client'
     'resources/Database/Assimalign.Cohesion.Database.Documents'
     'resources/Database/Assimalign.Cohesion.Database.Documents.Catalog'
+    'resources/Database/Assimalign.Cohesion.Database.Documents.Client'
     'resources/Database/Assimalign.Cohesion.Database.Documents.Language'
     'resources/Database/Assimalign.Cohesion.Database.Documents.Storage'
     'resources/Database/Assimalign.Cohesion.Database.Embedded'
