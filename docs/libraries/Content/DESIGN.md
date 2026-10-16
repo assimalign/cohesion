@@ -97,7 +97,7 @@ All package names below have the `Assimalign.Cohesion.` prefix. "Today" means th
 | `Content.Media` | Shared media descriptions; track/sample/timeline model planned | Content.Binary | Content.Binary | Strategic |
 | `Content.Bmff` | ISO BMFF box reader, writer and composite document tree | Content.Media | Content.Media | Strategic |
 | `Content.Mpeg` | MP4 profile over BMFF | None | Content.Bmff | Strategic |
-| `Content.Heif` | HEIF/AVIF still-image items, properties, references and metadata edits | Planned | Content.Bmff | Strategic |
+| `Content.Heif` | HEIF/AVIF still-image items, properties, references and metadata edits | Content.Bmff (Stage 5) | Content.Bmff | Strategic |
 | `Content.Ebml` | Generic EBML container, VInt and element model | None | Content.Binary | Strategic |
 | `Content.Mkv` | Matroska profile over EBML, with shared media descriptions | Content.Bmff | Content.Ebml, Content.Media | Strategic |
 | `Content.Pdf` | PDF object, document and cross-reference structure | None | Content.Binary | Strategic |
