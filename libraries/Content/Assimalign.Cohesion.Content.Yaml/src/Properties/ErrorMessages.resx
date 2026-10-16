@@ -112,4 +112,6 @@
   <data name="ScalarNotNumber" xml:space="preserve">
     <value>Scalar of kind '{0}' is not a number.</value>
   </data>
+  <data name="NestingLimitExceeded" xml:space="preserve"><value>YAML nesting exceeds the configured depth or available execution stack.</value></data>
+  <data name="AliasExpansionLimitExceeded" xml:space="preserve"><value>YAML aliases exceed the expanded node budget for this document.</value></data>
 </root>

@@ -102,6 +102,38 @@ anchor-name value grammar permits a colon.
 
 ## Error model
 
+`YamlParserOptions` applies to every parse facade, `ParseEvents`, and `CreateReader`. The existing
+overloads retain their signatures and use the defaults: `MaxDepth = 512` nested collections
+(root collection counts as one), and `MaxAliasExpansion = 1_000_000` expanded alias nodes per
+document. Both excesses throw `YamlException` with `LimitExceeded`. Options are init-only;
+depth must be positive and the alias budget nonnegative (zero disables aliases).
+
+Depth is checked before recursive collection descent and again against the completed events,
+because implicit mapping keys can introduce a parent retroactively. A runtime stack-availability
+guard also rejects with `LimitExceeded`, including property-only recursion and callers raising
+the depth option beyond the available stack. Thus raising an option cannot disable stack safety,
+but unusually small thread stacks may reject below the configured depth.
+
+Aliases still share node instances. An iterative event pass charges each alias the expanded size
+of its completed target, counting scalars, collections and mapping keys. It adds cached counts
+with saturating arithmetic, never materializing the expansion. Anchors and the budget reset for
+each document; duplicate anchor names bind to the most recent declaration. References to an open
+ancestor cost one and preserve the existing cyclic graph semantics; consumers must still detect
+cycles when traversing nodes. This budget bounds acyclic amplification, not the length of the
+input or the number of non-aliased nodes. Parsing continues to buffer the complete source.
+
+Syntax failures use `InvalidStructure`; invalid metadata and escape values use `InvalidValue`;
+unterminated flow collections, quotes, tags and escapes use `Truncated`; retained-scope
+exclusions (YAML versions, multiline implicit keys, supplementary escapes) use `Unsupported`.
+Invalid Unicode escape scalars, including surrogate values and values above U+10FFFF, are
+`InvalidValue`. The legacy three-argument `YamlException` constructor now selects
+`InvalidStructure`; its offset remains unknown.
+
+Parser-created YAML errors carry one-based line/UTF-16 column and `Position`, the absolute
+UTF-16 offset in the original decoded source, including a leading U+FEFF and original CR/CRLF.
+This character position follows the root exception's text contract; it is not a byte offset.
+Decoder failures below this layer retain their distinct byte positions.
+
 Malformed parsed YAML throws `YamlException : ContentFormatException` with one-based line/column —
 the Content-family error contract, so callers catch content failures at area granularity.
 Parse(ITextContent) also propagates Content.Text decoding failures unchanged as ContentFormatException

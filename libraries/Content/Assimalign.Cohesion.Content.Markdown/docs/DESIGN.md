@@ -102,6 +102,8 @@ decoding: each maximal ill-formed subpart becomes U+FFFD before ordinary Markdow
 - Unresolved inline literals accumulate in a StringBuilder and materialize once per run, avoiding
   quadratic copying for long bracket sequences. The hostile corpus guards both wall-clock bounds
   at geometrically increasing sizes and linear allocation growth for unresolved labels.
+- Bracket openers use an explicit stack; successful links invalidate prior link openers with a
+  generation counter. Nested labels therefore do not repeatedly scan the accumulated atom prefix.
 - `U+0000` becomes `U+FFFD` at inline parse, per the spec's insecure-characters rule.
 
 Marker-only quotes and list items contain no synthetic empty paragraph. An empty item may start

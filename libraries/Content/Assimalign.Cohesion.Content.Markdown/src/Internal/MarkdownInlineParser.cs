@@ -60,6 +60,8 @@ internal static class MarkdownInlineParser
         }
 
         var atoms = new List<Atom>();
+        var brackets = new Stack<(int Index, int LinkGeneration)>();
+        var linkGeneration = 0;
         var literal = new StringBuilder();
         long consumed = 0;
 
@@ -183,6 +185,7 @@ internal static class MarkdownInlineParser
                     if (offset + 1 < raw.Length && raw[offset + 1] == '[')
                     {
                         Flush(atoms, literal);
+                        brackets.Push((atoms.Count, linkGeneration));
                         atoms.Add(Atom.ForDelimiter(new Delimiter('[', 1) { IsImage = true }));
                         consumed = offset + 2;
                     }
@@ -198,6 +201,7 @@ internal static class MarkdownInlineParser
                 case openBracketId:
                 {
                     Flush(atoms, literal);
+                    brackets.Push((atoms.Count, linkGeneration));
                     atoms.Add(Atom.ForDelimiter(new Delimiter('[', 1)));
                     consumed = end;
                     break;
@@ -206,7 +210,7 @@ internal static class MarkdownInlineParser
                 case closeBracketId:
                 {
                     Flush(atoms, literal);
-                    consumed = ProcessCloseBracket(raw, atoms, end, literal);
+                    consumed = ProcessCloseBracket(raw, atoms, brackets, ref linkGeneration, end, literal);
                     break;
                 }
 
@@ -404,26 +408,18 @@ internal static class MarkdownInlineParser
     /// their emphasis first, as the spec requires). Anything else degrades to literal brackets —
     /// including reference-style links, which are outside the retained subset.
     /// </summary>
-    private static long ProcessCloseBracket(string raw, List<Atom> atoms, int bracketEnd, StringBuilder literal)
+    private static long ProcessCloseBracket(string raw, List<Atom> atoms, Stack<(int Index, int LinkGeneration)> brackets,
+        ref int linkGeneration, int bracketEnd, StringBuilder literal)
     {
-        var bracketIndex = -1;
-        for (var index = atoms.Count - 1; index >= 0; index--)
-        {
-            if (atoms[index].Delimiter is { Character: '[' })
-            {
-                bracketIndex = index;
-                break;
-            }
-        }
-
-        if (bracketIndex < 0)
+        if (!brackets.TryPop(out var opener))
         {
             literal.Append(']');
             return bracketEnd;
         }
 
+        var bracketIndex = opener.Index;
         var bracket = atoms[bracketIndex].Delimiter!;
-        if (!bracket.Active
+        if ((!bracket.IsImage && opener.LinkGeneration != linkGeneration)
             || !TryReadLinkSuffix(raw, bracketEnd, out var destination, out var title, out var suffixEnd))
         {
             atoms[bracketIndex] = Atom.ForNode(new MarkdownLiteral(bracket.IsImage ? "![" : "["));
@@ -446,14 +442,9 @@ internal static class MarkdownInlineParser
             children = link.Inlines;
             node = link;
 
-            // Links may not contain links: earlier link openers can no longer match.
-            for (var index = 0; index < bracketIndex; index++)
-            {
-                if (atoms[index].Delimiter is { Character: '[', IsImage: false } earlier)
-                {
-                    earlier.Active = false;
-                }
-            }
+            // Links may not contain links. Invalidate all prior link openers in constant time;
+            // image openers remain active. New openers use the new generation.
+            linkGeneration++;
         }
 
         Materialize(atoms, bracketIndex + 1, children);
@@ -886,7 +877,5 @@ internal static class MarkdownInlineParser
         public bool CanClose { get; init; }
 
         public bool IsImage { get; init; }
-
-        public bool Active { get; set; } = true;
     }
 }

@@ -10,7 +10,15 @@ namespace Assimalign.Cohesion.Content.Yaml.Internal;
 /// </summary>
 internal sealed class YamlStreamReader : IContentReader<YamlStream>
 {
-    public YamlStream Read(Stream stream) => YamlText.Parse(stream);
+    private readonly YamlParserOptions _options;
+
+    internal YamlStreamReader(YamlParserOptions options)
+    {
+        options.Validate();
+        _options = options;
+    }
+
+    public YamlStream Read(Stream stream) => YamlText.Parse(stream, _options);
 
     public ValueTask<YamlStream> ReadAsync(Stream stream, CancellationToken cancellationToken = default)
     {

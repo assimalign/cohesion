@@ -19,6 +19,8 @@ public class YamlExceptionMessageTests
 
         // Assert
         var exception = Should.Throw<YamlException>(parse);
+        exception.ErrorCode.ShouldBe(ContentFormatErrorCode.InvalidStructure);
+        exception.Position.ShouldNotBeNull();
         exception.Message.ShouldBe("Alias '*missing' refers to an undefined anchor. (line 2, column 1)");
         exception.Line.ShouldBe(2);
         exception.Column.ShouldBe(1);
