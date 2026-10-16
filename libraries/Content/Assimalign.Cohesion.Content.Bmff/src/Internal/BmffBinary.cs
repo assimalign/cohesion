@@ -10,8 +10,15 @@ internal static class BmffBinary
 {
     internal static BinaryContentReader ReadField(Stream stream, Span<byte> buffer)
     {
-        var offset = stream.Position;
-        stream.ReadContentExactly(buffer);
+        var offset = stream is BmffStream bmff ? bmff.Offset + bmff.Position : stream.Position;
+        try
+        {
+            stream.ReadContentExactly(buffer);
+        }
+        catch (ContentFormatException error) when (error.ErrorCode == ContentFormatErrorCode.Truncated && stream is BmffStream window)
+        {
+            throw new ContentFormatException(ErrorMessages.TruncatedHeader, ContentFormatErrorCode.Truncated, window.Offset + window.Position);
+        }
         return new BinaryContentReader(buffer, offset);
     }
 }

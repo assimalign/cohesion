@@ -446,6 +446,10 @@
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Bmff/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Bmff/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Bmff/docs/">
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Bmff/docs/DESIGN.md" />
+		<File Path="libraries/Content/Assimalign.Cohesion.Content.Bmff/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Bmff/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Bmff/src/Assimalign.Cohesion.Content.Bmff.csproj" />
 	</Folder>

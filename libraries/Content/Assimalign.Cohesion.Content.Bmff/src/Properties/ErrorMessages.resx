@@ -5,4 +5,35 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="InvalidHeaderTime" xml:space="preserve"><value>The timestamp precedes the BMFF epoch.</value></data>
+  <data name="ExtendedTypeRequired" xml:space="preserve"><value>An extended type is required exactly for uuid boxes.</value></data>
+  <data name="TruncatedHeader" xml:space="preserve"><value>The box header or payload is truncated.</value></data>
+  <data name="NestedZeroSize" xml:space="preserve"><value>A zero size is only legal for the last top-level box.</value></data>
+  <data name="SizeLimit" xml:space="preserve"><value>The box size exceeds the supported stream range.</value></data>
+  <data name="InvalidBoxSize" xml:space="preserve"><value>The box size is smaller than its header or exceeds its container.</value></data>
+  <data name="StreamNotSeekable" xml:space="preserve"><value>The stream does not support seeking.</value></data>
+  <data name="InvalidSeekOrigin" xml:space="preserve"><value>The seek origin is invalid.</value></data>
+  <data name="InvalidSeek" xml:space="preserve"><value>The seek position is outside the supported range.</value></data>
+  <data name="FixedWindow" xml:space="preserve"><value>A box window has a fixed length.</value></data>
+  <data name="WindowExceeded" xml:space="preserve"><value>The write exceeds the box window.</value></data>
+  <data name="UnsupportedBox" xml:space="preserve"><value>This box model is not implemented; preserve its payload or use a profile registry.</value></data>
+  <data name="UnsupportedVersion" xml:space="preserve"><value>The box version or flags are not supported.</value></data>
+  <data name="ChildCountMismatch" xml:space="preserve"><value>The container child count or child types do not match its prefix.</value></data>
+  <data name="InvalidFactory" xml:space="preserve"><value>The registered factory returned no box or a different type.</value></data>
+  <data name="SourceNotReadable" xml:space="preserve"><value>The source must be readable.</value></data>
+  <data name="PayloadConsumed" xml:space="preserve"><value>The payload has already been consumed or a child reader is active.</value></data>
+  <data name="BufferLimit" xml:space="preserve"><value>The payload exceeds the configured buffering limit.</value></data>
+  <data name="UnconsumedPayload" xml:space="preserve"><value>The parser did not consume its complete bounded payload.</value></data>
+  <data name="DepthLimit" xml:space="preserve"><value>The box nesting depth exceeds the configured limit.</value></data>
+  <data name="NotContainer" xml:space="preserve"><value>The current box is not a supported container.</value></data>
+  <data name="NoCurrentBox" xml:space="preserve"><value>The reader has no current box.</value></data>
+  <data name="InvalidBrands" xml:space="preserve"><value>The compatible brands must occupy a whole number of FourCC fields.</value></data>
+  <data name="LazySourceRequired" xml:space="preserve"><value>Lazy materialization requires a seekable source; consume or skip Payload on forward-only input.</value></data>
+  <data name="OutputNotWritable" xml:space="preserve"><value>The output must be writable.</value></data>
+  <data name="IncompleteBox" xml:space="preserve"><value>The emitted payload size differs from its declared size.</value></data>
+  <data name="ContainerState" xml:space="preserve"><value>Container start and end calls are unbalanced.</value></data>
+  <data name="DocumentSource" xml:space="preserve"><value>A document requires a readable, seekable source.</value></data>
+  <data name="SameSourceOutput" xml:space="preserve"><value>Save to a separate output while lazy payloads borrow the source.</value></data>
+  <data name="InvalidTree" xml:space="preserve"><value>The box tree contains a cycle, null node or invalid size.</value></data>
+  <data name="WriterClosed" xml:space="preserve"><value>No boxes may follow a size-zero box.</value></data>
+  <data name="BufferRequired" xml:space="preserve"><value>An unknown-size streaming container exceeds the configured buffer cap.</value></data>
 </root>

@@ -1,5 +1,5 @@
-﻿using System;
-using System.Diagnostics;
+﻿using System.Diagnostics;
+using System;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff.Internal;
@@ -7,25 +7,28 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 [DebuggerDisplay("Bmff Box: Movie Header (mvhd)")]
-public sealed class MovieHeaderBox : BmffBox
+/// <summary>The MovieHeaderBox model; field-level support is documented in DESIGN.md.</summary>
+public sealed class MovieHeaderBox : BmffFullBox
 {
     private static DateTime _seed = new DateTime(1904, 1, 1, 0, 0, 0);
 
-    private BmffVersion _headerVersion           = BmffVersion.Version1;
     private DateTime    _headerCreationTime      = DateTime.UtcNow;
     private DateTime    _headerModificationTime  = DateTime.UtcNow;
     private uint        _headerTimeScale;
     private ulong       _headerDuration;
     private double      _headerRate;
     private short       _headerVolume;
-    private byte[]      _headerReserved;
-    private byte[]      _headerPreDefined;
+    private byte[]      _headerPreDefined = Array.Empty<byte>();
     private uint        _headerNextTrackId;
 
 
 
+    /// <summary>Creates a MovieHeaderBox at its original location.</summary>
+    /// <param name="size">The original total byte size.</param>
+    /// <param name="offset">The absolute original header offset.</param>
     public MovieHeaderBox(long size, long offset)
     {
+        base.Version = (byte)BmffVersion.Version1;
         this.Limit = size;
         this.Offset = offset;
         this.Matrix = new int[] { 0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000 }; // Unity Matrix
@@ -34,15 +37,15 @@ public sealed class MovieHeaderBox : BmffBox
     /// <summary>
     /// The version of the movie header.
     /// </summary>
-    public BmffVersion Version
+    public new BmffVersion Version
     {
-        get => _headerVersion;
-        init => _headerVersion = value;
+        get => (BmffVersion)base.Version;
+        init => base.Version = (byte)value;
     }
     /// <summary>
-    /// Is an integer that declares the creation time of the presentation (in seconds since midnight, Jan. 1, 1904, in UTC time) 
+    /// Is an integer that declares the creation time of the presentation (in seconds since midnight, Jan. 1, 1904, in UTC time)
     /// </summary>
-    public DateTime CreationTime 
+    public DateTime CreationTime
     {
         get => _headerCreationTime;
         init
@@ -57,7 +60,7 @@ public sealed class MovieHeaderBox : BmffBox
     }
     /// <summary>
     /// Is an integer that declares the most recent time the presentation
-    /// was modified (in seconds since midnight, Jan. 1, 1904, in UTC time) 
+    /// was modified (in seconds since midnight, Jan. 1, 1904, in UTC time)
     /// </summary>
     public DateTime ModificationTime
     {
@@ -73,9 +76,9 @@ public sealed class MovieHeaderBox : BmffBox
         }
     }
     /// <summary>
-    /// Is an integer that specifies the time-scale for the entire presentation; this is the number of 
-    /// time units that pass in one second.For example, a time coordinate system that measures time in 
-    /// sixtieths of a second has a time scale of 60. 
+    /// Is an integer that specifies the time-scale for the entire presentation; this is the number of
+    /// time units that pass in one second.For example, a time coordinate system that measures time in
+    /// sixtieths of a second has a time scale of 60.
     /// </summary>
     public uint TimeScale
     {
@@ -95,13 +98,13 @@ public sealed class MovieHeaderBox : BmffBox
     /// <summary>
     /// The Movie play rate. Typically 1.0
     /// </summary>
-    public double Rate 
-    { 
-        get => _headerRate; 
-        init => _headerRate = value; 
+    public double Rate
+    {
+        get => _headerRate;
+        init => _headerRate = value;
     }
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public short Volume
     {
@@ -109,15 +112,15 @@ public sealed class MovieHeaderBox : BmffBox
         init => _headerVolume = value;
     }
     /// <summary>
-    /// 
+    ///
     /// </summary>
-    public byte[] Reserved { get; set; }    
+    public byte[] Reserved { get; set; } = Array.Empty<byte>();
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public int[] Matrix { get; init; }
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public byte[] PreDefined
     {
@@ -125,7 +128,7 @@ public sealed class MovieHeaderBox : BmffBox
         init => this._headerPreDefined = value;
     }
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public uint NextTrackId
     {
@@ -135,66 +138,42 @@ public sealed class MovieHeaderBox : BmffBox
 
 
     /// <inheritdoc />
+    /// <inheritdoc/>
     public override long Limit { get; }
 
     /// <inheritdoc />
+    /// <inheritdoc/>
     public override long Offset { get; }
 
     /// <inheritdoc />
+    /// <inheritdoc/>
     public override bool IsLeaf => true;
 
     /// <inheritdoc />
+    /// <inheritdoc/>
     public override bool IsComposite => false;
 
     /// <inheritdoc />
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.MovieHeader;
 
 
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        Span<byte> buffer = stackalloc byte[8];
-        var version = (BmffVersion)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian();
-
-        if (version == BmffVersion.Version1)
-        {
-            _headerVersion = version;
-            _headerCreationTime = _seed + TimeSpan.FromSeconds(unchecked((double)BmffBinary.ReadField(stream, buffer[..8]).ReadInt64BigEndian()));
-            _headerModificationTime = _seed + TimeSpan.FromSeconds(unchecked((double)BmffBinary.ReadField(stream, buffer[..8]).ReadInt64BigEndian()));
-            _headerTimeScale = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
-            _headerDuration = BmffBinary.ReadField(stream, buffer[..8]).ReadUInt64BigEndian();
-        }
-        else
-        {
-            _headerVersion = version;
-            _headerCreationTime = _seed + TimeSpan.FromSeconds(unchecked((double)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian()));
-            _headerModificationTime = _seed + TimeSpan.FromSeconds(unchecked((double)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian()));
-            _headerTimeScale = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
-            _headerDuration = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
-        }
-
-        // Preserve the legacy public raw-value behavior; field semantics are a Stage 2 repair.
-        _headerRate = BmffBinary.ReadField(stream, buffer[..4]).ReadFixedPoint16x16().RawValue;
-        _headerVolume = BmffBinary.ReadField(stream, buffer[..2]).ReadFixedPoint8x8().RawValue;
-        _headerReserved = new byte[2 + (2 * 4)];
-        stream.ReadContentExactly(_headerReserved);
-
-        for (int i = 0; i < 9; i++)
-        {
-            var field = BmffBinary.ReadField(stream, buffer[..4]);
-            Matrix[i] = i % 3 == 2 ? field.ReadFixedPoint2x30().RawValue : field.ReadFixedPoint16x16().RawValue;
-        }
-
-        _headerPreDefined = new byte[6 * 4];
-        stream.ReadContentExactly(_headerPreDefined);
-        _headerNextTrackId = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
+        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
     }
 
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        
+        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
     }
+    /// <inheritdoc/>
     public override T Accept<T>(IBmffBoxVisitor<T> visitor)
     {
         return visitor.Visit(this);
     }
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

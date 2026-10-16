@@ -1,28 +1,32 @@
-﻿using Assimalign.Cohesion.Content.Bmff.Internal;
-using System;
-using System.Buffers.Binary;
-using System.Collections;
+﻿using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System;
+
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
 [DebuggerDisplay("Bmff Box: Track (trak)")]
+/// <summary>The TrackBox model; field-level support is documented in DESIGN.md.</summary>
 public sealed class TrackBox : BmffBoxComposite
 {
-    private IList<BmffBox> _children = new List<BmffBox>();
+    internal override bool SupportsAsyncPlan => true;
 
-    protected uint _flags;
 
-    private ulong _trackCreationTime;
-    private ulong _trackModificationTime;
+    private readonly uint _flags = 0;
+
     private int _trackRate;
     private short _trackVolume;
 
+    /// <summary>Creates a TrackBox at its original location.</summary>
+    /// <param name="size">The original total byte size.</param>
+    /// <param name="offset">The absolute original header offset.</param>
     public TrackBox(long size, long offset)
     {
         this.Offset = offset;
@@ -61,41 +65,41 @@ public sealed class TrackBox : BmffBoxComposite
         set => _trackVolume = checked((short)Math.Round(value * ((int)byte.MaxValue + 1)));
     }
 
-    public byte[] Reserved { get; private set; }
+    public byte[] Reserved { get; private set; } = Array.Empty<byte>();
 
-    public int[] Matrix { get; private set; }
+    public int[] Matrix { get; private set; } = Array.Empty<int>();
 
-    public byte[] PreDefined { get; private set; }
+    public byte[] PreDefined { get; private set; } = Array.Empty<byte>();
 
     public uint NextTrackID { get; set; }
 
+    /// <inheritdoc/>
     public override long Limit { get; }
 
+    /// <inheritdoc/>
     public override long Offset { get; }
 
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.Track;
 
-    public override IEnumerable<BmffBox> Children => this._children;
 
+
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        var boxes = new List<BmffBox>();
-        var reader = new BmffReaderDefault(stream);
-
-        while (reader.Read())
-        {
-            boxes.Add(reader.Current);
-        }
-
-        _children = boxes;
+        base.Read(stream);
     }
 
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-
+        base.Write(stream);
     }
+    /// <inheritdoc/>
     public override T Accept<T>(IBmffBoxVisitor<T> visitor)
     {
         return visitor.Visit(this);
     }
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

@@ -1,9 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff.Internal;
@@ -11,10 +11,14 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 [DebuggerDisplay("Bmff Box: Chunk Offset (stco)")]
-public sealed class ChunkOffsetBox : BmffBox
+/// <summary>The ChunkOffsetBox model; field-level support is documented in DESIGN.md.</summary>
+public sealed class ChunkOffsetBox : BmffFullBox
 {
-    private uint[] _entries;
+    private readonly uint[] _entries = Array.Empty<uint>();
 
+    /// <summary>Creates a ChunkOffsetBox at its original location.</summary>
+    /// <param name="offset">The absolute original header offset.</param>
+    /// <param name="limit">The original total byte size.</param>
     public ChunkOffsetBox(long offset, long limit)
     {
         this.Offset = offset;
@@ -22,31 +26,33 @@ public sealed class ChunkOffsetBox : BmffBox
     }
 
     public uint[] Entries => _entries;
+    /// <inheritdoc/>
     public override bool IsLeaf => true;
+    /// <inheritdoc/>
     public override bool IsComposite => false;
+    /// <inheritdoc/>
     public override long Limit { get; }
+    /// <inheritdoc/>
     public override long Offset { get; }
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.ChunkOffset;
 
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        Span<byte> buffer = stackalloc byte[8];
-        var count = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
-
-        _entries = new uint[count];
-
-        for (uint i = 0; i < count; i++)
-        {
-            _entries[i] = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
-        }
+        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
     }
 
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new NotImplementedException();
+        throw new ContentFormatException(ErrorMessages.UnsupportedBox, ContentFormatErrorCode.Unsupported, Offset);
     }
+    /// <inheritdoc/>
     public override T Accept<T>(IBmffBoxVisitor<T> visitor)
     {
         return visitor.Visit(this);
     }
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }
