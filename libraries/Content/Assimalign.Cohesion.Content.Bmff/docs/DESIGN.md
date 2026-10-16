@@ -16,6 +16,18 @@ The intended family-level error model is described in the
 [Content design](../../Assimalign.Cohesion.Content/docs/DESIGN.md).
 The default reader's `Dispose` closes its underlying stream; callers must account for that ownership.
 
+## Shared binary primitives
+
+Field reads now use Content.Binary.ReadContentExactly and BinaryContentReader through a small
+internal field adapter with a caller-supplied stack buffer. Partial delivery is read to completion;
+an underlying early end reports ContentFormatException with Truncated. Fixed-point reads preserve
+the existing public raw-value behavior. Content.Media no longer supplies stream helpers or FPoint.
+
+This is a mechanical port. The composite tree, visitors, box types, BmffReaderDefault and BmffStream
+lifecycle remain. Stage 2 still needs to repair BmffStream bounds and positioning, unknown/large boxes,
+mvhd version/flags and raw rate interpretation, and uncapped stco/ftyp allocations from declared sizes.
+Existing BmffStream boundary exceptions can still preempt the shared truncation contract.
+
 ## Lifecycle and known constraints
 
 H2 (`4592e3eb`) repaired compilation, without claiming parser completeness. The media test

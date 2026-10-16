@@ -31,7 +31,7 @@ public class ContentFormatTests
         ContentFormat.Unknown.ShouldBeSameAs(ContentFormat.Unknown);
         ContentFormat.Unknown.Kind.ShouldBe(ContentKind.Unknown);
 
-        using var content = ContentFactory.FromBytes(new byte[] { 1 });
+        using var content = MemoryContent.Create(new byte[] { 1 });
         content.Format.ShouldBeSameAs(ContentFormat.Unknown);
     }
 

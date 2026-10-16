@@ -5,19 +5,37 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Content.Internal;
+namespace Assimalign.Cohesion.Content;
 
 /// <summary>
 /// A pure composite assembled from existing items. It has no serialized representation of its own; the
 /// items carry the data. Children are owned (disposed with the composite) unless borrowed at creation.
 /// </summary>
-internal sealed class CompositeContent : IComposableContent
+public sealed class CompositeContent : IComposableContent
 {
+    /// <summary>
+    /// Creates a composite from existing content items.
+    /// </summary>
+    /// <param name="items">The child items, in order.</param>
+    /// <param name="format">The format descriptor, or <see langword="null"/> for <see cref="ContentFormat.Unknown"/>.</param>
+    /// <param name="name">The optional composite name.</param>
+    /// <param name="leaveItemsOpen">
+    /// <see langword="false"/> (the default) to transfer ownership — disposing the composite disposes
+    /// every child; <see langword="true"/> to borrow the children and leave them undisposed.
+    /// </param>
+    /// <returns>A composite over the items. Its <see cref="IContent.OpenRead"/> throws <see cref="NotSupportedException"/> because a pure composite has no serialized form.</returns>
+    /// <exception cref="ArgumentNullException">The items is null.</exception>
+    public static CompositeContent Create(IReadOnlyList<IContent> items, ContentFormat? format = null, string? name = null, bool leaveItemsOpen = false)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        return new CompositeContent(items, format ?? ContentFormat.Unknown, name, leaveItemsOpen);
+    }
+
     private readonly IReadOnlyList<IContent> _items;
     private readonly bool _leaveItemsOpen;
     private bool _disposed;
 
-    internal CompositeContent(IReadOnlyList<IContent> items, ContentFormat format, string? name, bool leaveItemsOpen)
+    private CompositeContent(IReadOnlyList<IContent> items, ContentFormat format, string? name, bool leaveItemsOpen)
     {
         _items = items;
         _leaveItemsOpen = leaveItemsOpen;
@@ -25,24 +43,33 @@ internal sealed class CompositeContent : IComposableContent
         Name = name;
     }
 
+    /// <inheritdoc/>
     public string? Name { get; }
 
+    /// <inheritdoc/>
     public ContentFormat Format { get; }
 
+    /// <inheritdoc/>
     public string? MediaType => null;
 
+    /// <inheritdoc/>
     public long? Length => null;
 
+    /// <inheritdoc/>
     public bool IsReadOnly => true;
 
+    /// <inheritdoc/>
     public bool CanReopen => false;
 
+    /// <inheritdoc/>
     public Stream OpenRead() =>
-        throw new NotSupportedException("A pure composite has no serialized representation; enumerate its items instead.");
+        throw new NotSupportedException(ErrorMessages.CompositeNotSerialized);
 
+    /// <inheritdoc/>
     public ValueTask<Stream> OpenReadAsync(CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("A pure composite has no serialized representation; enumerate its items instead.");
+        throw new NotSupportedException(ErrorMessages.CompositeNotSerialized);
 
+    /// <inheritdoc/>
     public async IAsyncEnumerable<IContent> GetItemsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -55,6 +82,7 @@ internal sealed class CompositeContent : IComposableContent
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed)
@@ -72,6 +100,7 @@ internal sealed class CompositeContent : IComposableContent
         }
     }
 
+    /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)

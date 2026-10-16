@@ -3,7 +3,8 @@ using System.Diagnostics;
 using static System.Text.Encoding;
 using static System.Buffers.Binary.BinaryPrimitives;
 
-using Assimalign.Cohesion.Content.Media;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
@@ -94,8 +95,9 @@ public sealed class FileTypeBox : BmffBox
 
     public override void Read(BmffStream stream)
     {
-        _majorBrand = (uint)ReadInt32BigEndian(stream.ReadBytes(4));
-        _minorBrand = (uint)ReadInt32BigEndian(stream.ReadBytes(4));
+        Span<byte> buffer = stackalloc byte[8];
+        _majorBrand = (uint)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian();
+        _minorBrand = (uint)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian();
 
         var remaining = stream.Remaining / 4;
 
@@ -103,7 +105,7 @@ public sealed class FileTypeBox : BmffBox
 
         for (int i = 0; i < remaining; i++) 
         {
-            _compatibleBrands[i] = (uint)ReadInt32BigEndian(stream.ReadBytes(4));
+            _compatibleBrands[i] = (uint)BmffBinary.ReadField(stream, buffer[..4]).ReadInt32BigEndian();
         }
     }
 

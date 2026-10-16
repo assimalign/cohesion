@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Content;
 /// </summary>
 /// <remarks>
 /// A composite owns its children by default: disposing the composite disposes every child. Composites
-/// created over borrowed children leave them undisposed (see <c>ContentFactory.Compose</c>). A pure
+/// created over borrowed children leave them undisposed (see <c>CompositeContent.Create</c>). A pure
 /// composite — one assembled from items rather than parsed from a serialized source — has no byte
 /// representation of its own, and its <see cref="IContent.OpenRead"/> throws
 /// <see cref="System.NotSupportedException"/>.

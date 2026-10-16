@@ -51,6 +51,7 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.Content',
+            'Assimalign.Cohesion.Content.Binary',
             'Assimalign.Cohesion.Content.Text',
             'Assimalign.Cohesion.Content.Ebml',
             'Assimalign.Cohesion.Content.Markdown',

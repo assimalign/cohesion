@@ -22,7 +22,7 @@ Detection (`TextEncodingDetector.Detect`) is a pure function over the first four
 3. **UTF-8 default** otherwise.
 
 The result carries the preamble length so decoding starts after the mark. Detection through
-`TextContentFactory.FromContent(content)` requires *reopenable* content because it consumes a read;
+`TextContent.Create(content)` requires *reopenable* content because it consumes a read;
 single-use content must supply its encoding explicitly — an explicit contract instead of a silently
 half-consumed stream.
 
@@ -32,7 +32,8 @@ half-consumed stream.
 root family's ownership rules: readers are caller-owned, valid while the content is undisposed, and
 always start at the beginning of the text (after any byte order mark). The implementation wraps any
 `IContent`, so text semantics layer over memory, stream, or future storage-adapter content without
-duplicating source handling.
+duplicating source handling. Public sealed TextContent owns the concrete-returning Create overloads
+for strings, explicitly encoded content, and detected content; its constructor is private (decision 59).
 
 ## Line model
 
@@ -83,6 +84,13 @@ literal tokens, and the runs of text between them, every value a zero-copy slice
   first) happens in the constructor — construct one tokenizer per text, not per line; later options
   mutations don't affect live tokenizers. Invalid tables (null entries, duplicate texts) throw
   `ArgumentException` at construction, never during reads.
+
+## Error model
+
+The tokenizer accepts every input and reports positions for format parsers. Invalid tokenizer options
+and creation arguments use BCL argument exceptions; detecting single-use content throws ContentException.
+Package-authored messages are build-generated ErrorMessages resources. Format readers above this layer
+use the root ContentFormatException.ErrorCode and Position; legacy exceptions retain Unspecified.
 
 ## AOT posture
 

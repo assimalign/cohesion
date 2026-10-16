@@ -4,9 +4,9 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using static System.Buffers.Binary.BinaryPrimitives;
 
-using Assimalign.Cohesion.Content.Media;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
@@ -30,13 +30,14 @@ public sealed class ChunkOffsetBox : BmffBox
 
     public override void Read(BmffStream stream)
     {
-        var count = ReadUInt32BigEndian(stream.ReadBytes(4));
+        Span<byte> buffer = stackalloc byte[8];
+        var count = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
 
         _entries = new uint[count];
 
         for (uint i = 0; i < count; i++)
         {
-            _entries[i] = ReadUInt32BigEndian(stream.ReadBytes(4));
+            _entries[i] = BmffBinary.ReadField(stream, buffer[..4]).ReadUInt32BigEndian();
         }
     }
 

@@ -1,7 +1,6 @@
 ﻿using System;
-using static System.Buffers.Binary.BinaryPrimitives;
 
-using Assimalign.Cohesion.Content.Media;
+using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
@@ -31,9 +30,10 @@ internal sealed partial class BmffReaderDefault : BmffReader
         }
 
         // Represents the Offset of the context starting from the beginning of the stream.
+        Span<byte> buffer = stackalloc byte[8];
         var offset  = _stream.Position;
-        var limit   = ReadInt32BigEndian(_stream.ReadBytes(4));
-        var type    = ReadInt32BigEndian(_stream.ReadBytes(4));
+        var limit   = BmffBinary.ReadField(_stream, buffer[..4]).ReadInt32BigEndian();
+        var type    = BmffBinary.ReadField(_stream, buffer[..4]).ReadInt32BigEndian();
 
         if (type < 0 || !Enum.IsDefined(typeof(BmffBoxType), (uint)type))
         {

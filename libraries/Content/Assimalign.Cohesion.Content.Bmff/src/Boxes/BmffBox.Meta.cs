@@ -25,7 +25,6 @@ public sealed class MetaBox : BmffBoxComposite
 
     public override void Read(BmffStream stream)
     {
-        //stream.ReadBytes(1);
         //var reader = new BmffReaderDefault(stream);
 
         //while (reader.Read())
