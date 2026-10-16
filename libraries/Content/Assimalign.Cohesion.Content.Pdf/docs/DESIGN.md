@@ -1,16 +1,18 @@
-# PDF structural reader and object model
+# PDF structural reader, editable model and writer
 
 ## Intent and dependency direction
 
-This is Stage 2 of feature #470: an ISO 32000-2 structural reader for PDF 1.0–1.7 and 2.0,
-and a retained model that Stage 3 can serialize and update. It does not claim PDF rendering,
+Stages 2 and 3 of feature #470 provide an ISO 32000-2 structural reader for PDF 1.0–1.7 and 2.0,
+an editable retained model, and full/incremental saves through IContentWriter<PdfDocument>.
+The package does not claim PDF rendering,
 semantic validation of every dictionary, or preservation of the original whitespace spelling.
 The sole direct dependency is `Assimalign.Cohesion.Content.Binary`; Binary references Content.
 No shipped assembly receives access to another assembly's internals. Tests have a local grant.
 
 The program's common forward-only-reader pattern is specialized here by the PDF brief: cross-reference
 resolution needs random access, so this reader rejects non-seekable sources. It does not spool a
-40 GiB source to memory. The later writer remains a separate Stage 3 concern.
+40 GiB source to memory. The writer is a separate forward-only component and supports non-seekable
+destinations; the retained source still requires random access.
 
 The load flow follows these dependencies; an arrow means that a component uses the target.
 The reader locates the header/trailer, builds the revision-aware xref map, then creates a document.
@@ -135,7 +137,7 @@ Strict mode is the default. Lenient mode enables only these additional behaviors
 Header scanning within the first 1024 bytes is an explicit compatibility rule in both modes. Ordinary
 PDF syntax such as leading zeros, `.5`, `-.002`, escaped newlines and odd-length hex strings is not a
 leniency. Repair does not recover deletion/free-list history and may lose the intent of damaged revisions;
-StartXref becomes -1. A later writer must require a full save for repaired documents instead of assuming
+StartXref becomes -1. The writer requires a full save for repaired documents instead of assuming
 the original incremental chain is safe. Limits and Unsupported failures are never silently recovered.
 
 ## Unsupported semantic scope
@@ -149,27 +151,25 @@ the original incremental chain is safe. Limits and Unsupported failures are neve
 | Forms (§12.7) | Form dictionaries and references are readable. No form evaluation/filling API; their presence alone is not an error. |
 | Signatures (§12.8) | Signature dictionaries and bytes are retained. No signing, cryptographic validation or trust result is exposed; their presence alone is not an error. |
 | Annotation semantics (§12.5) | Annotations are only generic dictionaries/arrays/references. No annotation behavior API; no error solely because an annotation is present. |
-| Writer (Stage 3, #1555) | No save API or writer implementation exists in this stage. There is no runtime stub that silently emits or modifies a file. |
 
 Malformed generic structure and resource limits still apply inside deferred-feature dictionaries.
 External stream F data and unknown/crypt filters are also Unsupported when decode is requested.
 The package performs no external-file or network retrieval.
 
-## Extension into the Stage 3 writer
+## Read/write boundary
 
 Every standard object form has a retained representation: name/string bytes, boolean/integer/real
-values, ordered arrays/dictionaries, object identities, and encoded lazy stream data. A writer can
-serialize already resolved objects without reparsing them. It can resolve previously untouched objects
-once for a full rewrite, or copy unchanged payloads through BinarySegment. Raw comments/whitespace,
-number spelling and string escape spelling are intentionally normalized on serialization; literal versus
-hexadecimal string form is retained.
+values, ordered arrays/dictionaries, object identities, and encoded lazy stream data. The writer
+serializes resolved objects without reparsing them and resolves untouched objects for a full rewrite.
+It copies unchanged stream payloads through BinarySegment. Structural object streams may need decoding
+to extract members, but their original encoded bytes are still copied when retained as live objects.
+Raw comments/whitespace, number spelling and string escape spelling are normalized on serialization.
+Hexadecimal source strings stay hexadecimal; predominantly non-printable literal strings become hex.
 
 The document keeps trailer extension entries, effective version, source origin, latest StartXref,
-current generations and free-list records. Stage 3 can add allocation/replacement/change-tracking and
-save APIs in this assembly, use the current xref map and cached objects for an append, update Size/Prev,
-and select a full rewrite when repair has invalidated the old chain. It must handle transitive edits to
-mutable containers and explicitly define stream replacement. No existing public interface needs a new
-member to implement that work. New fonts, operators, forms and rendering capabilities should interpret
+current generations and free-list records. Mutation and save behavior stays inside this assembly;
+no existing public interface acquired a member and no shipped assembly received an internals grant.
+New fonts, operators, forms and rendering capabilities should interpret
 this model in focused packages instead of extending this parser into a rendering engine.
 
 ## Corpus, provenance and verification
@@ -207,10 +207,11 @@ object-stream and xref requirements. The
 [Binary design](../../Assimalign.Cohesion.Content.Binary/docs/DESIGN.md) define shared limits,
 lazy-source lifetime and malformed-input vocabulary.
 
-## Stage 3 serialization and mutation decision
+## Serialization and mutation decision
 
-The internal serializer emits invariant integers and shortest round-trip Double decimals, expanding
-exponents without rounding; integral reals retain a decimal point and negative zero retains its sign.
+The internal serializer emits invariant integers and shortest round-trip IEEE 754 binary64 decimals
+(at most 17 significant digits before expansion). It expands exponents without further rounding;
+integral reals retain a decimal point and negative zero retains its sign.
 Names use uppercase #xx escapes outside ASCII 33–126 and for delimiters and #. Literal strings
 escape every parenthesis, backslash, standard control and other non-printable byte (three octal digits).
 Hexadecimal syntax is used when requested by the source or when more than half the bytes fall outside
@@ -230,8 +231,35 @@ is disabled once edits exist, because rebuilding the cache would lose them.
 
 ReplaceData borrows unencoded BinarySegment bytes, removes old filters/external-file entries, updates
 Length and exposes the replacement immediately. Its memory/source must stay unchanged and open.
-The existing interfaces and immutable object types need no new public members.
-## Stage 3 full save
+The existing interfaces and immutable object types need no new public members. Array and dictionary
+mutation methods now increment internal revisions; Resolve captures these revisions when caching.
+The public additions are PdfDocument.Add/Replace/Free, PdfStream.ReplaceData, PdfWriter and its options.
+Trailer already supplies the editing surface; its edits are included in both save modes. CrossReferences
+reflects pending additions and deletions, but offsets/free links describe the original source until
+reload; a new object's offset is zero while it is retained only in the document cache.
+
+## Save flows
+
+The writer depends on preflight validation and one save mode; both modes depend on object serialization
+and cross-reference emission. Incremental saving also depends on a byte-for-byte source copy before
+append. Serialization uses lazy copy-through for unchanged streams, and xref emission uses bounded
+Flate/PNG Up encoding. The arrows below denote these dependencies.
+
+```mermaid
+flowchart TD
+    Writer["PdfWriter"] --> Validate["Validate destination, encryption and limits"]
+    Writer --> Full["Full save: header and every live object"]
+    Writer --> Incremental["Incremental: changed and new objects"]
+    Full --> Objects["Canonical object serialization"]
+    Full --> Xref["Cross-reference section and trailer"]
+    Incremental --> Copy["Content.Binary CopyExactlyTo"]
+    Incremental --> Objects
+    Incremental --> Xref
+    Objects --> Copy
+    Xref --> Encode["Bounded Flate and PNG Up encoding"]
+```
+
+## Full save
 
 PdfWriter implements IContentWriter<PdfDocument> and borrows the destination. Full saves emit the
 current effective version, a binary marker, every live object in number order (or deterministic
@@ -257,8 +285,12 @@ reproducibility for identical model/order, options and compression runtime, not 
 bitstream promise. Save does not change the model's trailer, stream dictionaries or dirty baseline;
 reload the output to make it the source of a subsequent revision. Partial output after I/O failure
 or cancellation must be discarded. WriteAsync currently follows the synchronous I/O path with
-cancellation checks between bounded reads/writes, matching the reader's execution model.
-## Stage 3 incremental save
+cancellation checks between bounded reads/writes, matching the reader's execution model. No background
+work is scheduled. Unchanged payload copying needs one pass; replacement Flate encoding needs two
+passes over the borrowed replacement. Length, and Filter/DecodeParms for replacements, are managed
+serialization fields; writer options select their emitted values.
+
+## Incremental save
 
 Incremental=true copies the PDF source range, from its recorded SourceOffset to its recorded end,
 with Content.Binary CopyExactlyTo, then appends changed/new objects, a rebuilt free list and a
@@ -289,6 +321,28 @@ An instrumented source measures the save after metadata resolution, rejects payl
 and proves a 2 MiB unsupported-codec payload is copied once without decode or materialization in
 both save modes. Parser setup can read ahead into a payload; that is separate from the measured
 copy operation. Cancellation and I/O failures leave the source untouched and the destination partial.
+
+## Writer limits and tradeoffs
+
+MaxObjects bounds the full-save Size before allocating records for gaps, retained revision records,
+and direct nodes per serialized object (keys included). Add also obeys the document's reader object
+limit. MaxDepth bounds direct nesting and cycles are rejected. MaxBufferedBytes bounds each object
+stream's header/body, each encoded structural stream and the predicted xref row count before encoding.
+MemoryStream capacity and copies may create bounded overhead above a unit's logical length; these
+are per-unit limits, not an aggregate memory quota. Reals use at most the finite Double decimal range;
+ordinary stream lengths remain 64-bit and do not cause payload-sized allocations.
+
+Writer misuse uses argument exceptions. Format/version, unsupported object implementation/placement,
+identity, cycle and limit failures use ContentFormatException with a code and known position.
+All authored error messages are resources. No reflection, runtime generation, extra dependencies or
+new public interfaces are needed. The first-identifier and encryption checks precede every output byte;
+later encoding, source or destination I/O failures may leave partial output, which callers discard.
+
+Incremental saves preserve original bytes but do not validate signatures or certify their continued
+validity. Full saves normalize structure and are not signature-preserving or linearized output. Existing
+unreachable structural streams remain live objects when their current xref entries are live; there is
+no garbage collector, content-operator transformation, or semantic page-tree repair in this writer.
+
 ## Writer compliance and golden provenance
 
 Six writer-produced files in tests/TestObjects/Golden cover full tables, xref streams, object
