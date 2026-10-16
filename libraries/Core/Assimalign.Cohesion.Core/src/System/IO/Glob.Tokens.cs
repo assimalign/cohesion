@@ -15,6 +15,10 @@ public sealed partial class Glob
     {
         public abstract int ConsumesMinLength { get; }
         public virtual bool ConsumesVariableLength { get; }
+
+        // position can be at the end of path even though the length checks passed: a brace group
+        // counts only its shortest alternative toward them, so the tokens after a longer
+        // alternative can find no input left. A token then returns false rather than read past it.
         public abstract bool Test(
             ReadOnlySpan<char> path,
             CultureInfo cultureInfo,
@@ -88,7 +92,7 @@ public sealed partial class Glob
                 }
             }
             // if all tokens matched but still more text then fail!
-            if (next < path.Length - 1)
+            if (next < path.Length)
             {
                 return false;
             }
@@ -106,6 +110,12 @@ public sealed partial class Glob
             CultureInfo cultureInfo,
             bool ignoreCase, int position, out int next)
         {
+            if (position >= path.Length)
+            {
+                next = position;
+                return false;
+            }
+
             var currentChar = path[position];
 
             next = position + 1;
@@ -125,6 +135,12 @@ public sealed partial class Glob
             int position, out
             int next)
         {
+            if (position >= path.Length)
+            {
+                next = position;
+                return false;
+            }
+
             next = position + 1;
 
             var currentChar = path[position];
@@ -175,6 +191,12 @@ public sealed partial class Glob
             int position, out
             int next)
         {
+            if (position >= path.Length)
+            {
+                next = position;
+                return false;
+            }
+
             var text = cultureInfo.TextInfo;
             var value = path[position];
 
@@ -267,6 +289,12 @@ public sealed partial class Glob
             int position, out
             int next)
         {
+            if (position >= path.Length)
+            {
+                next = position;
+                return false;
+            }
+
             if (char.IsDigit(Start) && char.IsDigit(End))
             {
                 return TestNumberRange(path, cultureInfo, ignoreCase, position, out next);
@@ -412,10 +440,14 @@ public sealed partial class Glob
                 // of the string. 
                 // So we must match up-to that position. We can't match separators. 
                 var requiredMatchPosition = path.Length - ConsumesAnyMinLength;
-                //if (requiredMatchPosition < currentPosition)
-                //{
-                //    return false;
-                //}
+
+                // A longer brace alternative before this wildcard can leave less input than the
+                // remaining tokens need. Testing them earlier would re-read what the group matched.
+                if (requiredMatchPosition < position)
+                {
+                    return false;
+                }
+
                 for (int i = position; i < requiredMatchPosition; i++)
                 {
                     var currentChar = path[i];
@@ -460,6 +492,9 @@ public sealed partial class Glob
             // If subevakuators are optional match then match
             if (ConsumesMinLength == 0)
             {
+                // The wildcard takes the rest of the input. next can still hold the position of the
+                // last failed test above, which the end-of-input check would refuse.
+                next = path.Length;
                 return true;
             }
 

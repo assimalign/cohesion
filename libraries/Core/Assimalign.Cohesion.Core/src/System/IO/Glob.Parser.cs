@@ -1,11 +1,14 @@
 ﻿using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using static System.IO.Glob;
+
+using Assimalign.Cohesion;
 
 namespace System.IO;
 
@@ -42,6 +45,11 @@ public sealed partial class Glob
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get { return ref _pattern[_index]; }
+        }
+
+        public int Index
+        {
+            get { return _index; }
         }
 
         public bool IsSeparator
@@ -437,6 +445,7 @@ public sealed partial class Glob
         {
             //List<CompositeGlobToken> alternatives = new List<CompositeGlobToken>();
             List<TokenBase> alternatives = new List<TokenBase>();
+            int start = reader.Index;
 
             while (reader.TryRead())
             {
@@ -476,6 +485,15 @@ public sealed partial class Glob
                 {
                     alternatives.Add(ParseLiteralInBraceGroup(ref reader));
                 }
+            }
+
+            // Empty alternatives are dropped, so {} and {,} have none, nor does a { that ends the
+            // pattern. Nothing could match such a group.
+            if (alternatives.Count == 0)
+            {
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.GlobBraceGroupEmpty, start),
+                    "pattern");
             }
 
             return new BraceGroupingToken(alternatives.ToArray());
