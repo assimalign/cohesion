@@ -55,6 +55,14 @@ BMFF ReadChildren cannot consume an external full-container prefix. For header-o
 of iref, read its four prefix bytes from Payload before calling ((BmffStream)Payload).ReadChildren().
 Normal Current materialization handles that prefix. No BMFF interface or visitor changes are made.
 
+HEIF shares the other BMFF extension contracts without owning their implementations.
+RegisterSampleEntry supplies contextual stsd dispatch when composing a profile with timed
+entries; this still-image view does not interpret those tracks. RegisterRelocation contributes
+transactional private-box rules using IBmffRelocationContext. Built-in relocation covers
+stco/co64, local iloc, tfhd/trun, tfra/mfro, sidx and saio. See the
+[complete rules](../../Assimalign.Cohesion.Content.Bmff/docs/DESIGN.md#relocation-and-mutation)
+for width promotion, supported bases and unknown-reference limits.
+
 ## Item view, validation and editing
 
 HeifDocument.Load uses the HEIF registry and owns its BMFF document; leaveOpen controls source
@@ -126,3 +134,9 @@ Streaming tests reject seeking on network-style input/output and prove a 40 GiB 
 without reading its payload. Metadata edits before mdat preserve image bytes after reload, and
 repeated saves do not apply relocation twice. No codec conformance or complete HEIF/AVIF profile
 certification is implied by these structural tests.
+
+Erasure fixtures place a distinctive synthetic marker in Exif and assert its complete absence
+after saving. They compare every retained image, exercise mdat and idat, multiple media boxes,
+fragmented and zero-length extents, partial/complete sharing, replacement and repeated removal,
+saio references and failed-planning retry. A sparse 40 GiB idat is compacted without reading its
+image bytes. Shared marker bytes intentionally remain when a retained image references them.

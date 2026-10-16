@@ -93,7 +93,7 @@ EndContainer for every start; Dispose releases unfinished buffers without emitti
 
 SaveAsync and WriteAsync use asynchronous output and BinarySegment copy-through for package boxes.
 The retained per-box Read/Write signatures are synchronous: LoadAsync performs synchronous parsing
-with cancellation checkpoints, and third-party composite Write overrides run synchronously even
+with cancellation checkpoints, and profile composite/lazy-leaf Write overrides run synchronously even
 when invoked by SaveAsync. Calls on a reader, writer, document, model or shared source are sequential.
 
 ### Document and ownership
@@ -209,11 +209,12 @@ depth. Unregistered sample entries stay opaque even in strict mode; registered u
 versions follow the usual strict/lenient policy. No second reader pass is required.
 
 Track-reference lists for hint, cdsc, hind, dpnd, ipir, mpod and sync are interpreted only inside
-tref. Other reference types remain opaque. Every box class has its own overload on both visitor
-interfaces and on `BmffBoxVisitor<T>` (one `Visit` per box is part of the composite design), so
+tref. Other reference types remain opaque. The original public field models have overloads on both visitor
+interfaces and on `BmffBoxVisitor<T>` (one `Visit` per public field model is part of the composite design), so
 `TrackReferenceTypeBox`, `TrackFragmentDecodeTimeBox`, `DataEntryUrlBox`, `DataEntryUrnBox` and
-`ItemInfoEntryBox` dispatch to typed overloads rather than to `Visit(BmffBox)`. A box class added
-later follows the same rule: add its overload to both interfaces and the base visitor.
+`ItemInfoEntryBox` dispatch to typed overloads rather than to `Visit(BmffBox)`. This follow-up keeps those
+interfaces unchanged: profile boxes and the internal sidx/saio implementations use the existing
+generic fallback.
 
 All mutable leaf models retain bytes following the defined fields. Counted containers retain the
 suffix after their declared children; uncounted containers must contain complete child boxes.
@@ -326,8 +327,9 @@ A profile that compacts data first replaces the payload and calls the RelocateMe
 with a pure payload-relative mapping callback. The callback distinguishes byte addresses from
 exclusive end boundaries and returns a negative value for erased targets. All supported reference
 rules share this map; method-1 iloc offsets also use their sibling idat map. The caller restores
-payloads if planning fails; BMFF restores reference fields. HEIF uses this seam for physical erasure. Relative offsets outside
-Int32 fail with InvalidValue. Opaque offset-bearing standard boxes and implicit previous-traf
+payloads if planning fails; BMFF restores reference fields. HEIF uses this seam for physical erasure.
+Relative offsets outside Int32 fail with InvalidValue. Opaque offset-bearing standard boxes and
+implicit previous-traf
 bases after the first traf fail with Unsupported if the layout changes. The operation does not
 interpret codec/sample-entry fields or arbitrary unknown references. Unregistered profile-specific
 indexes require explicit reference rules before changing those layouts.
@@ -343,6 +345,23 @@ sealed boxes using generic visitor dispatch; no shipped visitor interface is wid
 Reordering, adding and removing children preserves list order and recomputes every ancestor size.
 The existing writer switches any oversized ancestor to a large-size header without reading media.
 
+
+## Profile usage and compatibility
+
+MP4 registers thirteen sample-entry factories with RegisterSampleEntry and eleven opaque
+configuration factories with Register. HEIF registers lazy hvcC/av1C/idat and a colr leaf that
+reads its small prefix while retaining ICC bytes as a segment. Neither profile needs an empty
+composite or a second reader pass. Typed prefix fields remain the profile's responsibility.
+
+RegisterRelocation and the new IBmffRelocationContext are the reference-extension contract.
+A profile may contribute rules for its own sealed box types without changing visitors or using
+inter-assembly internals. Context instances belong to one apply callback and must not be retained.
+All operations and shared-source access remain sequential.
+
+Changing the configuration boxes' base class intentionally removes their former empty Children
+property. Existing Data/Payload access and leaf semantics are retained. No existing public
+interface acquires a member. The abstract lazy base follows the owner's composite-model
+exception; the relocation context uses the repository's interface-first convention.
 
 ## Verification
 
@@ -364,3 +383,9 @@ Portable xUnit/Shouldly fixtures are authored in tests/TestObjects without downl
 The Stage 2 corpus covers bounded streaming, headers, registry extension, ownership and lazy
 40 GiB media. BmffModelTests exercises every strategic field model and labels each case with its
 ISO/IEC 14496-12 clause, including independent composition-offset and packed-language checks.
+
+The extension tests cover lazy 40 GiB profile payloads, deferred materialization caps, contextual
+sample-entry dispatch, inherited depth limits, sidx/saio v0/v1 preservation, nested index sizes,
+width promotion, absolute and fragment-relative auxiliary addresses, and transactional custom
+rules. MP4 fixtures verify fast-start sample and auxiliary bytes; HEIF fixtures exercise payload
+compaction, partial sharing and rollback. These are container checks, not codec certification.

@@ -43,8 +43,9 @@ await document.SaveAsync(output, cancellationToken);
 
 The document preserves unknown boxes, sample-entry reserved bytes, child order and opaque
 configuration records. Media stays in borrowed BinarySegments and copies through without being
-loaded. FastStart uses BMFF's relocation operation and may promote stco to co64. It refuses
-fragmented files, unknown/external data references and known unhandled sidx/saio offsets.
+loaded. FastStart uses BMFF's relocation operation, including sidx segment references and saio
+auxiliary addresses, and promotes encodings when necessary. It refuses fragmented files and
+unknown/external sample data references; unsupported index versions still fail safe relocation.
 Progressive-to-fragmented remuxing is out of scope.
 
 Use a separate output. After changing or saving a document, load a fresh Mp4File over the saved
@@ -58,10 +59,14 @@ Use `BmffReader.Create(input, options, Mp4Profile.CreateRegistry(options))` and
 Configuration Current materialization requires a seekable backing source; a forward-only caller
 consumes its bounded Payload directly.
 
-BMFF currently preserves all children of stsd regardless of registry. LoadDocument re-enters the
-same public reader at each retained entry header, retaining the remaining depth budget. This is
-the profile's document-binding workaround; raw BMFF streaming of stsd still exposes opaque
-sample-entry payloads. The profile does not duplicate the container parser.
+MP4 registers sample entries with RegisterSampleEntry. BMFF's ReadChildren consumes the stsd
+full-box/count prefix and resolves each registered entry directly, retaining the enclosing depth
+budget. Unknown entries remain preserved. Configuration boxes derive from BmffBoxLazyLeaf;
+their Data aliases the inherited lazy Payload and no Children property remains.
+
+Profiles adding private references can register capture/apply/restore relocation rules with
+RegisterRelocation. Save uses the registry supplied at load. See
+[BMFF's extension contract](../../Assimalign.Cohesion.Content.Bmff/docs/DESIGN.md#registry-and-profile-extension).
 
 ## Policy and scope
 
@@ -75,4 +80,4 @@ container constraints described in [DESIGN](DESIGN.md), not full codec or switch
 Standalone media segments need their initialization metadata and are not independently loadable
 media files.
 
-The [design](DESIGN.md) maps BMFF fields to Media contracts and records current extension gaps.
+The [design](DESIGN.md) maps BMFF fields to Media contracts and documents the extension and relocation contracts.
