@@ -2283,7 +2283,7 @@ session enables.
 `status` `Error` and zeros (`rebuiltPages`, `maxSequence`, `redoLsn`; `checkpointLsn`), so the
 activity does not stay open on the caller's flow and an empty recovery's zeros are never read as a
 failure; the stop's `status` uses the area's names (`Success`, `Error`; neither pair is cancellable),
-which Storage spells itself because a child root takes no `QueryResultStatus` (the area
+which Storage spells itself because a child root takes no `DatabaseResultStatus` (the area
 [`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly)
 holds the convention and the failure rule); the exception is the failure, which the engine reports (a failed open through
 the root source's `DatabaseOperationFailed`, batch B1 of the plan; a failed checkpoint through its

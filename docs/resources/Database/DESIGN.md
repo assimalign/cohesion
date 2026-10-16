@@ -112,17 +112,27 @@ These are permanent commitments, not MVP scoping — features that contradict th
 
 Dependency direction is strictly downward. Model engines depend on kernel projects; kernel projects never depend on a model. The shared service surface (`Database.Client`) depends on the root contracts and is model-agnostic; each model's wire-protocol server lives in its model package, derives from the root's `DatabaseServer` base, and carries its **own copy** of the server machinery (per-model duplication, owner decision 2026-07-14 — decision log).
 
-**The root rolls up the child roots** (2026-07-13 inversion — decision log). `Assimalign.Cohesion.Database` references its eight child roots — `Types`, `Language`, `Storage`, `Transactions`, `Execution`, `Indexing`, `Protocol`, `Security` (the `Governance` placeholder was deleted with #1257) — and **no child root references the root**. A database has a vast base-component surface; the child roots break it out for separation of concerns and testability, and stay independently consumable precisely because the arrow points root → child. Child-to-child references are fine (`Transactions → Storage`, `Execution → Language/Types`); each child owns its own vocabulary (`ProtocolVersion` in `Protocol`, `TransactionId`/`TransactionState` in `Transactions`) and its own exception root (`StorageException`, `ProtocolException`, `TransactionAbortedException`, `IndexException`, … inherit `Exception` directly — `DatabaseException` covers the root and everything built *above* it). `Database.Indexing` joined the child roots on 2026-07-13 (owner direction) once its only root coupling — `DatabaseException` ancestry — was re-rooted onto its own `IndexException`.
+**The root rolls up the child roots** (2026-07-13 inversion — decision log). `Assimalign.Cohesion.Database` references its eight child roots — `Types`, `Language`, `Storage`, `Transactions`, `Execution`, `Indexing`, `Protocol`, `Security` (the `Governance` placeholder was deleted with #1257) — and **no child root references the root**. A database has a vast base-component surface; the child roots break it out for separation of concerns and testability, and stay independently consumable precisely because the arrow points root → child. Child-to-child references are fine (`Transactions → Storage`, `Execution → Types`, `Language → Types`); each child owns its own vocabulary (`ProtocolVersion` in `Protocol`, `TransactionId`/`TransactionState` in `Transactions`) and its own exception root (`StorageException`, `ProtocolException`, `TransactionAbortedException`, `IndexException`, … inherit `Exception` directly — `DatabaseException` covers the root and everything built *above* it). `Database.Indexing` joined the child roots on 2026-07-13 (owner direction) once its only root coupling — `DatabaseException` ancestry — was re-rooted onto its own `IndexException`.
 
 ### 3.2 The kernel
 
-- **`Database`** — the public area root: the abstract bases of the concrete-first rule (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`, `DatabaseEngineWorker`; added beside the interfaces in phase 3 of the concrete-types plan, #1259, which phase 6, #1262, deleted), the kept composition seams (`IDatabaseApplication`, `IDatabaseApplicationBuilder`, `IDatabaseApplicationContext`), `DatabaseException`, `DatabaseNotFoundException`, `DatabaseName`, lifecycle enums, and the `DatabaseObjectOwner`/`DatabaseObjectLockedException` ownership contract four model catalogs persist. It holds no schema type and `DatabaseInstance` has no capability member (owner decisions 50 and 51 of 2026-10-09). It rolls up the child roots so their common vocabulary arrives transitively. A shape that differs by model belongs in that model family, never here. A3 moved the former relational declaration/compiler/serializer/migration model into `Database.Sql.Schema`; that thin package is shared by SQL and SDK Tasks without referencing the SQL engine or Hosting.
+- **`Database`** — the public area root: the abstract bases of the concrete-first rule (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseExecutionSession<TRequest>`, `DatabaseLanguageSession<TRequest>`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`, `DatabaseEngineWorker`; added beside the interfaces in phase 3 of the concrete-types plan, #1259, which phase 6, #1262, deleted), the kept composition seams (`IDatabaseApplication`, `IDatabaseApplicationBuilder`, `IDatabaseApplicationContext`), `DatabaseException`, `DatabaseNotFoundException`, `DatabaseName`, lifecycle enums, and the `DatabaseObjectOwner`/`DatabaseObjectLockedException` ownership contract four model catalogs persist. It holds no schema type and `DatabaseInstance` has no capability member (owner decisions 50 and 51 of 2026-10-09). It rolls up the child roots so their common vocabulary arrives transitively. A shape that differs by model belongs in that model family, never here. A3 moved the former relational declaration/compiler/serializer/migration model into `Database.Sql.Schema`; that thin package is shared by SQL and SDK Tasks without referencing the SQL engine or Hosting.
 - **`Database.Storage`** — the physical layer: slotted pages, buffer pool with pin/evict, free-space map, journal (WAL) streams, backup/recovery seams. Owns `PageId`, `JournalRecord`, CRC integrity. The WAL contract is ARIES-shaped: append redo/undo records under an LSN discipline, checkpoint, replay on open. Durability policy (fsync cadence, group commit) is an engine-level option surfaced through storage. Data pages carry an owner tag driving **per-owner record chains** (2026-07-14): owner-scoped inserts, iteration, and transactional chain release, so a model's "scan one object" costs O(object) instead of O(storage) — the SQL engine keys chains by table object id.
 - **`Database.Transactions`** — the ACID heart (new): `TransactionManager` (begin/commit/rollback under an `IsolationLevel`; sealed, composed per database by `TransactionCoordinator`), `TransactionSnapshot` (MVCC visibility: xmin/xmax/active-set), `LockManager` (shared/update/exclusive + intent modes, deadlock detection), and an internal transaction log (the seam that binds transaction lifecycle to the WAL). Engines *use* the manager; sessions *expose* the resulting `DatabaseTransaction`.
 - **`Database.Indexing`** — shared index infrastructure: order-preserving byte-comparable `IndexKey` encoding, `BTreeIndex` (point/range search, insert/delete), `BTreeCursor` streaming iteration, B+Tree first and hash later, built on shared pages so index updates ride the same WAL/transaction path as data. **SQL was the first live consumer** (2026-07-14); Documents now uses the same package for OQL `CREATE INDEX`/`DROP INDEX`, transactional write-path maintenance, planner seeks, and recovery. Graph adjacency lookups and the KV primary structure follow the same seams.
 - **`Database.Types`** — the shared scalar type system: type identity, comparison/collation, binary encoding. Anything that ends up inside an `IndexKey` or a stored value goes through here so ordering is consistent across models.
-- **`Database.Execution`** — the model-agnostic request/result vocabulary: `QueryRequest`/`QueryResult` families and result streaming. Plans and operators stay in each model engine; the unused shared pipeline this project once carried was deleted with #1257.
-- **`Database.Language`** — shared lexer/parser/diagnostics infrastructure the per-model languages build on.
+- **`Database.Execution`** — the model-agnostic request/result vocabulary: a memberless `DatabaseRequest`, the `DatabaseResult` family and result streaming, referencing only `Database.Types`. Plans and operators stay in each model engine; the unused shared pipeline this project once carried was deleted with #1257.
+- **`Database.Language`** — shared lexer/parser infrastructure and diagnostic production for model languages; the diagnostic value types live in `Database.Types`.
+
+
+**Execution capabilities (owner, 2026-10-16; #1576).** The root session owns lifecycle,
+state and explicit transactions. `DatabaseExecutionSession<TRequest>` serves Sql,
+Documents, Graph and KeyValuePair; `DatabaseLanguageSession<TRequest>` adds text execution
+for the three language models. Blob derives directly from `DatabaseSession`. These bases
+live in the root assembly and constrain requests to the memberless `DatabaseRequest`.
+Each language request owns its typed statement and parameters. KeyValuePair's command
+grammar is an internal wire entry. Foreign-model requests fail compilation; a plain root
+session has no execute member. All result names in Execution use the `Database` prefix.
 
 ### 3.3 Model engines
 
@@ -201,76 +211,22 @@ facts it depicts are stated here in prose so the section stands without it:
 - **Wire version stays 1.0.** SQL/Key-Value identifiers and payloads are unchanged. Servers
   reject incompatible majors before authentication and negotiate the supported minor baseline.
 
-<!-- Deviates from the repo documentation rule "no colors, no themes" in diagrams, per owner
-     direction 2026-09-17: the owner asked to see a colored band rendered before deciding whether
-     to relax that rule. Scoped to this diagram only; every other diagram in the repo stays
-     color-free. If the rule stands, replace the `rect rgb(...)` band with a `Note over`. -->
+The flow below follows composition into the two server execution paths and their shared kernel.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor SqlCli as "SQL client"
-    actor KvCli as "Key-Value client"
-    participant Host as "DatabaseApplication (one process)"
-    participant SqlSrv as "SqlDatabaseServer — own listener"
-    participant KvSrv as "KeyValueDatabaseServer — own listener"
-    participant SqlEng as "SqlDatabaseEngine"
-    participant KvEng as "KeyValueDatabaseEngine"
-    participant Kernel as "Shared kernel: Storage, Transactions, Indexing"
-
-    Note over Host: Program.cs composes both models into one host
-
-    rect rgb(245,245,245)
-    Note over Host,Kernel: Build provisions, Start accepts — so provisioning precedes accept
-    Host->>SqlEng: Build deferred AddSql intent — engine runs from creation
-    SqlEng->>Kernel: spawn workers (checkpoint, WAL flush, write-back, purge)
-    SqlEng->>Kernel: open or create each declared database, apply its schema
-    Host->>KvEng: Build deferred AddKeyValue intent
-    KvEng->>Kernel: spawn workers
-    Host->>SqlSrv: StartAsync — bind listener, begin accept
-    Host->>KvSrv: StartAsync — bind listener, begin accept
-    end
-
-    Note over SqlCli,KvSrv: The endpoint fixes one immutable message family; no multiplexing front door.
-
-    par SQL connection
-        SqlCli->>SqlSrv: connect to the SQL endpoint
-        SqlSrv->>SqlSrv: Bind SqlProtocol.Family to the accepted channel
-        SqlCli->>SqlSrv: Startup(Version, Database, Principal)
-        SqlSrv->>SqlSrv: reject if sessions >= MaxSessions
-        SqlSrv-->>SqlCli: Authenticate (challenge)
-        SqlCli->>SqlSrv: AuthenticateResponse
-        SqlSrv->>SqlEng: OpenDatabaseAsync(startup.Database)
-        SqlEng-->>SqlSrv: SqlDatabase — session bound to ONE database
-        SqlSrv->>SqlEng: CreateSessionAsync
-        SqlSrv-->>SqlCli: Ready
-        SqlCli->>SqlSrv: SQL-family Execute("SELECT ...", parameters)
-        SqlSrv->>SqlEng: session.ExecuteAsync
-        SqlEng->>SqlEng: parse against SqlLanguageProfile
-        Note right of SqlEng: clause outside the profile returns COHDBL001
-        SqlEng->>SqlEng: plan — selects a secondary index if one applies
-        SqlEng->>Kernel: snapshot, index seek, versioned reads
-        Kernel-->>SqlEng: rows at the session snapshot
-        SqlSrv-->>SqlCli: SQL-family result messages (unchanged 1.0 encoding)
-    and Key-Value connection
-        KvCli->>KvSrv: connect to the Key-Value endpoint
-        KvSrv->>KvSrv: Bind KeyValueProtocol.Family to the accepted channel
-        KvCli->>KvSrv: Startup(Version, Database, Principal)
-        KvSrv-->>KvCli: Authenticate then Ready
-        KvCli->>KvSrv: Key-Value-family Execute("GET key")
-        KvSrv->>KvEng: session.ExecuteAsync
-        KvEng->>Kernel: snapshot read
-        Kernel-->>KvEng: value at snapshot
-        KvSrv-->>KvCli: Key-Value-family result messages (unchanged 1.0 encoding)
-    end
-
-    Note over SqlCli,KvSrv: Other endpoint families: Blob chunks, nested Documents, Graph paths
-
-    Note over SqlEng,Kernel: Both engines share the kernel but never each other. Writes serialize per database at the apply gate, not across the host.
-
-    SqlCli->>SqlSrv: Terminate
-    KvCli->>KvSrv: Terminate
-    Note over Host: Stop — servers drain first, then services stop in reverse order
+flowchart TD
+    App["Build engines and provision declared databases"] --> Start["Start per-model listeners"]
+    Start --> SqlWire["SQL handshake, authentication and database session"]
+    Start --> KvWire["Key-value handshake, authentication and database session"]
+    SqlWire --> SqlText["Decode parameters, then language ExecuteAsync"]
+    SqlText --> SqlParse["Parse SQL profile, validate and plan"]
+    SqlParse --> Kernel["Shared Storage, Transactions and Indexing; snapshot reads"]
+    KvWire --> KvText["Decode parameters, then internal command entry and refusal checks"]
+    KvText --> KvParse["Parse command and operands"]
+    KvParse --> KvTyped["Public typed ExecuteAsync with KeyValueRequest"]
+    KvTyped --> Kernel
+    Kernel --> Rows["Model result frames, then ready for the next command"]
+    App --> Stop["Stop: servers drain before services stop in reverse order"]
 ```
 
 ### 3.5 Hosting and orchestration
@@ -486,10 +442,11 @@ durable record of its events. The decisions every source shares:
   into it is a missing translation in its model, fixed there.
 - **One ending rule: every `Start` has a `Stop` on every path**, as `System.Net.Http`'s
   `RequestStart`, `RequestFailed` and `RequestStop` do. The `Stop` carries `status`, a
-  `QueryResultStatus` name: `Success`; `Error`, written after the pair's `Failed` event where one is
+  `DatabaseResultStatus` name: `Success`; `Error`, written after the pair's `Failed` event where one is
   catalogued; or `Cancelled`, for a cancellation, for a worker pass that saw the engine's stop and
   returned early, or for work its caller abandoned (a streamed result disposed early), with no
-  `Failed` event. It is written from a `finally` or on every exit, so an activity-tracking tool
+  `Failed` event. A statement also preserves a returned `Timeout` status; that status alone
+  writes no `StatementFailed`. The stop is written from a `finally` or on every exit, so an activity-tracking tool
   always sees the pair close, and a failure is captured by an exception filter that declines it and
   written once the throwing frame unwound, never from the filter (a filter runs before the
   thrower's `finally` blocks release their locks). Also as `System.Net.Http` does, a `Stop` is

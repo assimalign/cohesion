@@ -868,7 +868,7 @@ their existing parameter types, return types, and default cancellation tokens; n
 | IDatabaseServerContext | Engine; Sessions | Server-to-engine relationship remains explicit. |
 | IDatabaseServerSession | Id; ProtocolVersion; Principal; DatabaseSession; inherited DisposeAsync | Authentication/session semantics are outside composition. |
 | IDatabase | Name; Engine; CreateSessionAsync(token); inherited Dispose and DisposeAsync | Logical database operations are unchanged. |
-| IDatabaseSession | Database; State; CurrentTransaction; BeginTransactionAsync(token); BeginTransactionAsync(isolationLevel,token); ExecuteAsync(QueryRequest,token); ExecuteAsync(statement,parameters,token); inherited DisposeAsync | No five-model middleware or execution redesign. |
+| DatabaseSession | Database; State; CurrentTransaction; BeginTransactionAsync(token); BeginTransactionAsync(isolationLevel,token); inherited DisposeAsync | Updated 2026-10-16 (#1576): typed and text execution belong to `DatabaseExecutionSession<TRequest>` and `DatabaseLanguageSession<TRequest>`; Hosting retains the lifecycle base. |
 | IDatabaseTransaction | Id; State; IsolationLevel; CommitAsync(token); RollbackAsync(token); inherited DisposeAsync | Transaction semantics are not hosting lifecycle. |
 
 ## 9. Migration inventory and acceptance plan

@@ -5,6 +5,10 @@ languages grow: type SQL / OQL / GQL, browse catalogs, and work the key-value an
 not a product: no docs, no tests, not in any solution, CI workflow, or release inventory, and
 `IsPackable=false`. Windows only (`net10.0-windows10.0.19041.0`, unpackaged).
 
+Studio keeps each model session typed: SQL, Documents and Graph execute through their language
+capabilities; KeyValuePair sends typed requests; Blob uses its container API. Result display
+uses `DatabaseResultReader` over the model-neutral `DatabaseResult` family.
+
 ## Run
 
 ```powershell
@@ -64,7 +68,7 @@ One engine per model runs in-process under `<data root>\<model>` (default
 
 | Mode | What the page talks to |
 | --- | --- |
-| Embedded | The engine through `DatabaseSession` (explicit Begin/Commit/Rollback with an isolation level). |
+| Embedded | The engine through its concrete model session for execution; `DatabaseSession` supplies explicit Begin/Commit/Rollback with an isolation level. |
 | Wire (loopback) | The Studio starts that model's server on `127.0.0.1:<port>` (0 = OS-assigned) over the same engine and uses the real client (`Sql/Graph/KeyValuePair/Blob.Client`). Database list/create/drop, KEYSPACES and blob containers still go through the engine: the wire has no management verbs. |
 | Wire (external) | The real client against an already-running server (for example the SampleHost fixture). Type the database name; nothing can be listed or created. |
 
@@ -111,7 +115,7 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
 
 - `session.ExecuteAsync(string)` throws `DatabaseParseException` carrying only the first error for SQL,
   OQL and GQL (`FromSql`/`FromOql`/`FromGql` throw); a `SqlQueryRequest` built from the parser's
-  statement instead returns every diagnostic in `QueryResult.Diagnostics`.
+  statement instead returns every diagnostic in `DatabaseResult.Diagnostics`.
 - `SqlConnection.QueryAsync` drops the affected count and `ExecuteAsync` drops rows, so a consumer
   has to know the statement kind in advance. The wire client reports no diagnostics, only
   `SqlClientException` kind/code/message. `GraphConnection.QueryAsync` returns both.

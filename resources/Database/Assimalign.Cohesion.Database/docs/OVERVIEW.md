@@ -70,9 +70,10 @@ Database instances expose a nullable immutable `Provisioning` observation for mo
   through session statements. `DatabaseObjectLockedException` identifies the refused object,
   owning schema, and operation; a model whose owner is not a compiled schema (the SQL engine's
   declared database) passes its own message.
-- **Session contracts** — query execution (typed `QueryRequest` and language-text overloads) and
-  transaction management. Sessions are single-threaded by contract; disposing one rolls back its
-  active transaction.
+- **Session contracts** — `DatabaseSession` owns lifecycle, state and explicit transactions.
+  `DatabaseExecutionSession<TRequest>` adds typed execution; `DatabaseLanguageSession<TRequest>`
+  adds text execution for Sql, Documents and Graph. KeyValuePair is typed-only, and Blob has
+  no execute member. Sessions are single-threaded; disposal rolls back an active transaction.
 - **Error root** — `DatabaseException` for the contract root and everything built above it;
   `DatabaseNotFoundException` for the exact missing-database outcome of
   `DatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for statement text a session's

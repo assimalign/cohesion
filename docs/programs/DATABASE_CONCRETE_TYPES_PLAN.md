@@ -4232,8 +4232,41 @@ landed them; this phase is the ApplicationModel verification and Studio's typed 
 
 **P8, #1264: per-row result types and docs sweep.**
 
-- **Result types.** §5.3's P8 rows: `QueryRow`, `QueryResultSet`, `QueryResult` (§6.8),
-  `QueryRequest`, `QueryParser` and `QueryAnalyzer`.
+### Generic execution seam — owner decisions, 2026-10-16 (#1576–#1580)
+
+This decision record supersedes the execution/request portions of the earlier plan. The owner
+approved the reviewed design with the full result-family rename below. The implementation lands
+as #1577 (diagnostic ownership), #1578 (session capabilities), #1579 (names), then #1580 (docs).
+
+| Decision | Approved choice |
+|---|---|
+| D1 | Two capability bases: `DatabaseExecutionSession<TRequest>` for typed execution, and `DatabaseLanguageSession<TRequest>` for typed plus text execution. Sql, Documents and Graph use the language base; KeyValuePair uses the typed base. `DatabaseSession` retains lifecycle, state and transactions; Blob derives directly from it and has no execute member. |
+| D2 | Move `Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` unchanged to `Database.Types`. `Database.Execution` references Types only and reaches no language package. |
+| D3 | Delete `QueryRequest` and `QueryRequest<TStatement>`. Use a memberless `DatabaseRequest`; each language request owns its typed `Statement` and `Parameters`, with `GraphRequest` shared by row and path requests. |
+| D4 | **Owner override:** rename every public Execution result type to `DatabaseResult`, `DatabaseResultSet`, `DatabaseResultStatus`, `DatabaseRow` and `DatabaseColumn`. All stay in Execution. No compatibility shim. Model-specific language query names remain. |
+| D5 | No request `Kind` discriminator; telemetry uses the request type name. |
+| D6 | KeyValuePair has no public text member. Its deliberately non-language command grammar is an internal `ExecuteCommandTextAsync` wire entry. |
+| D7 | Do not introduce a parse-first language seam now. Preserve validation, refusal, tracing and re-entry behavior. |
+| D8 | Delete the unused `SessionState.Faulted`; session lifecycle remains Open/Closed and transaction faults remain transaction state. |
+| D9 | Non-null diagnostics remain with #1264; this work does not change diagnostics nullability. |
+| D10 | Withdrawn: how callers see MISSING remains #1126's decision, with #190's wire tag. This work changes no row member for it. The proposed `public virtual bool IsMissing(int ordinal) => false` conflicts with rule 4 and needs resolution in #1126. |
+| D11 | Move Studio to typed session accessors in the seam split. |
+| D12 | Category `L03.02.01.C07`, **Core - Query Language Platform and Execution Contracts**. The design's C08 is retired into C07 by the realignment. |
+| D13 | Explicit transactions remain a root session capability across all models. |
+| D14 | Both capability bases live in the root Database assembly. The shared tracing tail remains `private protected`; no shipped friend assembly or widened boundary is needed. |
+| D15 | Whether #1102 introduces its parse helper remains #1102's decision. |
+
+The accepted review also fixes overload declaration order: the language base declares its typed
+forwarder first and forwards through the public typed NVI, so CS1503 names the model request.
+KeyValuePair event 10 is limited to one report per second with `suppressedCount` and an exact
+occurrence counter. Existing Graph event 12 and root event 28 need separate throttling debt.
+
+
+
+- **Remaining result work (2026-10-16).** `DatabaseRow`, `DatabaseResultSet` and
+  `DatabaseResult` (§6.8, including non-null diagnostics), plus `QueryParser` and
+  `QueryAnalyzer`. #1576–#1579 delivered diagnostic ownership, the memberless request root,
+  session capabilities and all five result-family renames; P8 must build on those names.
 - **Docs.** The `docs/Assembly` pages that name interfaces (Blob.Client, Graph, Graph.Catalog and
   Graph.Storage), per-project OVERVIEW and DESIGN leftovers, the area README project map,
   `docs/DEPENDENCIES.md` (regenerated), and the cohesion-docs mirror. The program documents P6

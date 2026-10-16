@@ -1,50 +1,61 @@
 # Assimalign.Cohesion.Database.Execution — Design
 
-## Declared result length (#1437)
+The model-neutral request/result vocabulary (area architecture:
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2).
+This package references `Database.Types` only. It has no direct or transitive dependency on
+`Database.Language`, and it owns no planner, executor, parser or transaction pipeline.
 
-QueryColumn includes optional MaxLength as result metadata. It describes the declared character
-count (or binary byte limit), not the size of an individual value. SQL uses it with the shared
-Character identity to report CHAR(n) faithfully in process and in its result header; execution
-and padding rules remain in the SQL model.
+## Request and result families
 
-The shared request/result vocabulary (area architecture:
-[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). Planners,
-operators and model semantics deliberately live outside it — this layer owns the *shape* of
-what a session receives and returns, nothing about what a query means or how it runs.
+`DatabaseRequest` is a memberless abstract root. A model defines the operations it accepts:
+KeyValuePair requests carry command operands; `SqlQueryRequest` and `DocumentQueryRequest`
+own their typed `Statement` and `Parameters`; `GraphRequest` owns those values for the row
+and path request variants. There is no shared statement property or request-kind discriminator.
 
-## Design intent
+`DatabaseResult` reports status, affected count and diagnostics. `DatabaseResultSet` adds
+columns and streaming `DatabaseRow` values. `DatabaseColumn` describes a column, including
+optional `MaxLength`: the declared character count or binary byte limit, not an individual
+value's size. SQL uses it with the shared `Character` identity for `CHAR(n)` metadata; its
+execution and padding rules remain in the SQL model.
 
-Every engine answers the same session call: a parsed request in, a result out. One result
-vocabulary lets the wire protocol and the hosting layer handle any model's results without
-knowing the model, while each model engine supplies its own request and result leaves.
+The owner approved all five result-family renames on 2026-10-16 (#1576, #1579).
+The public names are `DatabaseResult`, `DatabaseResultSet`, `DatabaseResultStatus`,
+`DatabaseRow` and `DatabaseColumn`; they all remain in this assembly. There are no aliases
+or compatibility shims. Model-specific language results retain names such as `SqlQueryResult`,
+`DocumentQueryResult` and `GraphPathsQueryResult`.
 
-## Why-this-not-that decisions
+## Session capabilities
 
-- **Abstract request and result families, model leaves.** `QueryRequest`, `QueryResult`,
-  `QueryResultSet` and `QueryRow` are abstract; each model subclasses them
-  (`SqlQueryRequest`, `DocumentQueryRequest`, `GraphQueryRequest`, the KeyValuePair
-  requests, and their result leaves). They predate the concrete-first rule and keep no
-  interface twin; phase 8 of the concrete-types program (#1264) tightens them (NVI, typed
-  accessors, never-null diagnostics, `docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md` §5.3).
-- **No shared execution pipeline (owner decision of 2026-10-04, D6 in the plan).** The
-  project used to carry a middleware-shaped pipeline (`IQueryPipeline`,
-  `IQueryPipelineStage`, `QueryPipelineBuilder`, `QueryExecutionContext`), an
-  `IQueryTransactionScope` boundary seam, `IQueryExecutor`, `QueryStatementResult` and a
-  `QueryExecutionException` root. No engine ever ran a statement through them: each model
-  engine owns its planner, its executor and its transaction brackets over
-  `Database.Transactions`. They were deleted with #1257 rather than kept "for later"; the
-  Web-style tap-in pipeline is the composition the owner ruled out for this area.
-- **No exception root here.** With the pipeline gone this project throws nothing of its
-  own. Engines report execution failures through the area root's `DatabaseException`
-  family, which sits above this project in the dependency graph.
+The capability bases live in the root `Database` assembly, which references this package:
 
-## Non-goals
+| Base | Capability | Models |
+|---|---|---|
+| `DatabaseSession` | Lifecycle, state and explicit transactions | Every model, including Blob |
+| `DatabaseExecutionSession<TRequest>` | Typed `ExecuteAsync(TRequest, CancellationToken)` | Sql, Documents, Graph and KeyValuePair |
+| `DatabaseLanguageSession<TRequest>` | Typed execution plus `ExecuteAsync(string, parameters, CancellationToken)` | Sql, Documents and Graph |
 
-- No operator or plan algebra (model planners own it).
-- No streaming-result buffering: `QueryResultSet.GetRowsAsync` streams; anything that must
-  buffer does so in a model layer that knows the memory budget.
+Both generic bases constrain `TRequest` to `DatabaseRequest`. Public execution members are
+non-virtual and perform validation and tracing before calling protected abstract cores.
+The language base declares its typed forwarder before its text member and forwards through
+the base's public NVI. Consequently a foreign request fails compilation with the model's
+request type in the diagnostic. A plain root session or Blob session has no execute member.
+KeyValuePair's command parser is an internal wire entry, not a public language capability.
+
+## Decisions and remaining work
+
+- `Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` moved unchanged to
+  `Database.Types`. Diagnostics may still be null; non-null diagnostics and further result
+  NVI work remain with #1264.
+- There is no shared execution pipeline. The unused pipeline, transaction-scope and executor
+  abstractions were deleted under #1257. Models own their execution and transaction brackets.
+- There is no exception root here. Model failures use the root assembly's `DatabaseException`
+  family; this lower package cannot reference that root.
+- Text execution retains its existing validation, refusal and tracing order. Parsing every
+  language request before entering the traced execution member is deferred to separate work.
+- Streaming remains the model's responsibility: `DatabaseResultSet.GetRowsAsync` does not
+  introduce shared buffering or choose a model's memory budget.
 
 ## AOT posture
 
-Abstract contracts and a sealed column descriptor — no reflection, no expression trees, no
-runtime code generation.
+Abstract request/result contracts, a sealed column descriptor and ordinary generic session
+bases require no reflection, expression trees, runtime code generation or generic virtual method.

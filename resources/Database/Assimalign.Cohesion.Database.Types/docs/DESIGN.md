@@ -17,6 +17,12 @@ raw unsigned byte compare.** That is the design center `Database.Indexing` docum
 for `IndexKey` (the memcmp-key approach of InnoDB and FoundationDB tuples) — this
 project owns the encodings; Indexing owns the physical structures that compare them.
 
+## Shared diagnostics (#1577)
+
+`Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` moved here from Language on
+2026-10-16, unchanged. Both language parsers and model-neutral execution results use these
+values; Types has no dependency on a parser or execution package.
+
 ## Design intent
 
 Five model engines store and index values. If each defined its own ordering, a key

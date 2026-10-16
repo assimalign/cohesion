@@ -74,7 +74,9 @@ contracts in this sense and stay.
 2. **Abstract only for a variant set, for Hosting, or for an inverted seam.** A base exists
    when one of three things holds:
    - **variant set:** two or more implementations ship (the root session, transaction and server
-     session; `TransactionRecordSpace`; the protocol frame reader and writer);
+     session; `DatabaseExecutionSession<TRequest>` for Sql, Documents, Graph and KeyValuePair,
+     with `DatabaseLanguageSession<TRequest>` for the three language models;
+     `TransactionRecordSpace`; the protocol frame reader and writer);
    - **Hosting:** `Database.Hosting` must treat every model alike under COHRES002 (the root
      engine, database, server and engine worker);
    - **inverted seam:** a lower assembly drives the type and a higher assembly or the
@@ -146,10 +148,10 @@ contracts in this sense and stay.
    active" check, attach and dispose ordering. Each model now supplies only its vocabulary
    (error codes, exception translation) through a protected abstract member.
 9. **Diagnostics and other result collections are never null.** They return an empty
-   collection when there is nothing to report. `QueryResult.Diagnostics` changes in phase 8
+   collection when there is nothing to report. `DatabaseResult.Diagnostics` changes in phase 8
    (#1264). A member where `null` means "absent" (an optional syntax-tree list such as
    `SqlInsertExpression.Columns`, an options property such as
-   `BTreeIndexManagerOptions.ExistingIndexes`, `QueryRequest.Parameters`) is outside this rule.
+   `BTreeIndexManagerOptions.ExistingIndexes`, or the language requests' own `Parameters`) is outside this rule.
 10. **Names.** The replacement for `IDatabase` is `DatabaseInstance`, never `Database`. A type
     named `Database` breaks user code in a namespace such as `Acme.Database` with CS0118.
     `Storage.Storage` is the precedent for the pain. Leaves are `SqlDatabase`, `GraphDatabase`,

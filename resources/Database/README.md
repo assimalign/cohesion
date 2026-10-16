@@ -99,16 +99,20 @@ In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this are
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts and, since phase 3 of the concrete-types plan, the abstract bases that replace them (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`), exceptions, application composition, and object ownership (no schema type since B1) — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
+| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts and, since phase 3 of the concrete-types plan, the abstract bases that replace them (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseExecutionSession<TRequest>`, `DatabaseLanguageSession<TRequest>`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`), exceptions, application composition, and object ownership (no schema type since B1) — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
 | `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |
 | `Assimalign.Cohesion.Database.Types` | Child root — shared scalar type system: identity, comparison/collation, binary encoding |
-| `Assimalign.Cohesion.Database.Execution` | Child root — query request/result families (`QueryRequest`, `QueryResult`, `QueryResultSet`, `QueryRow`) |
-| `Assimalign.Cohesion.Database.Language` | Child root — shared lexer/parser/diagnostics infrastructure for the model languages |
+| `Assimalign.Cohesion.Database.Execution` | Child root — model-neutral request/result families (Types-only dependency) (`DatabaseRequest`, `DatabaseResult`, `DatabaseResultSet`, `DatabaseRow`) |
+| `Assimalign.Cohesion.Database.Language` | Child root — shared lexer/parser and diagnostic-production infrastructure; diagnostic value types live in Types |
 | `Assimalign.Cohesion.Database.Memory` | In-memory storage strategy (tests, embedded scenarios) |
 
 ### Model engines
+
+The root session has lifecycle, state and transactions. Sql, Documents and Graph use
+`DatabaseLanguageSession<TRequest>`; KeyValuePair uses `DatabaseExecutionSession<KeyValueRequest>`
+with an internal wire parser, and Blob has no execute member.
 
 Each model follows the same matrix: root (engine + public interface), plus `.Language`*, `.Storage`, `.Catalog`, `.Client`, `.Security` satellites. (The empty `.Replication` satellites and the shared `Database.Replication` and `Database.Governance` placeholders were deleted with #1257; replication returns as its own design when it is built.)
 

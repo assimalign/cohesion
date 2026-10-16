@@ -2339,7 +2339,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   with a column reference already failed while planning, as `Unknown column`, or,
   inside a subquery, as an error result: `PlanSubqueries` turned the child's
   `Unknown column` into `SqlUnsupportedQueryException`, which `SqlQueryExecutor`
-  returns as a `QueryResultStatus.Error` result carrying `COHDBL001`'s
+  returns as a `DatabaseResultStatus.Error` result carrying `COHDBL001`'s
   correlated-subquery diagnosis. It now throws `COHSQLE005` at every nesting level,
   for a reference to the subquery's own columns or the outer query's: ISO SQL's
   fetch-first count is a simple value specification, which no column of any scope
@@ -3033,8 +3033,8 @@ one `SqlDatabaseEngine` (`Create(engine, options)`, options in
 `SqlDatabaseServerOptions`). Servers are per-model by design: this type is
 where SQL-specific wire behavior grows (typed relational payloads, SQL
 transaction frames) as the protocol's model-specific surface lands; today
-execution rides the model-agnostic text-execute seam of the root's
-`DatabaseSession`. "Running" lives here — the engine underneath has no
+execution uses `SqlDatabaseSession`, whose
+`DatabaseLanguageSession<SqlQueryRequest>` base supplies typed and text execution. "Running" lives here — the engine underneath has no
 lifecycle; the server starts and stops around it.
 
 ### Why the machinery is Sql-internal — per-model duplication (2026-07-14, owner decision; the settled placement)
@@ -3089,9 +3089,8 @@ dispose), and the server never disposes its engine.
 ### The text-execute path
 
 The server receives statement *text* and tuple-codec parameter bytes off the
-wire; the bridge to the engine is the **text-execute seam on the root
-contract** —
-`DatabaseSession.ExecuteAsync(string, IReadOnlyDictionary<string, object?>?, CancellationToken)`
+wire; the bridge to the engine is the **language capability** —
+`DatabaseLanguageSession<SqlQueryRequest>.ExecuteAsync(string, IReadOnlyDictionary<string, object?>?, CancellationToken)`
 — whose core `SqlDatabaseSession` implements with the model's own parser
 (`SqlQueryRequest.FromSql`). Parameters decode with `DatabaseValueCodec`
 (`Database.Types`), one self-describing component per parameter; result rows
@@ -3228,7 +3227,7 @@ stateDiagram-v2
     Idle --> Closed: disconnect
 ```
 
-State misuse returns `QueryResultStatus.Error` with an error diagnostic, without
+State misuse returns `DatabaseResultStatus.Error` with an error diagnostic, without
 throwing or changing the active transaction. `COHSQLT001` means nested `BEGIN`;
 `COHSQLT002` means `COMMIT` or `ROLLBACK` without an active scope. The wire maps
 these to `ExecutionFailure` and includes the stable diagnostic code in its
@@ -4235,7 +4234,7 @@ sealed leaves; it has no public interface left, and no `Abstractions/` folder.
 |---|---|---|
 | `SqlDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
 | `SqlDatabase` | `DatabaseInstance` (and `IDatabaseSchemaProvisioner` until phase 6 deleted it) | `ISqlDatabase` and the internal `SqlDatabaseInstance` |
-| `SqlDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
+| `SqlDatabaseSession` | `DatabaseLanguageSession<SqlQueryRequest>` | an internal `IDatabaseSession` |
 | `SqlDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
 | `SqlDatabaseServer` | `DatabaseServer` | a sealed `IDatabaseServer` |
 | `SqlDatabaseServerSession` (internal) | `DatabaseServerSession` | an internal `IDatabaseServerSession` |
@@ -4636,3 +4635,11 @@ returning `ValueTask<IDuplexConnection>`; the base handles shared accept dispatc
 connection tracking. Custom byte-pipe connections derive from `DuplexConnection` or implement
 `IDuplexConnection`. Built-in duplex listeners already satisfy the new contract. Database wire
 framing, handshake and model messages are unchanged.
+
+## Session execution (#1576, 2026-10-16)
+
+`SqlDatabaseSession` derives from `DatabaseLanguageSession<SqlQueryRequest>`. It offers typed
+and text execution; a foreign-model request fails compilation. `SqlQueryRequest` owns its typed
+`Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
+use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
+on `DatabaseSession`.

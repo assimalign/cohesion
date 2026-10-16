@@ -394,11 +394,12 @@ an explicit nonnegative maximum depth, a visited-node set seeded with the start,
 nodes. It excludes the start even when a cycle or self-loop reaches it. Incident edges are ordered
 by identity, making the breadth-first result deterministic. Its result contains visited nodes;
 GQL's projected `a,r,b` values expose the actual frozen `GraphNode`/`GraphRelationship` objects
-through `QueryRow.GetValue`. Property projections return scalars. This does not add a path member
+through `DatabaseRow.GetValue`. Property projections return scalars. This does not add a path member
 to the frozen traversal contract.
 
 `GraphPathsQueryRequest.FromGql` selects real path execution through the existing
-`DatabaseSession.ExecuteAsync(QueryRequest)` boundary. Its `GraphPathsQueryResult.Paths` contains
+`GraphDatabaseSession.ExecuteAsync(GraphRequest)` capability. Both row and path requests derive
+from `GraphRequest`, whose private protected constructor fixes their result shape. The returned `GraphPathsQueryResult.Paths` contains
 materialized `GraphPath` objects from the matcher's bound entities and traversal sequence, under
 the same pinned snapshot as scalar execution. Exactly one projection is required: a node variable
 produces a singleton path, a relationship variable produces its stored source and target nodes,
@@ -443,8 +444,8 @@ yet keeps the caller's transaction and its earlier writes.
   no source position, so a name is reported once per kind, at its first mention: the patterns' names
   path by path (each path's labels, then its relationship types), then the `WHERE` clause's. A
   warning for a name first met in a labeled predicate carries that predicate's span
-  (`DiagnosticLocation.Absolute`); a pattern name's has none. `QueryResult.Diagnostics` stays null
-  for a statement with nothing to report. The warning travels on a row result (`QueryResultSet`), on
+  (`DiagnosticLocation.Absolute`); a pattern name's has none. `DatabaseResult.Diagnostics` stays null
+  for a statement with nothing to report. The warning travels on a row result (`DatabaseResultSet`), on
   `GraphPathsQueryResult`, and on the result of a statement with no projection.
 - **Writes.** `INSERT` still defines new labels and relationship types. A write whose `MATCH` names
   an unknown name matches nothing, so its `INSERT` or `DELETE` acts on nothing: the statement
@@ -476,7 +477,7 @@ yet keeps the caller's transaction and its earlier writes.
   A null label is an `ArgumentNullException` before the read starts.
   `GraphSchemaResult<T>.Diagnostics` is empty, never null, when the read reports nothing: it is a
   new collection property, and .NET's design guidelines rule out a null collection.
-  `QueryResult.Diagnostics` keeps its existing null-when-empty contract, so a caller tests `Count`
+  `DatabaseResult.Diagnostics` keeps its existing null-when-empty contract, so a caller tests `Count`
   on the schema result and null on a statement result until the concrete-type redesign of the
   Database models settles one convention. The other schema reads take no name (`GetLabelsAsync`,
   `GetRelationshipTypesAsync`) or a definition identity (`GetPropertyKeysAsync`, empty for an
@@ -502,7 +503,8 @@ yet keeps the caller's transaction and its earlier writes.
 
 `GraphSchema.Open(database, session)` already supplies in-process discovery of labels, relationship
 types, property keys and indexes. C2 preserves that API and makes the same catalog reachable
-through textual requests on the existing `DatabaseSession.ExecuteAsync` query boundary. Dedicated
+through textual requests on `GraphDatabaseSession`, whose
+`DatabaseLanguageSession<GraphRequest>` base supplies the language capability. Dedicated
 `SHOW` statements are Cohesion GQL extensions, not ISO conformance claims. A catalog definition is
 not a graph node: exposing it through `MATCH` would invent graph identities and relationships and
 would reserve labels in the user graph. `SHOW` instead returns a typed result set with no fabricated
@@ -589,7 +591,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
 | `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
 | `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
-| `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `QueryResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 1.0 |
+| `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 1.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 1.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
@@ -1034,7 +1036,7 @@ their `Open` factories.
 |---|---|---|
 | `GraphDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
 | `GraphDatabase` | `DatabaseInstance` | `IGraphDatabase` and the internal `GraphDatabaseInstance` |
-| `GraphDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
+| `GraphDatabaseSession` | `DatabaseLanguageSession<GraphRequest>` | an internal `IDatabaseSession` |
 | `GraphDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
 | `GraphDatabaseServer` | `DatabaseServer` | a sealed `IDatabaseServer` |
 | `GraphDatabaseServerSession` (internal) | `DatabaseServerSession` | an internal `IDatabaseServerSession` |
@@ -1219,3 +1221,11 @@ returning `ValueTask<IDuplexConnection>`; the base handles shared accept dispatc
 connection tracking. Custom byte-pipe connections derive from `DuplexConnection` or implement
 `IDuplexConnection`. Built-in duplex listeners already satisfy the new contract. Database wire
 framing, handshake and model messages are unchanged.
+
+## Session execution (#1576, 2026-10-16)
+
+`GraphDatabaseSession` derives from `DatabaseLanguageSession<GraphRequest>`. It offers typed
+and text execution; a foreign-model request fails compilation. `GraphRequest` owns its typed
+`Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
+use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
+on `DatabaseSession`.

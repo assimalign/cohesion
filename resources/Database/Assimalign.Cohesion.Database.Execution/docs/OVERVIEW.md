@@ -1,48 +1,44 @@
 # Assimalign.Cohesion.Database.Execution — Overview
 
-The model-agnostic request/result vocabulary of the Cohesion Data Platform: the
-families every engine speaks (`QueryRequest`, `QueryResult`, `QueryResultSet`,
-`QueryRow`, `QueryColumn`) and the outcome status (`QueryResultStatus`).
+The model-neutral request/result vocabulary of the Cohesion Data Platform:
+`DatabaseRequest`, `DatabaseResult`, `DatabaseResultSet`, `DatabaseResultStatus`,
+`DatabaseRow` and `DatabaseColumn`.
 
 ## Scope
 
-- **Request contracts** — `QueryRequest` carries a parsed `QueryStatement` and
-  optional parameters; `QueryRequest<TStatement>` gives a model its typed statement
-  view. Each model engine subclasses them (`SqlQueryRequest`, the Documents, Graph and
-  KeyValuePair requests).
-- **Result contracts** — `QueryResult` reports a status, an affected count and
-  diagnostics; `QueryResultSet` streams `QueryRow`s described by `QueryColumn`s. Each
-  model engine supplies its own leaves.
+- **Requests:** `DatabaseRequest` has no members. Model requests own their inputs. Language
+  requests own a typed `Statement` and `Parameters`; key-value requests carry command operands.
+- **Results:** `DatabaseResult` reports status, affected count and diagnostics.
+  `DatabaseResultSet` streams `DatabaseRow` values described by `DatabaseColumn` metadata.
+  Each model supplies the result implementations it needs.
 
-Execution itself — planning, operators, transaction brackets — lives in each model
-engine. The shared execution pipeline this project used to hold (`IQueryPipeline`,
-`QueryPipelineBuilder`, `QueryExecutionContext`, `IQueryTransactionScope`) had no
-consumer and was deleted under the concrete-first program (#1255, #1257).
+Planning, parsing, execution and transaction brackets belong to model engines. Blob sessions
+operate through their own storage API and have no execute member.
 
 ## Dependencies
 
-`Database.Language` (statements, diagnostics) and `Database.Types`. Deliberately
-**below** the area contract root — the root's session surface
-(`DatabaseSession.ExecuteAsync`) is typed in this project's terms, so nothing here
-may reference root types (transaction identity, engine contracts).
+Only `Database.Types`, which owns the shared diagnostic types as well as value types.
+There is no query-language dependency, direct or transitive. The root `Database` assembly
+references this package and owns `DatabaseExecutionSession<TRequest>` and
+`DatabaseLanguageSession<TRequest>`; this package does not reference the root.
 
 ## Usage
 
 ```csharp
-// A model engine's request: the typed statement view over the shared base.
-public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
+// session is a SqlDatabaseSession; only SqlQueryRequest or SQL text can be executed here.
+DatabaseResult result = await session.ExecuteAsync(SqlQueryRequest.FromSql("SELECT 1"));
+if (result is DatabaseResultSet rows)
 {
-    // ...
-}
-
-QueryResult result = await session.ExecuteAsync(SqlQueryRequest.FromSql("SELECT 1"));
-if (result is QueryResultSet rows)
-{
-    await foreach (QueryRow row in rows.GetRowsAsync())
+    await using var resultLifetime = rows;
+    await foreach (DatabaseRow row in rows.GetRowsAsync())
     {
-        // ...
+        // Consume the model's row values.
     }
 }
 ```
 
-See [DESIGN.md](DESIGN.md) for the decisions behind the shape.
+Sql, Documents and Graph offer typed and text execution. KeyValuePair offers typed execution
+only; its server uses an internal command-text parser. A variable typed as `DatabaseSession`
+offers lifecycle, state and transactions. Use the concrete model session to execute its requests.
+
+See [DESIGN.md](DESIGN.md) for the decisions and deferred result-contract work.
