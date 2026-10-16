@@ -94,6 +94,11 @@ internal sealed class MarkdownBlockParser
         //    open), then feeds looseness tracking.
         if (cursor.IsBlank)
         {
+            if (lostEmptyItem)
+            {
+                _open[matched - 1].BlankPending = true;
+            }
+
             CloseTo(matched - 1);
             HandleBlank(matched);
             return;
@@ -164,6 +169,12 @@ internal sealed class MarkdownBlockParser
             }
 
             break;
+        }
+
+        // A marker-only container has no paragraph. Its leading blank is tracked on the item.
+        if (cursor.IsBlank)
+        {
+            return;
         }
 
         // 5. Remaining text: paragraph content. A paragraph still open from the previous line

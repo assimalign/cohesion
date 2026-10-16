@@ -1011,7 +1011,7 @@
     "example": 278,
     "section": "List items",
     "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
-    "html": "<ul>\n<li>\nfoo</li>\n<li>\n<pre><code>bar\n</code></pre>\n</li>\n<li>\nbaz</li>\n</ul>\n",
+    "html": "<ul>\n<li>foo</li>\n<li>\n<pre><code>bar\n</code></pre>\n</li>\n<li>baz</li>\n</ul>\n",
     "matchesSpec": false
   },
   {

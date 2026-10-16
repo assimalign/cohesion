@@ -96,6 +96,10 @@ decoding: each maximal ill-formed subpart becomes U+FFFD before ordinary Markdow
   trees of any depth render without stack overflow.
 - `U+0000` becomes `U+FFFD` at inline parse, per the spec's insecure-characters rule.
 
+Marker-only quotes and list items contain no synthetic empty paragraph. An empty item may start
+with one blank marker line; a second blank closes it. Blank separators after empty items still
+participate in list looseness. CommonMark examples 239–241, 279–280 and 315 protect this boundary.
+
 ## Renderers
 
 **HTML** (`MarkdownHtmlRenderer`) emits the shapes the spec's examples use — tight list items
