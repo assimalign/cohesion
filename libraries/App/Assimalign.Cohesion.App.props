@@ -47,7 +47,9 @@
         Runtime project references only those roots; App.targets computes their
         transitive Assimalign.Cohesion project-reference closure for the Ref and
         Runtime manifests, then adds the App umbrella assembly. Framework tests
-        compare that effective set with the repository project graph.
+        compare that effective set with the repository project graph. The one
+        explicit list is the kernel's package-delivered assemblies, which no
+        project-reference walk can see.
 
         ================================================================
         Public vs private assemblies
@@ -114,6 +116,18 @@
         <Description Condition="'$(_CohesionFrameworkProducerName)' != ''">$(Description.Replace('$(MSBuildProjectName)', '$(_CohesionFrameworkProducerName)'))</Description>
     </PropertyGroup>
 
+    <!--
+        A framework member can need a package outside Microsoft.NETCore.App
+        (System.Threading.RateLimiting for Web.RateLimiting). Its list names the
+        package's assembly like any member, and the pack collects members from the
+        Runtime producer's bin. A library project leaves package assemblies out of
+        its bin by default, so the Runtime producer copies them in. The Refs
+        producer reads the same bin and needs no copy of its own.
+    -->
+    <PropertyGroup Condition="'$(CohesionFrameworkKind)' == 'Runtime'">
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    </PropertyGroup>
+
     <!-- ================================================================
          Assimalign.Cohesion.App: hosting kernel. Resource-area SDKs include it;
          direct base-SDK consumers opt in explicitly.
@@ -141,6 +155,12 @@
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.FileSystem.Physical" />
 
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App" />
+
+        <!-- The kernel's package-delivered assemblies: the closure above walks project
+             references only, so these are App's one explicit list. Private (runtime-only):
+             Hosting.Resources decrypts Windows mount files with ProtectedData, which is not
+             part of Microsoft.NETCore.App, and exposes none of its types. -->
+        <CohesionFrameworkPrivateAssembly Include="System.Security.Cryptography.ProtectedData" />
 
         <!--
             Roslyn analyzers / source generators shipped INSIDE this framework's
