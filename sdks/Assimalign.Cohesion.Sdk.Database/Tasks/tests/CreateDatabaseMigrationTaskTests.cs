@@ -48,7 +48,7 @@ public class CreateDatabaseMigrationTaskTests
         error.Code.ShouldBe("COHDBSDK206");
         error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
         error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v5", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v6", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         task.MigrationPath.ShouldBeEmpty();
         task.BaselinePath.ShouldBeEmpty();

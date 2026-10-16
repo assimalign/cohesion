@@ -1002,7 +1002,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     throw new DatabaseException($"FOREIGN KEY '{name}' requires matching column types.");
                 }
-                if (table.Columns[childOrdinal].Type.Type == DatabaseType.String
+                if (table.Columns[childOrdinal].Type.Type is DatabaseType.String or DatabaseType.Character
                     && (table.Columns[childOrdinal].Collation ?? _catalog.DefaultCollation)
                         != (parent.Columns[parentOrdinal].Collation ?? _catalog.DefaultCollation))
                 {

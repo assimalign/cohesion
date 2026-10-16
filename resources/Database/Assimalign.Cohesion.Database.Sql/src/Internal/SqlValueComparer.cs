@@ -23,6 +23,8 @@ internal static class SqlValueComparer
     /// <summary>Compares two non-null values using the resolved string collation.</summary>
     internal static int Compare(object left, object right, Collation? collation = null)
     {
+        if (left is SqlCharacter firstCharacter) { left = firstCharacter.Text; }
+        if (right is SqlCharacter secondCharacter) { right = secondCharacter.Text; }
         if (left is DateTime firstTimestamp && right is DateTime secondTimestamp)
         {
             return firstTimestamp.Ticks.CompareTo(secondTimestamp.Ticks);
@@ -120,6 +122,7 @@ internal static class SqlValueComparer
         }
         return value switch
         {
+            SqlCharacter character => collation.GetHashCode(character.Text),
             string text => collation.GetHashCode(text),
             DateTime timestamp => timestamp.Ticks.GetHashCode(),
             DateTimeOffset instant => instant.UtcTicks.GetHashCode(),

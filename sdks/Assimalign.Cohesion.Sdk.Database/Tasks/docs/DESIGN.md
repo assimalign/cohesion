@@ -1,5 +1,14 @@
 # Database SDK Design
 
+## Fixed-length strings (#1437)
+
+SDK and runtime now emit **cohesion/database-schema/v6** together. CLR char maps to Character (19)
+with length one, and explicit CHAR(n)/CHARACTER(n) string columns normalize through the schema
+snapshot to Character with length n. Shared SqlTypeModifiers still owns length validation.
+Migration SQL renders CHAR(n), and switching between CHAR and VARCHAR is an AlterColumn change.
+The runtime/SDK parity test includes a fixed-length key alongside domains. Earlier artifacts and
+baselines (v5 included) fail the format gate; rebuild them and recreate affected databases.
+
 ## Boundaries
 
 A database's C# schema declaration is the only schema source. The SDK compiler reads Roslyn
@@ -177,10 +186,10 @@ The outputs are:
 | `CohesionDatabaseSchema` items | Set by `CohesionDatabaseCompileSchema` | One per database the manifest lists (its schema document, full path), with `DatabaseName` and `HashPath` metadata, for downstream targets. |
 | `Schemas` task output | `CompileDatabaseSchemaTask` | One item per database, named for it, with `Hash`, `SchemaPath` and `HashPath` metadata. |
 
-The document format is `cohesion/database-schema/v5`, shared with the runtime compiler and the
-migration baseline writer. B2 introduced `defaultLiteral` in v4; #1438 advances the format again
-because normalizing an omitted decimal scale changes a raw v4 NUMERIC(p) document's identity.
-Earlier formats are refused before normalization, including v4. Rebuild artifacts and recreate
+The document format is `cohesion/database-schema/v6`, shared with the runtime compiler and the
+migration baseline writer. B2 introduced `defaultLiteral` in v4; #1438 advanced to v5 because
+decimal scale normalization changes a raw v4 NUMERIC(p) document's identity. #1437 advances
+to v6 for Character identity. Earlier formats, including v5, are refused before normalization. Rebuild artifacts and recreate
 databases recording an earlier schema format; no old hash or identity is reconciled. Reading an
 old artifact or migration baseline reports COHDBSDK206 with the schema.format refusal and remedy,
 without writing a migration. Runtime deserialization uses SqlSchemaValidationException with
@@ -243,7 +252,7 @@ dependency closure.
 
 ## E4 script artifact decision
 
-Iteration 1 keeps declared scripts outside the v5 typed schema. They require runtime statement
+Iteration 1 keeps declared scripts outside the v6 typed schema. They require runtime statement
 receipts and checksummed history that generated SQL alone cannot establish. The extractor emits
 COHDBSDK110 for SqlDatabaseBuilder.Script, preventing incomplete artifacts: migration files that
 carried a script without its receipt would leave a Verify-mode application unable to start, and a

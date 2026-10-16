@@ -43,4 +43,6 @@ public enum DatabaseType : byte
     Json,
     /// <summary>JSON binary data.</summary>
     JsonBinary,
+    /// <summary>Fixed-length Unicode string, blank-padded with trailing ASCII spaces ignored in comparison.</summary>
+    Character,
 }

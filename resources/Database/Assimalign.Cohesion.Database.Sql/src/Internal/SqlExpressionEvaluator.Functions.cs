@@ -110,6 +110,27 @@ internal sealed partial class SqlExpressionEvaluator
         return bound;
     }
 
+    /// <summary>The declared character/binary length of a projected expression, if fixed.</summary>
+    /// <param name="expression">The projected expression.</param>
+    /// <returns>The declared length, or null when no single modifier describes the result.</returns>
+    internal int? MaximumLengthOf(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression switch
+        {
+            SqlColumnReferenceExpression column => _columns[ResolveColumn(column)].Type.MaxLength,
+            SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage.MaxLength,
+            SqlCollateExpression collate => MaximumLengthOf(collate.Operand),
+            SqlFunctionCallExpression call when !SqlStandardLibrary.IsCoalesce(call.FunctionName)
+                => ResolveFunction(call)?.ReturnType.Storage.MaxLength,
+            _ => null,
+        };
+    }
+
+    private static DatabaseType AlternativeType(DatabaseType first, DatabaseType next)
+        => first is DatabaseType.Character or DatabaseType.String && next is DatabaseType.Character or DatabaseType.String && first != next
+            ? DatabaseType.String : first == DatabaseType.Null ? next : first;
+
     /// <summary>
     /// The type an expression's values have whatever row it is evaluated over, when the plan can
     /// tell: what overload resolution compares a call's arguments by. <see cref="DatabaseType.Null"/>
@@ -180,15 +201,12 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlSubqueryExpression:
                 return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.Type : DatabaseType.Null;
             case SqlCaseExpression conditional:
+                DatabaseType alternative = DatabaseType.Null;
                 foreach (var clause in conditional.WhenClauses)
                 {
-                    if (StaticTypeOf(clause.Result) is var result && result != DatabaseType.Null)
-                    {
-                        return result;
-                    }
+                    alternative = AlternativeType(alternative, StaticTypeOf(clause.Result));
                 }
-
-                return conditional.ElseResult is null ? DatabaseType.Null : StaticTypeOf(conditional.ElseResult);
+                return conditional.ElseResult is null ? alternative : AlternativeType(alternative, StaticTypeOf(conditional.ElseResult));
             case SqlFunctionCallExpression call:
                 return StaticCallType(call);
             default:
@@ -208,15 +226,12 @@ internal sealed partial class SqlExpressionEvaluator
     {
         if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
+            DatabaseType alternative = DatabaseType.Null;
             foreach (var argument in call.Arguments)
             {
-                if (StaticTypeOf(argument) is var type && type != DatabaseType.Null)
-                {
-                    return type;
-                }
+                alternative = AlternativeType(alternative, StaticTypeOf(argument));
             }
-
-            return DatabaseType.Null;
+            return alternative;
         }
 
         return ResolvedCallType(call, scalarOnly);

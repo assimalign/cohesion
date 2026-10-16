@@ -34,7 +34,7 @@ internal sealed partial class SqlPlanExecutor
             var row = new object?[sourceRow.FieldCount];
             for (int i = 0; i < row.Length; i++)
             {
-                row[i] = sourceRow.GetValue(i);
+                row[i] = SqlCharacter.Input(sourceRow.GetValue(i), source.Columns[i].Type);
             }
             rows.Add(row);
         }

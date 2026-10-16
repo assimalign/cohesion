@@ -421,11 +421,11 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         {
             await using (resultSet.ConfigureAwait(false))
             {
-                var columns = new List<(string Name, byte Type)>(resultSet.Columns.Count);
+                var columns = new List<(string Name, byte Type, int? MaxLength)>(resultSet.Columns.Count);
 
                 foreach (QueryColumn column in resultSet.Columns)
                 {
-                    columns.Add((column.Name, (byte)column.Type));
+                    columns.Add((column.Name, (byte)column.Type, column.MaxLength));
                 }
 
                 await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);

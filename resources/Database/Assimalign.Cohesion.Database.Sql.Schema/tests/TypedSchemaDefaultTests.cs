@@ -22,8 +22,8 @@ public sealed class TypedSchemaDefaultTests
         ShouldRender(text, "'it''s \\ ready'", DatabaseType.String);
         ShouldRender("", "''", DatabaseType.String);
         ShouldRender("'pending'", "'''pending'''", DatabaseType.String);
-        ShouldRender('a', "'a'", DatabaseType.String);
-        ShouldRender('\'', "''''", DatabaseType.String);
+        ShouldRender('a', "'a'", DatabaseType.Character);
+        ShouldRender('\'', "''''", DatabaseType.Character);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Typed DEFAULT: numeric CLR types use invariant literals and preserve decimal scale")]
@@ -241,7 +241,7 @@ public sealed class TypedSchemaDefaultTests
             table.DefaultSql(row => row.Value, "'it''s ready'")));
 
         // Act / Assert
-        typed.Format.ShouldBe("cohesion/database-schema/v5");
+        typed.Format.ShouldBe("cohesion/database-schema/v6");
         typed.CanonicalDocument.ShouldBe(raw.CanonicalDocument);
         typed.Hash.ShouldBe(raw.Hash);
     }

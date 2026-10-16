@@ -1,5 +1,14 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Fixed-length character declarations (#1437)
+
+CHAR and CHARACTER resolve to DatabaseType.Character, distinct from VARCHAR/TEXT (String).
+The parser supplies length one for bare CHAR, and explicit lengths reuse the existing shared
+SqlTypeModifiers rule in every declaration and CAST. SQL0005 and the common length ceiling remain
+unchanged. The runtime owns padding, trimming casts and comparison; DIALECT.md specifies their
+PostgreSQL anchors and the dialect differences. Schema and SDK normalization share this identity
+in the v6 canonical document.
+
 The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3). The dialect is deliberately fundamental — basic SQL, declared precisely —
 and structured to be extended without churning what exists (open/closed).

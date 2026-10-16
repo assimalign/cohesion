@@ -40,6 +40,11 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// there is no upgrade path or reconciliation of earlier identities. The SDK uses this format too.
 /// </para>
 /// <para>
+/// <b>Format <c>v6</c> (#1437).</b> Fixed-length character columns have the distinct
+/// <see cref="DatabaseType.Character"/> identity and a declared length; bare CHAR means one.
+/// Runtime and SDK documents share this format and reject earlier documents.
+/// </para>
+/// <para>
 /// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
 /// is read, and kept: the schema is immutable, so they never change.
 /// </para>
@@ -47,7 +52,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v5";
+    public const string CurrentFormat = "cohesion/database-schema/v6";
 
     // Computed once, on first read: the schema is immutable. Two threads that race the first read
     // compute the same strings, so the race costs only the duplicate work.
@@ -241,6 +246,19 @@ public sealed class CompiledSchemaTable
         for (int index = 0; index < values.Count; index++)
         {
             var column = values[index];
+            if (column is not null)
+            {
+                if (column.Type is DatabaseType.String or DatabaseType.Character && column.CustomType is { } name
+                    && SqlTypeModifiers.TrySplit(name, out string typeName, out int? length, out _)
+                    && SqlTypeModifiers.StorageType(typeName) is DatabaseType.Character)
+                {
+                    column = column with { Type = DatabaseType.Character, MaxLength = length ?? 1 };
+                }
+                else if (column.Type == DatabaseType.Character && column.CustomType is null)
+                {
+                    column = column with { MaxLength = column.MaxLength ?? 1 };
+                }
+            }
             copy[index] = column is null ? null! : column with
             {
                 Scale = SqlTypeModifiers.NormalizeScale(column.Type, column.Precision, column.Scale),

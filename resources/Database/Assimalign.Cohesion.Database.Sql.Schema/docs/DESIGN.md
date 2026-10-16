@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Sql.Schema — Design
 
+## Fixed-length schema columns (#1437)
+
+The current canonical document is **cohesion/database-schema/v6**, shared with Sdk.Database.
+CLR char maps to Character with length one; a string member declared with CHAR(n)/CHARACTER(n)
+normalizes to Character and n (bare CHAR means one). Explicit lengths use the existing shared
+SqlTypeModifiers rule. A CHAR/VARCHAR change is an AlterColumn type change, requiring the existing
+destructive-change opt-in; it is never an equal-hash/no-op. Earlier documents, including v5,
+are refused without normalization or compatibility readers. Runtime and SDK render Character as
+CHAR(n) and retain the author-provided CustomType name when present.
+
 This package owns SQL schema declarations, immutable compiled relational shapes,
 canonical JSON, validation, and migration planning. Feature A3 of
 [DATABASE_MVP_FEATURES.md](../../../../docs/programs/DATABASE_MVP_FEATURES.md)
@@ -37,7 +47,7 @@ computes `CanonicalDocument` and `Hash` once, on first read (the schema is immut
 the first read costs only duplicate work). Dropping `Model` changed the document, so the format moved to
 `cohesion/database-schema/v2` at the time (a `v1` document no longer deserialized, and a database
 whose recorded state was `v1` was replanned from its catalog snapshot). The format is now
-`v5`: #1438 normalized an omitted decimal scale, which changes the canonical document, so every
+`v6`: #1437 adds Character identity after #1438 normalized an omitted decimal scale, which changes the canonical document, so every
 earlier document — an SDK artifact, an applied marker or a pending migration target — is refused
 by the format check rather than replanned. The root's `SchemaMigrationResult` moved here as `SqlSchemaMigrationResult`.
 The C# lambda `Function<…>` and `Trigger<…>` declarations, the `Extension` value, their compiled
@@ -146,7 +156,7 @@ The optional `defaultLiteral` member is omitted when null. Adding it changes the
 contract, so B2 introduced `cohesion/database-schema/v4` for every schema, with or without defaults.
 Earlier documents are refused; no v3 compatibility reader or upgrade is provided. Provisioning
 refuses their recorded documents before any hash comparison or catalog reconstruction. The SDK compiler
-and migration baseline writer share the current v5 format with runtime schema compilation.
+and migration baseline writer share the current v6 format with runtime schema compilation.
 `NULL` text remains part of a declaration's identity even
 though SQL gives it the same database behavior as an absent default. Adding or removing a
 default changes column equivalence, so the planner carries both definitions in `AlterColumn`
@@ -258,7 +268,7 @@ I/O-free.
 ## E4 scripts
 
 SqlDatabaseBuilder.Script belongs to the database declaration after typed apply. SqlCompiledSchema
-uses v5 and typed defaults remain literal-only. Script history has its own ordered-set digest
+uses v6 and typed defaults remain literal-only. Script history has its own ordered-set digest
 and catalog-generation marker, so unchanged reconciliation hashes nothing. Script-created tables
 and indexes are excluded from typed snapshot reconstruction; deleting script code undoes nothing.
 See Database.Sql's E4 section for recovery and the inline-execution/SDK owner-review decisions.
@@ -291,14 +301,15 @@ The shared `NormalizeScale` rule also serves typed builders, the validator, SQL 
 provisioning and SDK extraction. An omitted scale and explicit zero therefore have the same
 canonical document and hash; a bare decimal keeps both fields null.
 
-The current format is `cohesion/database-schema/v5`, shared with Sdk.Database. Although the JSON
-members are unchanged, normalization changes the identity of a v4 raw NUMERIC(p) column whose
+The current format is `cohesion/database-schema/v6`, shared with Sdk.Database. Although the JSON
+members are unchanged, Character identity distinguishes v6 from v5; decimal normalization
+already changed the identity of a v4 raw NUMERIC(p) column whose
 precision was set and scale was null. Deserialization checks the format before constructing any
 schema objects. Earlier formats fail with SqlSchemaValidationException, InvalidDocument at
 schema.format, naming the found/current formats and the remedy: rebuild artifacts and recreate
 affected databases. Applied markers and pending targets retain the document's format, so SQL
 gates them at open and before Apply/Verify compares any hashes. No old hash is validated or
-reconciled, and no catalog version bump or upgrade path is needed.
+reconciled. SQL record-space format 12 separately gates CHAR keys; there is no upgrade path.
 
 SQL type text accepts FLOAT(p) for 1..53 bits. The engine resolves 1..24 as Float32 and 25..53 as
 Float64 and verifies that it matches the member's CLR storage; the compiled declaration retains

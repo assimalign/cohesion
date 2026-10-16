@@ -1,5 +1,38 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Fixed-length character identity (#1437)
+
+`DatabaseType.Character` (19) is CHAR/CHARACTER, distinct from String (VARCHAR/TEXT).
+`SqlType.Char(n)` and the parser reuse shared `SqlTypeModifiers` validation; bare CHAR is CHAR(1).
+`SqlCastConverter.ApplyModifiers` pads assignments, parameters, defaults, domain values and function
+results to n Unicode scalar values, rejects non-space assignment overflow with COHSQLE012, and
+truncates explicit casts. The E3 registry now has 75 standard casts: CHAR/text conversions plus
+the existing text conversion pairs mirrored for CHAR. CHAR-to-text strips trailing U+0020.
+
+The private `SqlCharacter` value retains identity through expression evaluation, subqueries and
+INSERT SELECT while public rows and wire payloads expose padded CLR strings. `SqlValueComparer`
+compares and hashes its trimmed text under the resolved collation. Every index path calls
+`SqlRowCodec.AppendKeyValue`, which trims before encoding and collation folding; rows encode padded
+strings. Thus grouping, DISTINCT, sorting, joins, uniqueness, foreign keys and seeks share identity.
+No reflection, dynamic code, new interface, project reference or visibility grant is required.
+
+`SqlRowCodec.RecordSpaceFormatVersion` advances **11 -> 12** for the new catalog type and CHAR index
+identity. The Indexing page format and shared tuple string encoding do not change. Earlier databases
+are refused; recreate them. The canonical schema advances **v5 -> v6** in runtime and SDK together;
+fixed-length columns persist Character and their length, so CHAR/VARCHAR changes plan AlterColumn.
+
+Result columns expose `MaxLength`. SQL result-header **format 2** starts with Int32 -2, then count,
+then each name, shared type byte and Int32 length (-1 for no declared length). Earlier headers are
+refused. The shared handshake and row tuple encoding are unchanged; rebuild client/server together.
+INFORMATION_SCHEMA reports CHARACTER plus length; COHESION_SCHEMA TYPES, DOMAINS and FUNCTIONS
+retain CHAR(n) in the existing type-name/signature fields.
+
+LIKE uses padded CHAR input, while its text pattern, concatenation and text casts strip CHAR padding.
+LENGTH counts unpadded Unicode scalars for CHAR. Domains and function parameters/results keep the
+padding rule. PostgreSQL behavior and differences are specified with source anchors in DIALECT.md.
+The file-backed session/wire tests repeat these contracts after reopen; the NativeAOT smoke tests
+exercise CHAR output, casts, length, concatenation, LIKE, seek and column metadata.
+
 The SQL engine (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
 against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
@@ -963,7 +996,7 @@ so NUMERIC(p,s) no longer also carries a spurious MaxLength. Explicit precision 
 to zero consistently. Invalid catalog resolution reports the shared reason as defense in depth.
 
 DIALECT.md records precision 1..28, scale 0..precision, and explicit string/binary length
-1..10485760. Bare types retain their unbounded meaning, and CHAR stays a VARCHAR alias.
+1..10485760. Bare VARCHAR/TEXT retain their unbounded meaning; CHAR defaults to one and pads (#1437).
 Invalid SQL modifiers are SQL0005 naming the column, domain, function parameter/result or CAST
 target. Text execution throws DatabaseParseException; the server sends ParseFailure and keeps the
 connection usable. Declared scripts parse in Build before database I/O, so the same failure precedes
@@ -978,14 +1011,16 @@ resolves it identically before comparing the catalog. Apply, the already-applied
 reopen therefore agree. Type-drift messages show every compared field (`MaxLength`, `Precision`,
 `Scale`) explicitly, including `null`, rather than formatting a null scale as zero.
 
-This normalization advances the runtime/SDK document to `cohesion/database-schema/v5`: a v4
+This normalization advanced the runtime/SDK document to v5; #1437 advances it to
+`cohesion/database-schema/v6` for Character identity. A v4
 NUMERIC(3) declaration could record scale:null while applying scale zero, so rereading it must
 not silently change its hash. The schema format gate refuses every earlier document with
 SqlSchemaValidationException (InvalidDocument, schema.format), naming both formats and the
 rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
 file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
 The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
-identity. Both catalog records retain a versioned document, so catalog format 10 is unchanged.
+identity. Both catalog records retain a versioned document; the current record-space format 12
+gates Character identity and its index keys, without changing these document envelopes.
 
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
 The shared resolver supplies that storage identity everywhere, including domain bases, function
@@ -1029,13 +1064,8 @@ character probes whole: a longer string can compare equal under the index's coll
   CAST truncates to the declared length even when the discarded characters are not spaces.
   This is PostgreSQL's `varchar()` and `bpchar()` distinction
   (`src/backend/utils/adt/varchar.c:264-268`, `:605-609`); its character-boundary clipping and
-  excess-space check are at `:633-647`. Bare string types have no declared length limit.
-- **CHAR remains an unpadded alias.** `SqlTypeNames` resolves CHAR, CHARACTER, VARCHAR and TEXT
-  to the same `DatabaseType.String`, and neither `DatabaseTypeInfo` nor the catalog preserves a
-  fixed-character identity. All aliases retain a short value as written: `CHAR(3)` stores `'a'`,
-  not `'a  '`. This deliberately differs from PostgreSQL's `bpchar()` padding
-  (`src/backend/utils/adt/varchar.c:330-343`). Distinguishing CHAR would require a type and
-  persisted-metadata change beyond the bounds fix; no new public or on-disk flag is introduced.
+  excess-space check are at `:633-647`. Bare VARCHAR/TEXT have no declared length limit; bare CHAR has length one.
+- **CHAR is distinct and padded.** See the fixed-length character identity section above (#1437).
 - **NUMERIC/DECIMAL.** A declared scale rounds with midpoint ties away from zero before testing
   precision. `NUMERIC(p)` means scale zero; `NUMERIC(p,s)` requires the rounded value to have
   magnitude below `10^(p-s)`. Thus `1.235` becomes `1.24` in `NUMERIC(3,2)`, while `9.995`
@@ -1163,7 +1193,7 @@ emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain expl
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
 on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
 Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
-has the same canonical document and hash. The document now uses `cohesion/database-schema/v5`
+has the same canonical document and hash. The document now uses `cohesion/database-schema/v6`
 for normalized decimal identities; typed defaults keep the shape introduced in B2.
 The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
@@ -1174,7 +1204,7 @@ Build with `COHSQLP001` before either file set exists; finite and underflow chec
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
-`cohesion/database-schema/v5`; B2 introduced `defaultLiteral` in v4. Null defaults
+`cohesion/database-schema/v6`; B2 introduced `defaultLiteral` in v4. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
@@ -1858,7 +1888,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 11 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 12 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -4518,7 +4548,7 @@ records only typed objects, whose structure scripts cannot change; it is safe to
 generation after script execution or receipt-chain recovery.
 
 Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
-data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v5 typed
+data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v6 typed
 artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
 Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
 SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views

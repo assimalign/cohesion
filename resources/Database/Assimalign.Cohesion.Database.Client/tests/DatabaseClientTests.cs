@@ -33,7 +33,7 @@ public class DatabaseClientTests
         result.AffectedCount.ShouldBe(-1);
         result.Columns.Count.ShouldBe(2);
         result.Columns[0].ShouldBe(new DatabaseClientColumn("id", DatabaseType.Int32));
-        result.Columns[1].ShouldBe(new DatabaseClientColumn("name", DatabaseType.String));
+        result.Columns[1].ShouldBe(new DatabaseClientColumn("name", DatabaseType.String, 100));
 
         result.Rows.Count.ShouldBe(2);
         result.Rows[0].ShouldBe([1, "ada"]);

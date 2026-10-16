@@ -63,6 +63,11 @@ internal static class SqlStandardCasts
 
     private static SqlCast[] Create() =>
     [
+        // PostgreSQL pg_cast.dat:318-325: bpchar -> text strips, text -> bpchar pads
+        // only when the target modifier is applied (varchar shares the text identity here).
+        SqlCast.Create<string, string>(SqlType.Character, SqlType.Text, static value => value.TrimEnd(' '), Implicit),
+        SqlCast.Create<string, string>(SqlType.Text, SqlType.Character, static value => value, Implicit),
+
         // To text: PostgreSQL's I/O conversions to a string type are assignment casts.
         SqlCast.Create<bool, string>(SqlType.Boolean, SqlType.Text, static value => value ? "TRUE" : "FALSE", Assignment),
         SqlCast.Create<sbyte, string>(SqlType.TinyInt, SqlType.Text, static value => value.ToString(CultureInfo.InvariantCulture), Assignment),
@@ -88,6 +93,32 @@ internal static class SqlStandardCasts
         SqlCast.Create<string, DateTimeOffset>(SqlType.Text, SqlType.TimestampTz, static text => SqlTemporalText.ParseTimestampTz(text), Explicit),
         SqlCast.Create<string, TimeSpan>(SqlType.Text, SqlType.Interval, static text => TimeSpan.Parse(text, CultureInfo.InvariantCulture), Explicit),
         SqlCast.Create<string, Guid>(SqlType.Text, SqlType.Uuid, static text => Guid.Parse(text), Explicit),
+
+        // To CHAR: PostgreSQL's I/O conversions to a string type are assignment casts.
+        SqlCast.Create<bool, string>(SqlType.Boolean, SqlType.Character, static value => value ? "TRUE" : "FALSE", Assignment),
+        SqlCast.Create<sbyte, string>(SqlType.TinyInt, SqlType.Character, static value => value.ToString(CultureInfo.InvariantCulture), Assignment),
+        SqlCast.Create<short, string>(SqlType.SmallInt, SqlType.Character, static value => value.ToString(CultureInfo.InvariantCulture), Assignment),
+        SqlCast.Create<int, string>(SqlType.Integer, SqlType.Character, static value => value.ToString(CultureInfo.InvariantCulture), Assignment),
+        SqlCast.Create<long, string>(SqlType.BigInt, SqlType.Character, static value => value.ToString(CultureInfo.InvariantCulture), Assignment),
+        SqlCast.Create<decimal, string>(SqlType.Numeric, SqlType.Character, static value => value.ToString(CultureInfo.InvariantCulture), Assignment),
+
+        // From CHAR: explicit only.
+        SqlCast.Create<string, bool>(SqlType.Character, SqlType.Boolean, static text => bool.TryParse(text.Trim(), out bool parsed)
+            ? parsed
+            : throw new InvalidCastException("BOOLEAN requires a boolean or TRUE/FALSE text."), Explicit),
+        SqlCast.Create<string, sbyte>(SqlType.Character, SqlType.TinyInt, static text => checked((sbyte)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
+        SqlCast.Create<string, short>(SqlType.Character, SqlType.SmallInt, static text => checked((short)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
+        SqlCast.Create<string, int>(SqlType.Character, SqlType.Integer, static text => checked((int)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
+        SqlCast.Create<string, long>(SqlType.Character, SqlType.BigInt, static text => checked((long)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
+        SqlCast.Create<string, decimal>(SqlType.Character, SqlType.Numeric, static text => SqlCastConverter.ParseExactDecimal(text), Explicit),
+        SqlCast.Create<string, float>(SqlType.Character, SqlType.Real, static text => ToReal(ParseFloat(text)), Explicit),
+        SqlCast.Create<string, double>(SqlType.Character, SqlType.Double, static text => ParseFloat(text), Explicit),
+        SqlCast.Create<string, DateOnly>(SqlType.Character, SqlType.Date, static text => SqlTemporalText.ParseDate(text), Explicit),
+        SqlCast.Create<string, TimeOnly>(SqlType.Character, SqlType.Time, static text => TimeOnly.Parse(text, CultureInfo.InvariantCulture), Explicit),
+        SqlCast.Create<string, DateTime>(SqlType.Character, SqlType.Timestamp, static text => SqlTemporalText.ParseTimestamp(text), Explicit),
+        SqlCast.Create<string, DateTimeOffset>(SqlType.Character, SqlType.TimestampTz, static text => SqlTemporalText.ParseTimestampTz(text), Explicit),
+        SqlCast.Create<string, TimeSpan>(SqlType.Character, SqlType.Interval, static text => TimeSpan.Parse(text, CultureInfo.InvariantCulture), Explicit),
+        SqlCast.Create<string, Guid>(SqlType.Character, SqlType.Uuid, static text => Guid.Parse(text), Explicit),
 
         // Among the exact numbers: widenings implicit, narrowings assignment and range-checked.
         SqlCast.Create<sbyte, short>(SqlType.TinyInt, SqlType.SmallInt, static value => value, Implicit),

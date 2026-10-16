@@ -55,7 +55,7 @@ public partial class CompileDatabaseSchemaTaskTests
 
         string schemaPath = SchemaPath(task, "orders");
         SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(schemaPath);
-        schema.Format.ShouldBe("cohesion/database-schema/v5");
+        schema.Format.ShouldBe("cohesion/database-schema/v6");
         schema.Name.ShouldBe("orders");
         schema.Tables.Select(static table => table.Name).ShouldBe(["OrderLines", "Orders"]);
         ITaskItem item = task.Schemas.ShouldHaveSingleItem();
@@ -360,7 +360,7 @@ public partial class CompileDatabaseSchemaTaskTests
             schema.Type<Price>(type => type.Decimal(18, 2));
             schema.Table<CrmCustomer>("customers", table =>
             {
-                table.Column(customer => customer.Code, "VARCHAR(16)");
+                table.Column(customer => customer.Code, "CHAR(16)");
                 table.Key(customer => customer.Code);
                 table.Column(customer => customer.Email, "email");
                 table.Column(customer => customer.Balance);
@@ -391,7 +391,7 @@ public partial class CompileDatabaseSchemaTaskTests
                             schema.Table<CrmCustomer>("customers", table =>
                             {
                                 table.Key(customer => customer.Code);
-                                table.Column(customer => customer.Code, "VARCHAR(16)");
+                                table.Column(customer => customer.Code, "CHAR(16)");
                                 table.Column(sqlType: Email, selector: customer => customer.Email);
                                 table.Column(customer => customer.Balance);
                             });
@@ -412,7 +412,7 @@ public partial class CompileDatabaseSchemaTaskTests
         SqlCompiledSchema written = SqlCompiledSchemaSerializer.Read(SchemaPath(task, "crm"));
         written.Types.ShouldHaveSingleItem().ShouldBe(new CompiledSchemaType("Price", Assimalign.Cohesion.Database.Types.DatabaseType.Decimal, 18, 2));
         written.Tables.ShouldHaveSingleItem().Columns.Select(static column => (column.Name, column.CustomType))
-            .ShouldBe([("Code", "VARCHAR(16)"), ("Email", "email"), ("Balance", "Price")]);
+            .ShouldBe([("Code", "CHAR(16)"), ("Email", "email"), ("Balance", "Price")]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: DEFAULT literals retain exact runtime document and hash parity")]

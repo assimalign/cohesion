@@ -178,6 +178,7 @@ internal sealed partial class SqlPlanExecutor
             columns[i] = new QueryColumn
             {
                 Name = projections[i].Name, Ordinal = i, Type = projections[i].Type,
+                MaxLength = projections[i].MaxLength,
                 IsNullable = projections[i].Expression is not null,
             };
         }
@@ -1472,6 +1473,10 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
+            if (value is SqlCharacter character)
+            {
+                value = column.Type.Type == DatabaseType.Character ? character.Value : character.Text;
+            }
             object converted = column.Type.Type switch
             {
                 DatabaseType.Boolean => Convert.ToBoolean(value, CultureInfo.InvariantCulture),
@@ -1484,7 +1489,7 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.Decimal => value is string numericText
                     ? SqlCastConverter.ParseNumericText(numericText, column.Type)
                     : Convert.ToDecimal(value, CultureInfo.InvariantCulture),
-                DatabaseType.String or DatabaseType.Json => value as string
+                DatabaseType.String or DatabaseType.Character or DatabaseType.Json => value as string
                     ?? Convert.ToString(value, CultureInfo.InvariantCulture)!,
                 DatabaseType.Binary or DatabaseType.JsonBinary => value is byte[] bytes
                     ? bytes

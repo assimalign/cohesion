@@ -803,7 +803,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         bool matches = LikeMatches(
-            Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+            Convert.ToString(SqlCharacter.Output(value), CultureInfo.InvariantCulture) ?? string.Empty,
             Convert.ToString(pattern, CultureInfo.InvariantCulture) ?? string.Empty,
             expression.Collation.Resolve(_subqueryValues));
 

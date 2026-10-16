@@ -15,4 +15,7 @@ internal enum SqlResultRule : byte
     /// a non-number included, as before typed signatures (the call itself fails when it runs).
     /// </summary>
     NumericElement,
+
+    /// <summary>LOWER and UPPER convert CHAR to TEXT before changing case; other inputs keep their type.</summary>
+    TextElement,
 }

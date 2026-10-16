@@ -43,6 +43,7 @@ internal sealed partial class SqlPlanner
             });
             projections.Add(new SqlProjection(name, null, column.Expression, GroupExpressionType(column.Expression, columns, evaluator))
             {
+                MaxLength = evaluator.MaximumLengthOf(column.Expression),
                 // A bare COUNT never returns NULL, even over no rows; every other projection may.
                 IsNullable = !(column.Expression is SqlFunctionCallExpression projected && IsAggregate(projected)
                     && aggregates[slots[projected] - select.GroupBy.Count].Function.IsNeverNull),
@@ -356,6 +357,7 @@ internal sealed partial class SqlPlanner
     {
         if (left == DatabaseType.Null || left == right) { return right; }
         if (right == DatabaseType.Null) { return left; }
+        if (left is DatabaseType.Character or DatabaseType.String && right is DatabaseType.Character or DatabaseType.String) { return DatabaseType.String; }
         static int Rank(DatabaseType type) => type switch
         {
             DatabaseType.Int8 => 1, DatabaseType.Int16 => 2, DatabaseType.Int32 => 3, DatabaseType.Int64 => 4,

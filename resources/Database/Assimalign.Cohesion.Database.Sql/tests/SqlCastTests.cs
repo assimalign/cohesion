@@ -57,12 +57,12 @@ public sealed class SqlCastTests
         yield return ["1.234", "DECIMAL(4, 2)", DatabaseType.Decimal, 1.23m];
         yield return ["0.001", "DECIMAL(2, 2)", DatabaseType.Decimal, 0m];
         yield return [123, "VARCHAR(2)", DatabaseType.String, "12"];
-        yield return ["abc", "CHAR(2)", DatabaseType.String, "ab"];
+        yield return ["abc", "CHAR(2)", DatabaseType.Character, "ab"];
         yield return ["😀", "VARCHAR(1)", DatabaseType.String, "😀"];
         yield return ["79228162514264337593543950335", "DECIMAL", DatabaseType.Decimal, decimal.MaxValue];
         yield return [" TrUe ", "BOOL", DatabaseType.Boolean, true];
         yield return ["FALSE", "BOOLEAN", DatabaseType.Boolean, false];
-        yield return [true, "CHARACTER(4)", DatabaseType.String, "TRUE"];
+        yield return [true, "CHARACTER(4)", DatabaseType.Character, "TRUE"];
         yield return [false, "VARCHAR(5)", DatabaseType.String, "FALSE"];
         yield return [12.25m, "TEXT", DatabaseType.String, "12.25"];
 

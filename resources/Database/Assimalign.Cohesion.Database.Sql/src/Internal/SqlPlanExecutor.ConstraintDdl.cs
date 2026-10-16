@@ -124,7 +124,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (string name in metadata.ColumnNames)
             {
                 var column = table.Columns[FindColumnOrdinal(table, name)];
-                if (column.Type.Type is Types.DatabaseType.String or Types.DatabaseType.Json
+                if (column.Type.Type is Types.DatabaseType.String or Types.DatabaseType.Character or Types.DatabaseType.Json
                     && !(column.Collation ?? _catalog.DefaultCollation).IsIndexBacked)
                 {
                     throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{name}' cannot have an index or indexed constraint.");

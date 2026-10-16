@@ -14,12 +14,13 @@ internal sealed class SqlLowerFunction : SqlScalarFunction
         : base("LOWER", [SqlType.AnyElement], SqlType.AnyElement, SqlFunctionVolatility.Immutable)
     {
         Usage = "LOWER(value)";
+        ResultRule = SqlResultRule.TextElement;
     }
 
     /// <inheritdoc />
     protected override SqlValue InvokeCore(scoped in SqlArguments arguments)
     {
         var value = arguments[0];
-        return value.Type == DatabaseType.String ? SqlValue.FromString(value.AsString().ToLowerInvariant()) : value;
+        return value.Type is DatabaseType.String or DatabaseType.Character ? SqlValue.FromString((value.Type == DatabaseType.Character ? value.AsString().TrimEnd(' ') : value.AsString()).ToLowerInvariant()) : value;
     }
 }

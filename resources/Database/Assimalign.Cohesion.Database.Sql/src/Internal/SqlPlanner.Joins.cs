@@ -68,7 +68,7 @@ internal sealed partial class SqlPlanner
                         if (local >= 0 && local < outerBinding.Table.Columns.Count
                             && CanSeekJoinEquality(innerBinding.Table.Columns[innerOrdinal].Type.Type,
                                 outerBinding.Table.Columns[local].Type.Type)
-                            && (innerBinding.Table.Columns[innerOrdinal].Type.Type is not (DatabaseType.String or DatabaseType.Json)
+                            && (innerBinding.Table.Columns[innerOrdinal].Type.Type is not (DatabaseType.String or DatabaseType.Character or DatabaseType.Json)
                                 || equality.Collation.IsIndexBacked
                                     && equality.Collation == (innerBinding.Table.Columns[innerOrdinal].Collation ?? _catalog.DefaultCollation)))
                         {
@@ -136,7 +136,7 @@ internal sealed partial class SqlPlanner
             or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Decimal;
 
         return ExactNumeric(inner) && ExactNumeric(outer)
-            || inner == outer && inner is DatabaseType.Boolean or DatabaseType.String or DatabaseType.Json
+            || inner == outer && inner is DatabaseType.Boolean or DatabaseType.String or DatabaseType.Character or DatabaseType.Json
                 or DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset
                 or DatabaseType.TimeSpan or DatabaseType.Guid;
     }

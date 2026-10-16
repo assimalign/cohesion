@@ -33,7 +33,8 @@ internal static class SqlTypeModifiers
             "REAL" or "FLOAT4" => DatabaseType.Float32,
             "FLOAT" or "FLOAT8" or "DOUBLE" => DatabaseType.Float64,
             "DECIMAL" or "NUMERIC" => DatabaseType.Decimal,
-            "CHAR" or "CHARACTER" or "VARCHAR" or "TEXT" => DatabaseType.String,
+            "CHAR" or "CHARACTER" => DatabaseType.Character,
+            "VARCHAR" or "TEXT" => DatabaseType.String,
             "BINARY" or "VARBINARY" or "BLOB" or "BYTEA" => DatabaseType.Binary,
             "DATE" => DatabaseType.Date,
             "TIME" => DatabaseType.Time,
@@ -157,7 +158,7 @@ internal static class SqlTypeModifiers
             }
             return null;
         }
-        if (type is DatabaseType.String or DatabaseType.Binary)
+        if (type is DatabaseType.String or DatabaseType.Character or DatabaseType.Binary)
         {
             return length is < 1 or > MaximumLength || precision is not null || scale is not null
                 ? "String and binary types accept one positive length argument between 1 and 10485760."

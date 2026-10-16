@@ -400,7 +400,8 @@ internal sealed partial class SqlSchemaProvisioner
                 : SqlEvaluationException.UnknownType(declared, $"Column '{column.Name}'");
         }
 
-        if (type.Storage.Type != column.Type)
+        if (type.Storage.Type != column.Type &&
+            !(type.Storage.Type == DatabaseType.Character && column.Type == DatabaseType.String))
         {
             throw new DatabaseException(
                 $"Column '{column.Name}' is declared with type '{declared}', which is stored as {SqlType.NameOf(type.Storage.Type)}, " +

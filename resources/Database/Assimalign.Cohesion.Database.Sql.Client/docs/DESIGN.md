@@ -1,5 +1,13 @@
 # Database.Sql.Client — Design
 
+## Character metadata (#1437)
+
+SQL result-header format 2 carries name, DatabaseType and nullable MaxLength. Both SqlColumn and
+DatabaseClientColumn retain the length. A CHAR(n) column reports Character (19) with n; its row
+value remains the padded CLR string, so GetString/GetValue and parameter round trips preserve
+padding. The header's Int32 -2 discriminator refuses older payloads. Rebuild client and server
+together; the shared handshake and row tuple encoding are unchanged.
+
 The SQL client owns parameter encoding, response decoding and materialization,
 typed commands/results, and error/telemetry mapping. It delegates dialing,
 startup/authentication, framing, and pooling to the shared client.

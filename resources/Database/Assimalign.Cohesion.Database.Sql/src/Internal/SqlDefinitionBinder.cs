@@ -245,7 +245,7 @@ internal static class SqlDefinitionBinder
             // A parameter inherits the invocation's collation; literals retain the database default.
             // PostgreSQL: src/backend/executor/functions.c:496-505.
             var columns = function.ParameterNames.Select((name, index) => new SqlCatalogColumn(name, types[index].Storage,
-                collation: types[index].Storage.Type == DatabaseType.String ? inputCollation : null,
+                collation: types[index].Storage.Type is DatabaseType.String or DatabaseType.Character ? inputCollation : null,
                 domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
             var bodyScope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: environment, cancellationToken: bindingToken);
             PinCalls(expression, bodyScope, function.BodyFunctionCalls);

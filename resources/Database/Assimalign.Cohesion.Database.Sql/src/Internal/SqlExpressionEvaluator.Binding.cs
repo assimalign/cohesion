@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -146,12 +147,43 @@ internal sealed partial class SqlExpressionEvaluator
     {
         var left = Bind(binary.Left, out SqlCollationCandidate leftCollation);
         var right = Bind(binary.Right, out SqlCollationCandidate rightCollation);
+        if (binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan
+            or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual)
+        {
+            left = BindCharacterComparand(binary.Left, left, binary.Right);
+            right = BindCharacterComparand(binary.Right, right, binary.Left);
+        }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
             SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindCharacterComparand(SqlExpression syntax, SqlBoundExpression bound, SqlExpression other)
+    {
+        return BindCharacterComparand(syntax, bound, StaticTypeOf(other));
+    }
+
+    private static SqlBoundExpression BindCharacterComparand(SqlExpression syntax, SqlBoundExpression bound, DatabaseType otherType)
+    {
+        if (otherType != DatabaseType.Character) { return bound; }
+        while (syntax is SqlCollateExpression collate) { syntax = collate.Operand; }
+        // Untyped literals/parameters take the CHAR operand's identity without length coercion.
+        return (syntax, bound) switch
+        {
+            (SqlLiteralExpression { LiteralType: SqlLiteralType.String }, SqlBoundConstant { Value: string text })
+                => new SqlBoundConstant(new SqlCharacter(text)),
+            (SqlParameterExpression, SqlBoundParameter { Value: string text } parameter)
+                => new SqlBoundParameter(parameter.Name, new SqlCharacter(text)),
+            _ => bound,
+        };
+    }
+
+    private SqlBoundExpression CharacterToText(SqlExpression syntax, SqlBoundExpression value)
+        => StaticTypeOf(syntax) == DatabaseType.Character
+            ? new SqlBoundCast(value, "TEXT", SqlType.Text, _functions.Types.ResolveCasts(null, SqlType.Text), _functions.Database, _defaultCollation)
+            : value;
+
     private SqlBoundExpression BindIsNull(SqlIsNullExpression isNull, out SqlCollationCandidate collation)
     {
         var operand = Bind(isNull.Operand, out SqlCollationCandidate operandCollation);
@@ -165,6 +197,10 @@ internal sealed partial class SqlExpressionEvaluator
         var operand = Bind(between.Operand, out SqlCollationCandidate operandCollation);
         var low = Bind(between.Low, out SqlCollationCandidate lowCollation);
         var high = Bind(between.High, out SqlCollationCandidate highCollation);
+        operand = BindCharacterComparand(between.Operand, operand, between.Low);
+        operand = BindCharacterComparand(between.Operand, operand, between.High);
+        low = BindCharacterComparand(between.Low, low, between.Operand);
+        high = BindCharacterComparand(between.High, high, between.Operand);
         collation = CollationOf(between, [operandCollation, lowCollation, highCollation]);
         return new SqlBoundBetween(operand, low, high, between.IsNegated,
             SqlBoundCollation.Of(operandCollation, lowCollation, _defaultCollation),
@@ -388,6 +424,7 @@ internal sealed partial class SqlExpressionEvaluator
                 return NotMaterialized();
             }
 
+            operand = BindCharacterComparand(membership.Operand, operand, slot.Type);
             // Every value of one subquery carries the subquery column's collation.
             return new SqlBoundInSubquery(operand, slot.Id,
                 SqlBoundCollation.Of(operandCollation, new SqlCollationCandidate(slot.Collation, 2), _defaultCollation),
@@ -405,6 +442,8 @@ internal sealed partial class SqlExpressionEvaluator
         for (int index = 0; index < candidates.Length; index++)
         {
             candidates[index] = Bind(values[index], out collations[index + 1]);
+            candidates[index] = BindCharacterComparand(values[index], candidates[index], membership.Operand);
+            operand = BindCharacterComparand(membership.Operand, operand, values[index]);
             comparisons[index] = SqlBoundCollation.Of(operandCollation, collations[index + 1], _defaultCollation);
         }
 
@@ -423,13 +462,19 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         // CASE conditions select a result; their collation does not describe that result.
+        bool textResult = StaticTypeOf(conditional) == DatabaseType.String;
         var clauses = conditional.WhenClauses;
         var whens = new SqlBoundWhen[clauses.Count];
         var results = new SqlCollationCandidate[clauses.Count + (conditional.ElseResult is null ? 0 : 1)];
         for (int index = 0; index < whens.Length; index++)
         {
             var condition = Bind(clauses[index].Condition, out SqlCollationCandidate conditionCollation);
+            if (conditional.Input is not null)
+            {
+                condition = BindCharacterComparand(clauses[index].Condition, condition, conditional.Input);
+            }
             var result = Bind(clauses[index].Result, out results[index]);
+            if (textResult) { result = CharacterToText(clauses[index].Result, result); }
             whens[index] = new SqlBoundWhen(condition, result,
                 input is null ? default : SqlBoundCollation.Of(inputCollation, conditionCollation, _defaultCollation));
         }
@@ -438,6 +483,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (conditional.ElseResult is not null)
         {
             elseResult = Bind(conditional.ElseResult, out results[^1]);
+            if (textResult) { elseResult = CharacterToText(conditional.ElseResult, elseResult); }
         }
 
         collation = CollationOf(conditional, results);
@@ -496,6 +542,13 @@ internal sealed partial class SqlExpressionEvaluator
         collation = CollationOf(call, collations);
         if (coalesce)
         {
+            if (StaticCallType(call) == DatabaseType.String)
+            {
+                for (int index = 0; index < arguments.Length; index++)
+                {
+                    arguments[index] = CharacterToText(call.Arguments[index], arguments[index]);
+                }
+            }
             return new SqlBoundCoalesce(arguments);
         }
 
@@ -504,7 +557,7 @@ internal sealed partial class SqlExpressionEvaluator
         var callCollation = SqlBoundCollation.Of(collation, default, _defaultCollation);
         for (int index = 0; index < arguments.Length; index++)
         {
-            if (scalar.ParameterAt(index) is { IsDomain: true } domain)
+            if (scalar.ParameterAt(index) is var domain && (domain.IsDomain || domain.Storage.Type == DatabaseType.Character))
             {
                 arguments[index] = new SqlBoundDomainArgument(arguments[index], domain, scalar.Name, callCollation, _functions.Database, _cancellationToken);
             }

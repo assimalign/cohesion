@@ -30,7 +30,7 @@ public sealed class SqlColumnBoundsTests
             ["VARCHAR(3)", "'abc   '", "abc"],
             ["VARCHAR(3)", "'😀ab'", "😀ab"],
             ["VARCHAR(3)", "'😀ab   '", "😀ab"],
-            ["CHAR(3)", "'a'", "a"],
+            ["CHAR(3)", "'a'", "a  "],
             ["CHAR(3)", "'abc   '", "abc"],
             ["CHAR(3)", "'😀ab'", "😀ab"],
             ["NUMERIC(4, 2)", "12.345", 12.35m],
@@ -241,7 +241,7 @@ public sealed class SqlColumnBoundsTests
     [InlineData("NUMERIC(4, 2)", "(1, 1.23), (2, 1.24)", "v < 123.45", new[] { 1, 2 })]
     [InlineData("VARCHAR(3)", "(1, 'abc'), (2, 'abd')", "v < 'abc '", new[] { 1 })]
     [InlineData("VARCHAR(3)", "(1, 'abc'), (2, 'abd')", "v < 'abcd'", new[] { 1 })]
-    [InlineData("CHAR(3)", "(1, 'abc'), (2, 'abd')", "v < 'abc '", new[] { 1 })]
+    [InlineData("CHAR(3)", "(1, 'abc'), (2, 'abd')", "v < 'abc '", new int[0])]
     public async Task Select_BoundedColumnComparand_ShouldMatchScanWithoutApplyingAssignmentModifiers(
         string type, string values, string predicate, int[] expected)
     {
@@ -301,9 +301,9 @@ public sealed class SqlColumnBoundsTests
             "c CHAR(3) DEFAULT 'a', n NUMERIC(4, 2) DEFAULT 12.345, m NUMERIC(4, 2) DEFAULT '-12.345')");
         await ExecuteAsync(session, "INSERT INTO bounded_values (id) VALUES (1)");
 
-        // Assert: CHAR remains the dialect's unpadded VARCHAR alias.
+        // Assert: CHAR retains its storage padding.
         (await RowsAsync(session, "SELECT v, c, n, m FROM bounded_values")).ShouldHaveSingleItem()
-            .ShouldBe(new object?[] { "abc", "a", 12.35m, -12.35m });
+            .ShouldBe(new object?[] { "abc", "a  ", 12.35m, -12.35m });
     }
 
     /// <summary>Domain checks observe the bounded value for assignments, defaults, backfill and explicit CAST.</summary>

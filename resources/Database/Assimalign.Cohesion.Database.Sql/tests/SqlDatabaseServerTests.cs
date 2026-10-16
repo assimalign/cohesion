@@ -105,8 +105,8 @@ public class SqlDatabaseServerTests
         var headerFrame = await client.ExpectAsync(ProtocolMessageType.ResultHeader);
         var header = ProtocolResultHeaderMessage.Decode(headerFrame.Payload.Span);
         header.Columns.Count.ShouldBe(2);
-        header.Columns[0].ShouldBe(("id", (byte)DatabaseType.Int32));
-        header.Columns[1].ShouldBe(("name", (byte)DatabaseType.String));
+        header.Columns[0].ShouldBe(("id", (byte)DatabaseType.Int32, (int?)null));
+        header.Columns[1].ShouldBe(("name", (byte)DatabaseType.String, (int?)100));
 
         // Rows are raw tuple-codec components, one per column
         var firstRow = await client.ExpectAsync(ProtocolMessageType.ResultRow);

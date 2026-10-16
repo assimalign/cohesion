@@ -30,7 +30,7 @@ public class SqlClientTests
         // Assert
         result.Columns.Count.ShouldBe(2);
         result.Columns[0].ShouldBe(new SqlColumn("id", 0, DatabaseType.Int32));
-        result.Columns[1].ShouldBe(new SqlColumn("name", 1, DatabaseType.String));
+        result.Columns[1].ShouldBe(new SqlColumn("name", 1, DatabaseType.String, 100));
 
         result.Count.ShouldBe(2);
         result[0].GetInt32("id").ShouldBe(1);

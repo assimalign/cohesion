@@ -182,11 +182,12 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     /// <exception cref="InvalidCastException">The value is NULL or of another type.</exception>
     public decimal AsDecimal() => Unpack<decimal>(DatabaseType.Decimal);
 
-    /// <summary>Reads a <c>TEXT</c> value.</summary>
+    /// <summary>Reads a <c>TEXT</c> or padded <c>CHAR</c> value.</summary>
     /// <returns>The value.</returns>
     /// <exception cref="InvalidCastException">The value is NULL or of another type.</exception>
     public string AsString()
     {
+        if (_type == DatabaseType.Character) { return ((SqlCharacter)_reference!).Value; }
         if (_type != DatabaseType.String)
         {
             ThrowMismatch(DatabaseType.String);
@@ -253,6 +254,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         return _type switch
         {
             DatabaseType.Null => true,
+            DatabaseType.Character => ((SqlCharacter)_reference!).Text == ((SqlCharacter)other._reference!).Text,
             DatabaseType.String => string.Equals((string)_reference!, (string)other._reference!, StringComparison.Ordinal),
             DatabaseType.Binary => ((byte[])_reference!).AsSpan().SequenceEqual((byte[])other._reference!),
             DatabaseType.Float32 => Read<float>().Equals(other.Read<float>()),
@@ -272,6 +274,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     public override int GetHashCode() => _type switch
     {
         DatabaseType.Null => 0,
+        DatabaseType.Character => HashCode.Combine(_type, StringComparer.Ordinal.GetHashCode(((SqlCharacter)_reference!).Text)),
         DatabaseType.String => HashCode.Combine(_type, StringComparer.Ordinal.GetHashCode((string)_reference!)),
         DatabaseType.Binary => HashCode.Combine(_type, ((byte[])_reference!).Length),
         DatabaseType.Float32 => HashCode.Combine(_type, Read<float>()),
@@ -288,6 +291,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     public override string ToString() => _type switch
     {
         DatabaseType.Null => "NULL",
+        DatabaseType.Character => ((SqlCharacter)_reference!).Value,
         DatabaseType.String => (string)_reference!,
         DatabaseType.Binary => "0x" + Convert.ToHexString((byte[])_reference!),
         _ => Convert.ToString(ToObject(), CultureInfo.InvariantCulture) ?? string.Empty,
@@ -412,6 +416,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static SqlValue FromOtherObject(object value) => value switch
     {
+        SqlCharacter character => new(DatabaseType.Character, character, default),
         double number => new(DatabaseType.Float64, value, Pack(number)),
         bool flag => new(DatabaseType.Boolean, value, Pack(flag)),
         short number => new(DatabaseType.Int16, value, Pack(number)),

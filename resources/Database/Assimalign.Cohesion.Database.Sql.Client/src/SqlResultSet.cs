@@ -57,7 +57,7 @@ public sealed class SqlResultSet : IReadOnlyList<SqlRow>
         for (int index = 0; index < result.Columns.Count; index++)
         {
             DatabaseClientColumn column = result.Columns[index];
-            columns[index] = new SqlColumn(column.Name, index, column.Type);
+            columns[index] = new SqlColumn(column.Name, index, column.Type, column.MaxLength);
 
             // First column wins on a duplicate name so name-based access is stable;
             // callers with duplicated projection names use ordinal access.
