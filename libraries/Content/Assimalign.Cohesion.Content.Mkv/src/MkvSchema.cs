@@ -11,11 +11,27 @@ public static class MkvSchema
 {
     /// <summary>Gets the immutable Matroska schema, including RFC 8794 headers and globals.</summary>
     public static EbmlSchema Matroska { get; } = Build();
-    /// <summary>Gets the WebM wire schema; profile restrictions are checked by MkvDocument.</summary>
-    public static EbmlSchema WebM => Matroska;
+    /// <summary>Gets the WebM schema with unsupported retained elements prohibited by occurrence rules.</summary>
+    public static EbmlSchema WebM { get; } = BuildWebM();
     /// <summary>Gets the ordinal matroska and webm DocType registrations.</summary>
     public static EbmlSchemaRegistry Registry { get; } = EbmlSchemaRegistry.Create(
         new Dictionary<string, EbmlSchema> { ["matroska"] = Matroska, ["webm"] = WebM });
+
+    private static EbmlSchema BuildWebM()
+    {
+        var builder = new EbmlSchemaBuilder();
+        foreach (var definition in Matroska.Definitions.Values)
+        {
+            // webmproject.org extension flags in the retained Matroska element table.
+            var prohibited = definition.Identifier.EncodedValue is 0x73A4 or 0x23314F or 0x22B59D or 0xEA or
+                0x1941A469 or 0x61A7 or 0x467E or 0x466E or 0x4660 or 0x465C or 0x46AE or
+                0x45BC or 0x45BD or 0x45DB or 0x45DD or 0x98 or 0x4598 or 0x437D or
+                0x63C9 or 0x63C4 or 0x63C6 or 0x447B;
+            builder.Add(prohibited ? EbmlElementDefinition.Create(definition.Identifier, definition.Name,
+                definition.Type, definition.ParentIds, maxOccurs: 0) : definition);
+        }
+        return builder.Build();
+    }
 
     private static EbmlSchema Build()
     {
@@ -104,7 +120,7 @@ public static class MkvSchema
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x45BD), "EditionFlagHidden", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0x45B9)], minOccurs: 1, maxOccurs: 1, maximumValue: 1UL, defaultValue: 0UL));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x45DB), "EditionFlagDefault", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0x45B9)], minOccurs: 1, maxOccurs: 1, maximumValue: 1UL, defaultValue: 0UL));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x45DD), "EditionFlagOrdered", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0x45B9)], minOccurs: 1, maxOccurs: 1, maximumValue: 1UL, defaultValue: 0UL));
-        builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0xB6), "ChapterAtom", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x45B9)], recursive: true, minOccurs: 1));
+        builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0xB6), "ChapterAtom", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x45B9)], recursive: true, minOccurs: 0));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x73C4), "ChapterUID", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0xB6)], minOccurs: 1, maxOccurs: 1, minimumValue: 1UL));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x5654), "ChapterStringUID", EbmlElementType.Utf8String, parentIds: [VInt.FromEncoded(0xB6)], maxOccurs: 1));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x91), "ChapterTimeStart", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0xB6)], minOccurs: 1, maxOccurs: 1));
@@ -126,7 +142,7 @@ public static class MkvSchema
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x63C9), "TagEditionUID", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0x63C0)], defaultValue: 0UL));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x63C4), "TagChapterUID", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0x63C0)], defaultValue: 0UL));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x63C6), "TagAttachmentUID", EbmlElementType.UnsignedInteger, parentIds: [VInt.FromEncoded(0x63C0)], defaultValue: 0UL));
-        builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x67C8), "SimpleTag", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x7373)], recursive: true, minOccurs: 1));
+        builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x67C8), "SimpleTag", EbmlElementType.MasterElement, parentIds: [VInt.FromEncoded(0x7373)], recursive: true, minOccurs: 0));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x45A3), "TagName", EbmlElementType.Utf8String, parentIds: [VInt.FromEncoded(0x67C8)], minOccurs: 1, maxOccurs: 1));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x447A), "TagLanguage", EbmlElementType.AsciiString, parentIds: [VInt.FromEncoded(0x67C8)], minOccurs: 1, maxOccurs: 1, defaultValue: "und"));
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0x447B), "TagLanguageBCP47", EbmlElementType.AsciiString, parentIds: [VInt.FromEncoded(0x67C8)], maxOccurs: 1));
