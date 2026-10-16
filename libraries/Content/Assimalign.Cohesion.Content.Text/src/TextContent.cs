@@ -4,6 +4,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Content.Text.Internal;
+
 namespace Assimalign.Cohesion.Content.Text;
 
 /// <summary>
@@ -128,7 +130,7 @@ public sealed class TextContent : ITextContent
         ObjectDisposedException.ThrowIf(_disposed, this);
         var stream = _content.OpenRead();
         SkipPreamble(stream);
-        return new StreamReader(stream, Encoding, detectEncodingFromByteOrderMarks: false);
+        return TextDecodingStream.CreateReader(stream, Encoding, _preambleLength);
     }
 
     /// <inheritdoc/>
@@ -137,7 +139,7 @@ public sealed class TextContent : ITextContent
         ObjectDisposedException.ThrowIf(_disposed, this);
         var stream = await _content.OpenReadAsync(cancellationToken).ConfigureAwait(false);
         SkipPreamble(stream);
-        return new StreamReader(stream, Encoding, detectEncodingFromByteOrderMarks: false);
+        return TextDecodingStream.CreateReader(stream, Encoding, _preambleLength);
     }
 
     /// <inheritdoc/>

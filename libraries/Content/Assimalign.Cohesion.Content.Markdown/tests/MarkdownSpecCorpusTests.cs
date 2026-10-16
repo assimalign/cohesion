@@ -6,8 +6,8 @@ namespace Assimalign.Cohesion.Content.Markdown.Tests;
 /// <summary>
 /// Cases transcribed from the CommonMark 0.31.2 specification's examples
 /// (https://spec.commonmark.org/0.31.2/, CC-BY-SA 4.0), restricted to the retained subset: each
-/// entry names the spec section it derives from. The full spec corpus harness is tracked
-/// separately (#469); these pin the subset's spec-faithful behavior at the construct level.
+/// entry names the spec section it derives from. MarkdownFullCorpusTests covers all official
+/// examples; these focused cases remain as readable construct-level specifications.
 /// </summary>
 public class MarkdownSpecCorpusTests
 {

@@ -104,6 +104,11 @@ anchor-name value grammar permits a colon.
 
 Malformed parsed YAML throws `YamlException : ContentFormatException` with one-based line/column —
 the Content-family error contract, so callers catch content failures at area granularity.
+Parse(ITextContent) also propagates Content.Text decoding failures unchanged as ContentFormatException
+with InvalidValue, the first invalid byte position when known (including BOM bytes), and the
+DecoderFallbackException as InnerException. This byte error is not a YAML syntax error and has
+no fabricated line/column. Detected encodings and lenient ITextContent preserve replacement
+decoding (U+FFFD per maximal ill-formed subpart), then apply normal YAML syntax rules.
 Exception messages use the build-generated `ErrorMessages` resources, with parameterized text
 formatted using the current culture.
 Programmatic invalid anchors and tags throw `ArgumentException` during value construction or

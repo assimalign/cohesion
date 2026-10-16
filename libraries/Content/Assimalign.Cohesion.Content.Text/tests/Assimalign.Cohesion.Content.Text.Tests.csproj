@@ -12,4 +12,8 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Text" />
 	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\ChunkedReadStream.cs" Link="Shared\ChunkedReadStream.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\NonSeekableStream.cs" Link="Shared\NonSeekableStream.cs" />
+	</ItemGroup>
 </Project>

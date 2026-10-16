@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Content.Markdown;
 /// Parses, writes, and renders Markdown text: the entry point of the Markdown content format
 /// package. The retained syntax is a documented subset of CommonMark 0.31.2 (see the package
 /// design documentation); constructs outside the subset degrade predictably to literal text, so
-/// parsing never fails for any input.
+/// decoded text always parses; strict byte decoding can report a content format failure.
 /// </summary>
 public static class MarkdownText
 {
@@ -63,6 +63,7 @@ public static class MarkdownText
     /// <param name="content">The text content carrying the Markdown.</param>
     /// <returns>The parsed document.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="content"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ContentFormatException">The content's strict decoder rejected malformed bytes; the error code is InvalidValue and the position is a byte offset when known.</exception>
     public static MarkdownDocument Parse(ITextContent content)
     {
         ArgumentNullException.ThrowIfNull(content);
