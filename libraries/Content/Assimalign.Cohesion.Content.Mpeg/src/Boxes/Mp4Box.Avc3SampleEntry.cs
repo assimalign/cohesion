@@ -1,3 +1,5 @@
+using System.IO;
+
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
 using Assimalign.Cohesion.Content.Mpeg.Internal;
@@ -43,4 +45,10 @@ public sealed class Avc3SampleEntryBox : BmffBoxComposite, IMp4SampleEntry
     }
     /// <inheritdoc/>
     public override long GetPayloadSize() => _fields.Length + base.GetPayloadSize();
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" dimensions={Width}x{Height} data-reference={DataReferenceIndex}"));
+    }
 }

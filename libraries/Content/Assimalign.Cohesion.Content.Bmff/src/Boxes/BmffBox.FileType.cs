@@ -1,5 +1,6 @@
-﻿using System.Buffers.Binary;
-using System;
+﻿using System;
+using System.Buffers.Binary;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff.Internal;
@@ -86,4 +87,17 @@ public sealed class FileTypeBox : BmffBox
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" major={GetMajorBrand()}"));
+        writer.Write(System.FormattableString.Invariant($" minor={MinorBrand} brands=["));
+        for (var index = 0; index < CompatibleBrands.Length; index++)
+        {
+            if (index != 0) { writer.Write(','); }
+            writer.Write(FourCC.FromUInt32(CompatibleBrands[index]).ToString());
+        }
+        writer.Write(']');
+    }
 }

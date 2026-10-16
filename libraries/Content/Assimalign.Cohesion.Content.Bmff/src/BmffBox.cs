@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
@@ -32,6 +33,17 @@ public abstract class BmffBox
     public abstract BmffBoxType BoxType { get; }
     /// <summary>Gets the original header, or default for a newly constructed model.</summary>
     public BmffBoxHeader Header { get; internal set; }
+
+    /// <summary>Appends already materialized fields for tree inspection; the default writes nothing.</summary>
+    /// <param name="writer">The borrowed output; prefix fields with a space and do not write a newline.</param>
+    /// <remarks>Overrides must not read payloads, compute write plans or mutate the model. Call the base
+    /// implementation to retain inherited details, including full-box version and flags. The formatter
+    /// escapes control characters and supplies an invariant-culture writer.</remarks>
+    /// <exception cref="ArgumentNullException">The writer is null.</exception>
+    /// <exception cref="IOException">Writing fails.</exception>
+    /// <exception cref="ObjectDisposedException">The output is disposed.</exception>
+    protected internal virtual void WriteDescription(TextWriter writer) => ArgumentNullException.ThrowIfNull(writer);
+
     /// <summary>Reads the payload from its exclusive bounded window.</summary>
     /// <param name="stream">The payload window.</param>
     /// <exception cref="ContentFormatException">The payload is invalid or unsupported.</exception>

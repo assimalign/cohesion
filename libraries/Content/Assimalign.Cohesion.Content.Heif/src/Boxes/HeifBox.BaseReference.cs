@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
@@ -45,4 +46,10 @@ public sealed class BaseReferenceBox : BmffBox
     public override void Write(BmffStream stream) => _fields.Write(stream, Options);
     /// <inheritdoc/>
     public override long GetPayloadSize() => _fields.Size(Options);
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        _fields.WriteDescription(writer);
+    }
 }

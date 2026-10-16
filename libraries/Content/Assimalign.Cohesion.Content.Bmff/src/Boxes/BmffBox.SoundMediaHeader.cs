@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Text;
 
 using Assimalign.Cohesion.Content.Binary;
@@ -56,4 +57,10 @@ public sealed class SoundMediaHeaderBox : BmffFullBox
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" balance={Balance}"));
+    }
 }

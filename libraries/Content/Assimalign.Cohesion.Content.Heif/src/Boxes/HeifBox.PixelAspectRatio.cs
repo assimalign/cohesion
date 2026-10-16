@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
@@ -47,5 +48,11 @@ public sealed class PixelAspectRatioBox : BmffBox
         {
             throw new ContentFormatException(ErrorMessages.InvalidValue, ContentFormatErrorCode.InvalidValue, Offset);
         }
+    }
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" spacing={HorizontalSpacing}:{VerticalSpacing}"));
     }
 }

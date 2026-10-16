@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
@@ -81,4 +82,10 @@ public sealed class ItemReferenceBox : BmffBoxComposite
         BaseReferenceBox value => value.Fields,
         _ => null
     };
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" version={Version} flags=0x{Flags:X6}"));
+    }
 }

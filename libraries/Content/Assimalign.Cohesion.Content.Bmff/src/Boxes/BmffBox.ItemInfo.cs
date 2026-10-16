@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 
 using Assimalign.Cohesion.Content.Bmff.Internal;
 
@@ -42,4 +43,10 @@ public sealed class ItemInfoBox : BmffBoxComposite
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" version={Version} flags=0x{Flags:X6} entries={EntryCount}"));
+    }
 }

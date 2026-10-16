@@ -198,3 +198,19 @@ Profile boxes inherit Offset, Limit, IsLeaf and IsComposite from BmffBox. Offset
 absolute read position; Limit is the original total size. Edits, relocation and saving leave both
 unchanged. A new profile box has zero coordinates until loaded; the writer computes its output
 layout separately. Even an empty sample-entry or item container is a composite.
+
+## Tree inspection
+
+BmffTreeFormatter.Write accepts a box or document and a borrowed TextWriter; Format returns a
+string with LF endings. Both use the bounded walker. Each line records FourCC, absolute source
+offset, original total size, large-size/size-zero markers, shape, full-box version/flags and current
+key fields. UnknownBox is explicitly marked unknown and preserved, with its preservation reason.
+Lazy payloads show only their segment lengths. Unloaded boxes are marked and never measured by
+calling a writer, so inspection does not initialize headers or compute edited output sizes.
+
+The protected WriteDescription(TextWriter) hook lets each box append already materialized fields.
+BmffFullBox supplies version/flags; overrides call the base and append fields with a leading space.
+Hooks must not read payloads or mutate the tree. Numbers use invariant culture; control characters
+are escaped to keep one physical line per box. MP4 opaque full-box prefixes (esds/vpcC) are labeled
+lazy rather than decoded for display. HEIF reference descriptions inspect the retained memory prefix
+without triggering array decoding; ICC profiles and configuration records remain untouched.

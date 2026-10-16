@@ -1,3 +1,5 @@
+using System.IO;
+
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
 using Assimalign.Cohesion.Content.Mpeg.Internal;
@@ -16,4 +18,10 @@ public sealed class ElementaryStreamDescriptorBox : BmffBoxLazyLeaf, IMp4OpaqueB
     public BinarySegment Data { get => Payload; set => Payload = value; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x65736473;
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(" full-box-prefix=lazy");
+    }
 }

@@ -1,3 +1,5 @@
+using System.IO;
+
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
 using Assimalign.Cohesion.Content.Heif.Internal;
@@ -83,4 +85,10 @@ public sealed class ColourInformationBox : BmffBoxLazyLeaf
     }
     /// <inheritdoc/>
     public override long GetPayloadSize() => 4L + (ColourType.Value == 0x6e636c78 ? 7 : 0) + (ColourType.Value is 0x70726f66 or 0x72494343 ? Profile.Length : TrailingData.Length);
+    /// <inheritdoc/>
+    protected override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" colour-type={ColourType} icc-bytes={Profile.Length}"));
+    }
 }
