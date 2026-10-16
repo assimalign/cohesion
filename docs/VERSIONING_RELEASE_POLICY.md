@@ -36,6 +36,7 @@ MSBuild properties, but it must preserve this single synchronized identity.
 | Channel | Version example | Publication policy |
 | --- | --- | --- |
 | Local development | `10.0.0-preview.1.local` | `Install-Local.ps1` only; written to `_out/packages/`; never published |
+| CI | `10.0.0-preview.0.ci.57`, `10.0.0-preview.0.pr.1520.58` | `ci-packages.yml` publishes every push to `main` and every same-repository pull request commit to GitHub Packages; never promoted (see [CI packages](#ci-packages)) |
 | Staging | `10.0.0-preview.1` | Every published GitHub Release tagged `v$(CohesionVersion)` is validated, packed, and staged in GitHub Packages |
 | Public preview or release candidate | `10.0.1-preview.N`, `10.0.1-rc.N` | Promoted from an already-published release only through an explicit manual dispatch and reviewer approval |
 | Alpha or beta | `10.0.1-alpha.N`, `10.0.1-beta.N` | Staging only |
@@ -77,6 +78,94 @@ package id plus SemVer; prefix-sharing ids, SDK/framework packages, and unrelate
 It also removes only the current local-version extract for each package being rebuilt from NuGet's
 global packages cache, preserving cached published versions. `-SkipSdks`, `-SkipFramework`, and
 `-SkipLibraries` also skip the corresponding cache and feed pruning.
+
+## CI packages
+
+[`.github/workflows/ci-packages.yml`](../.github/workflows/ci-packages.yml) publishes the complete
+release set to GitHub Packages for every push to `main` (each merged pull request) and every commit
+to an open pull request from a branch of this repository. Downstream work can then pin an exact
+build of `main`, or of a pull request still in review, without waiting for a release: benchmarking,
+`cohesion-platforms` integration, and `cohesion-examples` build-outs. The workflow never writes to
+nuget.org, never publishes a canonical version, and never replaces a published version.
+
+### Version shape
+
+`Get-CohesionCiPackageVersion` in
+[`CohesionPackaging.psm1`](../installer/scripts/modules/CohesionPackaging.psm1) derives the version
+from the canonical one. Appending to the canonical prerelease, as the local channel does, would be
+wrong here: `10.0.0-preview.1.ci.57` sorts **above** `10.0.0-preview.1`, so every CI build on the
+feed would outrank the release it precedes. The CI version instead extends the canonical version's
+predecessor, made by decrementing its final prerelease number:
+
+| Canonical | Build | CI version |
+| --- | --- | --- |
+| `10.0.0-preview.1` | push to `main`, run 57 | `10.0.0-preview.0.ci.57` |
+| `10.0.0-preview.1` | pull request 1520, run 58 | `10.0.0-preview.0.pr.1520.58` |
+| `10.0.0-preview.2` (after the post-tag bump) | push to `main`, run 90 | `10.0.0-preview.1.ci.90` |
+
+Every CI build therefore sorts above the previous line and below the canonical version. After
+`10.0.0-preview.1` is released and `main` is bumped to `preview.2`, CI builds sort above the
+released `preview.1`, and the rule of record holds: the canonical version never sorts below a CI
+build on the feed.
+
+- **The run number makes each version unique.** `github.run_number` is shared by both channels, so
+  a `main` build and a pull request build never collide, and later builds sort higher within a
+  channel. A re-run attempt keeps its run number and version. Only a re-run may skip packages
+  already on the feed; a first attempt that meets an existing version fails instead, because
+  that means the run numbers restarted (a renamed or recreated workflow) and
+  `--skip-duplicate` would silently keep older packages.
+- **Numeric identifiers stay within Int32.** NuGet parses numeric prerelease identifiers with
+  `Int32.TryParse` and compares a larger value as text, which would order `9` above `10`. The
+  derivation rejects a run or pull request number outside `1..2147483647`.
+- **The canonical line must end in a positive number.** A stable canonical version
+  (`10.0.1`), or a prerelease such as `preview` or `preview.0`, has no derivable predecessor, so
+  the workflow fails rather than inventing one. On `main` that state exists only between a stable
+  release commit and its post-tag bump. The identifiers `local`, `ci`, and `pr` are reserved and
+  may not appear in the canonical version.
+- **No commit SHA in the version.** An all-digit short SHA with a leading zero is invalid SemVer.
+  Each package's repository metadata records the commit instead, and the publish job's summary
+  lists version, channel, commit, and package count.
+
+### What is validated before publishing
+
+The set is the release's: `Pack-Release.ps1` strictly packs the full inventory, every SDK and
+framework family, and all release RIDs, then asserts the package set and metadata. The packed SDK
+consumers then build, publish self-contained, and run against that exact artifact on Linux before
+any package is pushed. There is no per-package validation matrix and no Windows or macOS consumer
+leg here. The per-area workflows already build and test the same commits, and `release.yml` still
+runs its full gate before a release version is staged.
+
+A pull request build packs the pull request's **head** commit, not GitHub's synthetic merge commit,
+so the commit recorded in each package stays resolvable. Pull requests from forks, and runs that
+Dependabot triggers, publish nothing: their tokens cannot write packages, and the workflow is never
+run on `pull_request_target`, which would grant that permission to the code under review. A newer
+commit on the same pull request cancels a pack still in progress, but never a publish under way, so
+a superseded commit cannot leave a partial version on the feed. Packages are pushed in
+`package-order.txt` order, SDKs last, so a consumer pinning the SDK version does not resolve it
+before its framework and library packages have arrived. Pull requests that change only `docs/` or
+`.claude/` publish nothing new.
+
+### Consuming CI packages
+
+- **Pin an exact version.** Set every Cohesion entry in the consumer's `global.json`
+  `msbuild-sdks` block to the same CI version (pin agreement is ordinal, see below). The publish
+  job's name and summary show the version for each run.
+- **Float only within a channel.** `10.0.0-preview.0.ci.*` tracks the latest `main` build and
+  `10.0.0-preview.0.pr.1520.*` the latest build of one pull request. `pr` sorts above `ci`, so an
+  unbounded float such as `10.0.0-*`, or an update bot reading the feed, picks the newest pull
+  request build over `main`.
+- **Authenticate without committing a credential.** GitHub Packages requires a token with
+  `read:packages` even for reads, and `credential-guard.yml` rejects credentials in tracked
+  `NuGet.Config` files. Declare the source by key only and supply the credential from the
+  environment, for example `NuGetPackageSourceCredentials_assimalign=Username=<user>;Password=<token>`
+  for a source keyed `assimalign`, from a CI secret.
+
+### Feed growth
+
+Each run publishes the full set, about 400 package versions today (223 libraries and resources, 21
+SDKs, and 19 frameworks with one targeting pack and seven runtime packs each). Nothing prunes CI
+versions yet. Delete merged or closed pull request versions and old `main` versions from GitHub
+Packages before the feed's version lists become unwieldy; never delete a release version.
 
 ## Consumer SDK pin agreement
 

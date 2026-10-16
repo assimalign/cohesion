@@ -526,6 +526,7 @@ $script:CohesionNonMatrixWorkflow = @(
     'analyzers.yml'
     'sdk-smoke.yml'
     'credential-guard.yml'
+    'ci-packages.yml'
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -1725,6 +1726,125 @@ function Assert-CohesionReleaseInventory {
         $script:CohesionReleaseRuntimeIdentifier.Count)
 }
 
+# ---------------------------------------------------------------------------------------------
+# CI package versions
+# ---------------------------------------------------------------------------------------------
+
+function Get-CohesionCiPackageVersion {
+    <#
+    .SYNOPSIS
+        Derives the unique CI package version .github/workflows/ci-packages.yml publishes for one
+        build of the canonical Cohesion version.
+
+    .DESCRIPTION
+        A CI version must sort BELOW the canonical version it builds toward. Appending to the
+        canonical prerelease, as Install-Local.ps1 does with .local, sorts above it:
+        10.0.0-preview.1.ci.7 is higher than 10.0.0-preview.1, so every CI build on the feed would
+        outrank the real release and break the rule of record that cohesion's version never sorts
+        below any version present on a feed.
+
+        So the CI version extends the canonical version's PREDECESSOR. The final prerelease
+        identifier must be a positive integer, and it is decremented. The channel and build
+        identifiers then follow:
+
+            canonical 10.0.0-preview.1   ->  base 10.0.0-preview.0
+            push to main, run 57         ->  10.0.0-preview.0.ci.57
+            pull request 1520, run 58    ->  10.0.0-preview.0.pr.1520.58
+
+        That places every CI build above the previous line (after the post-tag bump to preview.2,
+        builds are 10.0.0-preview.1.ci.N, above the released preview.1) and below the canonical
+        version. Within a channel, builds order by the workflow run number.
+
+        Numeric identifiers are Int32 because NuGet's VersionComparer parses them with
+        Int32.TryParse and compares a larger value as text, which orders "9" above "10". The
+        parameters bind as [int], so a value NuGet would misorder is rejected before it reaches a
+        package.
+
+        A stable canonical version, or a prerelease that does not end in a positive integer, has no
+        derivable predecessor and is rejected rather than given an invented one. The reserved local,
+        ci, and pr identifiers may not appear in the canonical version.
+
+    .PARAMETER Version
+        The canonical Cohesion version, from installer/scripts/Get-CohesionVersion.ps1.
+
+    .PARAMETER BuildNumber
+        A number unique to the build within its channel; ci-packages.yml passes github.run_number.
+
+    .PARAMETER PullRequestNumber
+        The pull request the build belongs to. Selects the pr channel; omitted for main.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Version,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 2147483647)]
+        [int] $BuildNumber,
+
+        [ValidateRange(1, 2147483647)]
+        [int] $PullRequestNumber
+    )
+
+    $versionPattern = '^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)(?:-(?<suffix>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+    $versionMatch = [System.Text.RegularExpressions.Regex]::Match(
+        $Version,
+        $versionPattern,
+        [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    if (-not $versionMatch.Success) {
+        throw "Version '$Version' must be SemVer in the supported form MAJOR.MINOR.PATCH-PRERELEASE."
+    }
+
+    if (-not $versionMatch.Groups['suffix'].Success) {
+        throw "Canonical version '$Version' is stable, so no CI version can sort between the previous release and it. Apply the post-tag bump to a prerelease line before publishing CI packages."
+    }
+
+    $canonicalIdentifier = $versionMatch.Groups['suffix'].Value.Split('.')
+    foreach ($identifier in $canonicalIdentifier) {
+        if ($identifier -match '^[0-9]+$' -and $identifier -notmatch '^(0|[1-9][0-9]*)$') {
+            throw "Version '$Version' contains a numeric prerelease identifier with a leading zero."
+        }
+
+        if (@('local', 'ci', 'pr') -contains $identifier) {
+            throw "Canonical version '$Version' contains the reserved '$identifier' identifier."
+        }
+    }
+
+    $lastIdentifier = $canonicalIdentifier[-1]
+    $lastNumber = 0
+    if ($lastIdentifier -notmatch '^[1-9][0-9]*$' -or
+        -not [int]::TryParse($lastIdentifier, [ref] $lastNumber)) {
+        throw "Canonical version '$Version' must end in a positive integer prerelease identifier (for example preview.1) so its CI builds can sort below it."
+    }
+
+    $versionPrefix = '{0}.{1}.{2}' -f
+        $versionMatch.Groups['major'].Value,
+        $versionMatch.Groups['minor'].Value,
+        $versionMatch.Groups['patch'].Value
+
+    $baseIdentifier = @($canonicalIdentifier | Select-Object -SkipLast 1) + @([string] ($lastNumber - 1))
+    if ($PSBoundParameters.ContainsKey('PullRequestNumber')) {
+        $channel = 'pr'
+        $channelIdentifier = @('pr', [string] $PullRequestNumber, [string] $BuildNumber)
+    }
+    else {
+        $channel = 'ci'
+        $channelIdentifier = @('ci', [string] $BuildNumber)
+    }
+
+    $baseSuffix = $baseIdentifier -join '.'
+    $versionSuffix = @($baseIdentifier + $channelIdentifier) -join '.'
+
+    return [pscustomobject]@{
+        CanonicalVersion = $Version
+        BaseVersion      = "$versionPrefix-$baseSuffix"
+        Version          = "$versionPrefix-$versionSuffix"
+        VersionPrefix    = $versionPrefix
+        VersionSuffix    = $versionSuffix
+        Channel          = $channel
+    }
+}
+
 function Assert-CohesionReleasePackageSet {
     <#
     .SYNOPSIS
@@ -1997,6 +2117,7 @@ Export-ModuleMember -Function @(
     'Get-CohesionReleasePackageId'
     'Get-CohesionCiMatrixEntry'
     'Assert-CohesionReleaseInventory'
+    'Get-CohesionCiPackageVersion'
     'Assert-CohesionReleasePackageSet'
     'Assert-CohesionPackageMetadata'
     'Invoke-CohesionPackBatch'

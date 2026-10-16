@@ -376,7 +376,7 @@ Step 3c is guarded, not merely documented: `Assert-CohesionReleaseInventory` fai
 
 The current version line is `<CohesionPatchVersion>0-preview.1</CohesionPatchVersion>`, which resolves to `10.0.0-preview.1`. Rule of record: **cohesion's version never sorts below any version present on a feed.** Inspect GitHub Packages and nuget.org before selecting a line, and bump `main` immediately after tagging so development never moves behind a published version.
 
-Local packages are distinct: `Install-Local.ps1` appends `.local` to the canonical prerelease (`10.0.0-preview.1.local`) and refuses a stable canonical line until its post-tag bump lands. Release packages reject the reserved `local` identifier. The complete staging, promotion, post-tag, and rate-limit policy is in [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md).
+Local packages are distinct: `Install-Local.ps1` appends `.local` to the canonical prerelease (`10.0.0-preview.1.local`) and refuses a stable canonical line until its post-tag bump lands. Release packages reject the reserved `local` identifier. CI packages go the other way: they extend the canonical version's **predecessor** (`10.0.0-preview.0.ci.<run>` while the canonical line is `10.0.0-preview.1`), because anything appended to the canonical prerelease sorts above it. The complete CI, staging, promotion, post-tag, and rate-limit policy is in [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md).
 
 The framework producer defaults in `libraries/App/Assimalign.Cohesion.App.props`, which every producer imports, set `VersionPrefix` and `VersionSuffix` from `CohesionVersionPrefix` and `CohesionVersionSuffix` so Microsoft.NET.Sdk's default `VersionPrefix=1.0.0` doesn't win. **Don't remove that mapping** — it is what keeps framework `.nupkg` versions aligned with the SDK without feeding a prerelease suffix to `AssemblyVersion`. It lived in `frameworks/Directory.Build.props` until the producers moved into their areas.
 
@@ -404,7 +404,7 @@ If a consumer build complains about an `Assimalign.Cohesion.Sdk` it can't resolv
 
 ## CI pipeline summary
 
-Per-area CI and the publish-less SDK consumer smoke prove the branch; **the release pipeline alone ships it.** Nothing else publishes.
+Per-area CI and the publish-less SDK consumer smoke prove the branch; **the release pipeline alone ships release versions.** The one other publisher, `ci-packages.yml`, stages CI-channel builds of `main` and of open pull requests in GitHub Packages and nowhere else. Nothing else publishes.
 
 ### Per-area CI — `library-*.yml`, `resource-*.yml`
 
@@ -528,9 +528,9 @@ Well over a third of the `src` csprojs under `libraries/` and `resources/` are s
 
 `.github/workflows/release-inventory.yml` runs the same guard on every push and pull request that touches a workflow, an installer script, the repository `Directory.Build.props`, or anything under a scanned project root, so a new project or its first source file is checked by the change that creates the drift rather than by a later release. After the pack, `Assert-CohesionPackageMetadata` opens every produced archive and fails unless the central NuGet icon actually landed — the icon is wired through an MSBuild import chain, and a project that falls out of that chain packs cleanly and silently unbranded.
 
-Only per-area release-library matrices participate in the inventory equality check. The exact non-matrix workflow set is `release.yml`, `release-inventory.yml`, `analyzers.yml`, `sdk-smoke.yml`, and `credential-guard.yml`. Static project matrices in any workflow, including non-matrix workflows such as `analyzers.yml` and `sdk-smoke.yml`, still count for the repository-wide blind-spot check.
+Only per-area release-library matrices participate in the inventory equality check. The exact non-matrix workflow set is `release.yml`, `release-inventory.yml`, `analyzers.yml`, `sdk-smoke.yml`, `credential-guard.yml`, and `ci-packages.yml`. Static project matrices in any workflow, including non-matrix workflows such as `analyzers.yml` and `sdk-smoke.yml`, still count for the repository-wide blind-spot check.
 
-Every external `uses:` in `release.yml`, `sdk-smoke.yml`, and `.github/actions/build/action.yml` is pinned to a commit SHA with a **trailing** version comment, because a mutable tag could run attacker-controlled code with a workflow's package or nuget.org OIDC identity. The comment must be trailing: that is the form Dependabot rewrites when it bumps a SHA, and `.github/dependabot.yml` carries an entry for both directories.
+Every external `uses:` in `release.yml`, `ci-packages.yml`, `sdk-smoke.yml`, and `.github/actions/build/action.yml` is pinned to a commit SHA with a **trailing** version comment, because a mutable tag could run attacker-controlled code with a workflow's package or nuget.org OIDC identity. The comment must be trailing: that is the form Dependabot rewrites when it bumps a SHA, and `.github/dependabot.yml` carries an entry for both directories.
 
 ### SDK consumer smoke — `.github/workflows/sdk-smoke.yml`
 
@@ -538,7 +538,11 @@ On pull requests and relevant pushes, a matrix (Linux, plus Windows and macOS on
 
 The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, NativeAOT, and container smoke added with that SDK. Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
 
-`release.yml` repeats the same package-only consumer harness as `validate-consumer`, using the exact full release artifact, before staging or promotion. The former publishing overlap is resolved: GitHub Packages and nuget.org have one writer, `release.yml`, and release versions use immutable `--skip-duplicate` semantics.
+`release.yml` repeats the same package-only consumer harness as `validate-consumer`, using the exact full release artifact, before staging or promotion. The former publishing overlap is resolved: nuget.org has one writer, `release.yml`. GitHub Packages has two, `release.yml` for release versions and `ci-packages.yml` for CI versions, and their versions cannot collide because a CI version extends the canonical version's predecessor. Neither replaces a published version.
+
+### CI packages — `.github/workflows/ci-packages.yml`
+
+Every push to `main` and every commit to an open same-repository pull request strictly packs the full release set with `Pack-Release.ps1` at the version `Get-CohesionCiPackageVersion` derives (`<predecessor>.ci.<run>` on `main`, `<predecessor>.pr.<pr>.<run>` for a pull request). The same package-only consumer harness then runs against that artifact on Linux, and the set is pushed to GitHub Packages only, SDKs last. It exists so downstream repositories (benchmarks, `cohesion-platforms`, `cohesion-examples`) can pin an exact build ahead of a release. It is not a release: there is no per-package validation matrix, no Windows or macOS consumer leg, no nuget.org path, and no canonical version. Fork pull requests and Dependabot-triggered runs publish nothing, and the workflow must never run on `pull_request_target`. A first attempt fails on an existing version rather than skipping it; only a re-run attempt passes `--skip-duplicate`. A newer pull request commit cancels a pack in progress, never a publish. `installer/scripts/modules/tests/CohesionReleasePolicy.Tests.ps1` pins this wiring and the version ordering. Version shape, consumer setup, and feed growth: [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md), "CI packages".
 
 ## File layout reference
 
@@ -603,7 +607,8 @@ installer/scripts/
 
 .github/workflows/
 ├── sdk-smoke.yml                          ← publish-less three-OS SDK validation
-└── release.yml                            ← sole package publisher + consumer gate
+├── ci-packages.yml                        ← CI-channel builds → GitHub Packages only
+└── release.yml                            ← sole release publisher + consumer gate
 
 build/Targets/
 ├── Build.Branding.props                   ← package metadata + <PackageIcon>

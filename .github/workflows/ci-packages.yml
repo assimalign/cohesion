@@ -1,0 +1,302 @@
+# Continuous package channel for downstream integration work.
+#
+# Every push to main (each merged pull request) and every commit to an open same-repository pull
+# request packs the complete release set and stages it in the Assimalign GitHub Packages feed at a
+# unique CI version. Benchmarking, cohesion-platforms, and cohesion-examples can then pin an exact
+# build of main, or of a pull request still in review, before any real preview is cut.
+#
+# This workflow never writes to nuget.org and never publishes a canonical version. Release
+# versions stay with .github/workflows/release.yml.
+#
+# The version comes from Get-CohesionCiPackageVersion in
+# installer/scripts/modules/CohesionPackaging.psm1. It extends the PREDECESSOR of the canonical
+# version, so every CI build sorts below the release it builds toward:
+#
+#     canonical 10.0.0-preview.1   ->  main: 10.0.0-preview.0.ci.<run>
+#                                      PR:   10.0.0-preview.0.pr.<pr>.<run>
+#
+# Appending to the canonical version instead (10.0.0-preview.1.ci.N) would sort ABOVE
+# 10.0.0-preview.1 and break the rule of record in docs/VERSIONING_RELEASE_POLICY.md.
+#
+# The set and its checks are the release's. Pack-Release.ps1 strictly packs the inventory in
+# CohesionPackaging.psm1, and the packed SDK consumers build, publish, and run against the exact
+# artifact before a single package is pushed. There is no per-package validation matrix here: the
+# per-area workflows already build and test these commits.
+#
+# Every `uses:` is pinned to a commit SHA with a trailing version comment, for the reason given at
+# the top of release.yml.
+name: CI Packages
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.claude/**'
+      - 'docs/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - '.claude/**'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: resolve CI package version
+    # Same-repository pull requests only. A fork's pull_request run and a Dependabot-triggered run
+    # both get a read-only token, so their push would fail after the full pack. Never trigger this
+    # workflow on pull_request_target, which grants packages:write to the code under review.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.version.outputs.commit }}
+      version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
+    steps:
+      # A pull request builds its head commit, not the synthetic refs/pull/N/merge commit. The head
+      # is what the author pushed, and it stays resolvable after the pull request moves on, so the
+      # RepositoryCommit stamped into each package keeps pointing at real history.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve CI package version
+        id: version
+        shell: pwsh
+        env:
+          COHESION_EVENT_NAME: ${{ github.event_name }}
+          COHESION_BUILD_NUMBER: ${{ github.run_number }}
+          COHESION_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+
+          $canonicalVersion = (& ./installer/scripts/Get-CohesionVersion.ps1)
+          if (-not $canonicalVersion) {
+            throw 'Get-CohesionVersion.ps1 produced no output.'
+          }
+
+          # The run number is shared by both channels, so main and pull request builds can never
+          # collide. A re-run attempt keeps its run number and so its version; the publish job
+          # handles that case.
+          $arguments = @{
+            Version     = $canonicalVersion.Trim()
+            BuildNumber = [int] $env:COHESION_BUILD_NUMBER
+          }
+          if ($env:COHESION_EVENT_NAME -eq 'pull_request') {
+            $arguments.PullRequestNumber = [int] $env:COHESION_PULL_REQUEST_NUMBER
+          }
+
+          $ciVersion = Get-CohesionCiPackageVersion @arguments
+          $commit = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Resolving the checked-out commit failed.'
+          }
+
+          "commit=$commit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$($ciVersion.Version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "channel=$($ciVersion.Channel)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Canonical version: $($ciVersion.CanonicalVersion)"
+          Write-Host "CI package version: $($ciVersion.Version) ($($ciVersion.Channel) channel, commit $commit)"
+
+  pack-packages:
+    name: pack all NuGet packages
+    needs: prepare
+    runs-on: ubuntu-24.04
+    # No completed run has measured this job yet; 120 minutes until one does
+    # (.claude/rules/build-system.md, job limits).
+    timeout-minutes: 120
+    # A newer commit on the same pull request cancels a pack still in progress. The group covers
+    # this job only, never the publish job, so a run that has already started pushing finishes
+    # and no superseded version is left half-published. Each main run gets its own group, so a
+    # main build is never cancelled.
+    concurrency:
+      group: cohesion-ci-packages-pack-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    outputs:
+      package-count: ${{ steps.package-count.outputs.count }}
+    steps:
+      - name: Checkout build commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.commit }}
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Pack CI packages
+        shell: pwsh
+        env:
+          COHESION_PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
+          COHESION_BUILD_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: >-
+          ./installer/scripts/Pack-Release.ps1
+          -Version $env:COHESION_PACKAGE_VERSION
+          -RepositoryCommit $env:COHESION_BUILD_COMMIT
+
+      - name: Record package count
+        id: package-count
+        shell: pwsh
+        run: |
+          $packageCount = @(Get-Content -LiteralPath '_out/release/packages/package-order.txt').Count
+          if ($packageCount -lt 1) {
+            throw 'Pack-Release.ps1 produced no packages.'
+          }
+
+          "count=$packageCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "CI package count: $packageCount"
+
+      - name: Verify package checksums
+        shell: bash
+        working-directory: _out/release/packages
+        run: sha256sum --check checksums.sha256
+
+      - name: Upload CI package artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Assimalign.Cohesion.CiPackages
+          path: _out/release/packages
+          if-no-files-found: error
+          # The feed holds the published copy; the artifact only carries the set between jobs.
+          retention-days: 3
+
+  # release.yml runs this harness on three OSes before it stages a release version. Linux is
+  # enough to keep a broken SDK or framework pack off the feed here; sdk-smoke.yml already covers
+  # Windows and macOS on main.
+  validate-consumer:
+    name: validate packed SDK consumer
+    needs: [prepare, pack-packages]
+    runs-on: ubuntu-24.04
+    # Same limit as release.yml's validate-consumer, which runs this exact harness.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout build commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.commit }}
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Download packed CI artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Assimalign.Cohesion.CiPackages
+          path: _ci/packages
+
+      - name: Verify package checksums
+        shell: bash
+        working-directory: _ci/packages
+        run: sha256sum --check checksums.sha256
+
+      - name: Build, publish, run, and assert package-only consumers
+        shell: pwsh
+        env:
+          COHESION_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $rid = @(
+            & dotnet --info |
+              Select-String -Pattern '^\s*RID:\s*(\S+)' |
+              ForEach-Object { $_.Matches[0].Groups[1].Value }
+          ) | Select-Object -First 1
+          if (-not $rid) {
+            throw "Could not resolve the host RID from 'dotnet --info'."
+          }
+
+          ./.github/scripts/Invoke-SdkConsumerSmoke.ps1 `
+              -PackageDirectory ./_ci/packages `
+              -Version $env:COHESION_VERSION `
+              -RuntimeIdentifier $rid
+
+  publish-github-packages:
+    name: publish ${{ needs.prepare.outputs.version }} to GitHub Packages
+    needs: [prepare, pack-packages, validate-consumer]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download validated packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Assimalign.Cohesion.CiPackages
+          path: _ci/packages
+
+      - name: Verify package checksums
+        shell: bash
+        working-directory: _ci/packages
+        run: sha256sum --check checksums.sha256
+
+      - name: Publish validated packages
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ github.token }}
+          COHESION_PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
+          COHESION_PACKAGE_COUNT: ${{ needs.pack-packages.outputs.package-count }}
+          COHESION_PACKAGE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          COHESION_BUILD_COMMIT: ${{ needs.prepare.outputs.commit }}
+          COHESION_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          $packageDirectory = '_ci/packages'
+          $packageFiles = @(Get-Content -LiteralPath "$packageDirectory/package-order.txt")
+          $expectedPackageCount = [int] $env:COHESION_PACKAGE_COUNT
+          if ($packageFiles.Count -ne $expectedPackageCount) {
+            throw "Expected $expectedPackageCount CI packages, found $($packageFiles.Count)."
+          }
+
+          # A first attempt must create every version. A conflict there means the run number
+          # repeated a version already on the feed (a renamed or recreated workflow restarts its run
+          # numbers), and --skip-duplicate would silently keep the older packages. Only a re-run of
+          # this same run, whose earlier attempt may have stopped partway, may skip existing ones.
+          $duplicateArgument = @()
+          if ([int] $env:COHESION_RUN_ATTEMPT -gt 1) {
+            $duplicateArgument = @('--skip-duplicate')
+          }
+
+          # One at a time, in package-order.txt's order: libraries, targeting packs, runtime packs,
+          # then the SDKs. A consumer resolves a build through its SDK pin, so the SDKs arrive only
+          # after everything they reference is already on the feed.
+          foreach ($packageFile in $packageFiles) {
+            $packagePath = Join-Path $packageDirectory $packageFile
+            if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
+              throw "The CI artifact is missing $packageFile."
+            }
+
+            & dotnet nuget push $packagePath `
+              --source 'https://nuget.pkg.github.com/assimalign/index.json' `
+              --api-key $env:GITHUB_PACKAGES_TOKEN `
+              --no-symbols `
+              @duplicateArgument
+            if ($LASTEXITCODE -ne 0) {
+              throw "Publishing $packageFile to GitHub Packages failed with exit code $LASTEXITCODE."
+            }
+          }
+
+          @"
+          ## Published CI packages
+
+          | | |
+          | --- | --- |
+          | Version | ``$($env:COHESION_PACKAGE_VERSION)`` |
+          | Channel | ``$($env:COHESION_PACKAGE_CHANNEL)`` |
+          | Commit | ``$($env:COHESION_BUILD_COMMIT)`` |
+          | Packages | $($packageFiles.Count) |
+
+          Pin every Cohesion SDK in a consumer's ``global.json`` ``msbuild-sdks`` block to
+          ``$($env:COHESION_PACKAGE_VERSION)``. The feed is
+          ``https://nuget.pkg.github.com/assimalign/index.json`` and requires a token with
+          ``read:packages``; see docs/VERSIONING_RELEASE_POLICY.md, "CI packages".
+          "@ |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
