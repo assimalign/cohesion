@@ -1229,3 +1229,7 @@ and text execution; a foreign-model request fails compilation. `GraphRequest` ow
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+Wire string decoding uses strict UTF-8. The shared startup/error payload reader refuses invalid
+sequences with ProtocolException; the server reports fatal ProtocolViolation and closes the session.
+Model statement, parameter-name and result-header strings use that same shared strict reader.
