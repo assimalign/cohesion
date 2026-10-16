@@ -142,7 +142,10 @@ hosting-family package:
    `Assimalign.Cohesion.App.Web` list in
    `resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props` (the Refs producer
    imports the same file), plus any new outside-area transitive dependencies the App/App.Web
-   lists don't already carry. Validate with
+   lists don't already carry. That includes the assembly of a package the library takes with
+   `CohesionPackageReference` when the package is not part of `Microsoft.NETCore.App`
+   (`System.Threading.RateLimiting` for Web.RateLimiting; `build-system.md`, "Package-delivered
+   assemblies are members too"). Validate with
    `dotnet pack resources/Web/Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj`
    (its collection target hard-fails on unresolvable assemblies). Exclusions from the list are
    documented in that file's comment. A separate hosting-family integration joins only the

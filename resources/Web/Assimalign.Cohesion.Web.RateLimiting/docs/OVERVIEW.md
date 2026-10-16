@@ -30,7 +30,9 @@ partitioning and queueing, are available through the policy model.
 - `Assimalign.Cohesion.Http` — the HTTP context, status codes, and header keys.
 - `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveRemoteIp` read the client-address partition key composes with.
 - `Assimalign.Cohesion.Http.Streaming` — the response-streaming feature the rejection writer checks before answering.
-- `System.Threading.RateLimiting` (BCL, AOT-safe) — the limiter engine.
+- `System.Threading.RateLimiting` (AOT-safe) — the limiter engine. It is an out-of-band package, not
+  part of `Microsoft.NETCore.App`; the `App.Web` framework ships it as a public member, so an
+  `Sdk.Web` application compiles against its limiter types without a package reference.
 
 It never references `Assimalign.Cohesion.Web.Hosting` (the resource hosting-isolation rule, `COHRES001`).
 

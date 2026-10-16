@@ -91,6 +91,12 @@
              IValidationProfile<T>, so applications compile against it. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
 
+        <!-- Package-delivered: Web.RateLimiting's CohesionPackageReference. The assembly is not
+             part of Microsoft.NETCore.App, and RateLimitingPolicy takes a
+             PartitionedRateLimiter<IHttpContext>, so applications compile against it (public).
+             The Runtime producer copies it into its bin (App.props). -->
+        <CohesionFrameworkAssembly Include="System.Threading.RateLimiting" />
+
         <!-- App-facing HTTP capabilities delivered deliberately even though no Web
              assembly references them, and consumed directly by application handlers.
              Incremental response streaming, the Server-Sent Events primitives, 1xx

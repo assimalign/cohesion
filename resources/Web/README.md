@@ -150,7 +150,8 @@ The working checklist also lives in `.claude/rules/web-area.md`:
    dependency-free (typed features and values — no DI reference, no configuration binding).
 2. **Framework membership** — a framework-delivered feature gets a `CohesionFrameworkAssembly` line in
    [`Assimalign.Cohesion.Web.Runtime/Directory.Build.props`](Assimalign.Cohesion.Web.Runtime/Directory.Build.props),
-   plus any new outside-area transitive dependencies App does not carry. Validate by packing
+   plus any new outside-area transitive dependencies App does not carry, a package assembly outside
+   `Microsoft.NETCore.App` included (`System.Threading.RateLimiting`). Validate by packing
    `resources/Web/Assimalign.Cohesion.Web.Runtime` (hard-fails on unresolvable assemblies). A separate
    hosting-family integration stays outside every framework carrying Web.Hosting (decision 57). If
    `Web.Hosting` references the new library, add its closure as a private member of the 17 other
