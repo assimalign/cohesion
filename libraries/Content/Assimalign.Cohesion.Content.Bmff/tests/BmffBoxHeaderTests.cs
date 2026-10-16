@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Binary;
 using System.IO;
 
 using Shouldly;
@@ -17,14 +16,8 @@ public class BmffBoxHeaderTests
     public void TryRead_ValidHeader_PreservesFields(bool large, bool uuid)
     {
         // Arrange: built from the ISO BMFF header grammar; no downloaded media.
-        var size = (large ? 16 : 8) + (uuid ? 16 : 0);
-        var bytes = new byte[size];
-        BinaryPrimitives.WriteUInt32BigEndian(bytes, large ? 1u : (uint)size);
-        BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(4), (uint)(uuid ? BmffBoxType.uuid : BmffBoxType.FreeSpace));
-        if (large)
-        {
-            BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(8), (ulong)size);
-        }
+        var bytes = BmffFixtures.Box(uuid ? "uuid" : "free", large: large);
+        var size = bytes.Length;
         using var input = new MemoryStream(bytes);
         using var output = new MemoryStream();
         // Act
