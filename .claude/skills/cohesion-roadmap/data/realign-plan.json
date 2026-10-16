@@ -11,7 +11,7 @@
     "realign-v2/tooling.md section 6.4 (window order)",
     "the regenerated v2 executor's dry run of 2026-10-16 (request counts)"
   ],
-  "executorState": "The v2 executor was regenerated from the approved data and dry-run on 2026-10-16: W1 394, W2 389 (384 plus 5 Tier writes for #1576-#1580), W3 391 and W4 391 requests, about 3 h 55 min at 400 per hour. W1A (Stage 0, 6 requests) can run now; W1B waits for the realignment tooling PR on main; W2 waits for programs.json with the gate entry on main. An independent review of the executor is running.",
+  "executorState": "The v2 executor was regenerated from the approved data and dry-run on 2026-10-16: W1 395, W2 389 (384 plus 5 Tier writes for #1576-#1580), W3 391 and W4 391 requests, about 3 h 55 min at 400 per hour. W1A (Stage 0, 7 requests: 3 field creates, the option-id probe, 3 option lists) runs right before the realignment tooling PR merges; W1B waits for that PR on main; W2 waits for programs.json with the gate entry on main.",
   "decisions": [
     { "id": 1, "group": "gates-run", "title": "Hardening (D1 v2): #1511 stays open as the program gate; its 8 features move to their code's categories; Program on 62 items and 33 blocked-by links.", "runsIn": ["W2"] },
     { "id": 2, "group": "gates-run", "title": "Withdraw R5: no scaffold child leaves the story that defines it.", "runsIn": ["W1", "W2"] },
@@ -77,7 +77,7 @@
   },
   "windows": [
     {
-      "id": "W1", "name": "Fields and options, then Core, SQL, Documents and KV/Blob/Cache categories, each filled as it is created", "requests": 394,
+      "id": "W1", "name": "Fields and options, then Core, SQL, Documents and KV/Blob/Cache categories, each filled as it is created", "requests": 395,
       "ops": [
         { "type": "fields", "fields": ["Category", "Tier", "Program"] },
         { "type": "areaOptions", "prefix": "Database" },
@@ -113,5 +113,5 @@
       "endState": "Field pass complete: the roadmap reads no carried category or program."
     }
   ],
-  "windowsNote": "Window order from realign-v2/delta-for-reapproval.md section 4; request counts from the regenerated v2 executor's dry run of 2026-10-16, W2 including the 5 Tier writes for the execution seam. W1 runs as W1A (Stage 0, 6 requests) and W1B. Decisions 11-13 were planned inside W3/W4; they were applied directly on 2026-10-16, before any window."
+  "windowsNote": "Window order from realign-v2/delta-for-reapproval.md section 4; request counts from the regenerated v2 executor's dry run of 2026-10-16, W2 including the 5 Tier writes for the execution seam. W1 runs as W1A (Stage 0, 7 requests) and W1B (388). Decisions 11-13 were planned inside W3/W4; they were applied directly on 2026-10-16, before any window."
 }

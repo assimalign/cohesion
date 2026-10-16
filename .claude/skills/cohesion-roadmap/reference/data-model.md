@@ -381,11 +381,11 @@ generated `roadmap-data.json` carries the data hashes too.
 | File | sha256 |
 | --- | --- |
 | `assets/roadmap-template.html` | `bf88e0bbf1a396870c43bf413e7824fff481b73862045aa9b53ac38d5f5d2fca` |
-| `data/tiers.json` | `05651171c31ca96a5275fad6575c2acd5b05b4952333fe09699e132456dc7900` |
+| `data/tiers.json` | `ebbd60c616a8ca76b9e4272e0bffba91c28b3cf4f0dc587cd8e4dd8775023c8a` |
 | `data/programs.json` | `47acd1c5d06c661787bf405896ad8fffd1fc639ef8695c8d069101d56df90ed3` |
 | `data/taxonomy.json` | `db2030184e9749f5e772be4a32ee644d9523c6c35df0e148b411664539364614` |
 | `data/overlay.json` | `aae06781ea482c3fb02c1e1a838acd81c0ec6ca6216e1f5e61370543c716d330` |
 | `data/bug-policy.json` | `bbf6bbfdc1995efb5ba4b453ae163074b6c2c0c8a81b6d5d93e06a4349b98651` |
-| `data/realign-plan.json` | `a9bf697179e4ef839535aec8a76865ebfc0448d59decbb9e0ee8b0ab8341764e` |
+| `data/realign-plan.json` | `18888e52459b37d9cfe77dce4205268da6aeae04a38e413eac8519ca26023ce7` |
 
 Recorded 2026-10-16. Update this table in the same change as any edit to those files.

@@ -73,7 +73,7 @@
       "id": "D2b",
       "date": "2026-10-16",
       "topic": "QueryRow.IsMissing (owner call under D2)",
-      "ruling": "Retracted: the additive QueryRow.IsMissing would be a public virtual member, which database-area.md rule 4 forbids (public members are non-virtual). #1126 designs a rule-4-compliant way to expose MISSING when it starts."
+      "ruling": "Retracted: the additive QueryRow.IsMissing would be a public virtual member, which rule 4 of the Database area's concrete-first rules forbids (\"Public members are non-virtual\"; database-area.md, on the integration branch until #1168 merges). #1126 designs a rule-4-compliant way to expose MISSING when it starts."
     }
   ],
   "epics": [
