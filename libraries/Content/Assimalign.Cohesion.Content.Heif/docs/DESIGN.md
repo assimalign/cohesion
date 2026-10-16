@@ -171,3 +171,27 @@ size, with a child count for composites or a lazy marker for opaque payloads. La
 shown in GiB; other totals use invariant digit grouping. Unloaded and preserved models are marked.
 The composite debugger proxy exposes the existing Children list without copying or enumerating it.
 Neither display evaluates field descriptions, writer size plans or payload accessors.
+
+## Inspection examples and extension contract
+
+See [OVERVIEW](OVERVIEW.md#traverse-and-inspect-the-native-tree) for traversal examples and fixture output.
+
+BmffBoxWalker and BmffQueryExtensions are the primary traversal for this profile, including
+`Children<T>`, `Descendants<T>`, FindAll(type), First and FirstOrDefault. Types can be profile classes
+or BmffBoxType/FourCC identities. The iteration and cycle/depth rules are shared with BMFF.
+The existing Accept/visitor dispatch remains for compatibility: BMFF cannot depend on this profile,
+so its visitor interface cannot acquire overloads for these boxes; they call Visit(BmffBox).
+
+A profile implements protected override void WriteDescription(TextWriter writer), calls base, then
+appends fields preceded by a space. Inside BMFF the override is protected internal. The hook is
+for already materialized state only; arbitrary custom overrides must uphold the no-I/O/no-mutation
+contract. Opaque full-box prefixes remain lazy. Large-size and size-zero mark header encodings;
+a loaded size always describes the source, even when current fields would serialize differently.
+
+A fixture subtree excerpt illustrates the header and field split:
+
+```text
+ipco @0xD7 size=145 children=6
+  ispe @0xDF size=20 version=0 flags=0x000000 dimensions=64x64
+  av1C @0xF3 size=12 lazy-payload=4
+```

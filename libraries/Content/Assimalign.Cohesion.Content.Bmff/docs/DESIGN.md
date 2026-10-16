@@ -19,7 +19,7 @@ hosting, reflection, assembly discovery or generated runtime code. NativeAOT com
 The owner explicitly retained the existing abstract BmffBox, BmffBoxComposite, one sealed class
 per box, and both visitor interfaces. This is a scoped exception to the repository's interface-first
 rule. The tree represents the file's ordered structure directly, lets each box own its payload
-Read/Write behavior, and lets visitors inspect or transform models without merging unrelated
+Read/Write behavior, and lets the walker and typed queries inspect models without merging unrelated
 field layouts into a generic box.
 
 BmffBoxComposite.Children is an editable IList rather than the former read-only enumeration.
@@ -214,7 +214,7 @@ versions follow the usual strict/lenient policy. No second reader pass is requir
 
 Track-reference lists for hint, cdsc, hind, dpnd, ipir, mpod and sync are interpreted only inside
 tref. Other reference types remain opaque. The original public field models have overloads on both visitor
-interfaces and on `BmffBoxVisitor<T>` (one `Visit` per public field model is part of the composite design), so
+interfaces and on `BmffBoxVisitor<T>` (retained for compatibility), so
 `TrackReferenceTypeBox`, `TrackFragmentDecodeTimeBox`, `DataEntryUrlBox`, `DataEntryUrnBox` and
 `ItemInfoEntryBox` dispatch to typed overloads rather than to `Visit(BmffBox)`. This follow-up keeps those
 interfaces unchanged: profile boxes and the internal sidx/saio implementations use the existing
@@ -403,7 +403,7 @@ still receives a matching leave; Stop ends immediately without unwinding callbac
 iterative, keeps only ancestor frames, rejects cycles and defaults to a maximum depth of 64.
 Copy a callback path before retaining it. Do not edit child lists during traversal.
 
-Children<T> queries direct children; Descendants<T>, FindAll and First/FirstOrDefault search
+`Children<T>` queries direct children; `Descendants<T>`, FindAll and First/FirstOrDefault search
 in preorder. Composite queries exclude their receiver; document queries include top-level boxes.
 FindAll and First/FirstOrDefault accept BmffBoxType or FourCC, including unregistered values.
 Queries are lazy and bounded by depth, so first-match queries stop without visiting later trees.
@@ -437,3 +437,20 @@ size, with a child count for composites or a lazy marker for opaque payloads. La
 shown in GiB; other totals use invariant digit grouping. Unloaded and preserved models are marked.
 The composite debugger proxy exposes the existing Children list without copying or enumerating it.
 Neither display evaluates field descriptions, writer size plans or payload accessors.
+
+## Inspection examples and extension contract
+
+See [OVERVIEW](OVERVIEW.md#traverse-and-inspect-a-tree) for traversal examples and fixture output.
+
+A profile implements protected override void WriteDescription(TextWriter writer), calls base, then
+appends fields preceded by a space. Inside BMFF the override is protected internal. The hook is
+for already materialized state only; arbitrary custom overrides must uphold the no-I/O/no-mutation
+contract. Opaque full-box prefixes remain lazy. Large-size and size-zero mark header encodings;
+a loaded size always describes the source, even when current fields would serialize differently.
+
+A fixture subtree excerpt illustrates the header and field split:
+
+```text
+moov @0x201A size=982 children=3
+  mvhd @0x2022 size=108 version=0 flags=0x000000 timescale=1000 duration=4000 next-track-id=3
+```
