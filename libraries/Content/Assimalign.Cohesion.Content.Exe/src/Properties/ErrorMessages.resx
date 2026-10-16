@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="SeekableSourceRequired" xml:space="preserve"><value>Executable inspection requires a readable, seekable source.</value></data>
+  <data name="InvalidRange" xml:space="preserve"><value>The declared range is invalid.</value></data>
+  <data name="TruncatedRange" xml:space="preserve"><value>The declared range exceeds the available source.</value></data>
+  <data name="MetadataLimit" xml:space="preserve"><value>Executable metadata exceeds the configured byte limit.</value></data>
+  <data name="TableLimit" xml:space="preserve"><value>An executable table exceeds the configured entry limit.</value></data>
+  <data name="InvalidTable" xml:space="preserve"><value>An executable table is inconsistent with its header.</value></data>
+  <data name="InvalidName" xml:space="preserve"><value>A section name offset is outside its string table.</value></data>
+  <data name="UnterminatedString" xml:space="preserve"><value>The declared string has no terminating zero byte.</value></data>
+  <data name="UnknownFormat" xml:space="preserve"><value>The executable format is not supported.</value></data>
+  <data name="InvalidSignature" xml:space="preserve"><value>The executable signature is invalid.</value></data>
+  <data name="InvalidOptionalHeader" xml:space="preserve"><value>The PE optional header has an invalid size.</value></data>
+  <data name="UnsupportedVariant" xml:space="preserve"><value>This executable format variant is not supported.</value></data>
+  <data name="InvalidIdentification" xml:space="preserve"><value>ELF class or data encoding is invalid.</value></data>
+  <data name="InvalidHeaderSize" xml:space="preserve"><value>The executable header size is invalid.</value></data>
+  <data name="InvalidSegment" xml:space="preserve"><value>An ELF segment has inconsistent file and memory sizes.</value></data>
+  <data name="InvalidInterpreter" xml:space="preserve"><value>The ELF interpreter declaration is invalid.</value></data>
+  <data name="InvalidNameTable" xml:space="preserve"><value>The ELF section-name string table is invalid.</value></data>
+  <data name="InvalidArchitecture" xml:space="preserve"><value>A universal Mach-O architecture range or alignment is invalid.</value></data>
+  <data name="InvalidCommand" xml:space="preserve"><value>A Mach-O load command has an invalid size or boundary.</value></data>
+  <data name="InvalidArgument" xml:space="preserve"><value>A process argument cannot contain a NUL character.</value></data>
+  <data name="InvalidResult" xml:space="preserve"><value>The exit code is inconsistent with the termination reason.</value></data>
+</root>

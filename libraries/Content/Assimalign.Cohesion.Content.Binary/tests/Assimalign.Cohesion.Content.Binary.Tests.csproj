@@ -1,16 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Files.Binary.Tests</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Content.Binary.Tests</RootNamespace>
 	</PropertyGroup>
-  <ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
 	</ItemGroup>
-
-  <ItemGroup>
-    <Using Include="Xunit" />
-  </ItemGroup>
-
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Binary" />
+	</ItemGroup>
 </Project>

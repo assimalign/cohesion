@@ -1,41 +1,55 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
-[DebuggerDisplay("Bmff Box: Movie Fragment Random Access Offset (mfro)")]
-public sealed class MovieFragmentRandomAccessOffsetBox : BmffBox
+namespace Assimalign.Cohesion.Content.Bmff;
+
+/// <summary>The MovieFragmentRandomAccessOffset box; ISO/IEC 14496-12 8.8.11.</summary>
+public sealed class MovieFragmentRandomAccessOffsetBox : BmffFullBox
 {
-    public MovieFragmentRandomAccessOffsetBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
-    public override bool IsLeaf => throw new NotImplementedException();
+    private byte[] _trailing = Array.Empty<byte>();
+    /// <summary>Creates a MovieFragmentRandomAccessOffsetBox at its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public MovieFragmentRandomAccessOffsetBox(long offset, long limit) { SetOriginalLocation(offset, limit);  }
 
-    public override bool IsComposite => throw new NotImplementedException();
-
-    public override long Limit { get; }
-
-    public override long Offset { get; }
-
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.MovieFragmentRandomAccessOffset;
 
+    /// <summary>Gets or sets the enclosing mfra size in bytes.</summary>
+    public uint MfraSize { get; set; }
+
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 0, 0, stream.Offset);
+        MfraSize = BmffFields.U32(stream);
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
     }
-
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new NotImplementedException();
+        Validate();
+        WriteFullBoxHeader(stream);
+        BmffFields.U32(stream, MfraSize);
+        stream.Write(_trailing);
     }
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    /// <inheritdoc/>
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 8L + _trailing.Length;
     }
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 0, 0, Offset);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

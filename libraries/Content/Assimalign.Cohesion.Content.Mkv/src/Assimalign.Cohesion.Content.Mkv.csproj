@@ -1,8 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.IO.Mkv</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Content.Mkv</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Bmff" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Ebml" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Media" />
 	</ItemGroup>
 </Project>

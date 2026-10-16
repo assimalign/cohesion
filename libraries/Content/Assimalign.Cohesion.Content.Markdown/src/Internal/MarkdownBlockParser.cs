@@ -16,9 +16,7 @@ namespace Assimalign.Cohesion.Content.Markdown.Internal;
 /// </summary>
 internal sealed class MarkdownBlockParser
 {
-    // Containers beyond this depth degrade to paragraph text instead of nesting further, which also
-    // bounds renderer stack depth.
-    private const int maxContainerDepth = 128;
+    private readonly MarkdownParserOptions _options;
 
     private readonly MarkdownDocument _document = new();
     private readonly List<Container> _open = [];
@@ -33,14 +31,16 @@ internal sealed class MarkdownBlockParser
     private int _fenceLength;
     private int _fenceIndent;
 
-    private MarkdownBlockParser()
+    private MarkdownBlockParser(MarkdownParserOptions options)
     {
+        _options = options;
         _open.Add(new Container(ContainerKind.Document, _document.Blocks));
     }
 
-    public static MarkdownDocument Parse(string text)
+    public static MarkdownDocument Parse(string text, MarkdownParserOptions options)
     {
-        var parser = new MarkdownBlockParser();
+        options.Validate();
+        var parser = new MarkdownBlockParser(options);
         var tokenizer = new TextTokenizer(text);
         ReadOnlySpan<char> line = default;
         var hasText = false;
@@ -67,7 +67,7 @@ internal sealed class MarkdownBlockParser
         parser.CloseTo(0);
         foreach (var (target, raw) in parser._pendingInlines)
         {
-            MarkdownInlineParser.Parse(raw, target);
+            MarkdownInlineParser.Parse(raw, target, options);
         }
 
         return parser._document;
@@ -94,6 +94,11 @@ internal sealed class MarkdownBlockParser
         //    open), then feeds looseness tracking.
         if (cursor.IsBlank)
         {
+            if (lostEmptyItem)
+            {
+                _open[matched - 1].BlankPending = true;
+            }
+
             CloseTo(matched - 1);
             HandleBlank(matched);
             return;
@@ -103,7 +108,7 @@ internal sealed class MarkdownBlockParser
         var openedAny = false;
         while (true)
         {
-            if (_open.Count >= maxContainerDepth)
+            if (matched - 1 >= _options.MaxContainerDepth)
             {
                 break;
             }
@@ -164,6 +169,12 @@ internal sealed class MarkdownBlockParser
             }
 
             break;
+        }
+
+        // A marker-only container has no paragraph. Its leading blank is tracked on the item.
+        if (cursor.IsBlank)
+        {
+            return;
         }
 
         // 5. Remaining text: paragraph content. A paragraph still open from the previous line
@@ -229,12 +240,14 @@ internal sealed class MarkdownBlockParser
                             return matched;
                         }
 
+                        // A blank still carries container indentation, especially inside a fence.
+                        cursor.SkipWhitespace(maxColumns: container.ContentIndent);
                         break;
                     }
 
                     var probe = cursor;
-                    probe.SkipWhitespace(maxColumns: container.ContentColumn - probe.Column);
-                    if (probe.Column < container.ContentColumn)
+                    probe.SkipWhitespace(maxColumns: container.ContentIndent);
+                    if (probe.Column - cursor.Column < container.ContentIndent)
                     {
                         return matched;
                     }
@@ -252,15 +265,12 @@ internal sealed class MarkdownBlockParser
 
     private void HandleBlank(int matched)
     {
-        for (var index = matched - 1; index > 0; index--)
+        var container = _open[matched - 1];
+        if (container.Kind == ContainerKind.ListItem)
         {
-            var container = _open[index];
-            if (container.Kind == ContainerKind.ListItem)
-            {
-                // A blank before any content is the single allowed leading blank; one after content
-                // arms looseness.
-                container.BlankPending = true;
-            }
+            // Only the immediate item owns this blank. A blank in a child quote or list does not
+            // loosen its ancestors; trailing list blanks propagate when that child closes.
+            container.BlankPending = true;
         }
     }
 
@@ -284,7 +294,8 @@ internal sealed class MarkdownBlockParser
 
         // Content line: remove up to the opening fence's indentation.
         cursor.SkipWhitespace(maxColumns: _fenceIndent);
-        _fenceRaw!.Append(cursor.Remaining).Append('\n');
+        cursor.AppendRemaining(_fenceRaw!);
+        _fenceRaw!.Append('\n');
     }
 
     private static bool TryReadThematicBreak(LineCursor probe)
@@ -457,6 +468,12 @@ internal sealed class MarkdownBlockParser
 
         // A marker while the current item is still matched starts a nested list inside it; a marker
         // after the item stopped matching is a sibling of (or replacement for) the current list.
+        var needed = _open[matched - 1].Kind == ContainerKind.List ? 1 : 2;
+        if (matched - 1 > _options.MaxContainerDepth - needed)
+        {
+            return false;
+        }
+
         CloseTo(matched - 1);
         var deepest = _open[^1];
         Container listContainer;
@@ -497,7 +514,7 @@ internal sealed class MarkdownBlockParser
         var itemContainer = new Container(ContainerKind.ListItem, item.Blocks)
         {
             List = listContainer.List,
-            ContentColumn = contentColumn,
+            ContentIndent = contentColumn - cursor.Column,
             BlankPending = startsBlank,
         };
         OpenContainer(itemContainer);
@@ -579,6 +596,12 @@ internal sealed class MarkdownBlockParser
                 _open[index - 1].BlankPending = true;
             }
 
+            if (container.Kind == ContainerKind.List && container.BlankPending
+                && _open[index - 1].Kind == ContainerKind.ListItem)
+            {
+                _open[index - 1].BlankPending = true;
+            }
+
             _open.RemoveAt(index);
         }
     }
@@ -606,19 +629,19 @@ internal sealed class MarkdownBlockParser
         public IList<MarkdownBlock>? Blocks { get; }
         public MarkdownList? List { get; init; }
         public char ListMarker { get; init; }
-        public int ContentColumn { get; init; }
+        public int ContentIndent { get; init; }
         public bool BlankPending { get; set; }
         public bool HasContent { get; set; }
     }
 
     /// <summary>
     /// A tab-aware cursor over one line: columns advance to the next multiple-of-four stop on tabs.
-    /// A tab that straddles a requested column budget is consumed whole — the subset's documented
-    /// simplification of the spec's partial-tab expansion.
+    /// Tabs crossing a container boundary retain their remaining virtual spaces.
     /// </summary>
     private ref struct LineCursor
     {
         private readonly ReadOnlySpan<char> _line;
+        private int _tabRemaining;
 
         /// <summary>Initializes a new instance of the <see cref="LineCursor"/> structure.</summary>
         /// <param name="line">The line the cursor scans.</param>
@@ -631,9 +654,9 @@ internal sealed class MarkdownBlockParser
 
         public int Column { get; private set; }
 
-        public readonly bool AtEnd => Index >= _line.Length;
+        public readonly bool AtEnd => _tabRemaining == 0 && Index >= _line.Length;
 
-        public readonly char Current => _line[Index];
+        public readonly char Current => _tabRemaining > 0 ? ' ' : _line[Index];
 
         public readonly ReadOnlySpan<char> Remaining => _line[Index..];
 
@@ -641,6 +664,13 @@ internal sealed class MarkdownBlockParser
 
         public void Advance()
         {
+            if (_tabRemaining > 0)
+            {
+                _tabRemaining--;
+                Column++;
+                return;
+            }
+
             Column += _line[Index] == '\t' ? 4 - (Column % 4) : 1;
             Index++;
         }
@@ -651,19 +681,34 @@ internal sealed class MarkdownBlockParser
             var startColumn = Column;
             while (!AtEnd && Column - startColumn < maxColumns && Current is ' ' or '\t')
             {
+                var width = Current == '\t' ? 4 - (Column % 4) : 1;
+                var available = maxColumns - (Column - startColumn);
+                if (width > available)
+                {
+                    _tabRemaining = width - available;
+                    Column += available;
+                    Index++;
+                    break;
+                }
+
                 Advance();
             }
 
             return Column - startColumn;
         }
 
-        /// <summary>Consumes a single optional space (or a whole tab) after a container marker.</summary>
+        /// <summary>Consumes one optional whitespace column after a container marker.</summary>
         public void SkipOneSpace()
         {
             if (!AtEnd && Current is ' ' or '\t')
             {
-                Advance();
+                SkipWhitespace(1);
             }
+        }
+
+        internal readonly void AppendRemaining(StringBuilder builder)
+        {
+            builder.Append(' ', _tabRemaining).Append(Remaining);
         }
 
         /// <summary>Consumes marker characters until the given column is reached (for re-scanning).</summary>

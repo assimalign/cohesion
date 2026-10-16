@@ -422,6 +422,7 @@
 		<Project Path="Connections/Assimalign.Cohesion.Connections.Udp/tests/Assimalign.Cohesion.Connections.Udp.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Content/">
+		<File Path="../docs/libraries/Content/DESIGN.md" />
 		<File Path="Content/Directory.Build.props" />
 		<File Path="Content/Directory.Build.targets" />
 		<File Path="Content/README.md" />
@@ -442,6 +443,10 @@
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Binary/">
 		<File Path="Content/Assimalign.Cohesion.Content.Binary/README.md" />
 	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Binary/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Binary/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Binary/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Binary/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Binary/src/Assimalign.Cohesion.Content.Binary.csproj" />
 	</Folder>
@@ -451,13 +456,23 @@
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Bmff/">
 		<File Path="Content/Assimalign.Cohesion.Content.Bmff/README.md" />
 	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Bmff/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Bmff/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Bmff/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Bmff/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Bmff/src/Assimalign.Cohesion.Content.Bmff.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Bmff/tests/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Bmff/tests/Assimalign.Cohesion.Content.Bmff.Tests.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Ebml/" />
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Ebml/">
+		<File Path="Content/Assimalign.Cohesion.Content.Ebml/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Ebml/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Ebml/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Ebml/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Ebml/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Ebml/src/Assimalign.Cohesion.Content.Ebml.csproj" />
 	</Folder>
@@ -467,11 +482,36 @@
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/">
 		<File Path="Content/Assimalign.Cohesion.Content.Exe/README.md" />
 	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Exe/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Exe/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/">
+		<Project Path="Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/Assimalign.Cohesion.Content.Exe.TestHost.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Exe/fixtures/Assimalign.Cohesion.Content.Exe.TestHost/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Exe/src/Assimalign.Cohesion.Content.Exe.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Exe/tests/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Exe/tests/Assimalign.Cohesion.Content.Exe.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Heif/">
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Heif/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Heif/src/">
+		<Project Path="Content/Assimalign.Cohesion.Content.Heif/src/Assimalign.Cohesion.Content.Heif.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Heif/tests/">
+		<Project Path="Content/Assimalign.Cohesion.Content.Heif/tests/Assimalign.Cohesion.Content.Heif.Tests.csproj" />
+		<File Path="Content/Assimalign.Cohesion.Content.Heif/tests/TestObjects/Corpus/PROVENANCE.md" />
 	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Markdown/">
 		<File Path="Content/Assimalign.Cohesion.Content.Markdown/README.md" />
@@ -481,9 +521,14 @@
 	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Markdown/tests/Assimalign.Cohesion.Content.Markdown.Tests.csproj" />
+		<File Path="Content/Assimalign.Cohesion.Content.Markdown/tests/TestObjects/CommonMark/PROVENANCE.md" />
 	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Media/">
 		<File Path="Content/Assimalign.Cohesion.Content.Media/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Media/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Media/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Media/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Media/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Media/src/Assimalign.Cohesion.Content.Media.csproj" />
@@ -491,20 +536,44 @@
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Media/tests/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Media/tests/Assimalign.Cohesion.Content.Media.Tests.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mkv/" />
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mkv/">
+		<File Path="Content/Assimalign.Cohesion.Content.Mkv/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mkv/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Mkv/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Mkv/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mkv/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Mkv/src/Assimalign.Cohesion.Content.Mkv.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mkv/tests/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Mkv/tests/Assimalign.Cohesion.Content.Mkv.Tests.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mpeg/" />
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mpeg/">
+		<File Path="Content/Assimalign.Cohesion.Content.Mpeg/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mpeg/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Mpeg/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Mpeg/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Mpeg/src/Assimalign.Cohesion.Content.Mpeg.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/" />
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mpeg/tests/">
+		<Project Path="Content/Assimalign.Cohesion.Content.Mpeg/tests/Assimalign.Cohesion.Content.Mpeg.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/">
+		<File Path="Content/Assimalign.Cohesion.Content.Pdf/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Pdf/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Pdf/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Pdf/src/Assimalign.Cohesion.Content.Pdf.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/tests/">
+		<Project Path="Content/Assimalign.Cohesion.Content.Pdf/tests/Assimalign.Cohesion.Content.Pdf.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Text/">
 		<File Path="Content/Assimalign.Cohesion.Content.Text/README.md" />

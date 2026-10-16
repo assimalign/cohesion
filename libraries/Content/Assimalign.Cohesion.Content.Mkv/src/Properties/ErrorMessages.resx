@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?><root>
+<resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+<resheader name="version"><value>2.0</value></resheader>
+<resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+<resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+<data name="AttachmentInvalid" xml:space="preserve"><value>An AttachedFile element containing FileData is required.</value></data>
+<data name="AttachmentLimit" xml:space="preserve"><value>The attachment exceeds the configured materialization limit.</value></data>
+<data name="AudioInvalid" xml:space="preserve"><value>The audio sampling frequency must be finite and positive.</value></data>
+<data name="AudioRequired" xml:space="preserve"><value>An audio track requires Audio metadata.</value></data>
+<data name="BlockFlagsInvalid" xml:space="preserve"><value>Reserved block flags must be zero.</value></data>
+<data name="BlockInvalid" xml:space="preserve"><value>The Matroska block header is invalid.</value></data>
+<data name="BlockTrackInvalid" xml:space="preserve"><value>The block track number must be nonzero.</value></data>
+<data name="BlockTrackMissing" xml:space="preserve"><value>The block track number has no TrackEntry.</value></data>
+<data name="BlockTruncated" xml:space="preserve"><value>The Matroska block header is truncated.</value></data>
+<data name="ClusterEditUnsupported" xml:space="preserve"><value>Saving edits to cluster contents or topology is unsupported.</value></data>
+<data name="CodecStateUnsupported" xml:space="preserve"><value>Safe range seeking across a codec configuration change is unsupported.</value></data>
+<data name="CueInvalid" xml:space="preserve"><value>The cue does not address an available cluster or track.</value></data>
+<data name="DepthLimit" xml:space="preserve"><value>The element nesting depth exceeds the configured limit.</value></data>
+<data name="LaceInvalid" xml:space="preserve"><value>Lace frame sizes do not fit the block.</value></data>
+<data name="LaceLimit" xml:space="preserve"><value>The block frame count exceeds the configured limit.</value></data>
+<data name="LaceTimeUnknown" xml:space="preserve"><value>Individual lace timestamps require DefaultDuration; codec decoding is not performed.</value></data>
+<data name="LacingDisabled" xml:space="preserve"><value>The track forbids lacing but the block contains laced frames.</value></data>
+<data name="LayoutLimit" xml:space="preserve"><value>The indexed metadata layout did not converge within the configured pass bound.</value></data>
+<data name="MetadataLimit" xml:space="preserve"><value>The metadata count exceeds a configured limit.</value></data>
+<data name="PositionTargetRemoved" xml:space="preserve"><value>An indexed element was removed; remove its native index entry before saving.</value></data>
+<data name="ProfileUnsupported" xml:space="preserve"><value>The EBML header does not identify a supported Matroska or WebM profile.</value></data>
+<data name="ReferenceUnsupported" xml:space="preserve"><value>The block reference cannot be resolved within the source snapshot.</value></data>
+<data name="SaveDestination" xml:space="preserve"><value>Save requires separate writable storage.</value></data>
+<data name="SeekInvalid" xml:space="preserve"><value>The segment-relative position does not address the declared top-level element.</value></data>
+<data name="SegmentRequired" xml:space="preserve"><value>A Matroska Segment is required.</value></data>
+<data name="SizeLimit" xml:space="preserve"><value>The encoded element exceeds EBML size capacity.</value></data>
+<data name="SourceSeekable" xml:space="preserve"><value>The document requires a readable seekable source.</value></data>
+<data name="StreamOperationUnsupported" xml:space="preserve"><value>The stream does not support this operation.</value></data>
+<data name="StrictRequired" xml:space="preserve"><value>The Matroska media adapter requires strict EBML validation.</value></data>
+<data name="TimestampInvalid" xml:space="preserve"><value>The timestamp cannot be represented in signed nanoseconds.</value></data>
+<data name="TrackDuplicate" xml:space="preserve"><value>Track numbers and track UIDs must be unique.</value></data>
+<data name="TrackScaleIgnored" xml:space="preserve"><value>The deprecated TrackTimestampScale is preserved but ignored by the media view.</value></data>
+<data name="VideoDimensionsInvalid" xml:space="preserve"><value>The crop leaves no positive video dimensions.</value></data>
+<data name="VideoRequired" xml:space="preserve"><value>A video track requires Video metadata.</value></data>
+<data name="WebMUnsupported" xml:space="preserve"><value>This track or element is outside the retained WebM subset.</value></data>
+<data name="TagRequired" xml:space="preserve"><value>A Tag requires at least one SimpleTag.</value></data>
+<data name="ChapterRequired" xml:space="preserve"><value>An EditionEntry requires at least one ChapterAtom.</value></data>
+<data name="SegmentUuidInvalid" xml:space="preserve"><value>The SegmentUUID must contain at least one nonzero bit.</value></data>
+<data name="EncryptedBlockUnsupported" xml:space="preserve"><value>Legacy EncryptedBlock sample interpretation is unsupported.</value></data>
+<data name="CollectionCapacity" xml:space="preserve"><value>The destination array cannot hold the collection.</value></data>
+<data name="ChapterTimeInvalid" xml:space="preserve"><value>A chapter end must not precede its start.</value></data>
+<data name="ChapterEndRequired" xml:space="preserve"><value>An ordered leaf chapter requires an end timestamp.</value></data>
+<data name="BlockRequired" xml:space="preserve"><value>The current element must be SimpleBlock or Block.</value></data>
+</root>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="DetectionRequiresReopen" xml:space="preserve"><value>Encoding detection requires reopenable content because it consumes a read. Provide the encoding explicitly for single-use content.</value></data>
+  <data name="NullTokenDefinition" xml:space="preserve"><value>Token definitions must not be null.</value></data>
+  <data name="DuplicateTokenDefinition" xml:space="preserve"><value>Duplicate token definition text '{0}'.</value></data>
+  <data name="InvalidTokenKind" xml:space="preserve"><value>A definition must be a delimiter, new-line, or whitespace token; text is the implicit kind of runs between matches.</value></data>
+  <data name="DecodingInvalid" xml:space="preserve"><value>The input contains an invalid byte sequence for its text encoding.</value></data>
+  <data name="LineLengthLimitExceeded" xml:space="preserve"><value>The line exceeds the configured maximum length.</value></data>
+</root>

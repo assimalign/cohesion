@@ -1,49 +1,29 @@
-﻿using Assimalign.Cohesion.Files.Bmff.Internal;
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
-[DebuggerDisplay("Bmff Box: Track Fragment (traf)")]
+namespace Assimalign.Cohesion.Content.Bmff;
+
+/// <summary>The TrackFragment container and its ordered child boxes.</summary>
 public sealed class TrackFragmentBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> _children;
+    internal override bool SupportsAsyncPlan => true;
+    /// <summary>Creates a TrackFragment box with its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
     public TrackFragmentBox(long offset, long limit)
     {
-        this.Offset = offset;
-        this.Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
-    public override IEnumerable<BmffBox> Children => _children;
 
-    public override long Limit { get;}
-
-    public override long Offset { get; }
-
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.TrackFragment;
-
-    public override void Read(BmffStream stream)
-    {
-        var boxes = new List<BmffBox>();
-        var reader = new BmffReaderDefault(stream);
-
-        while (reader.Read())
-        {
-            boxes.Add(reader.Current);
-        }
-
-        _children = boxes;
-    }
-
-    public override void Write(BmffStream stream)
-    {
-        throw new NotImplementedException();
-    }
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
-    {
-        return visitor.Visit(this);
-    }
+    /// <inheritdoc/>
+    public override void Read(BmffStream stream) => base.Read(stream);
+    /// <inheritdoc/>
+    public override void Write(BmffStream stream) => base.Write(stream);
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
 }

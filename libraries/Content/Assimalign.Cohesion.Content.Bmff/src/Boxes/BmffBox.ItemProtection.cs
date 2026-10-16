@@ -1,54 +1,92 @@
-﻿using Assimalign.Cohesion.Files.Bmff.Internal;
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System;
+using System.Buffers.Binary;
+using System.IO;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
+namespace Assimalign.Cohesion.Content.Bmff;
 
-[DebuggerDisplay("Bmff Box: Item Protection (ipro)")]
+/// <summary>The ItemProtection container and its ordered child boxes.</summary>
 public sealed class ItemProtectionBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> _children;
+    internal override bool SupportsAsyncPlan => true;
+    /// <summary>Creates a ItemProtection box with its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
     public ItemProtectionBox(long offset, long limit)
     {
-        this.Offset = offset;
-        this.Limit = limit;
+        SetOriginalLocation(offset, limit);
     }
-    public override bool IsLeaf => throw new NotImplementedException();
 
-    public override bool IsComposite => throw new NotImplementedException();
-
-    public override long Limit { get; }
-
-    public override long Offset { get; }
-
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.ItemProtection;
-
-    public override IEnumerable<BmffBox> Children => throw new NotImplementedException();
-
-    public override void Read(BmffStream stream)
+    private uint _flags;
+    /// <summary>Gets or sets the full-box version. Version zero is implemented.</summary>
+    public byte Version { get; set; }
+    /// <summary>Gets or sets the 24-bit flags. Zero flags are implemented.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value exceeds 24 bits.</exception>
+    public uint Flags
     {
-        var boxes = new List<BmffBox>();
-        var reader = new BmffReaderDefault(stream);
-
-        while (reader.Read())
+        get => _flags;
+        set
         {
-            boxes.Add(reader.Current);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 0xFFFFFFu);
+            _flags = value;
         }
-
-        _children = boxes;
     }
-
-    public override void Write(BmffStream stream)
+    internal override int PrefixSize => 6;
+    internal override int? ReadPrefix(BmffStream stream)
     {
-        throw new NotImplementedException();
+        Span<byte> bytes = stackalloc byte[4];
+        var prefix = BmffBinary.ReadField(stream, bytes).ReadUInt32BigEndian();
+        Version = (byte)(prefix >> 24);
+        Flags = prefix & 0xFFFFFF;
+        ValidateVersion();
+        return BmffBinary.ReadField(stream, bytes[..2]).ReadUInt16BigEndian();
     }
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    internal override void WritePrefix(BmffStream stream)
     {
-        return visitor.Visit(this);
+        ValidateVersion();
+        Span<byte> bytes = stackalloc byte[6];
+        BinaryPrimitives.WriteUInt32BigEndian(bytes, ((uint)Version << 24) | Flags);
+        if (Children.Count > ushort.MaxValue)
+        {
+            throw new ContentFormatException(ErrorMessages.ChildCountMismatch, ContentFormatErrorCode.LimitExceeded, Offset);
+        }
+        ValidateChildren(Children.Count);
+        BinaryPrimitives.WriteUInt16BigEndian(bytes[4..], (ushort)Children.Count);
+        stream.Write(bytes);
+    }
+    private void ValidateVersion()
+    {
+        if (Version != 0 || Flags != 0)
+        {
+            throw new ContentFormatException(ErrorMessages.UnsupportedVersion, ContentFormatErrorCode.Unsupported, Offset);
+        }
+    }
+    internal override void ValidateChildren(int? expectedCount)
+    {
+        base.ValidateChildren(expectedCount);
+        foreach (var child in Children)
+        {
+            if (child.BoxType != BmffBoxType.ProtectionSchemeInfo)
+            {
+                throw new ContentFormatException(ErrorMessages.ChildCountMismatch, ContentFormatErrorCode.InvalidStructure, child.Offset);
+            }
+        }
+    }
+    /// <inheritdoc/>
+    public override void Read(BmffStream stream) => base.Read(stream);
+    /// <inheritdoc/>
+    public override void Write(BmffStream stream) => base.Write(stream);
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" version={Version} flags=0x{Flags:X6}"));
     }
 }

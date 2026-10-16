@@ -4,13 +4,14 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.IO.Ebml;
+namespace Assimalign.Cohesion.Content.Ebml;
 
 /// <summary>
 /// Defines the EBML element types
 /// </summary>
 public enum EbmlElementType
 {
+    /// <summary>An unspecified element type; no scalar encoding is selected.</summary>
     None = -1,
     /// <summary>
     /// The signed integer

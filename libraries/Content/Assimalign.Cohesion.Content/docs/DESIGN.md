@@ -25,8 +25,9 @@ it. FileSystem integration belongs in an adapter at the edge, not in the anchor 
 | `ContentFormat` / `ContentKind` | Immutable format descriptor: name, classification, media types, extensions, governing specification |
 | `ContentException` / `ContentFormatException` | Area exception root and the malformed-input error every format reader reports through |
 
-Concrete implementations are `internal` (`MemoryContent`, `StreamContent`, `CompositeContent`),
-created through the public `ContentFactory` — interface-first per the repo coding rules.
+Concrete implementations are public sealed MemoryContent, StreamContent, and CompositeContent,
+with private constructors and concrete-returning Create methods (decision 59). MemoryContent.CreateWritable
+creates an empty writable buffer. Consumers can continue to depend on the interfaces.
 
 ## Stream ownership (the load-bearing decision)
 
@@ -35,7 +36,7 @@ Predictable parsing and serving requires every stream's lifetime to have exactly
 - **Streams handed out are caller-owned.** `OpenRead`/`OpenWrite` return streams the caller must
   dispose. For stream-backed content the returned object is a non-disposing *view*: disposing it never
   tears down the backing source, because the content instance owns that decision.
-- **Backing resources are owned or borrowed at creation.** `ContentFactory.FromStream(..., leaveOpen:)`
+- **Backing resources are owned or borrowed at creation.** `StreamContent.Create(..., leaveOpen:)`
   decides whether disposing the content disposes the source. The same rule applies to composites and
   their children (`leaveItemsOpen`).
 - **Reopenability is explicit.** `CanReopen` distinguishes replayable content (memory, seekable
@@ -46,8 +47,9 @@ Predictable parsing and serving requires every stream's lifetime to have exactly
   locking, because the media formats will hand out large streams where implicit synchronization would
   be a performance trap.
 
-Writes commit atomically: `IWritableContent.OpenWrite` buffers and replaces the visible bytes when the
-write stream is disposed, so a failed emit never leaves half-written content visible.
+`IWritableContent.OpenWrite` buffers and replaces the visible bytes when the write stream is
+disposed. Replacement is atomic, but disposal also commits bytes written before an emission error;
+callers that publish only on successful emission must prepare the complete payload separately.
 
 ## Composition
 
@@ -70,20 +72,32 @@ stabilization-feature concern that must not weigh down the contract root.
 `ContentException` is the area root (inherits `Exception` per the AGENTS area-root rule).
 `ContentFormatException` adds the malformed-input `Position` and is the type every format reader
 throws instead of leaking raw parsing exceptions; format packages derive from it when they need
-richer diagnostics (the EBML package's existing exceptions should migrate onto this root as part of
-its repair feature).
+richer diagnostics. EBML's EbmlDataFormatException and YAML's YamlException now derive from this root.
+
+ContentFormatException also carries ErrorCode: Unspecified (legacy constructors), Truncated,
+InvalidStructure, InvalidValue, LimitExceeded, or Unsupported. Positions are absolute when the
+reader knows the source origin. Tests assert codes and positions, never message text.
+All package-authored exception messages live in Properties/ErrorMessages.resx.
 
 ## Family dependency direction
 
-```
-Assimalign.Cohesion.Content            (this package — neutral contracts)
- ├── Content.Binary                    (shared binary parsing surface)
- │    └── Content.Media               (shared media abstractions)
- │         └── Content.Bmff → Mpeg…  (container formats and profiles)
- ├── Content.Text                      (encoding + text reading surface)
- │    ├── Content.Markdown           (text-derived formats)
- │    └── Content.Yaml               (YAML 1.2 — document model, parser, emitter)
- └── Content.Ebml → Content.Mkv       (EBML-based formats)
+The integrated [area family map](../../../../docs/libraries/Content/DESIGN.md#family-map) records
+all thirteen packages. Direct references point from consumers toward their shared layer:
+
+```mermaid
+flowchart LR
+    Binary["Content.Binary"] --> Root["Content"]
+    Media["Content.Media"] --> Binary
+    Bmff["Content.Bmff"] --> Media
+    Mpeg["Content.Mpeg"] --> Bmff
+    Mpeg --> Media
+    Heif["Content.Heif"] --> Bmff
+    Ebml["Content.Ebml"] --> Binary
+    Mkv["Content.Mkv"] --> Ebml
+    Mkv --> Media
+    Pdf["Content.Pdf"] --> Binary
+    Exe["Content.Exe"] --> Binary
+    Text["Text; YAML/Markdown also reference Text"] --> Root
 ```
 
 One-way, root-anchored: format packages depend on shared intermediate layers (`Binary`, `Media`,
@@ -101,6 +115,6 @@ plain stream plumbing — no reflection, no dynamic code, no serializers.
 - Format detection/sniffing and a format registry (a later stabilization feature; the descriptor shape
   is registry-ready).
 - Storage adapters (FileSystem, blob stores) — edge concerns that must not re-enter the root.
-- Bounded-stream/slice primitives for nested container parsing — feature `L01.01.05.03` builds those
+- Bounded-stream/slice primitives for nested container parsing — `Content.Binary` provides those
   on top of these contracts.
 - Content hashing/ETag computation — service-level concerns computable from `OpenRead`.

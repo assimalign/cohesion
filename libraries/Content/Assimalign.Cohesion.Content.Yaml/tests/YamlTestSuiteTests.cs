@@ -42,7 +42,9 @@ public class YamlTestSuiteTests
 
         if (expectError)
         {
-            Should.Throw<YamlException>(() => YamlText.Parse(input));
+            var exception = Should.Throw<YamlException>(() => YamlText.Parse(input));
+            exception.ErrorCode.ShouldBeOneOf(ContentFormatErrorCode.Truncated, ContentFormatErrorCode.InvalidStructure, ContentFormatErrorCode.InvalidValue, ContentFormatErrorCode.Unsupported);
+            exception.Position.ShouldNotBeNull();
             return;
         }
 

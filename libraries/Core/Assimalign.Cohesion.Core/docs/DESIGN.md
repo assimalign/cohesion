@@ -187,6 +187,86 @@ so it is rejected rather than silently turned into a share named `.` or `?`. `?`
 everywhere except the prefix, and the NT `\??\` prefix is still rejected. Error indexes refer to
 the caller's original string.
 
+## `Glob.Parse` is thread-safe
+
+`Glob.Parse`, and the implicit conversion from `string` that calls it, may run on any number of
+threads at once. A parsed `Glob` never changes, so one instance can be shared across threads.
+
+- **Tokenizer state belongs to one parse.** Each cache miss creates its own `Glob.Parser`, which
+  owns the `StringBuilder` that collects literal, set and range text. Every parse used to go
+  through one static parser and share that buffer. Two parses at once spliced each other's text,
+  so `/file[0-9].txt` could come back as a range such as `[0-x]` that matches `/filea.txt`, or the
+  parse threw `IndexOutOfRangeException`. That was the intermittent FileSystem.Globbing failure
+  on PR #1168 (run 38792058025).
+- **The pattern cache is process-wide and concurrent.** Token arrays are cached in a
+  `ConcurrentDictionary<string, TokenBase[]>` with ordinal keys. A lookup takes no lock and
+  allocates nothing, so parsing a cached pattern allocates only the returned `Glob`. When first
+  parses of one pattern race, each tokenizes it and `GetOrAdd` gives every caller the array that
+  was stored. The old cache was a `Dictionary` that `Tokenize` read but never wrote, so no parse
+  had ever been served from it.
+- **The cache is bounded by clearing it.** It is cleared after every 1,024 misses. Patterns come
+  from callers, and the FileSystem providers' `Watch` parses each watched path as a pattern, so a
+  cache that kept every distinct pattern would grow for the life of the process. Clearing keeps the
+  recent working set without the per-hit bookkeeping an LRU needs; a cleared pattern is parsed
+  again on its next use.
+- **Globs parsed from one pattern share a token array, and `Glob.Tokens` cannot change it.**
+  `Tokens` returns an `ImmutableArray<Token>` that wraps the shared array without copying it
+  (`ImmutableArray<Token>.CastUp` over `ImmutableCollectionsMarshal.AsImmutableArray`), so a read
+  allocates nothing and a cached parse still allocates only the `Glob`. It used to return the
+  `Token[]` itself, so one caller's write changed every glob of that pattern until the cache next
+  cleared. A copy was rejected because it allocates on every read, the case CA1819 warns about.
+  `ReadOnlySpan<Token>` allocates nothing either, but callers cannot store it, capture it in a
+  lambda, hold it across `await` or query it with LINQ. An `IReadOnlyList<Token>` wrapper would
+  add a field to every `Glob` and allocate on first read. Only marshalling APIs such as
+  `ImmutableCollectionsMarshal.AsArray`, and reflection, still reach the array.
+
+`GlobConcurrencyTests` pins both halves. Workers parse distinct range, set, brace and wildcard
+patterns at once, re-parse earlier ones while the cache fills and clears, and check each glob's
+matches and `ToString()` round trip. The run ends once 2,000 parses have overlapped another parse,
+not after a fixed time, and fails if that never happens. A second test asserts that parsing a
+cached pattern allocates exactly one `Glob`. `GlobTokensTests` asserts that writes through
+`Tokens` throw `NotSupportedException` and leave the shared array intact, and that reading the
+tokens allocates nothing.
+
+## `Glob` brace groups match the whole input
+
+Three defects in brace groups, recorded in #1507, are fixed together:
+
+- **A match could stop one character short.** The end-of-input checks in `Glob.IsMatch` and
+  `CompositeGlobToken.TestAll` tested `position < value.Length - 1`, so `**/*.{js,ts}` matched
+  `src/App.tsx` and `a{b,c}d` matched `abdx`. Without a group, the up-front fixed-length check, or
+  a `*` that anchors fixed-length tokens to the end, caught the extra character. A group is
+  variable-length, which turns both off. The checks now require the match to reach the end.
+- **Tokens after a longer alternative ran out of input.** The length checks count only a group's
+  shortest alternative, so `{ab,c}/` passes them on `ab`. A `*` or `**` owns the rest of the
+  pattern, so the group is the one variable-length token that other tokens follow. A path
+  separator, `?`, set or range token after it then read past the end, and `IsMatch` threw
+  `IndexOutOfRangeException`. Each now returns `false` at the end. A `*` followed by fixed-length
+  tokens had the same blind spot without throwing: it placed those tokens at the end of the input,
+  which is before the `*` itself once the group took the longer alternative, so `{ab,c}*b` matched
+  `ab` by reading the group's `b` twice. That `*` now fails when too little input is left.
+- **An empty group threw `InvalidOperationException`.** `{}`, `{,}` (empty alternatives are
+  dropped) and a `{` that ends the pattern leave a group with no alternatives, and LINQ's `Min`
+  over them threw. `Glob.Parse` now throws `ArgumentException` for `pattern`, with the
+  `GlobBraceGroupEmpty` message giving the group's index. A pattern that fails to parse is not
+  cached.
+
+One more change keeps the fix inside brace groups. A `*` whose remaining tokens can match nothing,
+such as the `/**` in `src*/**`, falls back to taking the rest of its segment, but it reported the
+position of its last failed attempt rather than the end. The old check let that through. The
+corrected one would have rejected `srcx` while still accepting `src`. The fallback now reports the
+end, so every pattern without a brace group matches as before. This change leaves open whether
+`src*/**` should match `srcx` at all, given that `src/**` does not match `src`.
+
+Within the documented limits, a brace group now behaves as the atomic regex group `(?>md|cs)`:
+the first alternative that matches at its position is kept, and the rest of the pattern must match
+what follows it. Compared with 10.0.0-preview.1, the corrected results are an intentional
+behavioral breaking change. `IsMatch` returns `false` where it returned `true` or threw, and
+`Glob.Parse` throws `ArgumentException` instead of `InvalidOperationException`. The public member
+signatures are unchanged, and so are the limits the overview lists: alternatives are tried in
+order without backtracking, and empty alternatives and wildcards inside alternatives are not
+supported. `GlobBraceGroupingTests` pins each case.
+
 ## AOT posture
 
 Runtime-contract parsing uses direct string, integer, and URI operations. It performs no

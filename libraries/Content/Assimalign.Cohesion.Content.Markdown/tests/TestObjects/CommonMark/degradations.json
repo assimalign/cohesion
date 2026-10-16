@@ -1,0 +1,1724 @@
+[
+  {
+    "example": 1,
+    "section": "Tabs",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>foo\tbaz\t\tbim</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 2,
+    "section": "Tabs",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>foo\tbaz\t\tbim</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 3,
+    "section": "Tabs",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>a\ta\nὐ\ta</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 5,
+    "section": "Tabs",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ul>\n<li>\n<p>foo</p>\n<p>bar</p>\n</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 6,
+    "section": "Tabs",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<blockquote>\n<p>foo</p>\n</blockquote>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 7,
+    "section": "Tabs",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ul>\n<li>foo</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 8,
+    "section": "Tabs",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>foo\nbar</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 18,
+    "section": "Backslash escapes",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>[]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 21,
+    "section": "Backslash escapes",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p>&lt;a href=&quot;/bar/)&quot;&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 23,
+    "section": "Backslash escapes",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo]</p>\n<p>[foo]: /bar* &quot;ti*tle&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 25,
+    "section": "Entity and numeric character references",
+    "reason": "Only the five XML named entities are retained; unknown names stay literal",
+    "html": "<p>&amp;nbsp; &amp; &amp;copy; &amp;AElig; &amp;Dcaron;\n&amp;frac34; &amp;HilbertSpace; &amp;DifferentialD;\n&amp;ClockwiseContourIntegral; &amp;ngE;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 31,
+    "section": "Entity and numeric character references",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p>&lt;a href=&quot;&amp;ouml;&amp;ouml;.html&quot;&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 32,
+    "section": "Entity and numeric character references",
+    "reason": "Only the five XML named entities are retained; unknown names stay literal",
+    "html": "<p><a href=\"/f&amp;ouml;&amp;ouml;\" title=\"f&amp;ouml;&amp;ouml;\">foo</a></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 33,
+    "section": "Entity and numeric character references",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo]</p>\n<p>[foo]: /f&amp;ouml;&amp;ouml; &quot;f&amp;ouml;&amp;ouml;&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 34,
+    "section": "Entity and numeric character references",
+    "reason": "Only the five XML named entities are retained; unknown names stay literal",
+    "html": "<pre><code class=\"language-f&amp;ouml;&amp;ouml;\">foo\n</code></pre>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 36,
+    "section": "Entity and numeric character references",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>f&amp;ouml;f&amp;ouml;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 48,
+    "section": "Thematic breaks",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>***</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 59,
+    "section": "Thematic breaks",
+    "reason": "Setext headings are excluded: underline becomes text or a thematic break",
+    "html": "<p>Foo</p>\n<hr />\n<p>bar</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 69,
+    "section": "ATX headings",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p># foo</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 80,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo <em>bar</em>\n=========</p>\n<p>Foo <em>bar</em></p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 81,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo <em>bar\nbaz</em>\n====</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 82,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo <em>bar\nbaz</em>\n====</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 83,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo</p>\n<hr />\n<p>Foo\n=</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 84,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo</p>\n<hr />\n<p>Foo</p>\n<hr />\n<p>Foo\n===</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 85,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo\n---</p>\n<p>Foo</p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 86,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo</p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 87,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo\n---</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 88,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo\n= =</p>\n<p>Foo</p>\n<hr />\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 89,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo</p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 90,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo\\</p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 91,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>`Foo</p>\n<hr />\n<p>`</p>\n<p>&lt;a title=&quot;a lot</p>\n<hr />\n<p>of dashes&quot;/&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 92,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<blockquote>\n<p>Foo</p>\n</blockquote>\n<hr />\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 93,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<blockquote>\n<p>foo\nbar\n===</p>\n</blockquote>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 94,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<ul>\n<li>Foo</li>\n</ul>\n<hr />\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 95,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo\nBar</p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 96,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<hr />\n<p>Foo</p>\n<hr />\n<p>Bar</p>\n<hr />\n<p>Baz</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 97,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>====</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 98,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<hr />\n<hr />\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 99,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<ul>\n<li>foo</li>\n</ul>\n<hr />\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 100,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>foo</p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 101,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<blockquote>\n<p>foo</p>\n</blockquote>\n<hr />\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 102,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>&gt; foo</p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 103,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo</p>\n<p>bar</p>\n<hr />\n<p>baz</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 104,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo\nbar</p>\n<hr />\n<p>baz</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 105,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo\nbar</p>\n<hr />\n<p>baz</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 106,
+    "section": "Setext headings",
+    "reason": "Setext underline remains paragraph text or thematic break",
+    "html": "<p>Foo\nbar\n---\nbaz</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 107,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>a simple\nindented code block</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 108,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<ul>\n<li>\n<p>foo</p>\n<p>bar</p>\n</li>\n</ul>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 109,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<ol>\n<li>\n<p>foo</p>\n<ul>\n<li>bar</li>\n</ul>\n</li>\n</ol>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 110,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>&lt;a/&gt;\n<em>hi</em></p>\n<p>- one</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 111,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>chunk1</p>\n<p>chunk2</p>\n<p>chunk3</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 112,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>chunk1</p>\n<p>chunk2</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 113,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>Foo\nbar</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 114,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>foo\nbar</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 115,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<h1>Heading</h1>\n<p>foo\nHeading</p>\n<hr />\n<p>foo</p>\n<hr />\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 116,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>foo\nbar</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 117,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>foo</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 118,
+    "section": "Indented code blocks",
+    "reason": "Indentation is stripped; ordinary paragraph and inline rules apply",
+    "html": "<p>foo</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 134,
+    "section": "Fenced code blocks",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p><code>aaa</code></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 141,
+    "section": "Fenced code blocks",
+    "reason": "Setext headings are excluded: underline becomes text or a thematic break",
+    "html": "<p>foo</p>\n<hr />\n<pre><code>bar\n</code></pre>\n<h1>baz</h1>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 148,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;table&gt;&lt;tr&gt;&lt;td&gt;\n&lt;pre&gt;\n<strong>Hello</strong>,</p>\n<p><em>world</em>.\n&lt;/pre&gt;\n&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 149,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;table&gt;\n&lt;tr&gt;\n&lt;td&gt;\nhi\n&lt;/td&gt;\n&lt;/tr&gt;\n&lt;/table&gt;</p>\n<p>okay.</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 150,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div&gt;\n<em>hello</em>\n&lt;foo&gt;&lt;a&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 151,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;/div&gt;\n<em>foo</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 152,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;DIV CLASS=&quot;foo&quot;&gt;</p>\n<p><em>Markdown</em></p>\n<p>&lt;/DIV&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 153,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div id=&quot;foo&quot;\nclass=&quot;bar&quot;&gt;\n&lt;/div&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 154,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div id=&quot;foo&quot; class=&quot;bar\nbaz&quot;&gt;\n&lt;/div&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 155,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div&gt;\n<em>foo</em></p>\n<p><em>bar</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 156,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div id=&quot;foo&quot;\n<em>hi</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 157,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div class\nfoo</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 158,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div *???-&amp;&amp;&amp;-&lt;---\n<em>foo</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 159,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div&gt;&lt;a href=&quot;bar&quot;&gt;<em>foo</em>&lt;/a&gt;&lt;/div&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 160,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;table&gt;&lt;tr&gt;&lt;td&gt;\nfoo\n&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 161,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div&gt;&lt;/div&gt;</p>\n<pre><code class=\"language-c\">int x = 33;\n</code></pre>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 162,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;a href=&quot;foo&quot;&gt;\n<em>bar</em>\n&lt;/a&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 163,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;Warning&gt;\n<em>bar</em>\n&lt;/Warning&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 164,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;i class=&quot;foo&quot;&gt;\n<em>bar</em>\n&lt;/i&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 165,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;/ins&gt;\n<em>bar</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 166,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;del&gt;\n<em>foo</em>\n&lt;/del&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 167,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;del&gt;</p>\n<p><em>foo</em></p>\n<p>&lt;/del&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 168,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;del&gt;<em>foo</em>&lt;/del&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 169,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;pre language=&quot;haskell&quot;&gt;&lt;code&gt;\nimport Text.HTML.TagSoup</p>\n<p>main :: IO ()\nmain = print $ parseTags tags\n&lt;/code&gt;&lt;/pre&gt;\nokay</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 170,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;script type=&quot;text/javascript&quot;&gt;\n// JavaScript example</p>\n<p>document.getElementById(&quot;demo&quot;).innerHTML = &quot;Hello JavaScript!&quot;;\n&lt;/script&gt;\nokay</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 171,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;textarea&gt;</p>\n<p><em>foo</em></p>\n<p><em>bar</em></p>\n<p>&lt;/textarea&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 172,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;style\ntype=&quot;text/css&quot;&gt;\nh1 {color:red;}</p>\n<p>p {color:blue;}\n&lt;/style&gt;\nokay</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 173,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;style\ntype=&quot;text/css&quot;&gt;</p>\n<p>foo</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 174,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<blockquote>\n<p>&lt;div&gt;\nfoo</p>\n</blockquote>\n<p>bar</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 175,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<ul>\n<li>&lt;div&gt;</li>\n<li>foo</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 176,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;style&gt;p{color:red;}&lt;/style&gt;\n<em>foo</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 177,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;!-- foo --&gt;<em>bar</em>\n<em>baz</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 178,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;script&gt;\nfoo\n&lt;/script&gt;1. <em>bar</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 179,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;!-- Foo</p>\n<p>bar\nbaz --&gt;\nokay</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 180,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;?php</p>\n<p>echo '&gt;';</p>\n<p>?&gt;\nokay</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 181,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;!DOCTYPE html&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 182,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;![CDATA[\nfunction matchwo(a,b)\n{\nif (a &lt; b &amp;&amp; a &lt; 0) then {\nreturn 1;</p>\n<p>} else {</p>\n<p>return 0;\n}\n}\n]]&gt;\nokay</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 183,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;!-- foo --&gt;</p>\n<p>&lt;!-- foo --&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 184,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div&gt;</p>\n<p>&lt;div&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 185,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>Foo\n&lt;div&gt;\nbar\n&lt;/div&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 186,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div&gt;\nbar\n&lt;/div&gt;\n<em>foo</em></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 187,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>Foo\n&lt;a href=&quot;bar&quot;&gt;\nbaz</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 188,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div&gt;</p>\n<p><em>Emphasized</em> text.</p>\n<p>&lt;/div&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 189,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;div&gt;\n<em>Emphasized</em> text.\n&lt;/div&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 190,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;table&gt;</p>\n<p>&lt;tr&gt;</p>\n<p>&lt;td&gt;\nHi\n&lt;/td&gt;</p>\n<p>&lt;/tr&gt;</p>\n<p>&lt;/table&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 191,
+    "section": "HTML blocks",
+    "reason": "HTML is literal text; ordinary block and inline rules apply and output is escaped",
+    "html": "<p>&lt;table&gt;</p>\n<p>&lt;tr&gt;</p>\n<p>&lt;td&gt;\nHi\n&lt;/td&gt;</p>\n<p>&lt;/tr&gt;</p>\n<p>&lt;/table&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 192,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url &quot;title&quot;</p>\n<p>[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 193,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]:\n/url<br />\n'the title'</p>\n<p>[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 194,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[Foo*bar]]:my_(url) 'title (with parens)'</p>\n<p>[Foo*bar]]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 195,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[Foo bar]:\n&lt;my url&gt;\n'title'</p>\n<p>[Foo bar]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 196,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url '\ntitle\nline1\nline2\n'</p>\n<p>[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 197,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url 'title</p>\n<p>with blank line'</p>\n<p>[foo]</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 198,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]:\n/url</p>\n<p>[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 199,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]:</p>\n<p>[foo]</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 200,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: &lt;&gt;</p>\n<p>[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 201,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: &lt;bar&gt;(baz)</p>\n<p>[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 202,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url\\bar*baz &quot;foo&quot;bar\\baz&quot;</p>\n<p>[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 203,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]</p>\n<p>[foo]: url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 204,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]</p>\n<p>[foo]: first\n[foo]: second</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 205,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[FOO]: /url</p>\n<p>[Foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 206,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[ΑΓΩ]: /φου</p>\n<p>[αγω]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 207,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 208,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[\nfoo\n]: /url\nbar</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 209,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url &quot;title&quot; ok</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 210,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url\n&quot;title&quot; ok</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 211,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url &quot;title&quot;</p>\n<p>[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 212,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<pre><code>[foo]: /url\n</code></pre>\n<p>[foo]</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 213,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>Foo\n[bar]: /baz</p>\n<p>[bar]</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 214,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<h1>[Foo]</h1>\n<p>[foo]: /url</p>\n<blockquote>\n<p>bar</p>\n</blockquote>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 215,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url\nbar\n===\n[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 216,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /url\n===\n[foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 217,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]: /foo-url &quot;foo&quot;\n[bar]: /bar-url\n&quot;bar&quot;\n[baz]: /baz-url</p>\n<p>[foo],\n[bar],\n[baz]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 218,
+    "section": "Link reference definitions",
+    "reason": "Definitions and reference labels remain literal; ordinary inline rules apply",
+    "html": "<p>[foo]</p>\n<blockquote>\n<p>[foo]: /url</p>\n</blockquote>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 225,
+    "section": "Paragraphs",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>aaa\nbbb</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 231,
+    "section": "Block quotes",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>&gt; # Foo\n&gt; bar\n&gt; baz</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 236,
+    "section": "Block quotes",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<blockquote>\n<p>foo\nbar</p>\n</blockquote>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 252,
+    "section": "Block quotes",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<blockquote>\n<p>code</p>\n</blockquote>\n<blockquote>\n<p>not code</p>\n</blockquote>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 253,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>A paragraph\nwith two lines.</p>\n<p>indented code</p>\n<blockquote>\n<p>A block quote.</p>\n</blockquote>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 254,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol>\n<li>\n<p>A paragraph\nwith two lines.</p>\n<p>indented code</p>\n<blockquote>\n<p>A block quote.</p>\n</blockquote>\n</li>\n</ol>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 257,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ul>\n<li>one</li>\n</ul>\n<p>two</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 264,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ul>\n<li>\n<p>Foo</p>\n<p>bar</p>\n<p>baz</p>\n</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 270,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ul>\n<li>\n<p>foo</p>\n<p>bar</p>\n</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 271,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol start=\"10\">\n<li>\n<p>foo</p>\n<p>bar</p>\n</li>\n</ol>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 272,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>indented code</p>\n<p>paragraph</p>\n<p>more code</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 273,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol>\n<li>\n<p>indented code</p>\n<p>paragraph</p>\n<p>more code</p>\n</li>\n</ol>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 274,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol>\n<li>\n<p>indented code</p>\n<p>paragraph</p>\n<p>more code</p>\n</li>\n</ol>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 278,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ul>\n<li>foo</li>\n<li>\n<pre><code>bar\n</code></pre>\n</li>\n<li>baz</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 286,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol>\n<li>\n<p>A paragraph\nwith two lines.</p>\n<p>indented code</p>\n<blockquote>\n<p>A block quote.</p>\n</blockquote>\n</li>\n</ol>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 287,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol>\n<li>\n<p>A paragraph\nwith two lines.</p>\n<p>indented code</p>\n<blockquote>\n<p>A block quote.</p>\n</blockquote>\n</li>\n</ol>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 288,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol>\n<li>\n<p>A paragraph\nwith two lines.</p>\n<p>indented code</p>\n<blockquote>\n<p>A block quote.</p>\n</blockquote>\n</li>\n</ol>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 289,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<p>1.  A paragraph\nwith two lines.</p>\n<p>indented code</p>\n<p>&gt; A block quote.</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 290,
+    "section": "List items",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol>\n<li>\n<p>A paragraph\nwith two lines.</p>\n<p>indented code</p>\n<blockquote>\n<p>A block quote.</p>\n</blockquote>\n</li>\n</ol>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 300,
+    "section": "List items",
+    "reason": "Setext headings are excluded: underline becomes text or a thematic break",
+    "html": "<ul>\n<li>\n<h1>Foo</h1>\n</li>\n<li>Bar\n<hr />\nbaz\n</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 308,
+    "section": "Lists",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<ul>\n<li>foo</li>\n<li>bar</li>\n</ul>\n<p>&lt;!-- --&gt;</p>\n<ul>\n<li>baz</li>\n<li>bim</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 309,
+    "section": "Lists",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<ul>\n<li>\n<p>foo</p>\n<p>notcode</p>\n</li>\n<li>\n<p>foo</p>\n</li>\n</ul>\n<p>&lt;!-- --&gt;</p>\n<p>code</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 313,
+    "section": "Lists",
+    "reason": "Indented code is excluded: strip indentation and apply paragraph/inline rules",
+    "html": "<ol>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ol>\n<p>3. c</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 317,
+    "section": "Lists",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n<p>[ref]: /url</p>\n</li>\n<li>\n<p>d</p>\n</li>\n</ul>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 344,
+    "section": "Code spans",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p>&lt;a href=&quot;<code>&quot;&gt;</code></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 475,
+    "section": "Emphasis and strong emphasis",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p><em>&lt;img src=&quot;foo&quot; title=&quot;</em>&quot;/&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 476,
+    "section": "Emphasis and strong emphasis",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p><strong>&lt;a href=&quot;</strong>&quot;&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 477,
+    "section": "Emphasis and strong emphasis",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p><strong>&lt;a href=&quot;</strong>&quot;&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 491,
+    "section": "Links",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p>[link](&lt;foo\nbar&gt;)</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 494,
+    "section": "Links",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p>[a](&lt;b)c\n[a](&lt;b)c&gt;\n[a](&lt;b&gt;c)</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 503,
+    "section": "Links",
+    "reason": "Only the five XML named entities are retained; unknown names stay literal",
+    "html": "<p><a href=\"foo%20b&amp;auml;\">link</a></p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 524,
+    "section": "Links",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p><a href=\"baz\">foo &lt;bar attr=&quot;</a>&quot;&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 527,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][bar]</p>\n<p>[bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 528,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[link [foo [bar]]][ref]</p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 529,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[link [bar][ref]</p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 530,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[link <em>foo <strong>bar</strong> <code>#</code></em>][ref]</p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 531,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[<img src=\"moon.jpg\" alt=\"moon\" />][ref]</p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 532,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo <a href=\"/uri\">bar</a>][ref]</p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 533,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo <em>bar [baz][ref]</em>][ref]</p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 534,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p><em>[foo</em>][ref]</p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 535,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo <em>bar][ref]</em></p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 536,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo &lt;bar attr=&quot;][ref]&quot;&gt;</p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 537,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo<code>][ref]</code></p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 538,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo<a href=\"https://example.com/?search=%5D%5Bref%5D\">https://example.com/?search=][ref]</a></p>\n<p>[ref]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 539,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][BaR]</p>\n<p>[bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 540,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[ẞ]</p>\n<p>[SS]: /url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 541,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[Foo\nbar]: /url</p>\n<p>[Baz][Foo bar]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 542,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo] [bar]</p>\n<p>[bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 543,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo]\n[bar]</p>\n<p>[bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 544,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo]: /url1</p>\n<p>[foo]: /url2</p>\n<p>[bar][foo]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 545,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[bar][foo!]</p>\n<p>[foo!]: /url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 546,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][ref[]</p>\n<p>[ref[]: /uri</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 547,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][ref[bar]]</p>\n<p>[ref[bar]]: /uri</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 548,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[[[foo]]]</p>\n<p>[[[foo]]]: /url</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 549,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][ref[]</p>\n<p>[ref[]: /uri</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 550,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[bar\\]: /uri</p>\n<p>[bar\\]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 551,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[]</p>\n<p>[]: /uri</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 552,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[\n]</p>\n<p>[\n]: /uri</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 553,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 554,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[<em>foo</em> bar][]</p>\n<p>[<em>foo</em> bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 555,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[Foo][]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 556,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo]\n[]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 557,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 558,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[<em>foo</em> bar]</p>\n<p>[<em>foo</em> bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 559,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[[<em>foo</em> bar]]</p>\n<p>[<em>foo</em> bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 560,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[[bar [foo]</p>\n<p>[foo]: /url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 561,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[Foo]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 562,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo] bar</p>\n<p>[foo]: /url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 563,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 564,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo*]: /url</p>\n<p><em>[foo</em>]</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 565,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][bar]</p>\n<p>[foo]: /url1\n[bar]: /url2</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 566,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][]</p>\n<p>[foo]: /url1</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 567,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p><a href=\"\">foo</a></p>\n<p>[foo]: /url1</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 568,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo](not a link)</p>\n<p>[foo]: /url1</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 569,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][bar][baz]</p>\n<p>[baz]: /url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 570,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][bar][baz]</p>\n<p>[baz]: /url1\n[bar]: /url2</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 571,
+    "section": "Links",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>[foo][bar][baz]</p>\n<p>[baz]: /url1\n[foo]: /url2</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 573,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo <em>bar</em>]</p>\n<p>[foo <em>bar</em>]: train.jpg &quot;train &amp; tracks&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 576,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo <em>bar</em>][]</p>\n<p>[foo <em>bar</em>]: train.jpg &quot;train &amp; tracks&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 577,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo <em>bar</em>][foobar]</p>\n<p>[FOOBAR]: train.jpg &quot;train &amp; tracks&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 582,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo][bar]</p>\n<p>[bar]: /url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 583,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo][bar]</p>\n<p>[BAR]: /url</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 584,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo][]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 585,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![<em>foo</em> bar][]</p>\n<p>[<em>foo</em> bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 586,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![Foo][]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 587,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo]\n[]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 588,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 589,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![<em>foo</em> bar]</p>\n<p>[<em>foo</em> bar]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 591,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![Foo]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 592,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 593,
+    "section": "Images",
+    "reason": "Reference definitions/links are excluded; literal labels and ordinary inline parsing remain",
+    "html": "<p>![foo]</p>\n<p>[foo]: /url &quot;title&quot;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 604,
+    "section": "Autolinks",
+    "reason": "Email autolinks are excluded; angle text is escaped literally",
+    "html": "<p>&lt;foo@bar.example.com&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 605,
+    "section": "Autolinks",
+    "reason": "Email autolinks are excluded; angle text is escaped literally",
+    "html": "<p>&lt;foo+special@Bar.baz-bar0.com&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 613,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;a&gt;&lt;bab&gt;&lt;c2c&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 614,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;a/&gt;&lt;b2/&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 615,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;a  /&gt;&lt;b2\ndata=&quot;foo&quot; &gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 616,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;a foo=&quot;bar&quot; bam = 'baz &lt;em&gt;&quot;&lt;/em&gt;'\n_boolean zoop:33=zoop:33 /&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 617,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>Foo &lt;responsive-image src=&quot;foo.jpg&quot; /&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 618,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;33&gt; &lt;__&gt;</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 619,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;a h*#ref=&quot;hi&quot;&gt;</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 620,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;a href=&quot;hi'&gt; &lt;a href=hi'&gt;</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 621,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt; a&gt;&lt;\nfoo&gt;&lt;bar/ &gt;\n&lt;foo bar=baz\nbim!bop /&gt;</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 622,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;a href='bar'title=title&gt;</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 623,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;/a&gt;&lt;/foo &gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 624,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;/a href=&quot;foo&quot;&gt;</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 625,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>foo &lt;!-- this is a --\ncomment - with hyphens --&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 626,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>foo &lt;!--&gt; foo --&gt;</p>\n<p>foo &lt;!---&gt; foo --&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 627,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>foo &lt;?php echo $a; ?&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 628,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>foo &lt;!ELEMENT br EMPTY&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 629,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>foo &lt;![CDATA[&gt;&amp;&lt;]]&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 630,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>foo &lt;a href=&quot;&amp;ouml;&quot;&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 631,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>foo &lt;a href=&quot;*&quot;&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 632,
+    "section": "Raw HTML",
+    "reason": "HTML is literal text; ordinary inline rules apply and output is escaped",
+    "html": "<p>&lt;a href=&quot;&quot;&quot;&gt;</p>\n",
+    "matchesSpec": true
+  },
+  {
+    "example": 642,
+    "section": "Hard line breaks",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p>&lt;a href=&quot;foo<br />\nbar&quot;&gt;</p>\n",
+    "matchesSpec": false
+  },
+  {
+    "example": 643,
+    "section": "Hard line breaks",
+    "reason": "Raw HTML is excluded: parse as ordinary Markdown text and escape on HTML output",
+    "html": "<p>&lt;a href=&quot;foo<br />\nbar&quot;&gt;</p>\n",
+    "matchesSpec": false
+  }
+]

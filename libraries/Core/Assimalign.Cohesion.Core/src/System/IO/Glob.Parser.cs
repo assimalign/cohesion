@@ -1,9 +1,14 @@
 ﻿using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 using static System.IO.Glob;
+
+using Assimalign.Cohesion;
 
 namespace System.IO;
 
@@ -40,6 +45,11 @@ public sealed partial class Glob
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get { return ref _pattern[_index]; }
+        }
+
+        public int Index
+        {
+            get { return _index; }
         }
 
         public bool IsSeparator
@@ -154,24 +164,46 @@ public sealed partial class Glob
 
     internal partial class Parser
     {
-        private static readonly Dictionary<string, TokenBase[]> _cache = new Dictionary<string, TokenBase[]>();
-        private static readonly Dictionary<string, TokenBase[]>.AlternateLookup<ReadOnlySpan<char>> _lookup = _cache.GetAlternateLookup<ReadOnlySpan<char>>();
+        // The cache starts over after this many misses. Patterns can be caller input or paths (the
+        // FileSystem providers' Watch parses each watched path), so a process-wide cache must not
+        // keep every distinct pattern; clearing keeps the recent working set without bookkeeping
+        // on each hit.
+        private const uint cacheCapacity = 1024;
 
+        // Lookups are lock-free and allocation-free, so a cached Glob.Parse allocates only the Glob.
+        private static readonly ConcurrentDictionary<string, TokenBase[]> _cache = new ConcurrentDictionary<string, TokenBase[]>(StringComparer.Ordinal);
+        private static uint _cacheMisses;
+
+        // Per-parse state: Tokenize creates a parser for each miss, so concurrent parses never
+        // share this buffer.
         private readonly StringBuilder _buffer;
 
-        public Parser()
+        private Parser()
         {
             _buffer = new StringBuilder();
         }
 
-        public TokenBase[] Tokenize(string pattern)
+        public static TokenBase[] Tokenize(string pattern)
         {
-            // Check cache for existing parsed pattern
-            if (_lookup.TryGetValue(pattern, out TokenBase[]? cache))
+            if (_cache.TryGetValue(pattern, out TokenBase[]? cached))
             {
-                return cache!;
+                return cached;
             }
 
+            TokenBase[] tokens = new Parser().Parse(pattern);
+
+            // Unsigned wraparound keeps the period: 2^32 is a multiple of the capacity.
+            if (Interlocked.Increment(ref _cacheMisses) % cacheCapacity == 0)
+            {
+                _cache.Clear();
+            }
+
+            // When first parses of one pattern race, every caller gets the array that was stored.
+            return _cache.GetOrAdd(pattern, tokens);
+        }
+
+        private TokenBase[] Parse(string pattern)
+        {
             List<TokenBase> tokens = new List<TokenBase>();
             ReadOnlySpan<char> span = pattern.AsSpan();
             Lexer lexer = new Lexer(span);
@@ -218,9 +250,6 @@ public sealed partial class Glob
                     tokens.Add(ParseLiteral(ref lexer));
                 }
             }
-
-
-            _buffer.Clear();
 
             return tokens.ToArray();
         }
@@ -416,6 +445,7 @@ public sealed partial class Glob
         {
             //List<CompositeGlobToken> alternatives = new List<CompositeGlobToken>();
             List<TokenBase> alternatives = new List<TokenBase>();
+            int start = reader.Index;
 
             while (reader.TryRead())
             {
@@ -455,6 +485,15 @@ public sealed partial class Glob
                 {
                     alternatives.Add(ParseLiteralInBraceGroup(ref reader));
                 }
+            }
+
+            // Empty alternatives are dropped, so {} and {,} have none, nor does a { that ends the
+            // pattern. Nothing could match such a group.
+            if (alternatives.Count == 0)
+            {
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.GlobBraceGroupEmpty, start),
+                    "pattern");
             }
 
             return new BraceGroupingToken(alternatives.ToArray());

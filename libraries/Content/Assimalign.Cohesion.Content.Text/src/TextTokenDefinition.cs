@@ -26,7 +26,7 @@ public sealed class TextTokenDefinition
         ArgumentException.ThrowIfNullOrEmpty(text);
         if (kind is not (TextTokenKind.Delimiter or TextTokenKind.NewLine or TextTokenKind.Whitespace))
         {
-            throw new ArgumentException("A definition must be a delimiter, new-line, or whitespace token; text is the implicit kind of runs between matches.", nameof(kind));
+            throw new ArgumentException(ErrorMessages.InvalidTokenKind, nameof(kind));
         }
 
         Text = text;

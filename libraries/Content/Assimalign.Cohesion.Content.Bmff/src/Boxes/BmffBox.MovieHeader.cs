@@ -1,196 +1,117 @@
 ﻿using System;
-using System.Diagnostics;
-using static System.Buffers.Binary.BinaryPrimitives;
+using System.IO;
+using System.Text;
 
-using Assimalign.Cohesion.Content.Media;
-using Assimalign.IO;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
-[DebuggerDisplay("Bmff Box: Movie Header (mvhd)")]
-public sealed class MovieHeaderBox : BmffBox
+/// <summary>The MovieHeader box; ISO/IEC 14496-12 8.2.2.</summary>
+public sealed class MovieHeaderBox : BmffFullBox
 {
-    private static DateTime _seed = new DateTime(1904, 1, 1, 0, 0, 0);
+    private byte[] _trailing = Array.Empty<byte>();
+    /// <summary>Creates a MovieHeaderBox at its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="size">The original total size.</param>
+    public MovieHeaderBox(long size, long offset) { SetOriginalLocation(offset, size); }
 
-    private BmffVersion _headerVersion           = BmffVersion.Version1;
-    private DateTime    _headerCreationTime      = DateTime.UtcNow;
-    private DateTime    _headerModificationTime  = DateTime.UtcNow;
-    private uint        _headerTimeScale;
-    private ulong       _headerDuration;
-    private double      _headerRate;
-    private short       _headerVolume;
-    private byte[]      _headerReserved;
-    private byte[]      _headerPreDefined;
-    private uint        _headerNextTrackId;
-
-
-
-    public MovieHeaderBox(long size, long offset)
-    {
-        this.Limit = size;
-        this.Offset = offset;
-        this.Matrix = new int[] { 0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000 }; // Unity Matrix
-    }
-
-    /// <summary>
-    /// The version of the movie header.
-    /// </summary>
-    public BmffVersion Version
-    {
-        get => _headerVersion;
-        init => _headerVersion = value;
-    }
-    /// <summary>
-    /// Is an integer that declares the creation time of the presentation (in seconds since midnight, Jan. 1, 1904, in UTC time) 
-    /// </summary>
-    public DateTime CreationTime 
-    {
-        get => _headerCreationTime;
-        init
-        {
-            if (value < _seed)
-            {
-                throw new InvalidOperationException("");
-            }
-
-            _headerCreationTime = value;
-        }
-    }
-    /// <summary>
-    /// Is an integer that declares the most recent time the presentation
-    /// was modified (in seconds since midnight, Jan. 1, 1904, in UTC time) 
-    /// </summary>
-    public DateTime ModificationTime
-    {
-        get => _headerModificationTime;
-        init
-        {
-            if (value < _seed)
-            {
-                throw new InvalidOperationException("");
-            }
-
-            _headerModificationTime = value;
-        }
-    }
-    /// <summary>
-    /// Is an integer that specifies the time-scale for the entire presentation; this is the number of 
-    /// time units that pass in one second.For example, a time coordinate system that measures time in 
-    /// sixtieths of a second has a time scale of 60. 
-    /// </summary>
-    public uint TimeScale
-    {
-        get => _headerTimeScale;
-        init => _headerTimeScale = value;
-    }
-    /// <summary>
-    /// Is an integer that declares length of the presentation (in the indicated timescale). This
-    /// property is derived from the presentation’s tracks: the value of this field corresponds to the duration of
-    /// the longest track in the presentation
-    /// </summary>
-    public ulong Duration
-    {
-        get => _headerDuration;
-        init => _headerDuration = value;
-    }
-    /// <summary>
-    /// The Movie play rate. Typically 1.0
-    /// </summary>
-    public double Rate 
-    { 
-        get => _headerRate; 
-        init => _headerRate = value; 
-    }
-    /// <summary>
-    /// 
-    /// </summary>
-    public short Volume
-    {
-        get => _headerVolume;
-        init => _headerVolume = value;
-    }
-    /// <summary>
-    /// 
-    /// </summary>
-    public byte[] Reserved { get; set; }    
-    /// <summary>
-    /// 
-    /// </summary>
-    public int[] Matrix { get; init; }
-    /// <summary>
-    /// 
-    /// </summary>
-    public byte[] PreDefined
-    {
-        get => this._headerPreDefined;
-        init => this._headerPreDefined = value;
-    }
-    /// <summary>
-    /// 
-    /// </summary>
-    public uint NextTrackId
-    {
-        get => this._headerNextTrackId;
-        init => this._headerNextTrackId = value;
-    }
-
-
-    /// <inheritdoc />
-    public override long Limit { get; }
-
-    /// <inheritdoc />
-    public override long Offset { get; }
-
-    /// <inheritdoc />
-    public override bool IsLeaf => true;
-
-    /// <inheritdoc />
-    public override bool IsComposite => false;
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.MovieHeader;
 
+    /// <summary>Gets or sets creation time in whole UTC seconds since 1904-01-01.</summary>
+    public ulong CreationTime { get; set; }
+    /// <summary>Gets or sets modification time in whole UTC seconds since 1904-01-01.</summary>
+    public ulong ModificationTime { get; set; }
+    /// <summary>Gets or sets the nonzero time units per second.</summary>
+    public uint TimeScale { get; set; } = 1000;
+    /// <summary>Gets or sets the duration in timescale units, including the all-ones unknown value.</summary>
+    public ulong Duration { get; set; }
+    /// <summary>Gets or sets the playback rate.</summary>
+    public FixedPoint16x16 Rate { get; set; } = FixedPoint16x16.FromRaw(0x10000);
+    /// <summary>Gets or sets the playback volume.</summary>
+    public FixedPoint8x8 Volume { get; set; } = FixedPoint8x8.FromRaw(0x100);
+    /// <summary>Gets or sets the ten reserved bytes.</summary>
+    public byte[] Reserved { get; set; } = new byte[10];
+    /// <summary>Gets or sets the nine raw matrix words (16.16 and 2.30 as defined by the specification).</summary>
+    public int[] Matrix { get; set; } = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000];
+    /// <summary>Gets or sets the 24 predefined bytes.</summary>
+    public byte[] PreDefined { get; set; } = new byte[24];
+    /// <summary>Gets or sets the next unused track identifier.</summary>
+    public uint NextTrackId { get; set; } = 1;
 
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        var version = (BmffVersion)ReadInt32BigEndian(stream.ReadBytes(4));
-
-        if (version == BmffVersion.Version1)
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 1, 0, stream.Offset);
+        CreationTime = BmffFields.Sized(stream, Version == 1 ? 8 : 4);
+        ModificationTime = BmffFields.Sized(stream, Version == 1 ? 8 : 4);
+        TimeScale = BmffFields.U32(stream);
+        Duration = BmffFields.Sized(stream, Version == 1 ? 8 : 4);
+        Rate = FixedPoint16x16.FromRaw(BmffFields.I32(stream));
+        Volume = FixedPoint8x8.FromRaw(BmffFields.I16(stream));
+        Reserved = BmffFields.Bytes(stream, 10);
+        for (var i = 0; i < 9; i++)
         {
-            _headerVersion = version;
-            _headerCreationTime = _seed + TimeSpan.FromSeconds(unchecked((double)ReadInt64BigEndian(stream.ReadBytes(8))));
-            _headerModificationTime = _seed + TimeSpan.FromSeconds(unchecked((double)ReadInt64BigEndian(stream.ReadBytes(8))));
-            _headerTimeScale = ReadUInt32BigEndian(stream.ReadBytes(4));
-            _headerDuration = ReadUInt64BigEndian(stream.ReadBytes(8));
-        }
-        else
-        {
-            _headerVersion = version;
-            _headerCreationTime = _seed + TimeSpan.FromSeconds(unchecked((double)ReadInt32BigEndian(stream.ReadBytes(4))));
-            _headerModificationTime = _seed + TimeSpan.FromSeconds(unchecked((double)ReadInt32BigEndian(stream.ReadBytes(4))));
-            _headerTimeScale = ReadUInt32BigEndian(stream.ReadBytes(4));
-            _headerDuration = ReadUInt32BigEndian(stream.ReadBytes(4));
+            Matrix[i] = BmffFields.I32(stream);
         }
 
-        _headerRate = ReadInt32BigEndian(stream.ReadBytes(4));
-        _headerVolume = ReadInt16BigEndian(stream.ReadBytes(2));
-        _headerReserved = stream.ReadBytes(2 + (2 * 4));
-
-        for (int i = 0; i < 9; i++)
-        {
-            Matrix[i] = ReadInt32BigEndian(stream.ReadBytes(4));
-        }
-
-        _headerPreDefined = stream.ReadBytes(6 * 4);
-        _headerNextTrackId = ReadUInt32BigEndian(stream.ReadBytes(4));
+        PreDefined = BmffFields.Bytes(stream, 24);
+        NextTrackId = BmffFields.U32(stream);
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
     }
-
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        
+        Validate();
+        WriteFullBoxHeader(stream);
+        BmffFields.Sized(stream, CreationTime, Version == 1 ? 8 : 4);
+        BmffFields.Sized(stream, ModificationTime, Version == 1 ? 8 : 4);
+        BmffFields.U32(stream, TimeScale);
+        BmffFields.Sized(stream, Duration, Version == 1 ? 8 : 4);
+        BmffFields.I32(stream, Rate.RawValue);
+        BmffFields.I16(stream, Volume.RawValue);
+        stream.Write(Reserved);
+        foreach (var value in Matrix)
+        {
+            BmffFields.I32(stream, value);
+        }
+
+        stream.Write(PreDefined);
+        BmffFields.U32(stream, NextTrackId);
+        stream.Write(_trailing);
     }
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    /// <inheritdoc/>
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return (Version == 1 ? 112L : 100L) + _trailing.Length;
+    }
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 1, 0, Offset);
+        BmffFields.Width(CreationTime, Version == 1 ? 8 : 4, Offset);
+        BmffFields.Width(ModificationTime, Version == 1 ? 8 : 4, Offset);
+        BmffFields.Width(Duration, Version == 1 ? 8 : 4, Offset);
+        if (TimeScale == 0)
+        {
+            throw new ContentFormatException(ErrorMessages.FieldRange, ContentFormatErrorCode.InvalidValue, Offset);
+        }
+
+        BmffFields.ArrayLength(Reserved, 10, Offset);
+        BmffFields.ArrayLength(Matrix, 9, Offset);
+        BmffFields.ArrayLength(PreDefined, 24, Offset);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" timescale={TimeScale} duration={Duration} next-track-id={NextTrackId}"));
     }
 }

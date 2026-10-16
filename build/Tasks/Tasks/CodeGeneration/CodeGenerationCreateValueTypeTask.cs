@@ -174,6 +174,8 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         public bool HasImplicitOperators { get; set; }
         public bool HasCustomToString { get; set; }
         public bool IsString => RuntimeType == ObjectRuntimeType.String;
+        // Double parsing saturates to infinity instead of throwing; identifiers have no numeric range.
+        public bool CanOverflow => !IsString && RuntimeType != ObjectRuntimeType.Double && RuntimeType != ObjectRuntimeType.Guid && RuntimeType != ObjectRuntimeType.Ulid;
         public string NullableName => Name + (IsClass ? "?" : "");
         public string Type => RuntimeType == ObjectRuntimeType.Guid || RuntimeType == ObjectRuntimeType.Ulid
             ? "global::System." + RuntimeType
@@ -326,13 +328,27 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         {
             builder.AppendTabbedLine(1, $"\nprivate static int Compare({context.Name}? a, {context.Name}? b) => a is null ? (b is null ? 0 : -1) : a.CompareTo(b);");
         }
-        foreach (string op in new[] { "==", "!=", ">", "<", ">=", "<=" })
+        // Explicit docs, not <inheritdoc/>: the operator interfaces name these parameters left and right.
+        string operand = context.IsClass ? ", or null" : "";
+        foreach (var (op, summary, relation) in new[]
+        {
+            ("==", "Determines whether two values are equal.", "equals"),
+            ("!=", "Determines whether two values are not equal.", "does not equal"),
+            (">", "Determines whether the first value is greater than the second.", "is greater than"),
+            ("<", "Determines whether the first value is less than the second.", "is less than"),
+            (">=", "Determines whether the first value is greater than or equal to the second.", "is greater than or equal to"),
+            ("<=", "Determines whether the first value is less than or equal to the second.", "is less than or equal to")
+        })
         {
             string equality = context.IsClass ? "(ReferenceEquals(a, b) || (a is not null && a.Equals(b)))" : "a.Equals(b)";
             string body = op == "==" ? equality : op == "!=" ? "!" + equality : (context.IsClass ? "Compare(a, b)" : "a.CompareTo(b)") + " " + op + " 0";
+            string nulls = !context.IsClass ? "" : op is "==" or "!=" ? " Two nulls are equal; null never equals an instance." : " Null is less than every instance.";
             builder.AppendTabbedLine(1, $$"""
 
-                /// <inheritdoc/>
+                /// <summary>{{summary}}{{nulls}}</summary>
+                /// <param name="a">The first value to compare{{operand}}.</param>
+                /// <param name="b">The second value to compare{{operand}}.</param>
+                /// <returns>True when <paramref name="a"/> {{relation}} <paramref name="b"/>; otherwise false.</returns>
                 public static bool operator {{op}}({{context.NullableName}} a, {{context.NullableName}} b) => {{body}};
                 """);
         }
@@ -377,31 +393,38 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
     private static void GenerateParsing(StringBuilder builder, ValueTypeContext context)
     {
         string syntax = context.RuntimeType == ObjectRuntimeType.Ulid ? "" : "[global::System.Diagnostics.CodeAnalysis.StringSyntax(global::System.Diagnostics.CodeAnalysis.StringSyntaxAttribute." + (context.RuntimeType == ObjectRuntimeType.Guid ? "GuidFormat" : "NumericFormat") + ")] ";
+        // Ulid formatting ignores the format; Guid and numeric formatting reject one they do not know.
+        string formatException = context.RuntimeType == ObjectRuntimeType.Ulid ? "" : "\n/// <exception cref=\"FormatException\"><paramref name=\"format\"/> is not a format the runtime type supports.</exception>";
         builder.AppendTabbedLine(1, $$"""
 
-            /// <inheritdoc/>
+            /// <inheritdoc/>{{formatException}}
             public string ToString({{syntax}}string? format, IFormatProvider? formatProvider) => Value.ToString(format, formatProvider);
 
-            /// <inheritdoc/>
+            /// <inheritdoc/>{{formatException}}
             public bool TryFormat(Span<char> destination, out int charsWritten, {{syntax}}ReadOnlySpan<char> format, IFormatProvider? provider) => Value.TryFormat(destination, out charsWritten, format{{(context.RuntimeType == ObjectRuntimeType.Guid ? "" : ", provider")}});
             """);
         foreach (bool span in new[] { false, true })
         {
             string inputType = span ? "ReadOnlySpan<char>" : "string";
             string parameter = span ? "span" : "value";
+            // Explicit docs, not <inheritdoc/>: IParsable<T> and ISpanParsable<T> name the text parameter s.
+            string exceptions = DocLines(
+                "/// <exception cref=\"FormatException\">The text cannot be parsed" + (context.HasValidation ? " or its value fails validation" : "") + ".</exception>",
+                context.CanOverflow ? "/// <exception cref=\"OverflowException\">The parsed number is outside the runtime type's range.</exception>" : null,
+                span ? null : "/// <exception cref=\"ArgumentNullException\">The text is null.</exception>");
             builder.AppendTabbedLine(1, $$"""
 
                 /// <summary>Parses a runtime value using the current culture and validates it.</summary>
                 /// <param name="{{parameter}}">The text to parse.</param>
                 /// <returns>The parsed value object.</returns>
-                /// <exception cref="FormatException">The text cannot be parsed or its value fails validation.</exception>
-                /// <exception cref="OverflowException">The parsed number is outside the runtime type's range.</exception>
-                {{(span ? "" : "/// <exception cref=\"ArgumentNullException\">The text is null.</exception>")}}
+                {{exceptions}}
                 public static {{context.Name}} Parse({{inputType}} {{parameter}}) => Parse({{parameter}}, null);
 
-                /// <inheritdoc/>
-                /// <exception cref="FormatException">The text cannot be parsed or its value fails validation.</exception>
-                {{(span ? "" : "/// <exception cref=\"ArgumentNullException\">The text is null.</exception>")}}
+                /// <summary>Parses a runtime value using a format provider and validates it.</summary>
+                /// <param name="{{parameter}}">The text to parse.</param>
+                /// <param name="provider">An object that supplies culture-specific formatting information, or null for the current culture.</param>
+                /// <returns>The parsed value object.</returns>
+                {{exceptions}}
                 public static {{context.Name}} Parse({{inputType}} {{parameter}}, IFormatProvider? provider)
                 {
                 """);
@@ -438,7 +461,11 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
                 /// <returns>True when parsing and validation succeed; otherwise false.</returns>
                 public static bool TryParse({{tryType}} {{parameter}}, {{resultType}} result) => TryParse({{parameter}}, null, out result);
 
-                /// <inheritdoc/>
+                /// <summary>Attempts to parse and validate a runtime value using a format provider.</summary>
+                /// <param name="{{parameter}}">The text to parse.</param>
+                /// <param name="provider">An object that supplies culture-specific formatting information, or null for the current culture.</param>
+                /// <param name="result">The parsed value on success; otherwise default.</param>
+                /// <returns>True when parsing and validation succeed; otherwise false.</returns>
                 public static bool TryParse({{tryType}} {{parameter}}, IFormatProvider? provider, {{resultType}} result)
                 {
                     result = default;
@@ -460,15 +487,15 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         {
             return;
         }
+        string newException = context.HasValidation ? "\n/// <exception cref=\"ArgumentException\">The generated identifier fails validation.</exception>" : "";
+        string emptyException = context.HasValidation ? "\n/// <exception cref=\"ArgumentException\">The empty identifier fails validation.</exception>" : "";
         builder.AppendTabbedLine(1, $$"""
 
             /// <summary>Creates a new identifier.</summary>
-            /// <returns>A newly generated identifier.</returns>
-            {{(context.HasValidation ? "/// <exception cref=\"ArgumentException\">The generated identifier fails validation.</exception>" : "")}}
+            /// <returns>A newly generated identifier.</returns>{{newException}}
             public static {{context.Name}} New() => new {{context.Name}}({{context.Type}}.{{(context.RuntimeType == ObjectRuntimeType.Guid ? "NewGuid" : "NewUlid")}}());
 
-            /// <summary>The identifier whose underlying value is empty.</summary>
-            {{(context.HasValidation ? "/// <exception cref=\"ArgumentException\">The empty identifier fails validation.</exception>" : "")}}
+            /// <summary>The identifier whose underlying value is empty.</summary>{{emptyException}}
             public static readonly {{context.Name}} Empty = new {{context.Name}}({{context.Type}}.Empty);
             """);
     }
@@ -484,6 +511,15 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
             ObjectRuntimeType.Guid => "GetGuid()", _ => "GetString()!"
         };
         string write = context.IsString || context.RuntimeType == ObjectRuntimeType.Guid ? "WriteStringValue(value.Value)" : context.RuntimeType == ObjectRuntimeType.Ulid ? "WriteStringValue(value.Value.ToString())" : "WriteNumberValue(value.Value)";
+        // Utf8JsonWriter failures the write methods propagate: oversized strings, non-finite doubles and writer state.
+        string writeExceptions = DocLines(
+            context.IsString ? "/// <exception cref=\"ArgumentException\">The underlying string is too long for the writer to encode.</exception>" : null,
+            context.RuntimeType == ObjectRuntimeType.Double ? "/// <exception cref=\"ArgumentException\">The underlying value is NaN or infinite, which a JSON number cannot represent.</exception>" : null,
+            "/// <exception cref=\"InvalidOperationException\">Validation is enabled, and writing a value at the writer's current position would produce invalid JSON.</exception>");
+        string propertyNameExceptions = DocLines(
+            context.IsString ? "/// <exception cref=\"global::System.Text.Json.JsonException\">The underlying string is null.</exception>" : null,
+            context.IsString ? "/// <exception cref=\"ArgumentException\">The underlying string is too long for a JSON property name.</exception>" : null,
+            "/// <exception cref=\"InvalidOperationException\">Validation is enabled, and writing a property name at the writer's current position would produce invalid JSON.</exception>");
         builder.AppendTabbedLine(1, $$"""
 
             /// <summary>Converts <see cref="{{context.Name}}"/> values and dictionary keys to and from JSON.</summary>
@@ -527,6 +563,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
                 /// <param name="writer">The writer receiving the value.</param>
                 /// <param name="value">The value to write.</param>
                 /// <param name="options">The serializer options.</param>
+                {{writeExceptions}}
                 public override void Write(global::System.Text.Json.Utf8JsonWriter writer, {{context.Name}} value, global::System.Text.Json.JsonSerializerOptions options) => writer.{{write}};
 
                 /// <summary>Reads a dictionary key from a JSON property name.</summary>
@@ -562,7 +599,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
                 /// <param name="writer">The writer receiving the property name.</param>
                 /// <param name="value">The dictionary key to write.</param>
                 /// <param name="options">The serializer options.</param>
-                {{(context.IsString ? "/// <exception cref=\"global::System.Text.Json.JsonException\">The underlying string is null.</exception>" : "")}}
+                {{propertyNameExceptions}}
                 public override void WriteAsPropertyName(global::System.Text.Json.Utf8JsonWriter writer, {{context.Name}} value, global::System.Text.Json.JsonSerializerOptions options)
                 {
                 """);
@@ -610,4 +647,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
     {
         builder.AppendTabbedLine(tabs, "}\ncatch (Exception exception) when (exception is FormatException || exception is ArgumentException || exception is OverflowException || exception is InvalidOperationException)\n{\n\tthrow new global::System.Text.Json.JsonException(exception.Message, exception);\n}");
     }
+
+    // Joins the documentation lines that apply, so an omitted line leaves no blank line before the member.
+    private static string DocLines(params string?[] lines) => string.Join("\n", lines.Where(line => line is not null));
 }

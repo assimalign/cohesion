@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="InexactTimestamp" xml:space="preserve"><value>The timestamp is not integral at the requested timescale.</value></data>
+  <data name="TimestampOverflow" xml:space="preserve"><value>The timestamp value or timescale exceeds the supported range.</value></data>
+  <data name="InvalidRounding" xml:space="preserve"><value>The rounding mode is not supported.</value></data>
+  <data name="IndexLookupUnavailable" xml:space="preserve"><value>The index does not support lookup by sample number.</value></data>
+  <data name="TimeLookupUnavailable" xml:space="preserve"><value>The index does not support lookup by presentation time.</value></data>
+  <data name="SeekUnavailable" xml:space="preserve"><value>The index cannot provide a safe seek range for this source.</value></data>
+  <data name="InvalidSeekSamples" xml:space="preserve"><value>The seek samples must be valid, from one track, and ordered from sync to target.</value></data>
+  <data name="IncompleteSeekRange" xml:space="preserve"><value>The seek range must contain both the sync sample and the target sample.</value></data>
+</root>

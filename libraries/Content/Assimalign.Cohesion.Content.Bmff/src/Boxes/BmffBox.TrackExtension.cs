@@ -1,42 +1,78 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
+using System.IO;
 using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+using Assimalign.Cohesion.Content.Binary;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
+namespace Assimalign.Cohesion.Content.Bmff;
 
-[DebuggerDisplay("Bmff Box: Movie Fragment (trex)")]
-public sealed class TrackExtensionBox : BmffBox
+/// <summary>The TrackExtension box; ISO/IEC 14496-12 8.8.3.</summary>
+public sealed class TrackExtensionBox : BmffFullBox
 {
-    public TrackExtensionBox(long offset, long limit)
-    {
-        this.Offset = offset;
-        this.Limit = limit;
-    }
-    public override bool IsLeaf => throw new NotImplementedException();
+    private byte[] _trailing = Array.Empty<byte>();
+    /// <summary>Creates a TrackExtensionBox at its original location.</summary>
+    /// <param name="offset">The original absolute header offset.</param>
+    /// <param name="limit">The original total size.</param>
+    public TrackExtensionBox(long offset, long limit) { SetOriginalLocation(offset, limit);  }
 
-    public override bool IsComposite => throw new NotImplementedException();
-
-    public override long Limit { get;}
-
-    public override long Offset { get; }
-
+    /// <inheritdoc/>
     public override BmffBoxType BoxType => BmffBoxType.TrackExtension;
 
+    /// <summary>Gets or sets the track identifier.</summary>
+    public uint TrackId { get; set; }
+    /// <summary>Gets or sets the one-based default description index.</summary>
+    public uint DefaultSampleDescriptionIndex { get; set; }
+    /// <summary>Gets or sets the default sample duration.</summary>
+    public uint DefaultSampleDuration { get; set; }
+    /// <summary>Gets or sets the default sample size.</summary>
+    public uint DefaultSampleSize { get; set; }
+    /// <summary>Gets or sets the default sample flags.</summary>
+    public uint DefaultSampleFlags { get; set; }
+
+    /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
-        
+        ReadFullBoxHeader(stream);
+        BmffFields.Version(Version, Flags, 0, 0, stream.Offset);
+        TrackId = BmffFields.U32(stream);
+        DefaultSampleDescriptionIndex = BmffFields.U32(stream);
+        DefaultSampleDuration = BmffFields.U32(stream);
+        DefaultSampleSize = BmffFields.U32(stream);
+        DefaultSampleFlags = BmffFields.U32(stream);
+        _trailing = BmffFields.Bytes(stream, stream.Remaining);
+        Validate();
     }
-
+    /// <inheritdoc/>
     public override void Write(BmffStream stream)
     {
-        throw new NotImplementedException();
+        Validate();
+        WriteFullBoxHeader(stream);
+        BmffFields.U32(stream, TrackId);
+        BmffFields.U32(stream, DefaultSampleDescriptionIndex);
+        BmffFields.U32(stream, DefaultSampleDuration);
+        BmffFields.U32(stream, DefaultSampleSize);
+        BmffFields.U32(stream, DefaultSampleFlags);
+        stream.Write(_trailing);
     }
-    public override T Accept<T>(IBmffBoxVisitor<T> visitor)
+    /// <inheritdoc/>
+    public override long GetPayloadSize()
     {
-        return visitor.Visit(this);
+        Validate();
+        return 24L + _trailing.Length;
+    }
+    private void Validate()
+    {
+        BmffFields.Version(Version, Flags, 0, 0, Offset);
+    }
+    /// <inheritdoc/>
+    public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+    /// <inheritdoc/>
+    protected internal override void WriteDescription(TextWriter writer)
+    {
+        base.WriteDescription(writer);
+        writer.Write(System.FormattableString.Invariant($" track-id={TrackId} default-duration={DefaultSampleDuration} default-size={DefaultSampleSize}"));
     }
 }

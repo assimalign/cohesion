@@ -29,10 +29,12 @@ public sealed class YamlStream : IEnumerable<YamlDocument>
 
     /// <summary>Gets the document at the given index.</summary>
     /// <param name="index">The zero-based index.</param>
+    /// <returns>The item at the requested index or key.</returns>
     public YamlDocument this[int index] => Documents[index];
 
     /// <inheritdoc/>
     public IEnumerator<YamlDocument> GetEnumerator() => Documents.GetEnumerator();
 
+    /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

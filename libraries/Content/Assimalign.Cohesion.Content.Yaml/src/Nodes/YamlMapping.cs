@@ -47,12 +47,14 @@ public sealed class YamlMapping : YamlNode, IEnumerable<YamlMappingEntry>
     /// </summary>
     /// <param name="key">The scalar key text.</param>
     /// <exception cref="KeyNotFoundException">Thrown when no entry has the key.</exception>
+    /// <returns>The item at the requested index or key.</returns>
     public YamlNode this[string key] =>
         TryGetValue(key, out var value) ? value : throw new KeyNotFoundException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MappingKeyMissing, key));
 
     /// <summary>Adds an entry with a scalar key.</summary>
     /// <param name="key">The scalar key text.</param>
     /// <param name="value">The entry value.</param>
+    /// <exception cref="System.ArgumentNullException">The scalar key text is null.</exception>
     public void Add(string key, YamlNode value) => Entries.Add(new YamlMappingEntry(YamlScalar.FromString(key), value));
 
     /// <summary>Adds an entry.</summary>
@@ -84,5 +86,6 @@ public sealed class YamlMapping : YamlNode, IEnumerable<YamlMappingEntry>
     /// <inheritdoc/>
     public IEnumerator<YamlMappingEntry> GetEnumerator() => Entries.GetEnumerator();
 
+    /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Content.Text.Internal;
 
@@ -50,12 +51,12 @@ internal sealed class TextTokenizerTable
         {
             if (definition is null)
             {
-                throw new ArgumentException("Token definitions must not be null.", nameof(options));
+                throw new ArgumentException(ErrorMessages.NullTokenDefinition, nameof(options));
             }
 
             if (!texts.Add(definition.Text))
             {
-                throw new ArgumentException($"Duplicate token definition text '{Escape(definition.Text)}'.", nameof(options));
+                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DuplicateTokenDefinition, Escape(definition.Text)), nameof(options));
             }
 
             var first = definition.Text[0];

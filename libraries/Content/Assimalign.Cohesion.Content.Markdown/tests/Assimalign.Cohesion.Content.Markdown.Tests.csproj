@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Content.Markdown.Tests</RootNamespace>
+		<StartupObject>Assimalign.Cohesion.Content.Markdown.Tests.ParserBombProbe</StartupObject>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
@@ -12,5 +13,8 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Markdown" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Text" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Update="TestObjects\CommonMark\*.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 </Project>

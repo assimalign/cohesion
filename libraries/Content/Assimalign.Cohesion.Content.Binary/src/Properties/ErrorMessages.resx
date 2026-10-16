@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="TruncatedInput" xml:space="preserve"><value>The input ended before the requested bytes were available.</value></data>
+  <data name="IntegerDoesNotFit" xml:space="preserve"><value>The value does not fit in the requested byte count.</value></data>
+  <data name="FixedPointOutOfRange" xml:space="preserve"><value>The value is outside the fixed-point range.</value></data>
+  <data name="FourCCLength" xml:space="preserve"><value>A four-character code requires exactly four bytes.</value></data>
+  <data name="FourCCInvalid" xml:space="preserve"><value>A four-character code requires exactly four ISO-8859-1 characters.</value></data>
+  <data name="DestinationTooSmall" xml:space="preserve"><value>The destination must contain at least four bytes.</value></data>
+  <data name="SourceNotSeekable" xml:space="preserve"><value>The source must be readable and seekable.</value></data>
+  <data name="SourceNotReadable" xml:space="preserve"><value>The source must be readable.</value></data>
+  <data name="SliceNotSeekable" xml:space="preserve"><value>The slice is forward-only.</value></data>
+  <data name="InvalidSeekOrigin" xml:space="preserve"><value>The seek origin is invalid.</value></data>
+  <data name="SeekOutsideRange" xml:space="preserve"><value>The requested position is negative or exceeds Int64.</value></data>
+  <data name="SliceReadOnly" xml:space="preserve"><value>The slice is read-only.</value></data>
+  <data name="MaterializationLimit" xml:space="preserve"><value>The segment exceeds the permitted materialization length.</value></data>
+</root>

@@ -2,5 +2,7 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Content.Pdf</RootNamespace>
 	</PropertyGroup>
-
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Binary" />
+	</ItemGroup>
 </Project>

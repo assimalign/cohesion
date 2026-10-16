@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Assimalign.Cohesion.Content.Yaml.Internal;
@@ -12,21 +13,28 @@ namespace Assimalign.Cohesion.Content.Yaml.Internal;
 internal sealed class YamlEventParser
 {
     private readonly string _text;
+    private readonly string _source;
+    private readonly YamlParserOptions _options;
+    private int _depth;
     private readonly List<YamlEvent> _events = [];
     private Dictionary<string, string>? _tagHandles;
     private int _pos;
     private int _line = 1;
     private int _lineStart;
 
-    private YamlEventParser(string text)
+    private YamlEventParser(string text, YamlParserOptions options)
     {
-        _text = text;
+        _source = text;
+        _text = Normalize(text);
+        _options = options;
     }
 
-    internal static List<YamlEvent> Parse(string text)
+    internal static List<YamlEvent> Parse(string text, YamlParserOptions options)
     {
-        var parser = new YamlEventParser(Normalize(text));
+        options.Validate();
+        var parser = new YamlEventParser(text, options);
         parser.ParseStream();
+        YamlEventValidator.Validate(parser._events, options, text);
         return parser._events;
     }
 
@@ -129,7 +137,7 @@ internal sealed class YamlEventParser
             var version = ReadWhile(static c => c is not ' ' and not '\t' and not '\n' and not '#');
             if (version is not ("1.1" or "1.2"))
             {
-                throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.YamlVersionUnsupported, version));
+                throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.YamlVersionUnsupported, version), ContentFormatErrorCode.Unsupported);
             }
         }
         else if (name == "TAG")
@@ -155,6 +163,10 @@ internal sealed class YamlEventParser
     /// <summary>Parses one node in block context whose content sits at a column greater than <paramref name="minIndent"/>.</summary>
     private void ParseBlockNode(int minIndent)
     {
+        if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        {
+            throw Error(ErrorMessages.NestingLimitExceeded, ContentFormatErrorCode.LimitExceeded);
+        }
         SkipBlankAndCommentLines();
         var (anchor, tag, hadProperties) = ParseNodeProperties(minIndent);
 
@@ -216,6 +228,10 @@ internal sealed class YamlEventParser
                 Advance();
                 BeginBlockMapping(column, startIndex);
             }
+            else
+            {
+                CheckNoTrailingContent();
+            }
 
             return;
         }
@@ -235,7 +251,7 @@ internal sealed class YamlEventParser
             {
                 if (!singleLine)
                 {
-                    throw Error(ErrorMessages.MappingKeyMultiline);
+                    throw Error(ErrorMessages.MappingKeyMultiline, ContentFormatErrorCode.Unsupported);
                 }
 
                 var startIndex = _events.Count;
@@ -279,6 +295,7 @@ internal sealed class YamlEventParser
     private void BeginBlockMapping(int column, int firstKeyStartIndex)
     {
         var keyEvent = _events[firstKeyStartIndex];
+        EnterCollection(keyEvent.Line, column + 1);
         _events.Insert(firstKeyStartIndex, new YamlEvent(YamlEventKind.MappingStart, keyEvent.Line, column + 1));
         ParseValueAfterColon(column);
         ParseBlockMappingEntries(column, firstImplicitKeyPending: true);
@@ -377,7 +394,7 @@ internal sealed class YamlEventParser
                 : ScanSingleQuoted(column, ref singleLine);
             if (!singleLine)
             {
-                throw Error(ErrorMessages.MappingKeyMultiline);
+                throw Error(ErrorMessages.MappingKeyMultiline, ContentFormatErrorCode.Unsupported);
             }
 
             SkipSpacesAndTabs();
@@ -452,6 +469,10 @@ internal sealed class YamlEventParser
     /// <summary>Parses a node that begins on the current line (a value after ':' or '-').</summary>
     private void ParseInlineValue(int minIndent)
     {
+        if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        {
+            throw Error(ErrorMessages.NestingLimitExceeded, ContentFormatErrorCode.LimitExceeded);
+        }
         var (anchor, tag, hadProperties) = ParseInlineProperties();
 
         if (AtEnd || Peek() == '\n' || Peek() == '#')
@@ -517,6 +538,10 @@ internal sealed class YamlEventParser
                 Advance();
                 BeginBlockMapping(startColumn, startIndex);
             }
+            else
+            {
+                CheckNoTrailingContent();
+            }
 
             return;
         }
@@ -534,7 +559,7 @@ internal sealed class YamlEventParser
             {
                 if (!singleLine)
                 {
-                    throw Error(ErrorMessages.MappingKeyMultiline);
+                    throw Error(ErrorMessages.MappingKeyMultiline, ContentFormatErrorCode.Unsupported);
                 }
 
                 var startIndex = _events.Count;
@@ -658,6 +683,10 @@ internal sealed class YamlEventParser
 
     private void ParseFlowNode(YamlAnchorName? anchor, YamlTag? tag)
     {
+        if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        {
+            throw Error(ErrorMessages.NestingLimitExceeded, ContentFormatErrorCode.LimitExceeded);
+        }
         var c = Peek();
         if (c == '[')
         {
@@ -683,7 +712,7 @@ internal sealed class YamlEventParser
             SkipFlowSeparation();
             if (AtEnd)
             {
-                throw Error(ErrorMessages.FlowSequenceUnterminated);
+                throw Error(ErrorMessages.FlowSequenceUnterminated, ContentFormatErrorCode.Truncated);
             }
 
             if (Peek() == ']')
@@ -707,7 +736,7 @@ internal sealed class YamlEventParser
                 break;
             }
 
-            throw Error(ErrorMessages.FlowSequenceSeparatorMissing);
+            throw Error(ErrorMessages.FlowSequenceSeparatorMissing, AtEnd ? ContentFormatErrorCode.Truncated : ContentFormatErrorCode.InvalidStructure);
         }
 
         Emit(new YamlEvent(YamlEventKind.SequenceEnd, _line, Column + 1, collectionStyle: YamlCollectionStyle.Flow));
@@ -724,6 +753,7 @@ internal sealed class YamlEventParser
         if (Peek() == ':' && (IsSpaceLikeOrEnd(Peek(1)) || Peek(1) is ',' or ']' or '}' or '[' or '{' or '"' or '\''))
         {
             var keyEvent = _events[startIndex];
+            EnterCollection(keyEvent.Line, keyEvent.Column);
             _events.Insert(startIndex, new YamlEvent(YamlEventKind.MappingStart, keyEvent.Line, keyEvent.Column, collectionStyle: YamlCollectionStyle.Flow));
             Advance();
             SkipFlowSeparation();
@@ -752,7 +782,7 @@ internal sealed class YamlEventParser
             SkipFlowSeparation();
             if (AtEnd)
             {
-                throw Error(ErrorMessages.FlowMappingUnterminated);
+                throw Error(ErrorMessages.FlowMappingUnterminated, ContentFormatErrorCode.Truncated);
             }
 
             if (Peek() == '}')
@@ -813,7 +843,7 @@ internal sealed class YamlEventParser
                 break;
             }
 
-            throw Error(ErrorMessages.FlowMappingSeparatorMissing);
+            throw Error(ErrorMessages.FlowMappingSeparatorMissing, AtEnd ? ContentFormatErrorCode.Truncated : ContentFormatErrorCode.InvalidStructure);
         }
 
         Emit(new YamlEvent(YamlEventKind.MappingEnd, _line, Column + 1, collectionStyle: YamlCollectionStyle.Flow));
@@ -853,7 +883,7 @@ internal sealed class YamlEventParser
         var (text, _) = ScanPlainFirstLine(inFlow: true);
         if (text.Length == 0)
         {
-            throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FlowCharacterUnexpected, Peek()));
+            throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FlowCharacterUnexpected, Peek()), AtEnd ? ContentFormatErrorCode.Truncated : ContentFormatErrorCode.InvalidStructure);
         }
 
         // Multi-line plain scalars fold in flow context as well.
@@ -1008,7 +1038,7 @@ internal sealed class YamlEventParser
         {
             if (AtEnd)
             {
-                throw Error(ErrorMessages.DoubleQuotedScalarUnterminated);
+                throw Error(ErrorMessages.DoubleQuotedScalarUnterminated, ContentFormatErrorCode.Truncated);
             }
 
             var c = Peek();
@@ -1024,7 +1054,7 @@ internal sealed class YamlEventParser
                 Advance();
                 if (AtEnd)
                 {
-                    throw Error(ErrorMessages.EscapeSequenceUnterminated);
+                    throw Error(ErrorMessages.EscapeSequenceUnterminated, ContentFormatErrorCode.Truncated);
                 }
 
                 var escape = Peek();
@@ -1096,29 +1126,33 @@ internal sealed class YamlEventParser
             'x' => ReadHexEscape(2),
             'u' => ReadHexEscape(4),
             'U' => ReadHexEscape(8),
-            _ => throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EscapeSequenceUnknown, c))
+            _ => throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.EscapeSequenceUnknown, c), ContentFormatErrorCode.InvalidValue)
         };
     }
 
     private char ReadHexEscape(int digits)
     {
-        var value = 0;
+        uint value = 0;
         for (var index = 0; index < digits; index++)
         {
             if (AtEnd || !char.IsAsciiHexDigit(Peek()))
             {
-                throw Error(ErrorMessages.HexEscapeInvalid);
+                throw Error(ErrorMessages.HexEscapeInvalid, AtEnd ? ContentFormatErrorCode.Truncated : ContentFormatErrorCode.InvalidValue);
             }
 
-            value = (value << 4) + Convert.ToInt32(Peek().ToString(), 16);
+            value = (value << 4) + (uint)(Peek() <= '9' ? Peek() - '0' : (Peek() | 0x20) - 'a' + 10);
             Advance();
         }
 
-        // Characters outside the basic plane are not representable in a single char; the retained
-        // scope surfaces them as a replacement pair through string.Append below when needed.
+        if (value > 0x10FFFF || value is >= 0xD800 and <= 0xDFFF)
+        {
+            throw Error(ErrorMessages.HexEscapeInvalid, ContentFormatErrorCode.InvalidValue);
+        }
+
+        // Valid supplementary scalars are outside this parser revision's retained scope.
         if (value > char.MaxValue)
         {
-            throw Error(ErrorMessages.EscapeCodePointUnsupported);
+            throw Error(ErrorMessages.EscapeCodePointUnsupported, ContentFormatErrorCode.Unsupported);
         }
 
         return (char)value;
@@ -1133,7 +1167,7 @@ internal sealed class YamlEventParser
         {
             if (AtEnd)
             {
-                throw Error(ErrorMessages.SingleQuotedScalarUnterminated);
+                throw Error(ErrorMessages.SingleQuotedScalarUnterminated, ContentFormatErrorCode.Truncated);
             }
 
             var c = Peek();
@@ -1423,7 +1457,7 @@ internal sealed class YamlEventParser
 
         if (!YamlAnchorName.TryCreate(builder.ToString(), out var name))
         {
-            throw Error(ErrorMessages.AnchorNameInvalid);
+            throw Error(ErrorMessages.AnchorNameInvalid, ContentFormatErrorCode.InvalidValue);
         }
 
         return name;
@@ -1433,7 +1467,7 @@ internal sealed class YamlEventParser
     {
         if (!YamlTag.TryCreate(ReadTagValue(), out var tag))
         {
-            throw Error(ErrorMessages.TagInvalid);
+            throw Error(ErrorMessages.TagInvalid, ContentFormatErrorCode.InvalidValue);
         }
 
         return tag;
@@ -1449,7 +1483,7 @@ internal sealed class YamlEventParser
             var uri = ReadWhile(static c => c is not '>' and not '\n');
             if (AtEnd || Peek() != '>')
             {
-                throw Error(ErrorMessages.VerbatimTagUnterminated);
+                throw Error(ErrorMessages.VerbatimTagUnterminated, ContentFormatErrorCode.Truncated);
             }
 
             Advance();
@@ -1476,7 +1510,7 @@ internal sealed class YamlEventParser
             var handle = "!" + token[..(separator + 1)];
             if (_tagHandles is null || !_tagHandles.TryGetValue(handle, out var prefix))
             {
-                throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TagHandleUnknown, handle));
+                throw Error(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TagHandleUnknown, handle), ContentFormatErrorCode.InvalidValue);
             }
 
             return prefix + token[(separator + 1)..];
@@ -1675,10 +1709,31 @@ internal sealed class YamlEventParser
         }
     }
 
-    private void Emit(YamlEvent yamlEvent) => _events.Add(yamlEvent);
+    private void Emit(YamlEvent yamlEvent)
+    {
+        if (yamlEvent.Kind is YamlEventKind.SequenceStart or YamlEventKind.MappingStart)
+        {
+            EnterCollection(yamlEvent.Line, yamlEvent.Column);
+        }
+        else if (yamlEvent.Kind is YamlEventKind.SequenceEnd or YamlEventKind.MappingEnd)
+        {
+            _depth--;
+        }
+        _events.Add(yamlEvent);
+    }
+
+    private void EnterCollection(int line, int column)
+    {
+        if (_depth >= _options.MaxDepth)
+        {
+            throw YamlException.At(ErrorMessages.NestingLimitExceeded, ContentFormatErrorCode.LimitExceeded, line, column, _source);
+        }
+        _depth++;
+    }
 
     private void EmitNullScalar(YamlAnchorName? anchor, YamlTag? tag) =>
         Emit(new YamlEvent(YamlEventKind.Scalar, _line, Column + 1, value: null, anchor: anchor, tag: tag));
 
-    private YamlException Error(string message) => new(message, _line, Column + 1);
+    private YamlException Error(string message, ContentFormatErrorCode code = ContentFormatErrorCode.InvalidStructure)
+        => YamlException.At(message, code, _line, Column + 1, _source);
 }
