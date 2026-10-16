@@ -62,6 +62,9 @@ internal static class Program
         ["grace@example.com", "$2.00", 456L, new DateOnly(2026, 2, 1), "00000002000000000000000000000000"],
     ];
 
+    private const string Characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
+    private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];
+
     // E3: a CAST no registered cast performs is refused while planning, rows or not.
     private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
 
@@ -156,6 +159,9 @@ internal static class Program
         await session.ExecuteAsync("CREATE DOMAIN sql_positive AS INT CHECK (VALUE > 0)");
         await session.ExecuteAsync("CREATE TABLE sql_defined (n sql_positive DEFAULT sql_increment(2))");
         await session.ExecuteAsync("INSERT INTO sql_defined VALUES (sql_increment(3))");
+        await session.ExecuteAsync("CREATE TABLE fixed_codes (c CHAR(3) PRIMARY KEY)");
+        await session.ExecuteAsync("INSERT INTO fixed_codes VALUES ('a')");
+        Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
         Check("in process: SQL function and domain", await RowsAsync(session, "SELECT sql_increment(n) FROM sql_defined"), [[5]]);
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, Projection), _projection);
         Check("in process: typed and hand-written aggregates", await RowsAsync(session, Aggregates), _aggregates);
@@ -196,6 +202,10 @@ internal static class Program
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using SqlConnection connection = await client.ConnectAsync(timeout.Token);
 
+        Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
+        var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);
+        Check("over the wire: CHAR type", fixedCodes.Columns[0].Type == Types.DatabaseType.Character, true);
+        Check("over the wire: CHAR length", fixedCodes.Columns[0].MaxLength == 3, true);
         Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, Projection, timeout.Token), _projection);
         Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, Aggregates, timeout.Token), _aggregates);
         Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, Registered, timeout.Token), _registered);
