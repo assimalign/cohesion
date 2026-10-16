@@ -21,14 +21,14 @@ public sealed class Mp4RegistryTests
         // Arrange
         var bytes = Mp4Fixtures.Write(Mp4Fixtures.Opaque(code, [0, 0, 0, 0]));
         using var source = new MemoryStream(bytes);
-        using var reader = BmffReader.Create(source, null, Mp4Profile.CreateRegistry());
+        using var reader = BmffReader.Create(source, new BmffReaderOptions { MaxBufferedPayloadSize = 0 }, Mp4Profile.CreateRegistry());
         // Act
         reader.Read().ShouldBeTrue();
-        var box = reader.Current.ShouldBeAssignableTo<BmffBoxComposite>();
+        var box = reader.Current.ShouldBeAssignableTo<BmffBoxLazyLeaf>();
         // Assert
         box.IsLeaf.ShouldBeTrue();
         box.IsComposite.ShouldBeFalse();
-        box.Children.ShouldBeEmpty();
+        box.Payload.Length.ShouldBe(4);
         Mp4Fixtures.Write(box).ShouldBe(bytes);
     }
 

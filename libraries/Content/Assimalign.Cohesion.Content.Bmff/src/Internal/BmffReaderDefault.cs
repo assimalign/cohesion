@@ -58,7 +58,7 @@ internal sealed class BmffReaderDefault : BmffReader
             var box = IsTrackReference ? new TrackReferenceTypeBox(_header) : _stream.Registry.Create(_header)!;
             try
             {
-                if (box is BmffBoxComposite || box is MediaDataBox || box is FreeSpaceBox || box is SkipBox)
+                if (box is BmffBoxComposite || box is BmffBoxLazyLeaf || box is MediaDataBox || box is FreeSpaceBox || box is SkipBox)
                 {
                     box.Read(_payload);
                 }

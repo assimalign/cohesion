@@ -160,9 +160,9 @@ internal sealed class BmffWritePlan
             }
             await payload.WriteAsync(composite.TrailingData, cancellationToken).ConfigureAwait(false);
         }
-        else if (_box is BmffBoxComposite)
+        else if (_box is BmffBoxComposite or BmffBoxLazyLeaf)
         {
-            // Third-party composites retain their synchronous per-box Write contract.
+            // Profile composites and lazy leaves retain their synchronous per-box Write contract.
             _box.Write(payload);
         }
         else if (TryGetSegment(out var segment))

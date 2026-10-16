@@ -141,13 +141,19 @@ Factories receive the validated BmffBoxHeader and must return a matching BoxType
 receive arbitrary wire sizes before header validation. There is no reflection or assembly scanning.
 The reader propagates the chosen registry into nested containers.
 
-A profile leaf implements Read, Write and GetPayloadSize and may derive from BmffFullBox.
+A buffered profile leaf implements Read, Write and GetPayloadSize and may derive from BmffFullBox.
 It reads only its bounded payload and must consume all buffered bytes. Report unsupported versions
 or flags with ContentFormatException(Unsupported), and malformed fields with the appropriate
 format code and absolute offset. A profile composite can parse/write its own prefix and then call
 the base child traversal. For header-only streaming of a profile-specific prefix, consume that
 prefix from Payload and call BmffStream.ReadChildren; the built-in reader's ReadChildren knows the
 prefix grammar of the package's own containers.
+
+A profile with opaque bytes derives from BmffBoxLazyLeaf. Its Read captures Payload as a borrowed
+BinarySegment over the seekable source, with no payload-sized allocation. Write copies it through.
+ReadPayloadBytes is a protected opt-in materializer; it checks the originating reader's buffer cap
+before allocation. Typed accessors and small-prefix parsing belong to the subclass. Lazy leaf
+Write overrides run synchronously during SaveAsync with bounded streaming and cancellation checks.
 
 ## Unknown and deferred preservation
 

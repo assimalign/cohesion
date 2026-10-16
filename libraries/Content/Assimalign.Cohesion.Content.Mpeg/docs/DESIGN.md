@@ -28,7 +28,7 @@ Sample entries are sealed composites with preserved prefixes. The retained types
 hvc1, hev1, av01, vp09, mp4a, Opus, ac-3, ec-3, wvtt, stpp and tx3g. Visual dimensions and
 compressor labels, audio channels/rate and data-reference indices are editable. Other prefix
 bytes and child order survive saves. Decoder boxes avcC/hvcC/av1C/vpcC/esds/dOps/dac3/dec3 and
-pasp/colr/btrt preserve opaque BinarySegments, including full-box prefixes where applicable.
+pasp/colr/btrt derive from BmffBoxLazyLeaf and preserve opaque BinarySegments, including full-box prefixes where applicable.
 
 The public BMFF forward-only reader/writer are the streaming surfaces; supply the profile
 registry. For stsd streaming, consume the full-box/count prefix and process bounded entry
@@ -39,11 +39,6 @@ payloads, or use LoadDocument for a seekable, editable tree. Codec decoding is o
 - BMFF always bypasses registry dispatch inside stsd. Local workaround: a second bounded
   reader pass over entry headers, with the remaining nesting budget. A contextual registry
   seam belongs in BMFF if the owner wants to remove this pass.
-- BMFF buffers third-party leaves and does not expose stable segment capture. Opaque profile
-  nodes use childless composite inheritance to reach its unbuffered path and reuse MediaDataBox.Read
-  for stable lazy segment capture. IsLeaf is true, IsComposite false, and Children is immutable
-  empty. This avoids holding disposed windows or pooled buffers. A public lazy-leaf seam would
-  remove this implementation compromise.
 - BMFF's typed visitor rule conflicts with the prohibition on changing its interfaces. New
   profile boxes use inherited Visit(BmffBox) dispatch; no visitor interface is widened.
 - Sealed box classes follow the explicit brief's composite model exception to interface-first.

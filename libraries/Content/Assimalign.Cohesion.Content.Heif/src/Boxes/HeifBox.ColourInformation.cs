@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 using Assimalign.Cohesion.Content.Binary;
 using Assimalign.Cohesion.Content.Bmff;
 using Assimalign.Cohesion.Content.Heif.Internal;
@@ -9,7 +6,7 @@ namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>The colr leaf with nclx fields or an opaque lazy ICC profile.</summary>
 // Deviates from the repo interface-first rule per the Stage 5 composite-box brief.
-public sealed class ColourInformationBox : BmffBoxComposite
+public sealed class ColourInformationBox : BmffBoxLazyLeaf
 {
     /// <summary>Creates an empty ColourInformationBox model.</summary>
     public ColourInformationBox() { }
@@ -20,14 +17,6 @@ public sealed class ColourInformationBox : BmffBoxComposite
     /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x636f6c72;
     internal HeifReaderOptions Options { get; set; } = new();
-    /// <inheritdoc/>
-    public override bool IsLeaf => true;
-    /// <inheritdoc/>
-    public override bool IsComposite => false;
-    // BMFF buffers external leaves. Composite dispatch is the local streaming adapter;
-    // these nodes remain semantic leaves and cannot acquire children (see DESIGN.md).
-    /// <inheritdoc/>
-    public override IList<BmffBox> Children { get; } = Array.AsReadOnly(Array.Empty<BmffBox>());
 
     /// <summary>Gets or sets the colour representation.</summary>
     public FourCC ColourType { get; set; } = FourCC.FromUInt32(0x6e636c78);
@@ -50,6 +39,7 @@ public sealed class ColourInformationBox : BmffBoxComposite
     /// <inheritdoc/>
     public override void Read(BmffStream stream)
     {
+        base.Read(stream);
         ColourType = FourCC.FromUInt32(HeifFields.Read(stream, 4));
         if (ColourType.Value == 0x6e636c78)
         {
@@ -59,15 +49,15 @@ public sealed class ColourInformationBox : BmffBoxComposite
             var range = HeifFields.Read(stream, 1);
             FullRange = (range & 128) != 0;
             Reserved = (byte)(range & 127);
-            TrailingData = HeifFields.Segment(stream);
+            TrailingData = Payload.Slice(stream.Position, stream.Remaining);
         }
         else if (ColourType.Value is 0x70726f66 or 0x72494343)
         {
-            Profile = HeifFields.Segment(stream);
+            Profile = Payload.Slice(stream.Position, stream.Remaining);
         }
         else
         {
-            TrailingData = HeifFields.Segment(stream);
+            TrailingData = Payload.Slice(stream.Position, stream.Remaining);
         }
     }
     /// <inheritdoc/>

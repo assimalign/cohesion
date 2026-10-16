@@ -64,13 +64,4 @@ internal static class HeifFields
             throw new ContentFormatException(ErrorMessages.Unsupported, ContentFormatErrorCode.Unsupported, position);
         }
     }
-    internal static BinarySegment Segment(BmffStream stream)
-    {
-        // BMFF has no public lazy-range accessor. Its media node supplies the same borrowed range.
-        var media = new MediaDataBox(0, 0);
-        media.Read(stream);
-        var result = media.Payload.Slice(stream.Position, stream.Remaining);
-        stream.SkipExactly(stream.Remaining);
-        return result;
-    }
 }

@@ -42,17 +42,14 @@ truncated parsing always fail; semantic leniency belongs to the item view, not u
 Unknown children and unsupported versions survive through BMFF preservation. No reflection,
 dynamic generation, codecs, storage adapters or inter-assembly internal access are required.
 
-## BMFF extension constraints and local workarounds
+## BMFF extension seams
 
-BMFF buffers external leaf models before calling Read and has no public lazy-range accessor.
-The colr, hvcC, av1C and idat models therefore inherit BmffBoxComposite solely to select its
-unbuffered read/write path, override IsLeaf/IsComposite, and expose an immutable empty Children
-list. They remain wire leaves. Internally, MediaDataBox.Read obtains the borrowed BinarySegment
-through the existing public seam; no payload is copied or lifetime tied to a disposed window.
-This is the smallest local streaming adapter that keeps BMFF unchanged. A future BMFF public
-lazy-leaf seam would let these classes derive directly from BmffBox.
-BMFF SaveAsync invokes these external Write overrides synchronously, with bounded streaming
-and cancellation checks. It does not promise asynchronous-only I/O for profile boxes.
+The colr, hvcC, av1C and idat models derive from BmffBoxLazyLeaf. BMFF captures their payloads
+as borrowed BinarySegments over the seekable source without buffering. colr parses its small
+colour prefix and retains the ICC profile or suffix as a slice. No child collection is exposed.
+The protected ReadPayloadBytes helper checks the reader cap before materializing bytes.
+BMFF SaveAsync invokes profile Write overrides synchronously with bounded streaming and
+cancellation checks; it does not promise asynchronous-only I/O for profile boxes.
 
 BMFF ReadChildren cannot consume an external full-container prefix. For header-only traversal
 of iref, read its four prefix bytes from Payload before calling ((BmffStream)Payload).ReadChildren().
