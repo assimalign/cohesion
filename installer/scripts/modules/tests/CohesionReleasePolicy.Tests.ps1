@@ -5,6 +5,63 @@ BeforeAll {
     $repositoryDirectory = (Resolve-Path (Join-Path $PSScriptRoot '../../../..')).Path
     $localPackagingModule = Join-Path $PSScriptRoot '../CohesionLocalPackaging.psm1'
     Import-Module $localPackagingModule -Force
+    Import-Module (Join-Path $PSScriptRoot '../CohesionPackaging.psm1') -Force
+
+    # NuGet's SemVer 2.0 precedence, as NuGet.Versioning's VersionComparer applies it: numeric
+    # identifiers are the ones Int32.TryParse accepts, a numeric identifier sorts below an
+    # alphanumeric one, labels compare ordinally ignoring case, and with an equal prefix the
+    # shorter identifier list sorts lower. Returns -1, 0, or 1.
+    function Compare-NuGetVersion {
+        param(
+            [Parameter(Mandatory)]
+            [string] $Left,
+
+            [Parameter(Mandatory)]
+            [string] $Right
+        )
+
+        $leftPart = $Left.Split('-', 2)
+        $rightPart = $Right.Split('-', 2)
+        $coreComparison = ([version] $leftPart[0]).CompareTo([version] $rightPart[0])
+        if ($coreComparison -ne 0) {
+            return [Math]::Sign($coreComparison)
+        }
+
+        if ($leftPart.Count -eq 1 -or $rightPart.Count -eq 1) {
+            # A release sorts above every prerelease of the same core.
+            return [Math]::Sign($leftPart.Count.CompareTo($rightPart.Count)) * -1
+        }
+
+        $leftIdentifier = $leftPart[1].Split('.')
+        $rightIdentifier = $rightPart[1].Split('.')
+        for ($index = 0; $index -lt [Math]::Min($leftIdentifier.Count, $rightIdentifier.Count); $index++) {
+            $leftNumber = 0
+            $rightNumber = 0
+            $leftIsNumber = [int]::TryParse($leftIdentifier[$index], [ref] $leftNumber)
+            $rightIsNumber = [int]::TryParse($rightIdentifier[$index], [ref] $rightNumber)
+            $comparison = if ($leftIsNumber -and $rightIsNumber) {
+                $leftNumber.CompareTo($rightNumber)
+            }
+            elseif ($leftIsNumber) {
+                -1
+            }
+            elseif ($rightIsNumber) {
+                1
+            }
+            else {
+                [string]::Compare(
+                    $leftIdentifier[$index],
+                    $rightIdentifier[$index],
+                    [System.StringComparison]::OrdinalIgnoreCase)
+            }
+
+            if ($comparison -ne 0) {
+                return [Math]::Sign($comparison)
+            }
+        }
+
+        return [Math]::Sign($leftIdentifier.Count.CompareTo($rightIdentifier.Count))
+    }
 
     function Get-WorkflowJobBody {
         param(
@@ -26,6 +83,7 @@ BeforeAll {
 
 AfterAll {
     Remove-Module CohesionLocalPackaging -Force -ErrorAction SilentlyContinue
+    Remove-Module CohesionPackaging -Force -ErrorAction SilentlyContinue
 }
 
 Describe 'Cohesion local package versions' {
@@ -273,5 +331,169 @@ os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu
 
         $releaseWorkflow | Should -Match 'local-sdk-use-canonical-version:'
         $databaseWorkflow | Should -Match 'resources/Database/global.json'
+    }
+}
+
+Describe 'Cohesion CI package versions' {
+    It 'extends the canonical predecessor for a main build' {
+        $version = Get-CohesionCiPackageVersion -Version '10.0.0-preview.1' -BuildNumber 57
+
+        $version.Version | Should -Be '10.0.0-preview.0.ci.57'
+        $version.BaseVersion | Should -Be '10.0.0-preview.0'
+        $version.VersionPrefix | Should -Be '10.0.0'
+        $version.VersionSuffix | Should -Be 'preview.0.ci.57'
+        $version.Channel | Should -Be 'ci'
+    }
+
+    It 'carries the pull request number for a pull request build' {
+        $version = Get-CohesionCiPackageVersion `
+            -Version '10.0.0-preview.1' `
+            -BuildNumber 58 `
+            -PullRequestNumber 1520
+
+        $version.Version | Should -Be '10.0.0-preview.0.pr.1520.58'
+        $version.VersionSuffix | Should -Be 'preview.0.pr.1520.58'
+        $version.Channel | Should -Be 'pr'
+    }
+
+    It 'sorts every build of <Canonical> above <Previous> and below the canonical version' -ForEach @(
+        @{ Canonical = '10.0.0-preview.1'; Previous = '9.0.0' }
+        @{ Canonical = '10.0.0-preview.2'; Previous = '10.0.0-preview.1' }
+        @{ Canonical = '10.0.0-preview.10'; Previous = '10.0.0-preview.9' }
+        @{ Canonical = '10.0.0-rc.1'; Previous = '10.0.0-preview.9' }
+        @{ Canonical = '10.0.1-preview.1'; Previous = '10.0.0' }
+    ) {
+        $build = @(
+            (Get-CohesionCiPackageVersion -Version $Canonical -BuildNumber 9).Version
+            (Get-CohesionCiPackageVersion -Version $Canonical -BuildNumber 10).Version
+            (Get-CohesionCiPackageVersion -Version $Canonical -BuildNumber 9 -PullRequestNumber 1520).Version
+            (Get-CohesionCiPackageVersion -Version $Canonical -BuildNumber 10 -PullRequestNumber 1520).Version
+        )
+
+        foreach ($version in $build) {
+            $version | Should -Match '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$'
+            Compare-NuGetVersion -Left $version -Right $Canonical | Should -Be -1
+            Compare-NuGetVersion -Left $Previous -Right $version | Should -Be -1
+        }
+
+        # Run 10 above run 9 is the order a text comparison gets wrong.
+        Compare-NuGetVersion -Left $build[0] -Right $build[1] | Should -Be -1
+        Compare-NuGetVersion -Left $build[2] -Right $build[3] | Should -Be -1
+    }
+
+    It 'rejects a stable canonical version' {
+        { Get-CohesionCiPackageVersion -Version '10.0.1' -BuildNumber 1 } |
+            Should -Throw -ExpectedMessage '*stable*post-tag bump*'
+    }
+
+    It 'rejects canonical prerelease <Version>, which has no positive trailing number' -ForEach @(
+        @{ Version = '10.0.0-preview' }
+        @{ Version = '10.0.0-preview.0' }
+    ) {
+        { Get-CohesionCiPackageVersion -Version $Version -BuildNumber 1 } |
+            Should -Throw -ExpectedMessage '*positive integer*'
+    }
+
+    It 'rejects the reserved <Identifier> identifier on the canonical version' -ForEach @(
+        @{ Identifier = 'local'; Version = '10.0.0-preview.1.local' }
+        @{ Identifier = 'ci'; Version = '10.0.0-ci.1' }
+        @{ Identifier = 'pr'; Version = '10.0.0-pr.1' }
+    ) {
+        { Get-CohesionCiPackageVersion -Version $Version -BuildNumber 1 } |
+            Should -Throw -ExpectedMessage "*reserved '$Identifier'*"
+    }
+
+    It 'rejects a leading-zero numeric prerelease identifier' {
+        { Get-CohesionCiPackageVersion -Version '10.0.1-preview.03' -BuildNumber 1 } |
+            Should -Throw -ExpectedMessage '*leading zero*'
+    }
+
+    It 'rejects build number <BuildNumber>, which NuGet cannot order as a number' -ForEach @(
+        @{ BuildNumber = '0' }
+        @{ BuildNumber = '2147483648' }
+    ) {
+        { Get-CohesionCiPackageVersion -Version '10.0.0-preview.1' -BuildNumber $BuildNumber } |
+            Should -Throw
+        { Get-CohesionCiPackageVersion -Version '10.0.0-preview.1' -BuildNumber 1 -PullRequestNumber $BuildNumber } |
+            Should -Throw
+    }
+}
+
+Describe 'Cohesion CI package workflow' {
+    BeforeAll {
+        $ciWorkflow = Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/ci-packages.yml') -Raw
+    }
+
+    It 'runs on pushes to main and on pull request commits, never on pull_request_target' {
+        $ciWorkflow | Should -Match '(?m)^  push:\r?\n    branches: \[main\]\r?$'
+        $ciWorkflow | Should -Match '(?m)^  pull_request:\r?\n    types: \[opened, synchronize, reopened\]\r?$'
+        $ciWorkflow | Should -Not -Match '(?m)^  pull_request_target:'
+    }
+
+    It 'publishes only from same-repository pull requests that Dependabot did not trigger' {
+        $prepareJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'prepare:'
+
+        $prepareJob | Should -Match "github\.event_name == 'push'"
+        $prepareJob | Should -Match 'github\.event\.pull_request\.head\.repo\.full_name == github\.repository'
+        $prepareJob | Should -Match "github\.actor != 'dependabot\[bot\]'"
+    }
+
+    It 'derives the version with the workflow commit tooling, so a branch that predates it still works' {
+        $prepareJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'prepare:'
+
+        # No ref: the tooling checkout is the commit the workflow file came from (the merge commit
+        # for a pull request), never the build commit, whose branch may predate the function.
+        $prepareJob | Should -Match '(?m)^      - name: Checkout workflow tooling\r?\n        uses: actions/checkout@[0-9a-f]{40} # v[0-9.]+\r?\n        with:\r?\n          persist-credentials: false\r?\n          path: _ci/tooling\r?\n          sparse-checkout: installer/scripts/modules\r?$'
+        $prepareJob | Should -Match 'Import-Module \./_ci/tooling/installer/scripts/modules/CohesionPackaging\.psm1 -Force'
+        $prepareJob | Should -Not -Match 'Import-Module \./installer/'
+        $prepareJob | Should -Match '\(& \./installer/scripts/Get-CohesionVersion\.ps1\)'
+    }
+
+    It 'packs the full release inventory at the derived CI version' {
+        $prepareJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'prepare:'
+        $packJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'pack-packages:'
+
+        $prepareJob | Should -Match 'Get-CohesionCiPackageVersion @arguments'
+        $prepareJob | Should -Match 'BuildNumber = \[int\] \$env:COHESION_BUILD_NUMBER'
+        $prepareJob | Should -Match 'COHESION_BUILD_NUMBER: \$\{\{ github\.run_number \}\}'
+        $packJob | Should -Match '\./installer/scripts/Pack-Release\.ps1'
+        $packJob | Should -Match '-Version \$env:COHESION_PACKAGE_VERSION'
+        $packJob | Should -Match '-RepositoryCommit \$env:COHESION_BUILD_COMMIT'
+        $packJob | Should -Not -Match 'SkipLibraries'
+    }
+
+    It 'publishes to GitHub Packages only, after the packed-consumer validation' {
+        $consumerJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'validate-consumer:'
+        $publishJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'publish-github-packages:'
+
+        $consumerJob | Should -Match 'Invoke-SdkConsumerSmoke\.ps1'
+        $publishJob | Should -Match '(?m)^    needs: \[prepare, pack-packages, validate-consumer\]\r?$'
+        $publishJob | Should -Match "--source 'https://nuget\.pkg\.github\.com/assimalign/index\.json'"
+        [System.Text.RegularExpressions.Regex]::Matches($ciWorkflow, 'packages: write').Count |
+            Should -Be 1
+        $publishJob | Should -Match 'packages: write'
+        $ciWorkflow | Should -Match '(?m)^permissions:\r?\n  contents: read\r?$'
+        $ciWorkflow | Should -Not -Match 'api\.nuget\.org'
+        $ciWorkflow | Should -Not -Match 'NuGet/login'
+        $ciWorkflow | Should -Not -Match 'id-token:'
+    }
+
+    It 'skips duplicate versions only on a re-run attempt' {
+        $publishJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'publish-github-packages:'
+
+        $publishJob | Should -Match 'COHESION_RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}'
+        $publishJob | Should -Match "(?ms)if \(\[int\] \`$env:COHESION_RUN_ATTEMPT -gt 1\) \{\s*\`$duplicateArgument = @\('--skip-duplicate'\)"
+        [System.Text.RegularExpressions.Regex]::Matches($publishJob, "'--skip-duplicate'").Count |
+            Should -Be 1
+    }
+
+    It 'lets a newer pull request commit cancel a pack but never a publish' {
+        $packJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'pack-packages:'
+        $publishJob = Get-WorkflowJobBody -Workflow $ciWorkflow -Job 'publish-github-packages:'
+
+        $packJob | Should -Match 'group: cohesion-ci-packages-pack-\$\{\{ github\.event\.pull_request\.number \|\| github\.run_id \}\}'
+        $packJob | Should -Match 'cancel-in-progress: true'
+        $publishJob | Should -Not -Match 'concurrency:'
+        $ciWorkflow | Should -Not -Match '(?m)^concurrency:'
     }
 }

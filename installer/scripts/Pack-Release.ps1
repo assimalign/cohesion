@@ -31,9 +31,10 @@
     run.
 
 .PARAMETER Version
-    The SemVer package version to produce, for example 10.0.1 or 10.0.0-preview.1. Must match the
-    canonical CohesionVersion; .github/workflows/release.yml enforces that against the release tag
-    before calling this script.
+    The SemVer package version to produce, for example 10.0.1 or 10.0.0-preview.1.
+    .github/workflows/release.yml passes the canonical CohesionVersion, which it enforces against
+    the release tag before calling this script. .github/workflows/ci-packages.yml passes the CI
+    version Get-CohesionCiPackageVersion derives from it, such as 10.0.0-preview.0.ci.57.
 
 .PARAMETER Configuration
     Build configuration. Defaults to Release.
