@@ -25,6 +25,10 @@
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Binary/">
 		<File Path="Assimalign.Cohesion.Content.Binary/README.md" />
 	</Folder>
+	<Folder Name="/Content/Assimalign.Cohesion.Content.Binary/docs/">
+		<File Path="Assimalign.Cohesion.Content.Binary/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Content.Binary/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Binary/src/">
 		<Project Path="Assimalign.Cohesion.Content.Binary/src/Assimalign.Cohesion.Content.Binary.csproj" />
 	</Folder>

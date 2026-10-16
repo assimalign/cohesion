@@ -107,6 +107,6 @@ plain stream plumbing — no reflection, no dynamic code, no serializers.
 - Format detection/sniffing and a format registry (a later stabilization feature; the descriptor shape
   is registry-ready).
 - Storage adapters (FileSystem, blob stores) — edge concerns that must not re-enter the root.
-- Bounded-stream/slice primitives for nested container parsing — feature `L01.01.05.03` builds those
+- Bounded-stream/slice primitives for nested container parsing — `Content.Binary` provides those
   on top of these contracts.
 - Content hashing/ETag computation — service-level concerns computable from `OpenRead`.
